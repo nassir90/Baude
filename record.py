@@ -2100,7 +2100,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.typed_at = None  # (where an @ or a # was just typed: their searches start only there, _token_changed)
         self.buf.connect("insert-text", lambda _b, at, text, _n: ("@" in text or "#" in text) and len(text) <= 2 and
                          setattr(self, "typed_at", at.get_offset() + max(text.rfind("@"), text.rfind("#"))))
-        self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_line(),
+        self.caret_was = None  # (where the caret was: which way it went, _caret_in_marker)
+        self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_in_marker(),
+                                                                                self._caret_line(),
                                                                                 self._token_changed()))
         self.buf.connect("mark-set", lambda _b, _i, mark: mark.get_name() == "selection_bound" and
                          not self.loading and self._caret_line())
@@ -2720,6 +2722,30 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf.delete(start, end)
         self.buf.end_user_action()
         return True
+
+    def _caret_in_marker(self):
+        """A list item has two places for the caret: before its bullet (or number), and at its text. Its unseen indent,
+        the bullet and the space after it (and a box) are one step: the caret moved into them goes on the way it was
+        going, right to the text, left to before the bullet, and left again to the line before. A selection's moving
+        end too."""
+        ins = self.buf.get_iter_at_mark(self.buf.get_insert())
+        was, self.caret_was = self.caret_was, ins.get_offset()
+        if (hit := self._item_at(ins.get_line())) is None:
+            return
+        start, m = hit
+        before, text, at = len(m.group(1)), m.end(), ins.get_line_offset()
+        if at == before or at >= text:
+            return
+        to = start.copy()
+        back = was is not None and was > ins.get_offset()
+        if at < before and back and was == start.get_offset() + before and start.get_line() > 0:
+            to.backward_char()  # (left from before the bullet: the line before's end)
+        else:
+            to.forward_chars(before if at < before or back else text)
+        if self.buf.get_has_selection():
+            self.buf.move_mark(self.buf.get_insert(), to)
+        else:
+            self.buf.place_cursor(to)
 
     def _out_of_marker(self):
         """The caret in a list item's bullet, box or indent (all drawn over, or unseen): put just after them, so what's

@@ -1,4 +1,5 @@
-"""Baude and Record kept up to date from git (Settings → Auto restart on update; off with BAUDE_UPDATE=0). Every
+"""Baude and Record kept up to date from git, once Settings → Auto restart on update is turned on: it's off until then,
+since it runs whatever the upstream has (and off with BAUDE_UPDATE=0 whatever the setting). Every
 CHECK_S the checkout they run from is fetched, never asking for a password (git's own credentials, a keychain's, an
 agent's; without them only what changes here counts); behind its upstream with nothing of its own (no change to what
 git tracks, no commit the upstream hasn't), it's fast-forwarded. Once the commit checked out isn't the one the app
@@ -42,8 +43,9 @@ STARTED = git(HERE, "rev-parse", "HEAD", timeout=5)  # (the commit this process'
 
 
 def enabled():
+    """Only once it's been turned on in Settings (never by default: an update runs code from the upstream)."""
     return os.environ.get("BAUDE_UPDATE", "1").lower() not in ("0", "off", "no", "false") and \
-        widgets.load_settings().get("auto_update", True) is not False
+        widgets.load_settings().get("auto_update") is True
 
 
 def upstream(root=HERE):
@@ -200,7 +202,7 @@ def restarted(win, state, name):
 
 
 def settings_row():
-    """Settings → Auto restart on update (Baude's and Record's, the one setting): on unless it's been turned off."""
+    """Settings → Auto restart on update (Baude's and Record's, the one setting): off until it's turned on."""
     up = upstream()
     row = Adw.SwitchRow(title="Auto restart on update",
                         subtitle=f"From {up} every {CHECK_S}s, restarting once idle" if up else

@@ -6594,6 +6594,9 @@ def test_update_from_git():
     idle, restarts = [False], []
     del os.environ["BAUDE_UPDATE"]
     try:
+        update.widgets.save_settings(auto_update=None)
+        assert not update.enabled(), "off until it's turned on in Settings"
+        update.widgets.save_settings(auto_update=True)
         u = update.Updater("app", lambda: idle[0], restarts.append, root=work, every=1)
         u.started = broken
         wait_for(lambda: u.ready == fixed, "found", timeout=20)
@@ -6603,6 +6606,7 @@ def test_update_from_git():
         assert restarts == [{"from": broken, "to": fixed, "commits": 1}], restarts
         u.stop()
     finally:
+        update.widgets.save_settings(auto_update=None)
         os.environ["BAUDE_UPDATE"] = "0"
     assert not update.enabled()
     assert update.importable("baude", os.path.dirname(HERE)), "Baude's own: imports with no display opened"

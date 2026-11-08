@@ -2321,9 +2321,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         font = self.view.get_pango_context().get_font_description()
         px = font.get_size() / Pango.SCALE * (1 if font.get_size_is_absolute() else 96 / 72)
         ink = self.view.get_color()
-        if (key := (round(px, 2), ink.to_string())) == getattr(self, "_heading_key", None):
+        if (key := (round(px, 2), ink.to_string())) == getattr(self, "_headings_drawn_for", None):
             return
-        self._heading_key = key
+        self._headings_drawn_for = key  # (not _heading_key: that's Alt and an arrow on a heading)
         table = self.buf.get_tag_table()
         for n, (above, below) in self.HEADING_SPACE.items():
             tag = table.lookup(f"h{n}")
@@ -2762,7 +2762,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         going, right to the text, left to before the bullet, and left again to the line before. A selection's moving
         end too."""
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
-        was, self.caret_was = self.caret_was, ins.get_offset()
+        was, self.caret_was = self.caret_was, (ins.get_offset(), self.buf.get_char_count())
+        if was is None or was[1] != self.buf.get_char_count():
+            return  # (moved by the text changing, as it's typed or as an edit puts in a bullet: left where it's put)
+        was = was[0]
         if (hit := self._item_at(ins.get_line())) is None:
             return
         start, m = hit
@@ -2770,7 +2773,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         if at == before or at >= text:
             return
         to = start.copy()
-        back = was is not None and was > ins.get_offset()
+        back = was > ins.get_offset()
         if at < before and back and was == start.get_offset() + before and start.get_line() > 0:
             to.backward_char()  # (left from before the bullet: the line before's end)
         else:

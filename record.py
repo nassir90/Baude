@@ -1931,6 +1931,12 @@ class NotesView(Gtk.TextView):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.logos, self.marks, self.blocks = [], [], []
+        self.restyled = None  # (told when its style's changed: the text's size or colour, DiaryEditor._heading_looks)
+
+    def do_css_changed(self, change):
+        Gtk.TextView.do_css_changed(self, change)
+        if self.restyled is not None:
+            self.restyled()
 
     def char_rect(self, it):
         """it's character's box, in buffer coordinates (as the layer is drawn), from the caret's places before and
@@ -2028,12 +2034,13 @@ class DiaryEditor(Gtk.Box, FindInText):
     FOLLOW_MARGIN = 32  # (the caret kept this far from the edge it's typed towards: follow_caret)
     FOLLOW_MS = 140
     FOLLOW_TRIES = 8
-    # (headings under the page's title, .diary-title, 1.75em to the text's 1.05: the first a little smaller, each
-    # deeper one smaller again, as Org mode's custom styles have them; the fourth the text's size and the two below it
-    # smaller still, set apart by their weight, and the sixth grey)
-    TAGS = {"h1": {"weight": 800, "scale": 1.4}, "h2": {"weight": 800, "scale": 1.22},
-            "h3": {"weight": 700, "scale": 1.1}, "h4": {"weight": 700}, "h5": {"weight": 700, "scale": 0.9},
-            "h6": {"weight": 700, "scale": 0.85, "foreground": "#8a8a8a"},
+    # headings as Google Docs' own styles have them, against its 11pt text: (size, space above, space below, in pt;
+    # how much of the text's colour). None bold, the sixth italic; the third grey (Docs' #434343), the rest #666666,
+    # here the text's colour that much of it, so in the dark too. More space above than below: each goes with what
+    # follows it. In pixels for the text's size now (_heading_looks)
+    HEADINGS = {1: (20, 20, 6, 1.0), 2: (16, 18, 6, 1.0), 3: (14, 16, 4, 0.74), 4: (12, 14, 4, 0.6),
+                5: (11, 12, 4, 0.6), 6: (11, 12, 4, 0.6)}
+    TAGS = {**{f"h{n}": {"scale": size / 11} for n, (size, *_rest) in HEADINGS.items()},
             "mark": {"foreground": "#8a8a8a"}, "bold": {"weight": 700}, "italic": {"style": Pango.Style.ITALIC},
             "highlight": {"background": "rgba(246,211,45,0.35)"}, "strike": {"strikethrough": True},
             "verbatim": {"family": "monospace", "background": "rgba(128,128,128,0.16)"},
@@ -2093,6 +2100,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf = self.view.get_buffer()
         for name, props in self.TAGS.items():
             self.buf.create_tag(name, **props)
+        self.buf.get_tag_table().lookup("h6").set_property("style", Pango.Style.ITALIC)
+        self.view.restyled = self._heading_looks
+        self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
         tags = self.buf.get_tag_table()  # (the @'s unseen, though "ref" colours the rest of its @name)
         tags.lookup("logo-at").set_priority(tags.get_size() - 1)
@@ -2302,6 +2312,26 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.follow_anim.set_easing(Adw.Easing.EASE_OUT_CUBIC)
         self.follow_anim.play()
 
+    def _heading_looks(self):
+        """The headings' space above and below (HEADINGS, in points against Docs' 11pt text) in pixels for the text's
+        size now (the zoom, Settings → Size), and their grey the text's colour (the theme's), each time either's
+        changed."""
+        font = self.view.get_pango_context().get_font_description()
+        px = font.get_size() / Pango.SCALE * (1 if font.get_size_is_absolute() else 96 / 72)
+        color = self.view.get_color()
+        if (key := (round(px, 2), color.to_string())) == getattr(self, "_heading_key", None):
+            return
+        self._heading_key = key
+        table = self.buf.get_tag_table()
+        for n, (_size, above, below, ink) in self.HEADINGS.items():
+            tag = table.lookup(f"h{n}")
+            tag.set_property("pixels-above-lines", round(above / 11 * px))
+            tag.set_property("pixels-below-lines", round(below / 11 * px))
+            if ink < 1:
+                grey = color.copy()
+                grey.alpha *= ink
+                tag.set_property("foreground-rgba", grey)
+
     def _highlight(self):
         """The page drawn as it reads, in Markdown as Self's editor draws it: headings, lists (a bullet, a box drawn
         for - and [ ]), quotes, rules, code; **bold**, *italic*, ~~struck~~, ==marked==, `code`, [links](url);
@@ -2313,6 +2343,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         if (tone := self.view.marker_color()).to_string() != getattr(self, "_tone", None):  # (a number's: the theme's)
             self._tone = tone.to_string()
             buf.get_tag_table().lookup("bullet").set_property("foreground-rgba", tone)
+        self._heading_looks()
         text = buf.get_text(start, end, True)
         ins = buf.get_iter_at_mark(buf.get_insert())
         sel = buf.get_iter_at_mark(buf.get_selection_bound())

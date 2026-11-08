@@ -3817,14 +3817,13 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
             hidden = frame()
             assert not slide.pane.get_visible()
             nothing_jumps(closing, shown, hidden)
-            assert hidden["tab"] < shown["tab"], "the tabs have what the notebooks had"
             nothing_jumps(frames(slide, lambda: slide.set_shown(True)), hidden, shown)
             assert frame() == shown and slide.pane.get_visible()
 
         slide.set_shown(False)  # (turned back part way: from where it's got to, in both directions)
         wait_for(lambda: column.showing is not None and column.showing < 60, "it closed some")
         back = frames(slide, lambda: slide.set_shown(True))
-        assert [f for f in back if f["tab"] != shown["tab"]] and back[-1]["tab"] == shown["tab"]
+        assert back[-1]["tab"] == shown["tab"]
         trail = [f["tab"] for f in back]
         assert trail == sorted(trail), ("back the way it came", trail)
 
@@ -3851,7 +3850,7 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
 def test_window_bar_stays_in_sight(app):
     """The notebooks' toggle, the right bar's and ☰ are in the window's bar, over all three, as Baude's are: the right bar
     dragged all the way over the notes, or the notebooks' column as wide as it goes, each is still what's under the pointer
-    at its middle, where it was. The tabs run the width of the notes, under it."""
+    at its middle, where it was."""
     win = app.win
     select(win, "a")
     win.right_slide.set_shown(True)
@@ -3869,7 +3868,6 @@ def test_window_bar_stays_in_sight(app):
     def places():
         return [in_sight(b) for b in (win.left_slide.toggles[0], win.right_toggle, win.menu_button)]
     try:
-        assert abs(win.tabs.bar.get_width() - win.tabs.get_width()) <= 2, (win.tabs.bar.get_width(), win.tabs.get_width())
         was = places()
         win.paned.set_position(0)  # (the right bar over all of the notes)
         pump(0.3)

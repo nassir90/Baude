@@ -4549,14 +4549,26 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         # (⌥⌘← ⌥⌘→: back and forward through them)
         self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True)
         self.tabs.view.connect("notify::selected-page", lambda *_: self._tab_shown())
-        self.tabs.prepend(self.tabs.bar)
         main = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, hexpand=True)
         main.add_css_class("record-content")
         main.add_css_class("baude-frame")
-        # the window's bar, all the way across over the three, as Baude's: the notebooks' toggle at its start, by the
-        # window's buttons, and the right bar's and ☰ at its end. Nothing a side bar's dragged over hides them
-        head = Adw.HeaderBar()
-        head.pack_start(side_toggle)
+        # the window's bar, all the way across over the three: the window's buttons and the notebooks' toggle at its
+        # start, the tabs, then the right bar's toggle and ☰. Nothing a side bar's dragged over hides them. (All of it
+        # the bar's title, nothing either side of it: a title's centred, with a gap to match whatever's beside it, so
+        # the tabs would have had less on one side. The window's buttons native on macOS, as a bar's own are: otherwise
+        # they take no room, the traffic lights over what's there)
+        self.tabs.bar.set_hexpand(True)
+        whole = Gtk.Box(spacing=6, hexpand=True)
+        head = Adw.HeaderBar(title_widget=whole, show_start_title_buttons=False, show_end_title_buttons=False)
+        head.add_css_class("tabs-head")  # (the tabs on the bar, as tall as it: widgets.CSS)
+        start_buttons = Gtk.WindowControls(side=Gtk.PackType.START, use_native_controls=sys.platform == "darwin")
+        end_buttons = Gtk.WindowControls(side=Gtk.PackType.END, use_native_controls=sys.platform == "darwin")
+        for buttons in (start_buttons, end_buttons):  # (none to show, none's gap: as a header bar's)
+            buttons.bind_property("empty", buttons, "visible",
+                                  GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
+        whole.append(start_buttons)
+        whole.append(side_toggle)
+        whole.append(self.tabs.bar)
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
@@ -4650,8 +4662,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         right.set_size_request(340, -1)
         self.right_toggle = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic", active=True,
                                              tooltip_text=f"{noun()}, Files and Git (Ctrl+Alt+B)")
-        head.pack_end(menu_btn)
-        head.pack_end(self.right_toggle)
+        whole.append(self.right_toggle)
+        whole.append(menu_btn)
+        whole.append(end_buttons)
         self.content_stack = Gtk.Stack()
         none = Adw.StatusPage(icon_name="system-users-symbolic", title=f"Make a {book()}",
                               description=f"A {book()} is your notes on a subject, and a {noun()} that reads AI prose "

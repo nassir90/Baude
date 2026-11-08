@@ -3444,51 +3444,12 @@ class FixedWidth(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
-class StartRoom(Gtk.Widget):
-    """The window's start buttons and the notebooks' toggle (child), before the tabs, and the gap after them: the room they
-    take, less what the notebooks' column covers of it as it opens or closes (beside: ColumnSlide). So the tabs follow the
-    column only as far as the buttons. child's held at the room's end, reaching back under the column (nothing cuts it off
-    here), so it stays where it is, where the column's own bar has them: the column's toggle shows up to its edge and this
-    one from there, and it looks the one toggle."""
-
-    GAP = 6  # (as the tabs' row has between what's in it)
-
-    def __init__(self, child):
-        super().__init__()
-        self.child, self.beside = child, 0
-        child.set_parent(self)
-
-    def full_width(self):
-        return self.child.measure(Gtk.Orientation.HORIZONTAL, -1).natural + self.GAP
-
-    def do_measure(self, orientation, for_size):
-        if self.child is None:
-            return 0, 0, -1, -1
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            shown = max(0, self.full_width() - self.beside)
-            return shown, shown, -1, -1
-        return self.child.measure(orientation, -1)
-
-    def do_size_allocate(self, width, height, baseline):
-        if self.child is not None:
-            natural = self.child.measure(Gtk.Orientation.HORIZONTAL, -1).natural
-            end = Gsk.Transform().translate(Graphene.Point().init(width - self.GAP - natural, 0))
-            self.child.allocate(natural, height, baseline, end)
-
-    def do_dispose(self):
-        if self.child is not None:
-            self.child.unparent()
-            self.child = None
-        Gtk.Widget.do_dispose(self)
-
-
 class ColumnSlide(widgets.SideSlide):
-    """The notebooks' column opened and closed smoothly: how much of it's shown (FixedWidth.showing), and the room before
-    the tabs what that leaves (StartRoom), so the window's buttons and its toggle stay where they are, at its left, and
-    nothing's left to change when it's done."""
+    """The notebooks' column opened and closed smoothly: how much of it's shown (FixedWidth.showing), what's beside it
+    following its edge, and nothing left to change when it's done. (Its toggle's in the window's bar: that doesn't move.)"""
 
-    def __init__(self, fixed, pane, room, toggles=()):
-        self.host, self.fixed, self.room = fixed, fixed, room
+    def __init__(self, fixed, pane, toggles=()):
+        self.host, self.fixed = fixed, fixed
         super().__init__(pane, toggles)
 
     def open_at(self, width):
@@ -3498,10 +3459,8 @@ class ColumnSlide(widgets.SideSlide):
         return float(self.fixed.width if self.fixed.showing is None else self.fixed.showing)
 
     def apply(self, value):
-        self.fixed.showing = self.room.beside = round(value)
+        self.fixed.showing = round(value)
         self.fixed.queue_resize()
-        self.room.set_visible(self.room.beside < self.room.full_width())
-        self.room.queue_resize()
 
     def closed_value(self):
         return 0.0
@@ -3513,10 +3472,8 @@ class ColumnSlide(widgets.SideSlide):
         pass
 
     def settle(self):
-        self.fixed.showing, self.room.beside = None, 0
+        self.fixed.showing = None
         self.fixed.queue_resize()
-        self.room.set_visible(not self.pane.get_visible())
-        self.room.queue_resize()
 
 
 class PagesList(Gtk.Box):
@@ -4553,16 +4510,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.shown_order = []  # (the tabs as they were shown, the last last: reader, diary, code_page)
         split = Gtk.Box()
         # left: the notebooks, New Notebook at the top as Baude's New session is, and under them the open one's pages,
-        # which fold away; its toggle by the window's buttons, the notebooks' bar's or the tabs'
+        # which fold away; its toggle in the window's bar, by the window's buttons, as Baude's sessions' is
         side = self.books = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, width_request=FixedWidth.LEAST)
         side.add_css_class("record-books")
         side.add_css_class("baude-frame")  # (the frame, as the bars and the right bar are: widgets.CSS)
-        # (no title: at the pages' width, beside the window's buttons and the toggle, "Notebooks" came out "Note…";
-        # New Notebook under it says what the column is, and the toggle's tooltip does)
-        sh = Adw.HeaderBar(show_title=False, show_end_title_buttons=False)  # (the window's end ones: the right's)
         side_toggle = self._sidebar_toggle()
-        sh.pack_start(side_toggle)  # (by the window's buttons, as Baude's is)
-        side.add_top_bar(sh)
         books = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
@@ -4593,37 +4545,18 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         column = FixedWidth(side, self.store.books_width or self.BOOKS_WIDTH)
         column.resized = self._books_resized
         split.append(column)
-        # the middle: what's open, a tab each, their bar the window's top (no bar of its own over it)
+        # the middle: what's open, a tab each, their bar at the top of it, as Baude's chat has its tabs
         # (⌥⌘← ⌥⌘→: back and forward through them)
         self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True)
         self.tabs.view.connect("notify::selected-page", lambda *_: self._tab_shown())
+        self.tabs.prepend(self.tabs.bar)
         main = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, hexpand=True)
         main.add_css_class("record-content")
         main.add_css_class("baude-frame")
-        self.tabs.bar.set_hexpand(True)
-        # (all of it the bar's title, nothing either side of it: a title's centred, with a gap to match whatever's beside
-        # it, and only the middle of a bar stretches. So the tabs have all there is, between the toggles)
-        top = Gtk.Box(spacing=6, hexpand=True)
-        whole = Gtk.Box(hexpand=True)  # (what's before the tabs, and top; no gap between: StartRoom has its own)
-        head = Adw.HeaderBar(title_widget=whole, show_start_title_buttons=False, show_end_title_buttons=False)
-        # (native on macOS, as a header bar's own are: otherwise they take no room, the traffic lights over what's there)
-        start_buttons = Gtk.WindowControls(side=Gtk.PackType.START, use_native_controls=sys.platform == "darwin")
-        end_buttons = Gtk.WindowControls(side=Gtk.PackType.END, use_native_controls=sys.platform == "darwin")
-        start_buttons.bind_property("empty", start_buttons, "visible",  # (none to show, none's gap: as a header bar's)
-                                    GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
-        head.add_css_class("tabs-head")  # (as tall as the bars beside it: widgets.CSS)
-        # (the notebooks hidden: the bar here has the window's buttons, and this toggle just after them, where the
-        # notebooks' was; it doesn't move as they go and come. The window's start ones: the notebooks' bar's, or these)
-        hidden = self._sidebar_toggle()
-        start = Gtk.Box(spacing=6)
-        start.append(start_buttons)
-        start.append(hidden)
-        room = StartRoom(start)
-        side.bind_property("visible", room, "visible",
-                           GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
-        whole.append(room)
-        whole.append(top)
-        top.append(self.tabs.bar)  # (from there to the right bar's toggle)
+        # the window's bar, all the way across over the three, as Baude's: the notebooks' toggle at its start, by the
+        # window's buttons, and the right bar's and ☰ at its end. Nothing a side bar's dragged over hides them
+        head = Adw.HeaderBar()
+        head.pack_start(side_toggle)
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
@@ -4645,7 +4578,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         app_menu.append("Ongoing Feedback", "win.fixes")
         app_menu.append(f"Restart {noun()}", "win.restart")
         menu.append_section(None, app_menu)
-        menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),
                          ("exportall", lambda: self.ask_export(self.store.notebooks, book(plural=True))),
@@ -4710,19 +4643,15 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.add_viewer_pages(self.right_stack, code=False)  # (Files and Git; code opens in a tab: show_code)
         right = self.right = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT)
         right.add_css_class("baude-frame")
-        rh = Adw.HeaderBar(show_start_title_buttons=False,
-                           title_widget=Adw.ViewSwitcher(stack=self.right_stack, policy=Adw.ViewSwitcherPolicy.NARROW))
-        right.add_top_bar(rh)
+        # (its pages' switcher at the top of it, under the window's bar, as Baude's side panel has its own)
+        right.add_top_bar(Adw.ViewSwitcher(stack=self.right_stack, policy=Adw.ViewSwitcherPolicy.NARROW,
+                                           margin_top=6, margin_bottom=6, halign=Gtk.Align.CENTER))
         right.set_content(self.right_stack)
         right.set_size_request(340, -1)
-        right.bind_property("visible", end_buttons, "visible",  # (the window's end ones: the right bar's)
-                            GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
         self.right_toggle = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic", active=True,
                                              tooltip_text=f"{noun()}, Files and Git (Ctrl+Alt+B)")
-        top.append(self.right_toggle)
-        top.append(menu_btn)
-        top.append(end_buttons)
-        main.add_top_bar(head)
+        head.pack_end(menu_btn)
+        head.pack_end(self.right_toggle)
         self.content_stack = Gtk.Stack()
         none = Adw.StatusPage(icon_name="system-users-symbolic", title=f"Make a {book()}",
                               description=f"A {book()} is your notes on a subject, and a {noun()} that reads AI prose "
@@ -4747,9 +4676,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.paned.add_css_class("inside-before")
         split.append(self.paned)
         self.right_slide = widgets.PaneSlide(self.paned, right, [self.right_toggle])
-        self.left_slide = ColumnSlide(column, side, room, [side_toggle, hidden])  # (both toggles, the one switch)
+        self.left_slide = ColumnSlide(column, side, [side_toggle])
         column.slide = self.left_slide
-        self.toasts = Adw.ToastOverlay(child=self.viewer_overlays(split))  # (Kubernetes, Databases: over it all)
+        framed = Adw.ToolbarView(content=split)
+        framed.add_css_class("baude-frame")  # (the bar on the frame, as the columns are: widgets.CSS)
+        framed.add_top_bar(head)
+        self.toasts = Adw.ToastOverlay(child=self.viewer_overlays(framed))  # (Kubernetes, Databases: over it all)
         self.set_content(self.toasts)
         self.fill_sidebar()
         chats = list(self.store.chats)  # (taken first: showing a notebook keeps what's open, and none is yet)

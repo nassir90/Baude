@@ -341,10 +341,8 @@ def test_read_code_block_height(app):
     assert r.scroll.get_child().get_vscroll_policy() == Gtk.ScrollablePolicy.NATURAL
     assert win.chat.scroll.get_child().get_vscroll_policy() == Gtk.ScrollablePolicy.NATURAL
     assert win.left_slide.fixed.width == record.DiaryEditor.PAGES_WIDTH, "till it's dragged: test_notebooks_column_drags"
-    bar = next(w for w in walk(win.books) if isinstance(w, record.Adw.HeaderBar))
-    assert not bar.get_show_title(), "no title: it didn't fit"
     assert not win.books.get_visible() or win.books.get_width() == record.DiaryEditor.PAGES_WIDTH, \
-        ("held at it, its bar's title and a long name notwithstanding", win.books.get_width())
+        ("held at it, a long name notwithstanding", win.books.get_width())
     row = win.notebook_list.get_row_at_index(0)
     assert not hasattr(row, "sub") and isinstance(row.name, Gtk.Label) and not row.name.has_css_class("heading")
 
@@ -3765,11 +3763,9 @@ def test_side_bars_slide(app):
 
 def test_nothing_jumps_as_the_notebooks_slide(app):
     """Frame by frame, in the window, as it's painted (the frame clock's after-paint: it runs offscreen too, some 30 frames
-    a second; the window's native buttons reserve their room offscreen as on the screen): as the notebooks close and open
-    the window's buttons' room and their toggle stay put (the notebooks' bar's toggle, and the tabs' bar's where the
-    column's edge has cut that off), and the first tab moves one way only, never over them, no further in a frame than the
-    column did, from where it sits steady to where it sits steady. The right bar shown or hidden; its own slide, the
-    notebooks shown or hidden, leaves all that where it is."""
+    a second): as the notebooks close and open, their toggle, the right bar's and ☰ stay put in the window's bar, and the
+    first tab moves one way only, no further in a frame than the column did, from where it sits steady to where it sits
+    steady. The right bar shown or hidden; its own slide, the notebooks shown or hidden, leaves all that where it is."""
     saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 180
     win = app.win
     select(win, "a")
@@ -3777,22 +3773,16 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
     for key in [k for k in win.tabs.pages if k != ("note", record.HOME)]:
         win.tabs.close(key)  # (the tabs to themselves: too many for the bar and the first is scrolled, as it narrows)
     slide, column, right = win.left_slide, win.left_slide.fixed, win.right_slide
-    heads = (next(w for w in walk(win.books) if isinstance(w, record.Adw.HeaderBar)),
-             win.tabs.bar.get_ancestor(record.Adw.HeaderBar))
-    rooms = [next(w for w in walk(h) if isinstance(w, Gtk.WindowControls) and w.get_side() == Gtk.PackType.START)
-             for h in heads]
 
     def place(widget):
         ok, bounds = widget.compute_bounds(win)
         assert ok
-        return bounds.get_x(), bounds.get_width()
+        return bounds.get_x(), bounds.get_y(), bounds.get_width()
 
     def frame():
         steady = win.books.get_width() if slide.pane.get_visible() else 0
         return {"column": steady if column.showing is None else column.showing,
-                "rooms": [place(r) for r in rooms if r.get_mapped()],
-                "toggles": [place(t) for t in slide.toggles if t.get_mapped()], "cut": not slide.toggles[0].get_mapped(),
-                "hidden": slide.toggles[1].get_mapped(), "right": place(win.right_toggle)[0],
+                "buttons": [place(b) for b in (slide.toggles[0], win.right_toggle, win.menu_button)],
                 # (no further left than the bar: with many open, the first is scrolled off under its edge)
                 "tab": max(place(win.tabs.bar)[0], min(place(w)[0] for w in walk(win.tabs.bar)
                                                        if w.get_css_name() == "tab" and w.get_mapped()))}
@@ -3814,17 +3804,8 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
         columns = [start["column"]] + [f["column"] for f in got]
         for tabs, widths in zip(zip(trail, trail[1:]), zip(columns, columns[1:])):
             assert abs(tabs[1] - tabs[0]) <= abs(widths[1] - widths[0]) + 1, ("no step", trail, columns)
-        at, wide = start["toggles"][0]
-        room = (start["rooms"] or [(0, 0)])[0]  # (none, where the window has no buttons at its start)
         for f in got:
-            assert f["right"] == start["right"], "the right bar's toggle's not in this"
-            assert bool(f["rooms"]) == bool(start["rooms"]) and all(r == room for r in f["rooms"]), ("the room stays put", f, room)
-            assert f["toggles"] and all(t == (at, wide) for t in f["toggles"]), ("the toggle stays put", f, at)
-            assert f["hidden"] or f["cut"] or f["column"] >= at + wide, ("the toggle's in sight, all of it", f, at)
-            assert f["tab"] >= at + wide > at >= room[0] + room[1], ("nothing over the buttons", f, room)
-        if sys.platform == "darwin":  # (the traffic lights are native: they take room only if it's asked for)
-            assert room[1] > 40, room
-
+            assert f["buttons"] == start["buttons"], ("the window's bar stays put", f, start)
     try:
         pump(0.3)
         for bar_shown in (True, False):  # (the right bar)
@@ -3834,11 +3815,11 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
             shown = frame()
             closing = frames(slide, lambda: slide.set_shown(False))
             hidden = frame()
-            assert not slide.pane.get_visible() and hidden["hidden"] and hidden["cut"]
+            assert not slide.pane.get_visible()
             nothing_jumps(closing, shown, hidden)
-            assert hidden["tab"] < shown["tab"], "the tabs have what the notebooks had, past the buttons and the toggle"
+            assert hidden["tab"] < shown["tab"], "the tabs have what the notebooks had"
             nothing_jumps(frames(slide, lambda: slide.set_shown(True)), hidden, shown)
-            assert frame() == shown and slide.pane.get_visible() and not shown["hidden"]
+            assert frame() == shown and slide.pane.get_visible()
 
         slide.set_shown(False)  # (turned back part way: from where it's got to, in both directions)
         wait_for(lambda: column.showing is not None and column.showing < 60, "it closed some")
@@ -3858,9 +3839,8 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
             for shown_now in (False, True):
                 moved = frames(right, lambda: right.set_shown(shown_now))
                 assert win.right.get_visible() == shown_now
-                assert all((f["tab"], f["toggles"], f["rooms"]) == (steady["tab"], steady["toggles"], steady["rooms"])
-                           for f in moved), moved
-            assert abs(win.paned.get_position() - at) <= 1 and frame()["right"] == steady["right"]
+                assert all((f["tab"], f["buttons"]) == (steady["tab"], steady["buttons"]) for f in moved), moved
+            assert abs(win.paned.get_position() - at) <= 1
     finally:
         slide.set_shown(True)
         right.set_shown(True)
@@ -3868,30 +3848,39 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
         widgets.SLIDE_MS = saved
 
 
-def test_tabs_fill_the_top_bar(app):
-    """The tabs run the whole width of the bar above the page, from the left toggle's place to the right toggle, with no gap
-    left where a button or a centred title would have been."""
+def test_window_bar_stays_in_sight(app):
+    """The notebooks' toggle, the right bar's and ☰ are in the window's bar, over all three, as Baude's are: the right bar
+    dragged all the way over the notes, or the notebooks' column as wide as it goes, each is still what's under the pointer
+    at its middle, where it was. The tabs run the width of the notes, under it."""
     win = app.win
     select(win, "a")
-    pump(0.2)
-    bar, head = win.tabs.bar, win.tabs.bar.get_ancestor(record.Adw.HeaderBar)
-    ok, tabs = bar.compute_bounds(head)
-    ok2, toggle = win.right_toggle.compute_bounds(head)
-    assert ok and ok2 and tabs.get_x() < 24, ("from the bar's left, the notebooks showing", tabs.get_x())
-    assert tabs.get_width() > head.get_width() - 140, (tabs.get_width(), head.get_width())
-    assert toggle.get_x() - (tabs.get_x() + tabs.get_width()) < 24, ("to the right toggle", tabs.get_x(), tabs.get_width(), toggle.get_x())
-    win.left_slide.set_shown(False)  # (the notebooks hidden: just after their toggle, here now)
-    pump(0.2)
-    ok, tabs = bar.compute_bounds(head)
-    ok2, left = win.left_slide.toggles[1].compute_bounds(head)
-    buttons = next(w for w in walk(head) if isinstance(w, Gtk.WindowControls) and w.get_side() == Gtk.PackType.START)
-    ok3, room = buttons.compute_bounds(head)
-    assert ok3 and left.get_x() >= room.get_x() + room.get_width(), "the toggle after the window's buttons, not under them"
-    if sys.platform == "darwin":  # (the traffic lights are native: they take room only if it's asked for)
-        assert buttons.get_use_native_controls() and room.get_width() > 40, room.get_width()
-    assert tabs.get_x() - (left.get_x() + left.get_width()) < 24 and tabs.get_x() >= left.get_x() + left.get_width() - 1, tabs.get_x()
-    win.left_slide.set_shown(True)
-    pump(0.1)
+    win.right_slide.set_shown(True)
+    wait_for(lambda: win.right_slide.anim is None, "the right bar settled")
+    pump(0.3)
+    column = win.left_slide.fixed
+    was_at, was_wide = win.paned.get_position(), column.width
+
+    def in_sight(button):
+        ok, at = button.compute_bounds(win)
+        hit = win.pick(at.get_x() + at.get_width() / 2, at.get_y() + at.get_height() / 2, Gtk.PickFlags.DEFAULT)
+        assert ok and button.get_mapped() and (hit is button or hit.is_ancestor(button)), (button, hit)
+        return at.get_x(), at.get_y(), at.get_width()
+
+    def places():
+        return [in_sight(b) for b in (win.left_slide.toggles[0], win.right_toggle, win.menu_button)]
+    try:
+        assert abs(win.tabs.bar.get_width() - win.tabs.get_width()) <= 2, (win.tabs.bar.get_width(), win.tabs.get_width())
+        was = places()
+        win.paned.set_position(0)  # (the right bar over all of the notes)
+        pump(0.3)
+        assert places() == was
+        column.set_width(10_000)  # (the notebooks' column as wide as it goes)
+        pump(0.3)
+        assert places() == was
+    finally:
+        column.set_width(was_wide)
+        win.paned.set_position(was_at)
+        pump(0.2)
 
 
 def test_selection_runs_across_paragraphs(app):

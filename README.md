@@ -1,7 +1,7 @@
 # Baude
 
 Baude is a GTK4 / libadwaita desktop app for [Claude Code](https://claude.com/claude-code). It runs the `claude` CLI
-and shows the chat, its tool calls and every session on the machine. [Record](#record) reads a chat with you.
+and shows the chat, its tool calls and every session on the machine.
 
 ![Baude after a finished turn](docs/screenshots/02-turn-complete-dark.png)
 
@@ -31,11 +31,6 @@ and shows the chat, its tool calls and every session on the machine. [Record](#r
 |---|---|
 | ![Attachments](docs/screenshots/42-composer-attachments-light.png)<br>Attachments | ![Slash commands](docs/screenshots/43-slash-completer-light.png)<br>Slash commands |
 | ![Send Feedback](docs/screenshots/92-feedback-with-capture-light.png)<br>Send Feedback | ![Ongoing Feedback](docs/screenshots/96-feedback-ready-light.png)<br>Ongoing Feedback |
-
-## Record
-
-Record reads a chat with you. It's a Haiku agent that explains only through your own notes and remembers your last
-three messages. Open it from Baude's ☰ → *Open in Record…*.
 
 ## Running it
 

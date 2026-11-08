@@ -1760,6 +1760,8 @@ class ZoomPlace:
                     near.append(unit)
             unit = unit.get_next_sibling()
         below.reverse()  # (both lists pop() the message nearest the view first)
+        if near:  # (what's left shown, and how tall it was: how much taller it's grown says the rooms', _rescale)
+            self.near_was = [(unit, at[1]) for unit in near if (at := self.extent(unit)) is not None]
         return anchor, above, below, near
 
     def _hide(self, unit, height=None):
@@ -1769,13 +1771,35 @@ class ZoomPlace:
         if height is None:
             ok, b = unit.compute_bounds(self.content)
             height = b.get_height() if ok else 0
+        height += unit.get_margin_top() + unit.get_margin_bottom()  # (the room it took, its margins too)
         unit.set_visible(False)
         unit.zoom_hidden = True
         if (room := getattr(unit, "zoom_room", None)) is None:
             room = unit.zoom_room = Gtk.Box()
             room.zoom_spacer = True  # (not a message: split passes it by)
             self.box.insert_child_after(room, unit)
-        room.set_size_request(-1, max(0, round(height)))
+        room.zoom_was = height  # (as tall as it was: as it would be now, _rescale)
+        room.set_size_request(-1, max(0, round(height * getattr(self, "grown", 1.0))))
+
+    def _rescale(self):
+        """The hidden messages' rooms as tall as they'd be now, as near as can be said: as much taller (narrower, or its
+        text bigger) as what's still shown has grown since. So the chat's height, and its scrollbar's thumb, change as
+        smoothly as the text does, not in steps as each message comes back to its height at the new width."""
+        was = now = 0.0
+        for unit, height in getattr(self, "near_was", ()):
+            if unit.get_visible() and unit.get_mapped() and (at := self.extent(unit)) is not None:
+                was += height
+                now += at[1]
+        if was <= 0:
+            return
+        self.grown = now / was
+        unit = self.box.get_first_child()
+        while unit is not None:
+            if getattr(unit, "zoom_spacer", False):
+                want = max(0, round(unit.zoom_was * self.grown))
+                if unit.get_size_request()[1] != want:
+                    unit.set_size_request(-1, want)
+            unit = unit.get_next_sibling()
 
     def _show(self, unit):
         if (room := getattr(unit, "zoom_room", None)) is not None:  # (gone with it: only there while it's hidden)
@@ -1799,6 +1823,9 @@ class ZoomPlace:
         else:
             if self.job is None and not self.left and (place := widgets.scroll_place(self.scroll)):
                 self.before = {**place, "value": place["value"] * ratio}
+            if self.job is None:  # (how far down it is, as the scrollbar has it: held there meanwhile, _hold)
+                adj = self.scroll.get_vadjustment()
+                self.thumb = adj.get_value() / adj.get_upper() if adj.get_upper() > 0 else 0.0
             anchor, above, below, _near = self.split()
             place = None
         if change:
@@ -1834,6 +1861,39 @@ class ZoomPlace:
         job["through"] = None
         if job["anchor"] is not None and (at := self.extent(job["anchor"])) is not None:
             job["through"] = (value - at[0]) / at[1] if at[1] > 0 else 0.0
+        job["mark"] = self._mark(value) if job["anchor"] is not None and not at_end else None
+
+    MARK_UNITS = 3  # (messages looked through, from the one at the top, for text to hold the place by)
+
+    def _mark(self, top):
+        """The text at the top of the view: (a label, its character there, how far below the view's top that character's
+        line is), its line held there as everything round it rewraps (_hold). A message's place as a fraction of it, as
+        before, wasn't: its text rewrapped, the line at the top moved a line's height up or down, a jitter all through a
+        side bar's slide. None: no text near the top."""
+        unit, looked = self.job["anchor"], 0
+        while unit is not None and looked < self.MARK_UNITS:
+            if unit.get_visible() and not getattr(unit, "zoom_spacer", False):
+                looked += 1
+                for w in widgets.walk(unit):
+                    if not isinstance(w, Gtk.Label) or not w.get_mapped() or not w.get_text():
+                        continue
+                    ok, b = w.compute_bounds(self.content)
+                    if not ok or b.get_y() + b.get_height() <= top:
+                        continue
+                    _x, y = w.get_layout_offsets()
+                    _in, index, _trailing = w.get_layout().xy_to_index(0, int(max(0.0, top - b.get_y() - y) * Pango.SCALE))
+                    if (at := self._char_y(w, index)) is not None:
+                        return w, index, at - top
+            unit = unit.get_next_sibling()
+        return None
+
+    def _char_y(self, label, index):
+        """Where label's character index's line is, in what's scrolled; None if it can't be said."""
+        ok, at = label.compute_point(self.content, Graphene.Point().init(0, 0))
+        if not ok:
+            return None
+        _x, y = label.get_layout_offsets()
+        return at.y + y + label.get_layout().index_to_pos(index).y / Pango.SCALE
 
     def _back(self, _clock):
         """As each frame begins: the next few hidden messages shown, styled at the new size in this frame (shown after
@@ -1861,6 +1921,7 @@ class ZoomPlace:
         if not self.scroll.get_mapped():
             self.left = bool(job["above"] or job["below"])
             return self.stop()
+        self._rescale()
         if not job["put_back"]:
             self.note()
         if job["shown"]:
@@ -1879,14 +1940,30 @@ class ZoomPlace:
         job, adj = self.job, self.scroll.get_vadjustment()
         if job is None:
             return
+        mark, to = job.get("mark"), None
         if job["bottom"]:
-            adj.set_value(adj.get_upper() - adj.get_page_size())
+            to = adj.get_upper() - adj.get_page_size()
+        elif mark is not None and mark[0].get_mapped() and (y := self._char_y(mark[0], mark[1])) is not None:
+            to = y - mark[2]  # (the line that was at the top, where it was)
         elif job["through"] is not None and (at := self.extent(job["anchor"])) is not None:
-            adj.set_value(at[0] + job["through"] * at[1])
+            to = at[0] + job["through"] * at[1]
+        if to is not None and abs(round(to) - adj.get_value()) >= 1:  # (whole pixels: a fraction moved the scrollbar's
+            adj.set_value(round(to))                                     # thumb, and showed it, each frame for nothing)
+        # the scrollbar's thumb where it was: its top is how far down the value is of all there is, and what's hidden
+        # and what's rewrapping changed all there is a little each frame, the thumb a pixel up or down. So all there is,
+        # as the scrollbar has it, is what keeps it there (never less than the view past where it is); the true height's
+        # back as it's done
+        if not job["bottom"] and (thumb := getattr(self, "thumb", 0.0)) > 0 and adj.get_value() > 0:
+            upper = max(adj.get_value() + adj.get_page_size(), adj.get_value() / thumb)
+            if abs(upper - adj.get_upper()) >= 0.5:
+                adj.set_upper(upper)
         job["kept"], job["fresh"], job["put_back"] = adj.get_value(), [], False
 
     def stop(self):
         job, self.job = self.job, None
+        if getattr(self, "thumb", 0.0) > 0:  # (the scrollbar's own height back: laid out again, it says what's there)
+            self.content.queue_resize()
+        self.near_was, self.grown, self.thumb = (), 1.0, 0.0
         if job is not None:
             for handler in job["handlers"]:
                 job["clock"].disconnect(handler)

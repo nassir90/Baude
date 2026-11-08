@@ -1740,27 +1740,49 @@ class ZoomPlace:
         left near it), the ones far from the view hidden. (Those shown as this frame began aren't laid out, at the new
         size or anywhere: where they are can't be read, so they go back to being hidden.)"""
         for unit in self.job["fresh"] if self.job else ():
-            unit.set_visible(False)
-            unit.zoom_hidden = True
+            self._hide(unit)
         adj = self.scroll.get_vadjustment()
         top, page = adj.get_value(), adj.get_page_size()
         anchor, above, below, near = None, [], [], []
         unit = self.box.get_first_child()
         while unit is not None:
-            if getattr(unit, "zoom_hidden", False):  # (still hidden from the last time)
+            if getattr(unit, "zoom_spacer", False):  # (a hidden one's room)
+                pass
+            elif getattr(unit, "zoom_hidden", False):  # (still hidden from the last time)
                 (below if anchor else above).append(unit)
             elif unit.get_visible() and (at := self.extent(unit)) is not None:
                 if anchor is None and at[0] + at[1] > top:
                     anchor = unit
                 if at[0] + at[1] < top - self.ABOVE * page or at[0] > top + self.BELOW * page:
-                    unit.set_visible(False)
-                    unit.zoom_hidden = True
+                    self._hide(unit, at[1])
                     (below if anchor else above).append(unit)
                 else:
                     near.append(unit)
             unit = unit.get_next_sibling()
         below.reverse()  # (both lists pop() the message nearest the view first)
         return anchor, above, below, near
+
+    def _hide(self, unit, height=None):
+        """A message hidden, an empty box as tall as it was in its place: the chat stays about as tall as it was, so its
+        scrollbar stays still while messages are hidden (without, it grew to most of the bar and jumped about as they
+        came back)."""
+        if height is None:
+            ok, b = unit.compute_bounds(self.content)
+            height = b.get_height() if ok else 0
+        unit.set_visible(False)
+        unit.zoom_hidden = True
+        if (room := getattr(unit, "zoom_room", None)) is None:
+            room = unit.zoom_room = Gtk.Box()
+            room.zoom_spacer = True  # (not a message: split passes it by)
+            self.box.insert_child_after(room, unit)
+        room.set_size_request(-1, max(0, round(height)))
+
+    def _show(self, unit):
+        if (room := getattr(unit, "zoom_room", None)) is not None:  # (gone with it: only there while it's hidden)
+            self.box.remove(room)
+            unit.zoom_room = None
+        unit.set_visible(True)
+        unit.zoom_hidden = False
 
     def through(self, change=None, ratio=1.0):
         """change() (the text's size, ratio times what it was), the place kept and what's far off brought back in the
@@ -1773,8 +1795,7 @@ class ZoomPlace:
             anchor, above, below, near, place = self.away
             self.away = None
             for unit in near:
-                unit.set_visible(True)
-                unit.zoom_hidden = False
+                self._show(unit)
         else:
             if self.job is None and not self.left and (place := widgets.scroll_place(self.scroll)):
                 self.before = {**place, "value": place["value"] * ratio}
@@ -1825,8 +1846,7 @@ class ZoomPlace:
             for side in (job["below"], job["above"]):
                 if side:
                     unit = side.pop()
-                    unit.set_visible(True)
-                    unit.zoom_hidden = False
+                    self._show(unit)
                     job["fresh"].append(unit)
                     shown += 1
         job["shown"] = shown
@@ -1891,8 +1911,7 @@ class ZoomPlace:
         at = self.extent(anchor) if anchor is not None else None
         through = (adj.get_value() - at[0]) / at[1] if at and at[1] > 0 else None
         for unit in near:
-            unit.set_visible(False)
-            unit.zoom_hidden = True
+            self._hide(unit)
         self.away = anchor, above, below, near, (adj.get_value() + adj.get_page_size() >= adj.get_upper() - 1, through)
 
 

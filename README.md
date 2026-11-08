@@ -18,11 +18,10 @@ and shows the chat, its tool calls and every session on the machine.
 | ![Tool calls](docs/screenshots/29-tool-group-open-light.png)<br>Tool calls | ![Command prompt](docs/screenshots/10-permission-bash-light.png)<br>Command approval |
 | ![Edit prompt](docs/screenshots/11-permission-edit-dark.png)<br>Edit approval | ![MCP prompt](docs/screenshots/14-permission-mcp-light.png)<br>MCP tool approval |
 
-## Code, databases, Git and Kubernetes
+## Git and Kubernetes
 
 | | |
 |---|---|
-| ![Code view](docs/screenshots/38b-code-view-light.png)<br>Code view | ![Schema](docs/screenshots/38c-schema-diagram-light.png)<br>Database schema |
 | ![Git](docs/screenshots/38f-git-light.png)<br>Git history | ![Kubernetes](docs/screenshots/38e-kubernetes-logs-light.png)<br>Kubernetes pods and logs |
 
 ## Input and feedback

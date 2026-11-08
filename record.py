@@ -2106,6 +2106,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf = self.view.get_buffer()
         for name, props in self.TAGS.items():
             self.buf.create_tag(name, **props)
+        for n in self.HEADING_SPACE:  # (a heading's space below, as the space above the line after it: _heading_looks)
+            self.buf.create_tag(f"after-h{n}")
         self.view.restyled = self._heading_looks
         self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
@@ -2319,7 +2321,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.follow_anim.play()
 
     # the space above and below a heading as Google Docs' own styles have it, in points against its 11pt text: more
-    # above than below, so each goes with what follows it (_heading_looks)
+    # above than below, so each goes with what follows it (_heading_looks). Its space below is the line after it's
+    # space above ("after-h1"...): a heading's own, under hidden markup ("# "), had GTK stop over it, the pointer's
+    # place in it a byte off the end of the line
     HEADING_SPACE = {1: (20, 6), 2: (18, 6), 3: (16, 4), 4: (14, 4), 5: (12, 4), 6: (12, 4)}
     HEADING_INK = {3: 0.82, 4: 0.7, 5: 0.7, 6: 0.6}  # (the deeper ones grey: this much of the text's colour)
 
@@ -2336,7 +2340,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         for n, (above, below) in self.HEADING_SPACE.items():
             tag = table.lookup(f"h{n}")
             tag.set_property("pixels-above-lines", round(above / 11 * px))
-            tag.set_property("pixels-below-lines", round(below / 11 * px))
+            table.lookup(f"after-h{n}").set_property(  # (on top of what every line has above it)
+                "pixels-above-lines", round(below / 11 * px) + self.view.get_pixels_above_lines())
             if n in self.HEADING_INK:
                 grey = ink.copy()
                 grey.alpha *= self.HEADING_INK[n]
@@ -2406,9 +2411,13 @@ class DiaryEditor(Gtk.Box, FindInText):
         blocks = [[first, last] for first, last, _closed in spans]  # (each code block's lines, for its card: NotesView)
         in_block = {n for first, last, _closed in spans for n in range(first, last + 1)}
         fences = {first for first, _last, _closed in spans} | {last for _first, last, closed in spans if closed}
+        below = None  # (the heading just before: its space below, this line's above)
         for n, line in enumerate(text.split("\n")):
             a, b = pos, pos + len(line)
             pos = b + 1
+            after, below = below, None
+            if after and not re.match(r"#{1,6}\s", line):  # (another heading: its own space above)
+                tag(after, a, b + 1)
             here = n in shown if mode == "line" else mode == "all"  # (Settings → Markup visibility)
             hide = (lambda x, y: tag("mark", x, y)) if here else (lambda x, y: tag("hidden", x, y))
             hide_link = hide if mode != "all" else (lambda x, y: tag("hidden", x, y))  # (all but a link's)
@@ -2422,6 +2431,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                 item = None
             if m := re.match(r"(#{1,6})(\s+)", line):
                 tag(f"h{len(m.group(1))}", a, b)
+                below = f"after-h{len(m.group(1))}"
                 hide(a, a + m.end())
                 body = m.end()
             elif m := LIST_ITEM_RE.match(line):

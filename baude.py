@@ -10783,6 +10783,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         dialog.present(self)
         return dialog
 
+    # macOS: once a dialog has opened, the whole window drawn afresh (see Repaint), unless every frame already is
+    REPAINT_AFTER_DIALOG = sys.platform == "darwin" and not FULL_REDRAWS
+
     def dialog_shown(self, _pspec):
         if self.REPAINT_AFTER_DIALOG and self.get_visible_dialog() is not None and self.repaint_wait is None:
             self.repaint_wait = [None, time.monotonic()]  # (the frame last seen, and since when this has waited)

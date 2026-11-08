@@ -1901,16 +1901,19 @@ class DiaryPlace(ZoomPlace):
         self.view, self.buf = editor.view, editor.buf
 
     def extent(self, line):
+        """Where the line is, in the adjustment's terms (the text scrolls itself: its buffer's y, from the top of the
+        view's, on from where the adjustment is), and how tall."""
         ok, it = self.buf.get_iter_at_line(line)
         if not ok:
             return None
         y, height = self.view.get_line_yrange(it)
-        return self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, 0, y)[1], height
+        return y - self._top() + self.scroll.get_vadjustment().get_value(), height
+
+    def _top(self):
+        return self.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, 0, 0)[1]
 
     def split(self):
-        top = int(self.scroll.get_vadjustment().get_value())
-        y = self.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, 0, top)[1]
-        return self.view.get_line_at_y(y)[0].get_line(), [], [], []
+        return self.view.get_line_at_y(self._top())[0].get_line(), [], [], []
 
 
 class NotesView(Gtk.TextView):
@@ -1959,18 +1962,37 @@ class NotesView(Gtk.TextView):
         rect.x, rect.y, rect.width, rect.height = here.x, here.y, width, here.height
         return rect
 
+    def in_view(self):
+        """The lines in view: (first offset, last offset, first line, last line). Only what's there is drawn: asking
+        where a character is lays its line out, and every bullet of a long page each frame was most of a reflow's
+        time."""
+        rect = self.get_visible_rect()
+        top = self.get_line_at_y(rect.y)[0]
+        bottom = self.get_line_at_y(rect.y + rect.height)[0]
+        if not bottom.ends_line():
+            bottom.forward_to_line_end()
+        return top.get_offset(), bottom.get_offset(), top.get_line(), bottom.get_line()
+
     def do_snapshot_layer(self, layer, snapshot):
         if layer == Gtk.TextViewLayer.BELOW_TEXT:
-            self._snapshot_blocks(snapshot)
+            if self.blocks:
+                self._snapshot_blocks(snapshot, self.in_view())
+            return
         if layer != Gtk.TextViewLayer.ABOVE_TEXT or not (self.logos or self.marks):
             return
         buf = self.get_buffer()
+        first, last, _l1, _l2 = self.in_view()
+        col, glyphs = self.marker_col(), {}  # (the column, and each glyph's layout: once a frame, not once a bullet)
         for offset, logo in self.logos:
+            if not first <= offset <= last:
+                continue
             r = self.char_rect(buf.get_iter_at_offset(offset))
             size = min(r.height * 0.8, max(r.width, r.height * 0.6))
             widgets.draw_ref_icon(snapshot, logo, r.x + (r.width - size) / 2, r.y + (r.height - size) / 2, size,
                                   self.COLOR)
         for offset, kind in self.marks:
+            if not first <= offset <= last:
+                continue
             r = self.char_rect(buf.get_iter_at_offset(offset))
             if kind == "rule":
                 y = r.y + r.height // 2
@@ -1979,29 +2001,31 @@ class NotesView(Gtk.TextView):
                 color.alpha *= 0.3
                 snapshot.append_color(color, rule)
                 continue
-            layout = self.create_pango_layout(self.GLYPHS[kind])
             bullet = kind in ("bullet", "hollow")
-            color = self.BOX
-            if bullet:
-                attrs = Pango.AttrList()
-                attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
-                layout.set_attributes(attrs)
-                color = self.marker_color()
-            _ink, logical = layout.get_pixel_extents()
+            if kind not in glyphs:
+                layout = self.create_pango_layout(self.GLYPHS[kind])
+                if bullet:
+                    attrs = Pango.AttrList()
+                    attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
+                    layout.set_attributes(attrs)
+                glyphs[kind] = layout, layout.get_pixel_extents()[1], self.marker_color() if bullet else self.BOX
+            layout, logical, color = glyphs[kind]
             # (a bullet at the right of its column, as Baude's chat has it; a box where its [ ] is)
-            x = r.x + self.marker_col() - logical.width - logical.x if bullet else r.x
+            x = r.x + col - logical.width - logical.x if bullet else r.x
             snapshot.save()
             snapshot.translate(Graphene.Point().init(x, r.y + (r.height - logical.height) / 2))
             snapshot.append_layout(layout, color)
             snapshot.restore()
 
-    def _snapshot_blocks(self, snapshot):
-        """Each code block's card: Baude's raised fill and one rule round it, the width of the text."""
+    def _snapshot_blocks(self, snapshot, view):
+        """Each code block's card in view (in_view): Baude's raised fill and one rule round it, the width of the text."""
         buf, fill, rule = self.get_buffer(), self.get_color(), self.get_color()
         fill.alpha *= 0.06
         rule.alpha *= 0.14
         left, width = self.get_left_margin(), self.get_width() - self.get_left_margin() - self.get_right_margin()
         for first, last in self.blocks:
+            if last < view[2] or first > view[3]:
+                continue
             top, _h = self.get_line_yrange(buf.get_iter_at_line(first)[1])
             y, height = self.get_line_yrange(buf.get_iter_at_line(last)[1])
             card = Gsk.RoundedRect()
@@ -2143,11 +2167,11 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.view.add_controller(motion)
         self.hovered = None  # (the @name the pointer's over: _hover)
         self.following, self.follow_frames, self.follow_tries, self.follow_anim = None, 0, 0, None  # (follow_soon)
-        self.clamp = Adw.Clamp(maximum_size=self.WIDTH, child=self.view)  # (Window.apply_full_width)
+        # (the text scrolls itself, a scrollable clamp round it: in a viewport, as an Adw.Clamp is put in one, it was as
+        # tall as all of it, so a change of its width laid out every line of a long page at once, a frame or more
+        # each. Scrolling itself, GTK lays out what's in view, the rest as it's idle. Window.apply_full_width)
+        self.clamp = Adw.ClampScrollable(maximum_size=self.WIDTH, child=self.view)
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, child=self.clamp)
-        # (the focus coming to the text doesn't move the page: it's taller than what's shown, so GTK would show its top.
-        # The caret has follow_soon)
-        self.scroll.get_child().set_scroll_to_focus(False)
         self.title_hits, self.on_title = [], None  # (the find bar's matches in the title, and the one it's on: find)
         main.prepend(self.make_find_bar())  # (over all of the page, the title's in what it finds)
         self.search_bar.connect("notify::search-mode-enabled",  # (its close button too: back to writing)

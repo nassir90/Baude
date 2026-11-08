@@ -1935,8 +1935,15 @@ class NotesView(Gtk.TextView):
 
     def do_css_changed(self, change):
         Gtk.TextView.do_css_changed(self, change)
+        if self.restyled is not None and not getattr(self, "restyling", False):  # (once GTK's done restyling: a tag
+            self.restyling = True                                                 # changed in it, its lines laid out
+            GLib.idle_add(self._restyle)                                          # again in the midst of that)
+
+    def _restyle(self):
+        self.restyling = False
         if self.restyled is not None:
             self.restyled()
+        return False
 
     def char_rect(self, it):
         """it's character's box, in buffer coordinates (as the layer is drawn), from the caret's places before and
@@ -2109,7 +2116,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf.connect("insert-text", lambda _b, at, text, _n: ("@" in text or "#" in text) and len(text) <= 2 and
                          setattr(self, "typed_at", at.get_offset() + max(text.rfind("@"), text.rfind("#"))))
         self.caret_was = None  # (where the caret was: which way it went, _caret_in_marker)
-        self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_in_marker(),
+        self.snapping = None  # (the caret's snap out of a list item's marker, waiting: _caret_moved)
+        self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_moved(),
                                                                                 self._caret_line(),
                                                                                 self._token_changed()))
         self.buf.connect("mark-set", lambda _b, _i, mark: mark.get_name() == "selection_bound" and
@@ -2756,22 +2764,32 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf.end_user_action()
         return True
 
-    def _caret_in_marker(self):
+    def _caret_moved(self):
+        """Where the caret's gone, and the text's length then; its snap out of a list item's marker (_caret_in_marker)
+        once GTK's done moving it, not in the midst of that (its own steps, a click, a drag still going on)."""
+        was, self.caret_was = self.caret_was, (self.buf.get_iter_at_mark(self.buf.get_insert()).get_offset(),
+                                               self.buf.get_char_count())
+        if was is None or was[1] != self.buf.get_char_count():
+            return  # (moved by the text changing, as it's typed or as an edit puts in a bullet: left where it's put)
+        if self.snapping is None:
+            self.snapping = GLib.idle_add(self._caret_in_marker, was[0], priority=GLib.PRIORITY_HIGH_IDLE)  # (before
+                                                                                     # the frame it'd be drawn in)
+
+    def _caret_in_marker(self, was):
         """A list item has two places for the caret: before its bullet (or number), and at its text. Its unseen indent,
         the bullet and the space after it (and a box) are one step: the caret moved into them goes on the way it was
         going, right to the text, left to before the bullet, and left again to the line before. A selection's moving
         end too."""
+        self.snapping = None
+        if self.notebook is None:
+            return False
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
-        was, self.caret_was = self.caret_was, (ins.get_offset(), self.buf.get_char_count())
-        if was is None or was[1] != self.buf.get_char_count():
-            return  # (moved by the text changing, as it's typed or as an edit puts in a bullet: left where it's put)
-        was = was[0]
         if (hit := self._item_at(ins.get_line())) is None:
-            return
+            return False
         start, m = hit
         before, text, at = len(m.group(1)), m.end(), ins.get_line_offset()
         if at == before or at >= text:
-            return
+            return False
         to = start.copy()
         back = was > ins.get_offset()
         if at < before and back and was == start.get_offset() + before and start.get_line() > 0:
@@ -2782,6 +2800,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.move_mark(self.buf.get_insert(), to)
         else:
             self.buf.place_cursor(to)
+        return False
 
     def _out_of_marker(self):
         """The caret in a list item's bullet, box or indent (all drawn over, or unseen): put just after them, so what's

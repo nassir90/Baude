@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Baude</title>
+<meta name="description" content="A desktop app for Claude Code, built with GTK 4 and libadwaita.">
+<meta property="og:title" content="Baude">
+<meta property="og:description" content="A desktop app for Claude Code, built with GTK 4 and libadwaita.">
+<meta property="og:image" content="https://mpts.ie/apps/baude/shots/02-turn-complete-light.webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1c1b1f;--muted:#4f4f57;--brand:#1c58a8;--rule:#e2e4e8}
+*{box-sizing:border-box}
+html,body{background:#fff}
+body{margin:0;color:var(--ink);font:16px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--brand)}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:20px}
+.banner{background:var(--brand);color:#fff}
+.banner .wrap{padding-block:28px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.banner h1{margin:0;font-size:2.25rem;font-weight:600;letter-spacing:-.01em}
+.banner .crumb{color:rgba(255,255,255,.8);font-size:.9375rem;text-decoration:none}
+.banner .crumb:hover{color:#fff;text-decoration:underline}
+.intro{padding-block:28px 8px}
+.intro p{margin:0 0 20px;font-size:1.125rem;color:var(--muted);max-width:62ch}
+.actions{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 24px;border-radius:20px;
+  font:500 .9375rem/1 inherit;text-decoration:none;border:1px solid var(--brand);cursor:pointer}
+.btn.filled{background:var(--brand);color:#fff}
+.btn.outlined{background:#fff;color:var(--brand)}
+h2{font-size:1.375rem;font-weight:600;color:var(--brand);margin:48px 0 20px}
+.shots-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:48px 0 20px}
+.shots-head h2{margin:0}
+.theme{display:inline-flex;border:1px solid var(--brand);border-radius:16px;overflow:hidden}
+.theme button{font:500 .875rem/1 inherit;padding:8px 16px;border:0;background:#fff;color:var(--brand);cursor:pointer}
+.theme button[aria-pressed=true]{background:var(--brand);color:#fff}
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:36px 28px;margin:0}
+@media (max-width:760px){.shots{grid-template-columns:minmax(0,1fr)}}
+.shot{margin:0}
+.shot a{display:block;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12),0 6px 22px rgba(0,0,0,.09)}
+.shot img{width:100%;height:auto;display:block}
+.shot figcaption{margin:12px 2px 0;font-size:.9375rem;color:var(--muted)}
+.how p{color:var(--muted);max-width:70ch;margin:0 0 14px}
+code{font:.875em "JetBrains Mono",ui-monospace,monospace;background:#f1f3f6;padding:.1em .35em;border-radius:5px}
+footer{margin-block:64px 40px;font-size:.875rem;color:var(--muted);display:flex;gap:20px}
+dialog{padding:0;border:0;background:transparent;max-width:96vw;max-height:96vh}
+dialog:focus,dialog :focus{outline:none}
+dialog::backdrop{background:rgba(10,12,16,.86)}
+dialog img{display:block;max-width:96vw;max-height:86vh;width:auto;height:auto;border-radius:10px}
+dialog p{color:#e9eaee;text-align:center;margin:12px 0 0;font-size:.9375rem}
+</style>
+</head>
+<body>
+
+<header class="banner"><div class="wrap">
+  <h1>Baude</h1>
+  <a class="crumb" href="/apps/">mpts.ie / apps</a>
+</div></header>
+
+<main class="wrap">
+  <section class="intro">
+    <p>A desktop app for Claude Code, built with GTK 4 and libadwaita. It runs the <code>claude</code> command you
+    already have and shows everything it does: replies as they stream in, tool calls you can read, permission
+    prompts, subagents and background tasks, and every session on your computer, including the ones running in
+    Claude Desktop or a terminal, which it follows live.</p>
+    <div class="actions">
+      <a class="btn filled" href="#screenshots">Screenshots</a>
+      <a class="btn outlined" href="#how">How it works</a>
+    </div>
+  </section>
+
+  <div class="shots-head" id="screenshots">
+    <h2>Screenshots</h2>
+    <div class="theme" role="group" aria-label="Theme">
+      <button type="button" data-theme="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+  <div class="shots">
+<!-- SHOTS -->
+  </div>
+
+  <section class="how" id="how">
+    <h2>How it works</h2>
+    <p>Baude doesn't talk to the API itself. It runs one long-lived <code>claude -p</code> process and speaks its
+    stream-json protocol, the same one the Agent SDK uses. Everything agentic (tools, permissions, context,
+    compaction, MCP, hooks, skills, <code>CLAUDE.md</code>, sessions) stays the CLI's job, so Baude works with
+    your existing sign-in, settings and plugins. Baude is the view.</p>
+    <p>Sessions are the CLI's own transcripts, so Baude lists every one on the computer. A session another program
+    is writing is followed like <code>tail -f</code>, and Baude keeps its own input off until that program is done.
+    It is plain Python whose only dependency is PyGObject.</p>
+  </section>
+
+  <footer><a href="/apps/">More apps</a><a href="/">mpts.ie</a></footer>
+</main>
+
+<dialog id="view" aria-label="Screenshot"><img alt=""><p></p></dialog>
+
+<script>
+// Light / Dark switches every screenshot; clicking one opens it full size (← and → step through, Esc closes).
+let theme = "light";
+const links = [...document.querySelectorAll(".shot a")];
+const view = document.getElementById("view"), big = view.querySelector("img"), cap = view.querySelector("p");
+let at = 0;
+function setTheme(t) {
+  theme = t;
+  for (const b of document.querySelectorAll(".theme button")) b.setAttribute("aria-pressed", b.dataset.theme === t);
+  for (const a of links) {
+    a.href = `shots/${a.dataset.name}-${t}.webp`;
+    a.querySelector("img").src = `shots/${a.dataset.name}-${t}-sm.webp`;
+  }
+}
+function show(i) {
+  at = (i + links.length) % links.length;
+  big.src = links[at].href;
+  cap.textContent = big.alt = links[at].querySelector("img").alt;
+  if (!view.open) view.showModal();
+}
+document.querySelector(".theme").addEventListener("click", e => e.target.dataset.theme && setTheme(e.target.dataset.theme));
+links.forEach((a, i) => a.addEventListener("click", e => { e.preventDefault(); show(i); }));
+view.addEventListener("click", e => { if (e.target === view) view.close(); });
+document.addEventListener("keydown", e => {
+  if (!view.open) return;
+  if (e.key === "ArrowRight") show(at + 1);
+  if (e.key === "ArrowLeft") show(at - 1);
+});
+</script>
+</body>
+</html>

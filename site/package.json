@@ -1,0 +1,17 @@
+{
+  "name": "baude-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:shots": "python3 build_shots.py",
+    "dev": "npm run build:shots && cf dev",
+    "build": "npm run build:shots && cf build",
+    "deploy": "npm run build:shots && cf deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "beta",
+    "cf": "^1.0.0-beta.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

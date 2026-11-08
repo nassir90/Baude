@@ -9,28 +9,28 @@ and shows the chat, its tool calls and every session on the machine. [Record](#r
 
 | | |
 |---|---|
-| ![Markdown](docs/screenshots/30-markdown-gallery-light.png)<br>Markdown with code, quotes and tables | ![Signal links](docs/screenshots/37b-signal-link-kinds-light.png)<br>Signal links files, commits, env vars and more |
+| ![Markdown](docs/screenshots/30-markdown-gallery-light.png)<br>Markdown | ![Signal links](docs/screenshots/37b-signal-link-kinds-light.png)<br>Signal links |
 
 ## Tools and permissions
 
 | | |
 |---|---|
-| ![Tool calls](docs/screenshots/29-tool-group-open-light.png)<br>Tool calls fold into one line | ![Command prompt](docs/screenshots/10-permission-bash-light.png)<br>Manual mode asks before each command |
-| ![Edit prompt](docs/screenshots/11-permission-edit-dark.png)<br>Edits show as a diff first | ![MCP prompt](docs/screenshots/14-permission-mcp-light.png)<br>MCP tools by name, fields as rows |
+| ![Tool calls](docs/screenshots/29-tool-group-open-light.png)<br>Tool calls | ![Command prompt](docs/screenshots/10-permission-bash-light.png)<br>Command approval |
+| ![Edit prompt](docs/screenshots/11-permission-edit-dark.png)<br>Edit approval | ![MCP prompt](docs/screenshots/14-permission-mcp-light.png)<br>MCP tool approval |
 
 ## Code, databases, Git and Kubernetes
 
 | | |
 |---|---|
-| ![Code view](docs/screenshots/38b-code-view-light.png)<br>Files open beside the chat | ![Schema](docs/screenshots/38c-schema-diagram-light.png)<br>Database schemas as diagrams |
-| ![Git](docs/screenshots/38f-git-light.png)<br>Git history in the side panel | ![Kubernetes](docs/screenshots/38e-kubernetes-logs-light.png)<br>Pods and their logs |
+| ![Code view](docs/screenshots/38b-code-view-light.png)<br>Code view | ![Schema](docs/screenshots/38c-schema-diagram-light.png)<br>Database schema |
+| ![Git](docs/screenshots/38f-git-light.png)<br>Git history | ![Kubernetes](docs/screenshots/38e-kubernetes-logs-light.png)<br>Kubernetes pods and logs |
 
 ## Input and feedback
 
 | | |
 |---|---|
-| ![Attachments](docs/screenshots/42-composer-attachments-light.png)<br>Images and files in the input box | ![Slash commands](docs/screenshots/43-slash-completer-light.png)<br>Slash commands and skills |
-| ![Send Feedback](docs/screenshots/92-feedback-with-capture-light.png)<br>Send Feedback with screen captures | ![Ongoing Feedback](docs/screenshots/96-feedback-ready-light.png)<br>Fixes ready to review and merge |
+| ![Attachments](docs/screenshots/42-composer-attachments-light.png)<br>Attachments | ![Slash commands](docs/screenshots/43-slash-completer-light.png)<br>Slash commands |
+| ![Send Feedback](docs/screenshots/92-feedback-with-capture-light.png)<br>Send Feedback | ![Ongoing Feedback](docs/screenshots/96-feedback-ready-light.png)<br>Ongoing Feedback |
 
 ## Record
 

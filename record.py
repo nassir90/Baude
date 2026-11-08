@@ -3079,6 +3079,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
                 widgets.wrap_selection(self.buf, chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
+        if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
+                not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
+            self._em_dash()  # (and the space or Enter goes in after it, as typed)
         if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self._sub_page() and keyval == Gdk.KEY_space:
             return False  # (the space follows the link, as typed; Enter's the Enter it would have been: a list goes on)
         if keyval == Gdk.KEY_BackSpace and (self._unbullet() or self._unbreak()):
@@ -3235,6 +3238,28 @@ class DiaryEditor(Gtk.Box, FindInText):
                         unseen(s, x + side) and unseen(y - side, e):
                     self.buf.select_range(self.buf.get_iter_at_offset(x + side), self.buf.get_iter_at_offset(y - side))
                     return
+
+    def _em_dash(self):
+        """-- just typed on its own, whitespace before it, then a space or Enter: it's an em dash, as the text's -- is
+        drawn in a reply (widgets.EM_DASH). Not in code: a `span` (an odd number of backticks before it on the line,
+        so one still being typed too) or a ``` block. True if it was."""
+        if self.notebook is None or self.buf.get_has_selection():
+            return False
+        ins = self.buf.get_iter_at_mark(self.buf.get_insert())
+        line = ins.copy()
+        line.set_line_offset(0)
+        before = self.buf.get_text(line, ins, True)
+        if not re.search(r"(?<=\s)--$", before) or before[:-2].count("`") % 2:
+            return False
+        start = self.buf.get_iter_at_offset(ins.get_offset() - 2)
+        table = self.buf.get_tag_table()
+        if any(start.has_tag(table.lookup(name)) for name in ("verbatim", "pre")):
+            return False
+        self.buf.begin_user_action()
+        self.buf.delete(start, ins)
+        self.buf.insert_at_cursor("\u2014")
+        self.buf.end_user_action()
+        return True
 
     def _sub_page(self):
         """+Ideas just typed, then a space or Enter: it becomes [[+Ideas]], a link to this page's sub-page Ideas, which

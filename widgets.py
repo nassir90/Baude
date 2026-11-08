@@ -880,6 +880,9 @@ _STRIKE = re.compile(r"~~(.+?)~~")
 _KEPT_LINK = re.compile(r"\x00(\d+)\x00")
 
 
+EM_DASH = re.compile(r"(?<=\s)--(?=\s)")  # (-- on its own, whitespace both sides: an em dash, outside code)
+
+
 INLINE_MEMO_BYTES = 512 * 1024  # what _inline remembers, at most: its texts and their markup
 
 
@@ -953,6 +956,8 @@ def _inline_markup(text):
         if (unexplained := getattr(SIGNAL, "unexplained", None)) is not None and \
                 (said := unexplained(REF_MESSAGE)) is not None:  # (Record's: the "the X"s nothing introduced, red)
             p = said.sub(lambda m: keep(unexplained_markup(m[0])), p)
+    if "--" in p:  # (the code spans are set aside by now: -- in them stays)
+        p = EM_DASH.sub("\u2014", p)
     s = _emphasis(link_paths(html.escape(p, quote=False)))
     return _KEPT_LINK.sub(lambda m: marks[int(m[1])], s) if "\x00" in s else s
 

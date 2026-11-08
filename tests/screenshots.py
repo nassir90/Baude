@@ -1692,13 +1692,39 @@ def capture(win, size, path):
         img = ImageGrab.grab(xdisplay=os.environ["DISPLAY"])  # the whole screen, so popovers are included
         img.crop((0, 0, *size)).save(path)
         return
-    # no X display (macOS): GTK draws the window itself; popovers, being separate surfaces, aren't in it
+    if sys.platform == "darwin":
+        img = capture_macos(win)
+        img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
+        return
+    # elsewhere without X: GTK draws the window itself; popovers, being separate surfaces, aren't in it
     paintable = Gtk.WidgetPaintable.new(win)
     snap = Gtk.Snapshot()
     paintable.snapshot(snap, win.get_width(), win.get_height())
     win.get_native().get_renderer().render_texture(snap.to_node(), None).save_to_png(path)
     img = Image.open(path)
     img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
+
+
+def capture_macos(win):
+    """macOS: the window as the screen shows it, its traffic lights too (macOS draws those, not GTK). screencapture -l
+    takes one window by its number, with the windows it owns (its popovers), so a window of another app in front of
+    it never gets in. Scaled back to points."""
+    import ctypes
+    import subprocess
+    import tempfile
+    import macos
+
+    main = macos.native_window(win)
+    number = macos.objc_send(main, b"windowNumber", ret=ctypes.c_long)
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        tmp = f.name
+    try:
+        subprocess.run(["screencapture", "-x", "-o", "-l", str(number), tmp], check=True)
+        img = Image.open(tmp).convert("RGB")
+    finally:
+        os.unlink(tmp)
+    scale = img.width / macos.objc_send(main, b"frame", ret=macos._rect()).w
+    return img.resize((round(img.width / scale), round(img.height / scale)), Image.LANCZOS)
 
 
 def reset_state():

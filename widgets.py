@@ -3667,6 +3667,7 @@ class SideSlide:
         self.pane, self.toggles, self.anim, self.quiet = pane, list(toggles), None, False
         self.target = pane.get_visible()
         self.glide, self.held_shut, self.held_at, self.when_glided = None, False, None, None  # (a drag's: hold)
+        self.moving = None  # (told True as it starts to slide or be dragged, False once it's still: motion)
         for toggle in self.toggles:
             toggle.set_active(self.target)
             toggle.connect("toggled", self._toggled)
@@ -3711,6 +3712,7 @@ class SideSlide:
             return
         if not moving:
             self.begin()
+            self.motion(True)
             if show and not self.pane.get_visible():
                 self._set_visible(True)
                 self.remember_open()
@@ -3775,6 +3777,12 @@ class SideSlide:
         if not self.target:
             self._set_visible(False)
         self.settle()
+        self.motion(False)
+
+    def motion(self, on):
+        """It's started moving (on: a slide, a drag), or it's still again: moving told, if anything's to know."""
+        if self.moving is not None:
+            self.moving(on)
 
     def begin(self):
         """About to move: whatever lets it go narrower than it can be."""
@@ -3814,6 +3822,7 @@ class PaneSlide(SideSlide):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self.dragged_from = self.host.get_position()
         self.limits = self.host.get_property("min-position"), self.host.get_property("max-position")
+        self.motion(True)
 
     def _drag_update(self, _gesture, dx, _dy):
         if self.dragged_from is None:
@@ -3832,9 +3841,10 @@ class PaneSlide(SideSlide):
                 self.closed_by_drag(self.host.get_width() - position if self.end else position)
             self.let_go(position)
         elif self.glide is not None:  # (on its way back to where it was let go: still the drag's)
-            self.when_glided = lambda: setattr(self, "dragged_from", None)
+            self.when_glided = lambda: (setattr(self, "dragged_from", None), self.motion(False))
         else:
             self.dragged_from = None
+            self.motion(False)
 
     def following(self):
         """The rule's where a drag of it has put it, this moment: not sliding shut, or back, nor slid by a toggle meanwhile."""

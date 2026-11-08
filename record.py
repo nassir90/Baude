@@ -1714,6 +1714,7 @@ class ZoomPlace:
 
     def __init__(self, scroll, widget, box=None):
         self.scroll, self.widget, self.box, self.job = scroll, widget, box, None
+        self.paused = False  # (what's hidden kept hidden, its width still changing: Window._side_moving)
         self.content = scroll.get_child().get_child()  # (what's scrolled: inside its viewport)
         self.left = False  # (messages still hidden: the tab left before they were all back)
         self.away = None  # (its tab not shown as every widget's size changed: put_away)
@@ -1820,7 +1821,7 @@ class ZoomPlace:
         if job is None or not self.scroll.get_mapped():
             return
         shown = 0
-        while shown < self.BACK and (job["above"] or job["below"]):
+        while not self.paused and shown < self.BACK and (job["above"] or job["below"]):
             for side in (job["below"], job["above"]):
                 if side:
                     unit = side.pop()
@@ -1843,6 +1844,9 @@ class ZoomPlace:
         if not job["put_back"]:
             self.note()
         if job["shown"]:
+            return
+        if self.paused:  # (not done: what's hidden comes back once it's let go)
+            job["calm"], job["frames"] = 0, 0
             return
         upper = self.scroll.get_vadjustment().get_upper()
         job["calm"] = job["calm"] + 1 if upper == job["upper"] else 0
@@ -3524,6 +3528,8 @@ class FixedWidth(Gtk.Widget):
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self.dragged_from = self.width
+        if self.slide is not None:
+            self.slide.motion(True)
 
     def _drag_update(self, _gesture, dx, _dy):
         if self.dragged_from is None:
@@ -3536,6 +3542,8 @@ class FixedWidth(Gtk.Widget):
         if self.dragged_from is None:
             return
         began, self.dragged_from = self.dragged_from, None
+        if self.slide is not None:
+            self.slide.motion(False)  # (a slide shut after it, let_go's: its own)
         if self.slide is not None and self.slide.let_go(began):
             return
         if self.resized is not None:
@@ -4831,6 +4839,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.right_slide = widgets.PaneSlide(self.paned, right, [self.right_toggle])
         self.left_slide = ColumnSlide(column, side, [side_toggle])
         column.slide = self.left_slide
+        self.left_slide.moving = self.right_slide.moving = self._side_moving
         framed = Adw.ToolbarView(content=split)
         framed.add_css_class("baude-frame")  # (the bar on the frame, as the columns are: widgets.CSS)
         framed.add_top_bar(head)
@@ -4853,6 +4862,19 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
+
+    def _side_moving(self, on):
+        """A side bar's started moving (sliding, or dragged), or it's still again. A chat read in the tab shown (Reader)
+        is all of it laid out again at each new width, and a long one took a frame or more for each: so while the bar
+        moves its messages far from the view are hidden (ZoomPlace, as for the zoom), and what's in view is all that's laid
+        out again; once it's still they come back, a few a frame, nearest first, its place kept. (A page of notes lays out
+        only what's in view already.)"""
+        place = getattr(self.tabs.current(), "place", None)
+        if place is None or isinstance(place, DiaryPlace):
+            return
+        if on:
+            place.through()
+        place.paused = on
 
     def _books_resized(self, width):
         """The notebooks' column dragged wider or narrower: kept."""

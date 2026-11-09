@@ -7879,12 +7879,22 @@ def spent_since(proc, msg):
     return spent - seen if spent >= seen else spent
 
 
+def background_proc(session_id):
+    """The claude a Baude window keeps at a turn for a chat left mid-turn (BaudeWindow.detach_proc), if any."""
+    app = Gio.Application.get_default()
+    for w in app.get_windows() if app is not None and session_id else []:
+        if isinstance(w, BaudeWindow) and session_id in w.background:
+            return w.background[session_id]
+    return None
+
+
 class ClaudeProc:
     """Owns the claude subprocess. Callbacks are delivered on the GTK main loop."""
 
     def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
+        self.asks = {}  # request id -> a permission it asked for and hasn't been answered (BaudeWindow.detach_proc)
         exe = exe or claude_exe()  # (apple-claude for Apple's model: start_proc)
         args = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                 "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio",
@@ -8610,7 +8620,10 @@ class SessionSidebar(Gtk.Box):
 
     def file_state(self, info):
         """A session baude isn't running: working while another program (Claude Desktop, a
-        terminal) is in the middle of a turn in it, done for a minute after, else inactive."""
+        terminal) is in the middle of a turn in it, done for a minute after, else inactive. One left mid-turn, its
+        claude going on in the background: working, or waiting while it asks you something."""
+        if (p := background_proc(info.get("id"))) is not None:
+            return "waiting" if p.asks else "working"
         path = info.get("path")
         try:
             mtime = os.stat(path).st_mtime
@@ -10237,6 +10250,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.pending = {}          # control request id -> callback(response)
         self.tasks = {}            # background task id -> latest info (commands and subagents)
         self.waiting_cards = set()  # permission prompts not answered yet
+        self.background = {}  # session id -> the claude of a chat left mid-turn, going on with it (detach_proc)
         # a past session opens read-only: its file is shown (and tailed) but no claude touches it
         # until you send a message (even resuming without a message writes to the file)
         self.resume_pending = False
@@ -10534,6 +10548,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.apply_zoom()
         apply_scales(self.get_display())
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
+                                                  [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
                                                   self.drop_signal(), GLib.idle_add(self.let_go)) and False)
 
@@ -11392,6 +11407,76 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.set_busy(False)
         self.start_proc()
 
+    # ---- a chat left mid-turn (another opened, or a new one started): its claude goes on with the turn, not killed,
+    # writing its transcript as it goes, and is this window's again when the chat's opened (attach_proc), in this
+    # window or another. Meanwhile a permission it asks for waits, its chat's dot saying so (Sidebar.file_state), and
+    # is asked when the chat's opened. Once its turn's over it's let go; it goes with the window.
+    def detach_proc(self):
+        p, self.proc = self.proc, None
+        p.owner, p.key, p.mode, p.model = self, self.session_id or f"new-{id(p)}", self.mode, self.model
+        p.on_msg, p.on_exit = self.on_background_msg, lambda _code, p=p: self.let_go_background(p)
+        self.background[p.key] = p
+        self.waiting_cards.clear()
+        self.set_busy(False)
+
+    def on_background_msg(self, proc, msg):
+        t, req = msg.get("type"), msg.get("request") or {}
+        if t == "system" and msg.get("subtype") == "init" and msg.get("session_id") not in (None, proc.key):
+            self.background.pop(proc.key, None)  # (a new chat's: its id known now)
+            proc.key = msg["session_id"]
+            self.background[proc.key] = proc
+        elif t == "control_request" and req.get("subtype") != "can_use_tool":
+            proc.send({"type": "control_response", "response": {
+                "subtype": "error", "request_id": msg["request_id"], "error": f"baude: unsupported {req.get('subtype')}"}})
+        elif t == "control_request":
+            if req.get("tool_name") in self.always_allow and model_program(proc.model) == "claude":
+                proc.respond(msg["request_id"], {"behavior": "allow", "updatedInput": req.get("input", {})})
+            else:
+                proc.asks[msg["request_id"]] = msg
+                self.sidebar.restate()
+        elif t == "result":
+            self.let_go_background(proc)
+        return False
+
+    def let_go_background(self, proc):
+        """A chat's claude left mid-turn, its turn over (or the window closing): stopped, its chat's dot back to its
+        transcript's."""
+        if self.background.get(getattr(proc, "key", None)) is proc:
+            del self.background[proc.key]
+        proc.on_msg, proc.on_exit = (lambda *_: False), (lambda *_: None)
+        proc.kill()
+        self.sidebar.restate()
+
+    def take_background(self, session_id):
+        """The claude still at a turn in a chat left mid-turn, from whichever window left it: None if there's none."""
+        if (p := background_proc(session_id)) is not None:
+            p.owner.background.pop(p.key, None)
+            p.owner.sidebar.restate()
+        return p
+
+    def attach_proc(self, p):
+        """A chat's claude, left mid-turn (detach_proc), this window's again: what it did meanwhile is in the history
+        just drawn, what it does next comes as it's done, and what it asked meanwhile is asked here."""
+        if self.proc:
+            old, self.proc = self.proc, None
+            old.on_exit = lambda *_: None
+            old.kill()
+        self.resume_pending, self.view_path, self.resumed_note = False, None, False
+        self.tail.stop()
+        self.update_banner()
+        p.on_msg, p.on_exit = self.on_msg, self.on_exit
+        self.proc = p
+        self.pending.clear()
+        self.blocks, self.streamed_ids = {}, set()
+        self.waiting_cards.clear()
+        self.turn_finished = False
+        if p.mode in self.mode_dd.values:  # (the mode it's running in, not the read-only one a chat opens in)
+            self.mode = p.mode
+            self.mode_dd.select(p.mode)
+        self.set_busy(True)
+        for msg in list(p.asks.values()):
+            self.h_control_request(msg)
+
     def clear_transcript(self, closing=False):
         self.remember_place()  # (to open it there again)
         self.restore_scroll = None
@@ -11431,6 +11516,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.switching_chat = True  # (the new chat's own switches come below)
             self.set_cwd(run_in)
         self.remember_own_writes()
+        if self.busy and self.proc is not None:
+            self.detach_proc()  # (the turn goes on: detach_proc)
         self.resume_pending, self.view_path = False, None
         self.tail.stop()
         self.update_banner()
@@ -11796,9 +11883,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         dlg.select_folder(self, None, done)
 
     def start_in_folder(self, path):
-        if self.busy:
-            self.note("stop the current turn before starting another session")
-            return
         if not os.path.isdir(path):
             self.note(f"not a folder: {path}")
             return
@@ -13434,10 +13518,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.sidebar.focus_search()
 
     def resume_session(self, info):
-        if self.busy:
-            self.note("stop the current turn before switching sessions")
-            return
         self.remember_own_writes()  # before the view switches to the other session
+        if self.busy and self.proc is not None:
+            self.detach_proc()  # (the turn goes on: detach_proc)
         cwd = info.get("cwd")
         self.clear_transcript()
         self.switching_chat = True  # (its own switches come below: not the chat before's, in its folder)
@@ -13459,7 +13542,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if info.get("title"):
             self.show_title(info["title"])
         self.read_only_mode()
-        self.restart_proc(resume=True)  # a fresh helper: resume_pending keeps --resume off
+        if (left := self.take_background(info["id"])) is not None:  # (left mid-turn, still at it: its own claude again)
+            self.attach_proc(left)
+        else:
+            self.restart_proc(resume=True)  # a fresh helper: resume_pending keeps --resume off
         self.apply_read_only()
         self.sidebar.fill()
 
@@ -13589,6 +13675,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if name in self.always_allow and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             return
+        self.proc.asks[rid] = msg  # (asked again here if the chat's left and opened again before it's answered)
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
 
     def sign_in(self, args=()):
@@ -13658,6 +13745,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         def decide(_b, behavior, always=False):
             if always:
                 self.always_allow.add(name)
+            proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             else:
@@ -13774,6 +13862,8 @@ class BaudeApp(Adw.Application):
             if w.proc:
                 w.proc.on_exit = lambda *_: None
                 w.proc.kill()
+            for p in list(w.background.values()):  # (chats left mid-turn: their turns end here)
+                w.let_go_background(p)
         save_info_cache(force=True)  # (as quitting does: exec skips do_shutdown)
         os.execv(sys.executable, launch_command("--cwd", wins[-1].run_cwd if wins else self.opts.cwd, "--restore", path))
 

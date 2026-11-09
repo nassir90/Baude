@@ -8417,14 +8417,14 @@ class SessionSidebar(Gtk.Box):
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         label = info.get("fork_label") if depth else None
-        title = Gtk.Label(label=label or info.get("title") or "(untitled)", xalign=0,
-                          ellipsize=Pango.EllipsizeMode.END, hexpand=True)
+        # (a title too long for the row fades out where it's cut: widgets.FadeLabel)
+        title = widgets.FadeLabel(label=label or info.get("title") or "(untitled)", xalign=0, hexpand=True)
         if depth:
             title.add_css_class("fork-title")
         box.append(title)
         if where:  # (grouped by day: the folder it's in)
-            place = Gtk.Label(label=short_group_label(*session_group(info.get("folder", info.get("cwd")))),
-                              ellipsize=Pango.EllipsizeMode.END, max_width_chars=12, valign=Gtk.Align.CENTER)
+            place = widgets.FadeLabel(label=short_group_label(*session_group(info.get("folder", info.get("cwd")))),
+                                      max_chars=12, valign=Gtk.Align.CENTER)
             place.add_css_class("session-place")
             box.append(place)
         if tree := info.get("worktree"):  # (a worktree's chat, listed under its repository)

@@ -5336,6 +5336,90 @@ def sidebar_action(icon, label, tip, fn):
     return btn
 
 
+# A name too long for its row in a list on the left (a chat's, a page's, a notebook's): it fades out at the end it's cut
+# at, instead of ending in "…" (FadeLabel)
+CUT_FADE = 28  # px: how far in from the cut the fade begins
+
+
+def _fade_stops():
+    if not hasattr(_fade_stops, "stops"):
+        stops = []
+        for offset, alpha in ((0.0, 1.0), (1.0, 0.0)):  # (what's drawn: as it is, then gone)
+            stop = Gsk.ColorStop()
+            stop.offset, stop.color = offset, Gdk.RGBA(red=0, green=0, blue=0, alpha=alpha)  # (a copy: set whole)
+            stops.append(stop)
+        _fade_stops.stops = stops
+    return _fade_stops.stops
+
+
+def snapshot_faded(snapshot, draw, width, height, at_start):
+    """draw(snapshot), what's cut at width, with its last CUT_FADE px faded out: the right end, or at_start the left
+    (right-to-left text). The mask is only over the end that fades: one over the whole of it costs the renderer more."""
+    fade = min(CUT_FADE, width / 3)
+    if at_start:
+        strip, start, end = Graphene.Rect().init(0, 0, fade, height), Graphene.Point().init(fade, 0), \
+            Graphene.Point().init(0, 0)
+        rest = Graphene.Rect().init(fade, 0, width - fade, height)
+    else:
+        strip, start, end = Graphene.Rect().init(width - fade, 0, fade, height), \
+            Graphene.Point().init(width - fade, 0), Graphene.Point().init(width, 0)
+        rest = Graphene.Rect().init(0, 0, width - fade, height)
+    snapshot.push_clip(rest)  # (the most of it, as it is)
+    draw(snapshot)
+    snapshot.pop()
+    snapshot.push_mask(Gsk.MaskMode.ALPHA)  # (the mask, then what it masks)
+    snapshot.append_linear_gradient(strip, start, end, _fade_stops())
+    snapshot.pop()
+    draw(snapshot)
+    snapshot.pop()
+
+
+class FadeLabel(Gtk.Label):
+    """A one-line label that, too long for the width it's given, is cut and fades out at the cut instead of ending in
+    "…": as narrow as anything (its minimum width is nothing), the whole of it its natural width (or max_chars
+    characters' worth, the most). Right-to-left text shows its start, at the right, and fades at the left. Whatever's
+    behind it (a row hovered or selected, light or dark) shows through the fade: nothing's painted over it. Its text
+    isn't laid out again as its width changes, as an ellipsized label's is."""
+
+    __gtype_name__ = "BaudeFadeLabel"
+
+    def __init__(self, max_chars=0, **kw):
+        super().__init__(**kw)
+        self.max_chars = max_chars
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+
+    def do_measure(self, orientation, for_size):
+        low, nat, low_base, nat_base = Gtk.Label.do_measure(self, orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            low, low_base, nat_base = 0, -1, -1
+            if self.max_chars:
+                metrics = self.get_pango_context().get_metrics(None, None)
+                nat = min(nat, math.ceil(self.max_chars * metrics.get_approximate_char_width() / Pango.SCALE))
+        return low, nat, low_base, nat_base
+
+    def do_snapshot(self, snapshot):
+        width, height = self.get_width(), self.get_height()
+        layout = self.get_layout()
+        wide = layout.get_pixel_extents()[1].width
+        if wide <= width:
+            Gtk.Label.do_snapshot(self, snapshot)
+            return
+        # (cut: its start shown, whichever way it reads. GtkLabel holds it to the left, xalign 0; to the right where the
+        # widgets are laid out right to left)
+        rtl = layout.get_direction(0) == Pango.Direction.RTL
+        held_right = self.get_direction() == Gtk.TextDirection.RTL
+        shift = 0 if rtl == held_right else (wide - width if held_right else width - wide)
+
+        def draw(s):
+            if shift:
+                s.save()
+                s.translate(Graphene.Point().init(shift, 0))
+            Gtk.Label.do_snapshot(self, s)
+            if shift:
+                s.restore()
+        snapshot_faded(snapshot, draw, width, height, at_start=rtl)
+
+
 def load_css():
     """Baude's stylesheet (CSS), once per display: what's drawn with its classes elsewhere (Record's lists, the
     viewers) looks as it does in Baude."""

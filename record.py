@@ -3776,7 +3776,7 @@ class PagesList(Gtk.Box):
         for name in order:
             depth = name.count(":")
             box = Gtk.Box(spacing=6, margin_start=6 + depth * widgets.TreeList.INDENT, margin_end=4)
-            lb = Gtk.Label(label=short_page(name), xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
+            lb = widgets.FadeLabel(label=short_page(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
             if name in grey:
                 lb.add_css_class("dim-label")
                 lb.add_css_class("page-placeholder")
@@ -5252,7 +5252,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         row = Gtk.ListBoxRow()
         row.notebook = t
         box = Gtk.Box(spacing=6, margin_start=6, margin_end=4)  # (a line, as a page's in the pages' list)
-        row.name = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
+        row.name = widgets.FadeLabel(xalign=0, hexpand=True)  # (too long: it fades where it's cut)
         box.append(row.name)
         row.set_child(box)
         self._fill_row(row)

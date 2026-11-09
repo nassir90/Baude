@@ -57,7 +57,7 @@ def png_bytes(w, h, rgba):
 
 
 def ask_permission(win, name, inp, tool_id):
-    """What manual mode shows: the tool card, then the permission card for it."""
+    """What manual mode shows: the tool card, asking whether to allow it."""
     win.render_assistant([{"type": "tool_use", "id": tool_id, "name": name, "input": inp}])
     win.on_msg(win.proc, {"type": "control_request", "request_id": f"perm-{tool_id}",
                           "request": {"subtype": "can_use_tool", "tool_name": name, "input": inp,
@@ -101,7 +101,7 @@ def _(app):
     return win
 
 
-@scene("10-permission-bash", "Manual mode: Bash permission card (description + command, no raw JSON)")
+@scene("10-permission-bash", "Manual mode: a Bash call asking, in its own card (description + command, no raw JSON); no spinner")
 def _(app):
     win = app.window(opts())
     ask_permission(win, "Bash", {
@@ -111,7 +111,7 @@ def _(app):
     return win
 
 
-@scene("11-permission-edit", "Manual mode: Edit permission card (path + red/green diff)")
+@scene("11-permission-edit", "Manual mode: an Edit asking (path + red/green diff)")
 def _(app):
     win = app.window(opts())
     ask_permission(win, "Edit", {"file_path": "/home/naza/projects/Baude/baude.py",
@@ -120,7 +120,7 @@ def _(app):
     return win
 
 
-@scene("12-permission-write", "Manual mode: Write permission card (path, line count, contents)")
+@scene("12-permission-write", "Manual mode: a Write asking (path, line count, contents)")
 def _(app):
     win = app.window(opts())
     ask_permission(win, "Write", {"file_path": "/home/naza/projects/Baude/hello.py",
@@ -129,7 +129,7 @@ def _(app):
     return win
 
 
-@scene("13-permission-web", "Manual mode: WebFetch permission card (link + prompt)")
+@scene("13-permission-web", "Manual mode: a WebFetch asking (link + prompt)")
 def _(app):
     win = app.window(opts())
     ask_permission(win, "WebFetch", {"url": "https://docs.gtk.org/gtk4/class.TextView.html",

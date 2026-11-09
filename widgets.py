@@ -5003,6 +5003,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .tool-card.error { border-color: @error_color; }
+.tool-card.asking { border-color: @warning_color; }  /* (waiting for you to allow it: the approval's colour) */
 /* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */
 .perm-card { border: 1px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */

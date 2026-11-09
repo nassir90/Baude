@@ -5857,7 +5857,7 @@ class ToolCard(Gtk.Box):
         TOOL_NAMES.add(name)  # (a tool this chat called: Signal can name it)
         self.name, self.tool_id, self.partial_json, self.input = name, tool_id, "", {}
         self.state, self.task, self.decision, self.listeners = "running", None, None, []
-        self.artifact = None
+        self.artifact, self.asking, self.opened_to_ask = None, None, False
         # one line:  Name [Command] [Output]  summary (cut off with …)        [spinner, while it runs]
         # and under it, what those open: what was asked, what came back (once there is some)
         grid = self.grid = Gtk.Grid()
@@ -5899,12 +5899,43 @@ class ToolCard(Gtk.Box):
     def show_status(self):
         if self.status is not None:
             self.line.remove(self.status)
-        self.status = _card_status(self.state)
+        self.status = _card_status(self.state) if self.asking is None else None  # (waiting on you: not running)
         if self.status is not None:
             self.line.append(self.status)
 
+    def ask(self, buttons):
+        """Asked whether to allow it, here in the card: what it would run, opened, and under it buttons (Allow, Deny…).
+        It's waiting on you then, not running: no spinner, the border in the colour of waiting."""
+        self.answered()  # (asked again before an answer: the earlier buttons go)
+        self.asking = buttons
+        self.add_css_class("asking")
+        self.show_status()
+        if self.input_toggle.get_visible() and not self.input_toggle.get_expanded():
+            self.opened_to_ask = True
+            self.input_toggle.set_expanded(True)
+        buttons.set_margin_top(8)
+        self.grid.attach(buttons, 0, 4, 1, 1)
+        for fn in self.listeners:
+            fn(self)
+
+    def answered(self):
+        """The ask is answered (or can't be any more): the buttons go, and what was opened for it folds again."""
+        buttons, self.asking = self.asking, None
+        if buttons is None:
+            return
+        self.grid.remove(buttons)
+        discard(buttons)
+        self.remove_css_class("asking")
+        if self.opened_to_ask:
+            self.opened_to_ask = False
+            self.input_toggle.set_expanded(False)
+        self.show_status()
+        for fn in self.listeners:
+            fn(self)
+
     def set_decision(self, decision):
-        """'allowed' / 'denied' / 'always allowed' from a permission prompt, shown in the header."""
+        """'allowed' / 'denied' / 'always allowed' from a permission prompt; only a denial is said in the header (an
+        allowed call runs, then is done: that says it)."""
         self.decision = decision
         self.refresh_header()
 
@@ -5915,7 +5946,7 @@ class ToolCard(Gtk.Box):
             extra.append("running in background")
         elif self.state == "interrupted":
             extra.append("interrupted")
-        if self.decision:
+        if self.decision == "denied":
             extra.append(self.decision)
         tail = "".join(f"  <span alpha='55%'>· {html.escape(e)}</span>" for e in extra)
         title, source = tool_display(self.name)
@@ -5998,6 +6029,8 @@ class ToolCard(Gtk.Box):
         self.show_output()
 
     def set_result(self, content, is_error):
+        if self.asking is not None:  # (it ended without an answer, as a turn stopped: nothing to answer now)
+            self.answered()
         texts, images = [], []
         for c in content if isinstance(content, list) else [content]:
             if isinstance(c, dict) and c.get("type") == "image" and c.get("source", {}).get("data"):
@@ -6106,7 +6139,7 @@ class ToolGroup(Gtk.Grid):
         cards = self.cards()
         failed = sum(c.state == "error" for c in cards)
         self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else ""))
-        states = {c.state for c in cards}
+        states = {c.state for c in cards if c.asking is None}  # (one waiting to be allowed isn't running)
         state = "running" if states & {"running", "background"} else "error" if "error" in states else \
             "interrupted" if "interrupted" in states and len(states) == 1 else "done"
         if state != self.state or self.status is None and state == "running":
@@ -6116,8 +6149,8 @@ class ToolGroup(Gtk.Grid):
             self.status = _status_icon(state) if state == "running" else None  # (a spinner says something; a tick doesn't)
             if self.status is not None:
                 self.row.append(self.status)
-        if any(c.has_media() for c in cards) and not self.toggle.get_expanded():
-            self.toggle.set_expanded(True)  # images are the point; don't hide them
+        if any(c.has_media() or c.asking is not None for c in cards) and not self.toggle.get_expanded():
+            self.toggle.set_expanded(True)  # images are the point, and a call asking you is waiting on you: shown
 
 
 # ------------------------------------------------------- desktop launcher --
@@ -11198,6 +11231,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             # and subagent messages that arrive later still find their cards (only the half-drawn
             # stream of the old process is dropped)
             self.blocks, self.streamed_ids = {}, set()
+        for waiting in list(self.waiting_cards):  # (the claude that asked is gone: nothing to answer. A copy: answered()
+            # takes the card out of waiting_cards as it goes)
+            if isinstance(waiting, ToolCard):
+                waiting.answered()
         self.waiting_cards.clear()
         self.turn_finished = False
         self.set_busy(False)
@@ -13238,17 +13275,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.stick_bottom = True
 
     def permission_card(self, rid, name, inp, tool_use_id):
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("perm-card")
-        self.waiting_cards.add(card)
-        self.update_session_state()
-        title, source = tool_display(name)
-        what = f"{source}: {title}" if source else title
-        summary = summarize_tool(name, inp)
-        card.append(sel_label(f"<b>Allow {html.escape(what)}?</b>" +
-                              (f"  <span alpha='60%'>{html.escape(summary)}</span>" if summary else "")))
-        card.append(tool_input_view(name, inp))
+        """Asks whether to allow a call: in the call's own card, when it's in the chat (ToolCard.ask); else (no card for
+        it yet, or it's a subagent's, drawn elsewhere) in a box of its own here, saying what it would run."""
+        card = self.tool_cards.get(tool_use_id)
+        if card is not None and tool_use_id in self.tool_parent:
+            card = None
         row = Gtk.Box(spacing=6)
+        box = None
+        if card is None:
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            box.add_css_class("perm-card")
+            title, source = tool_display(name)
+            what = f"{source}: {title}" if source else title
+            summary = summarize_tool(name, inp)
+            box.append(sel_label(f"<b>Allow {html.escape(what)}?</b>" +
+                                 (f"  <span alpha='60%'>{html.escape(summary)}</span>" if summary else "")))
+            box.append(tool_input_view(name, inp))
+            box.append(row)
+        waiting = card if card is not None else box
+        self.waiting_cards.add(waiting)
+        self.update_session_state()
         proc = self.proc
 
         def decide(_b, behavior, always=False):
@@ -13258,13 +13304,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             else:
                 proc.respond(rid, {"behavior": "deny", "message": "The user denied this tool use."})
-            card.get_parent() and card.get_parent().remove(card)
-            self.waiting_cards.discard(card)
+            if card is not None:
+                card.answered()
+            else:
+                box.get_parent() and box.get_parent().remove(box)
+            self.waiting_cards.discard(waiting)
             self.update_session_state()
             decision = ("always allowed" if always else "allowed") if behavior == "allow" else "denied"
             if tool_use_id in self.tool_cards:
                 self.tool_cards[tool_use_id].set_decision(decision)  # keeps tool groups together
-            else:
+            elif behavior != "allow":  # (allowed, it runs: nothing to say)
                 self.note(f"{decision} {name}")
 
         choices = [("Allow", "allow", False, "suggested-action"),
@@ -13278,8 +13327,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 b.add_css_class(css)
             b.connect("clicked", decide, beh, always)
             row.append(b)
-        card.append(row)
-        self.add(card)
+        if card is not None:
+            # (however it stops asking, answered or not, it isn't waiting on you any more; the window held weakly, as the
+            # card's listeners outlive its handlers)
+            me = weakref.ref(self)
+            card.listeners.append(lambda c: c.asking is None and (w := me()) is not None and c in w.waiting_cards and (
+                w.waiting_cards.discard(c), w.update_session_state()))
+            card.ask(row)
+        else:
+            self.add(box)
         self.stick_bottom = True
 
 

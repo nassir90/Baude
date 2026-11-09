@@ -337,7 +337,7 @@ def test_turn_allow(app):
         text = labels_text(win)
         assert "Done, one file." in text, text
         card = find(win.transcript, baude.ToolCard)[0]
-        assert card.decision == "allowed", "decision shown on the card"
+        assert card.decision == "allowed" and "allowed" not in card.header.get_text(), "allowed: nothing to say"
         assert card.state == "done"
         assert "$0.0125" in win.status.get_text(), win.status.get_text()
         perm = [json.loads(l) for l in fake_log() if '"perm1"' in l and "control_response" in l]
@@ -2546,9 +2546,11 @@ def test_mcp_card_and_permission(app):
         assert mc.title.get_text() == "Create issue" and mc.header.get_text().startswith("GitHub")
         win.on_msg(win.proc, {"type": "control_request", "request_id": "pm", "request": {
             "subtype": "can_use_tool", "tool_name": name, "input": inp, "tool_use_id": "mc"}})
-        card = button(win, "Allow").get_ancestor(Gtk.Box).get_parent()
-        text = labels_text(card)
-        assert "Allow GitHub: Create issue?" in text and "mcp__" not in text, text
+        card = button(win, "Allow")
+        while not isinstance(card, baude.ToolCard):
+            card = card.get_parent()
+        assert card is mc, "asked in the call's own card"
+        assert "mcp__" not in labels_text(card), labels_text(card)
         assert button(win, "Always allow Create issue")
         snapshot(win, "mcp_permission")
     finally:
@@ -2671,9 +2673,12 @@ def test_permission_card_readable(app):
     try:
         type_and_send(win, "go")
         wait_for(lambda: button(win, "Allow"), "permission card")
-        card = button(win, "Allow").get_ancestor(Gtk.Box).get_parent()
+        card = button(win, "Allow")
+        while not isinstance(card, baude.ToolCard):
+            card = card.get_parent()
         text = labels_text(card)
         assert "ls -la" in text and '"command"' not in text and "{" not in text, text
+        assert card.status is None, "waiting on you, not running: no spinner"
         snapshot(win, "permission_card")
     finally:
         close(win)

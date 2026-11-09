@@ -207,6 +207,110 @@ class RefIcon(Gtk.Widget):
             draw_ref_icon(snapshot, self.icon, 0, 0, min(self.get_width(), self.get_height()), self.get_color())
 
 
+class PickList:
+    """A list to pick from as you type, the focus left in the text: Record's @ and # in its notes, Baude's / in its
+    composer. A row's a logo (RefIcon), a name and a dimmed line about it; under them, how many there are. Rows are made
+    as they're shown (a folder has thousands): bind(i, icon, name, about) says what row i is. ↑ ↓ Page Up and Page Down
+    move in it (move); Enter or Tab, and a click, take what's picked (the caller's on_pick)."""
+
+    WIDTH, HEIGHT = 520, 360  # px: past that height it scrolls
+    STEPS = {Gdk.KEY_Up: -1, Gdk.KEY_Down: 1, Gdk.KEY_Page_Up: -10, Gdk.KEY_Page_Down: 10}
+
+    def __init__(self, parent, bind, on_pick, position=Gtk.PositionType.BOTTOM,
+                 about_ellipsis=Pango.EllipsizeMode.MIDDLE):
+        self.bind, self.about_ellipsis = bind, about_ellipsis
+        self.pop = Gtk.Popover(autohide=False, has_arrow=False, position=position, can_focus=False)
+        self.pop.add_css_class("ref-pop")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.model = Gtk.StringList()  # (its strings: the rows' numbers)
+        self.sel = Gtk.SingleSelection(model=self.model, autoselect=False, can_unselect=True)
+        rows = Gtk.SignalListItemFactory()
+        rows.connect("setup", lambda _f, li: li.set_child(self._row()))
+        rows.connect("bind", lambda _f, li: self._bind(li))
+        self.list = Gtk.ListView(model=self.sel, factory=rows, single_click_activate=True, can_focus=False)
+        self.list.connect("activate", lambda _l, i: (self.sel.set_selected(i), on_pick()))
+        self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                         propagate_natural_height=True, max_content_height=self.HEIGHT,
+                                         width_request=self.WIDTH)
+        self.note = Gtk.Label(xalign=0, css_classes=["dim-label", "caption"])
+        box.append(self.scroll)
+        box.append(self.note)
+        self.pop.set_child(box)
+        self.pop.set_parent(parent)
+        # (the pointer picks a row only once it's moved over the list: resting where the list came up as you typed, it
+        # picked the row that came under it, and Enter took that, not the first)
+        self.rest = None  # (where the pointer was as the list came up, in the window: the list moves as it's filled)
+        self.list.set_can_target(False)
+        moves = Gtk.EventControllerMotion()
+        moves.connect("enter", self._pointer_moved)
+        moves.connect("motion", self._pointer_moved)
+        self.pop.add_controller(moves)
+        self.pop.connect("closed", lambda *_: (self.list.set_can_target(False), setattr(self, "rest", None)))
+
+    def _pointer_moved(self, _c, x, y):
+        surface = self.pop.get_surface()
+        at = (x + surface.get_position_x(), y + surface.get_position_y()) if surface is not None else (x, y)
+        if self.rest is None:
+            self.rest = at
+        elif abs(at[0] - self.rest[0]) + abs(at[1] - self.rest[1]) > 2:
+            self.list.set_can_target(True)
+
+    def _row(self):
+        line = Gtk.Box(spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
+        line.append(RefIcon())
+        name = Gtk.Label(xalign=0, css_classes=["heading"], ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=36)
+        line.append(name)
+        line.append(Gtk.Label(xalign=0, css_classes=["dim-label", "caption"], ellipsize=self.about_ellipsis,
+                              hexpand=True))
+        return line
+
+    def _bind(self, li):
+        icon = li.get_child().get_first_child()
+        name = icon.get_next_sibling()
+        self.bind(int(li.get_item().get_string()), icon, name, name.get_next_sibling())
+        icon.queue_draw()
+
+    def show(self, n, at, note, pointing_to=None):
+        """n rows, row at picked (None: none), note under them; up, if it wasn't, pointing at pointing_to (a
+        Gdk.Rectangle in the parent's coordinates)."""
+        self.model.splice(0, self.model.get_n_items(), [str(i) for i in range(n)])
+        self.list.set_can_target(False)  # (other rows under the pointer: none of them picked till it moves again)
+        self.rest = None
+        # (a few, as tall as they are: a scrollbar's least height, 58px, is more than two rows', and showed one name
+        # with an empty row under it; more than HEIGHT holds even at twice the size, scrolled)
+        self.scroll.set_policy(Gtk.PolicyType.NEVER,
+                               Gtk.PolicyType.NEVER if n * 48 <= self.HEIGHT else Gtk.PolicyType.AUTOMATIC)
+        self.sel.set_selected(Gtk.INVALID_LIST_POSITION if at is None or not n else at)
+        if n:
+            self.list.scroll_to(at or 0, Gtk.ListScrollFlags.NONE, None)
+        self.scroll.set_visible(bool(n))
+        self.note.set_text(note)
+        if pointing_to is not None:
+            self.pop.set_pointing_to(pointing_to)
+        if not self.pop.get_visible():
+            self.pop.popup()
+
+    def picked(self):
+        """The picked row's number, or None."""
+        i = self.sel.get_selected()
+        return i if i != Gtk.INVALID_LIST_POSITION and i < self.model.get_n_items() else None
+
+    def move(self, step):
+        """The pick moved step rows (nothing picked: the first), kept in sight; it stops at either end."""
+        if n := self.model.get_n_items():
+            i = self.sel.get_selected()
+            i = 0 if i == Gtk.INVALID_LIST_POSITION else max(0, min(n - 1, i + step))
+            self.sel.set_selected(i)
+            self.list.scroll_to(i, Gtk.ListScrollFlags.NONE, None)
+
+    def visible(self):
+        return self.pop.get_visible()
+
+    def hide(self):
+        if self.pop.get_visible():
+            self.pop.popdown()
+
+
 # Text zoom (Ctrl +/-/0, and ⌘ +/-/0 on macOS, where GTK calls Command Meta) applies to widgets with the .zoomable
 # class, on top of the app's text size (apply_scales). 0 goes back to the zoom Settings… keeps ("zoom_default").
 ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 0.6, 2.5, 0.1
@@ -5096,14 +5200,10 @@ paned.main-split > separator { min-width: 1px; background: @baude_frame; box-sha
 /* where it's dragged from, GTK's 6px either side of the rule: on the inside's edge, not that gap short of it */
 paned.main-split.inside-after > separator { margin-left: 6px; margin-right: -6px; }
 paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6px; }
-/* the input box and the / dropdown share one corner radius */
 .composer-box { border-radius: 12px; box-shadow: 0 0 0 1px @baude_rule; }
 .composer-box:disabled { opacity: 0.55; }
-popover.completer > contents {
-  border-radius: 12px; padding: 6px;
-  /* the same soft shadow as the input box (an Adwaita card), not the heavy popover one */
-  box-shadow: 0 0 0 1px alpha(black, 0.03), 0 1px 3px 1px alpha(black, 0.07), 0 2px 6px 2px alpha(black, 0.03);
-}
+.ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
+.ref-pop listview { background: none; }
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }

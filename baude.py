@@ -6662,23 +6662,19 @@ class LoginCard(Gtk.Box):
 
 
 class SlashCompleter:
-    """Popover over the composer listing commands/skills while the first word starts with '/'."""
-
-    MAX_ROWS = 60
+    """/'s list, over the composer while its first word starts with '/': the commands, Baude's own and claude's, as
+    they're typed, each with whose it is (Claude Code's own: its logo), its arguments and what it does. It looks and
+    goes as Record's @ list does (widgets.PickList): ↑ ↓ Page Up and Page Down move, Enter or Tab or a click puts
+    the command in, Esc leaves it."""
 
     def __init__(self, textview, anchor):
-        self.view, self.commands, self.matches = textview, list(LOCAL_COMMANDS), []
-        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
-        self.list.add_css_class("navigation-sidebar")  # visible selection highlight
-        self.list.connect("row-activated", lambda _l, row: self.accept(row.get_index()))
-        self.scroll = Gtk.ScrolledWindow(max_content_height=320, propagate_natural_height=True,
-                                         hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.scroll.set_child(self.list)
-        self.pop = Gtk.Popover(child=self.scroll, autohide=False, has_arrow=False, css_classes=["completer"],
-                               position=Gtk.PositionType.TOP, can_focus=False)
+        self.view, self.anchor, self.commands, self.matches = textview, anchor, list(LOCAL_COMMANDS), []
+        self.q, self.moved = None, False  # (what's being typed, and whether the arrows moved in its list)
+        self.picks = widgets.PickList(anchor, self._bind, self.accept, position=Gtk.PositionType.TOP,
+                                      about_ellipsis=Pango.EllipsizeMode.END)
+        self.pop = self.picks.pop
+        self.pop.set_halign(Gtk.Align.START)  # (its left side on the input box's)
         self.pop.set_offset(0, -10)  # a clear gap above the input box
-        self.pop.set_parent(anchor)
-        self.anchor = anchor
         textview.get_buffer().connect("changed", lambda *_: self.refresh())
 
     def set_commands(self, cmds):
@@ -6697,7 +6693,7 @@ class SlashCompleter:
 
     def refresh(self):
         q = self.query()
-        if q is None:
+        if q is None or "/" in q:  # (a path's, not a command)
             return self.hide()
         def rank(c):
             name, aliases = c["name"].lower(), [a.lower() for a in c.get("aliases") or []]
@@ -6708,81 +6704,62 @@ class SlashCompleter:
             if any(q in n for n in [name, *aliases]):
                 return 2
             return 3 if q and q in (c.get("description") or "").lower() else None
+        i = self.picks.picked()
+        kept = self.matches[i]["name"] if self.moved and q == self.q and i is not None and i < len(self.matches) \
+            else None  # (the same, listed again, as claude's commands come in: what's picked stays picked)
         scored = [(r, c) for c in self.commands if (r := rank(c)) is not None]
-        self.matches = [c for _, c in sorted(scored, key=lambda rc: rc[0])][:self.MAX_ROWS]
-        if not self.matches:
-            return self.hide()
-        while (row := self.list.get_row_at_index(0)) is not None:
-            self.list.remove(row)
-            discard(row)
-        for c in self.matches:
-            self.list.append(self.make_row(c))
-        self.list.select_row(self.list.get_row_at_index(0))
-        self.scroll.get_vadjustment().set_value(0)
-        self.pop.set_size_request(self.anchor.get_width(), -1)
-        self.pop.popup()
+        self.matches = [c for _, c in sorted(scored, key=lambda rc: rc[0])]
+        at = next((j for j, c in enumerate(self.matches) if c["name"] == kept), None)
+        self.q, self.moved = q, at is not None
+        n = len(self.matches)
+        # (as wide as @'s, or the input box, if that's narrower: its padding and line either side as well)
+        wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
+        self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = 0, 0, self.anchor.get_width(), self.anchor.get_height()
+        self.picks.show(n, at or 0, f"{n} found" if n else "Nothing found", rect)
 
-    def make_row(self, c):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=3, margin_bottom=3,
-                      margin_start=6, margin_end=6)
-        hint = c.get("argumentHint") or ""
-        aliases = ", ".join("/" + a for a in c.get("aliases") or [])
-        title = f"<b>/{html.escape(c['name'])}</b>"
-        if hint:
-            title += f"  <span alpha='60%'>{html.escape(hint)}</span>"
-        if aliases:
-            title += f"  <span alpha='45%' size='small'>({html.escape(aliases)})</span>"
-        name = Gtk.Label(xalign=0, use_markup=True, label=title, ellipsize=Pango.EllipsizeMode.END,
-                         max_width_chars=1, hexpand=True)
-        name.add_css_class("mono")
-        desc = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1, hexpand=True,
-                         label=(c.get("description") or "").split("\n")[0])
-        desc.add_css_class("dim-label")
-        desc.add_css_class("caption")
-        box.append(name)
-        box.append(desc)
-        return Gtk.ListBoxRow(child=box, tooltip_text=c.get("description") or None)
+    def _bind(self, i, icon, name, about):
+        c = self.matches[i]
+        icon.icon = "claude" if c.get("builtin") else "cli"
+        name.set_text("/" + c["name"])
+        desc = (c.get("description") or "").strip()
+        also = ", ".join("/" + a for a in c.get("aliases") or [])
+        about.set_text(" · ".join(x for x in (also and f"also {also}", c.get("argumentHint") or "",
+                                              desc.split("\n")[0]) if x))
+        about.set_tooltip_text(desc or None)
 
     def visible(self):
-        return self.pop.get_visible()
+        return self.picks.visible()
 
     def hide(self):
-        self.matches = []
-        if self.pop.get_visible():
-            self.pop.popdown()
+        self.moved = False
+        self.picks.hide()
 
-    def move(self, step):
-        row = self.list.get_selected_row()
-        i = max(0, min(len(self.matches) - 1, (row.get_index() if row else -1) + step))
-        row = self.list.get_row_at_index(i)
-        self.list.select_row(row)
-        ok, bounds = row.compute_bounds(self.list)
-        if ok:  # keep the selection in view without moving keyboard focus off the textview
-            adj, y, h = self.scroll.get_vadjustment(), bounds.get_y(), bounds.get_height()
-            if y < adj.get_value():
-                adj.set_value(y)
-            elif y + h > adj.get_value() + adj.get_page_size():
-                adj.set_value(y + h - adj.get_page_size())
-
-    def accept(self, index=None):
-        if index is None:
-            row = self.list.get_selected_row()
-            index = row.get_index() if row else 0
-        if not 0 <= index < len(self.matches):
+    def accept(self):
+        i = self.picks.picked()
+        if i is None or i >= len(self.matches):
             return
-        self.view.get_buffer().set_text(f"/{self.matches[index]['name']} ")  # trailing space hides us
+        self.view.get_buffer().set_text(f"/{self.matches[i]['name']} ")  # trailing space hides us
         self.view.grab_focus()
 
-    def handle_key(self, keyval):
+    def handle_key(self, keyval, state=0):
         """Returns True if the key was consumed by the popover."""
         if not self.visible():
             return False
-        if keyval in (Gdk.KEY_Down, Gdk.KEY_Up):
-            self.move(1 if keyval == Gdk.KEY_Down else -1)
-        elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+        steps = widgets.PickList.STEPS
+        if state & Gdk.ModifierType.SHIFT_MASK and keyval in (*steps, Gdk.KEY_Left, Gdk.KEY_Right):
+            self.hide()  # (Shift and an arrow: selecting the text, not picking in the list)
+            return False
+        if keyval in steps:
+            if self.matches:
+                self.picks.move(steps[keyval])
+                self.moved = True
+        elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
             self.hide()
+            return bool(self.matches)  # ("Nothing found": Esc does what it would have, as a turn's stop, too)
         else:
             return False
         return True
@@ -11319,7 +11296,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     # ---- UI events
     def on_key(self, _ctl, keyval, _code, state):
-        if self.completer.handle_key(keyval):
+        if self.completer.handle_key(keyval, state):
             return True
         if widgets.leave_wrapped(self.input.get_buffer(), keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)

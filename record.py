@@ -1066,10 +1066,7 @@ CSS = """
 entry.diary-title { background: none; }
 entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
 paned.notes-split > separator { background: none; background-image: none; box-shadow: none; }
-.ref-pop contents { padding: 4px; }
 .ref-card contents { padding: 6px 8px; }  /* (a name's card, just under the pointer: Window.ref_card) */
-
-.ref-pop listview { background: none; }
 .page-placeholder { font-style: italic; }
 .unknown-chip { padding: 2px 10px; border-radius: 99px; font-size: 0.9em; }
 """
@@ -2290,28 +2287,13 @@ class DiaryEditor(Gtk.Box, FindInText):
                                 lambda *_: self.search_bar.get_search_mode() or self.view.grab_focus())
         self.title.connect("changed", lambda *_: self._find_again())
         main.append(self.scroll)
-        # @'s list: every name found, best first, each with its logo as ⌘K lists it, scrolled (made as they're shown:
-        # a folder has thousands). The model's strings are the positions in pop_shown.
-        self.pop = Gtk.Popover(autohide=False, has_arrow=False, position=Gtk.PositionType.BOTTOM, can_focus=False)
-        self.pop.add_css_class("ref-pop")
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self.pop_shown, self.pop_model = [], Gtk.StringList()
-        # (nothing picked till it's asked for, in #'s: _fill_pop)
-        self.pop_sel = Gtk.SingleSelection(model=self.pop_model, autoselect=False, can_unselect=True)
+        # @'s list: every name found, best first, each with its logo as ⌘K lists it (widgets.PickList: Baude's / is
+        # one too). Its rows are pop_shown's.
+        self.picks = widgets.PickList(self.view, self._pop_bind, self._insert_ref)
+        self.pop, self.pop_list, self.pop_sel, self.pop_model, self.pop_note = \
+            self.picks.pop, self.picks.list, self.picks.sel, self.picks.model, self.picks.note
+        self.pop_shown = []  # (nothing picked till it's asked for, in #'s: _fill_pop)
         self.pop_moved, self.pop_query = False, None  # (moved in with the arrows, while this was what's searched for)
-        rows = Gtk.SignalListItemFactory()
-        rows.connect("setup", DiaryEditor._pop_row)
-        rows.connect("bind", self._pop_bind)
-        self.pop_list = Gtk.ListView(model=self.pop_sel, factory=rows, single_click_activate=True, can_focus=False)
-        self.pop_list.connect("activate", lambda _l, i: (self.pop_sel.set_selected(i), self._insert_ref()))
-        self.pop_scroll = Gtk.ScrolledWindow(child=self.pop_list, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                             propagate_natural_height=True, max_content_height=self.POP_HEIGHT,
-                                             width_request=self.POP_WIDTH)
-        self.pop_note = label("", css=("dim-label", "caption"), wrap=False)
-        box.append(self.pop_scroll)
-        box.append(self.pop_note)
-        self.pop.set_child(box)
-        self.pop.set_parent(self.view)
         self.waiting = None
         self.place = DiaryPlace(self)  # (through the zoom: Window.zoom_tab)
         self.load()
@@ -3189,36 +3171,17 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.buf.apply_tag_by_name("token", self.buf.get_iter_at_offset(self.token[0]),
                                            self.buf.get_iter_at_offset(b))
 
-    POP_WIDTH, POP_HEIGHT = 520, 360  # @'s list, in px: past that height it scrolls
-
-    @staticmethod
-    def _pop_row(_f, li):
-        line = Gtk.Box(spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
-        line.append(widgets.RefIcon())
-        name = label("", css=("heading",), wrap=False)
-        name.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        name.set_max_width_chars(36)
-        line.append(name)
-        where = label("", css=("dim-label", "caption"), wrap=False)
-        where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        where.set_hexpand(True)
-        line.append(where)
-        li.set_child(line)
-
-    def _pop_bind(self, _f, li):
-        it = self.pop_shown[int(li.get_item().get_string())]
-        icon = li.get_child().get_first_child()
+    def _pop_bind(self, i, icon, name, where):
+        it = self.pop_shown[i]
         icon.icon = it["icon"]
-        icon.queue_draw()
-        name = icon.get_next_sibling()
         name.set_text(it.get("label") or it["surface"])
-        name.get_next_sibling().set_text(f"{it['what']} · {it['summary']}")
-        widgets.time_tip(name.get_next_sibling(), it.get("at"), it.get("ago"))
+        where.set_text(f"{it['what']} · {it['summary']}")
+        widgets.time_tip(where, it.get("at"), it.get("ago"))
 
     def pop_selected(self):
         """The item @'s list has selected, or None."""
-        i = self.pop_sel.get_selected()
-        return self.pop_shown[i] if i != Gtk.INVALID_LIST_POSITION and i < len(self.pop_shown) else None
+        i = self.picks.picked()
+        return self.pop_shown[i] if i is not None and i < len(self.pop_shown) else None
 
     def _issue_list(self):
         """Whether the list up is #'s."""
@@ -3237,34 +3200,22 @@ class DiaryEditor(Gtk.Box, FindInText):
         if issues and not self.pop_shown:  # (a # is an ordinary thing to type: no list, and nothing said)
             return self._hide_pop()
         self.pop_query = self.token[1]
-        self.pop_model.splice(0, self.pop_model.get_n_items(), [str(i) for i in range(len(self.pop_shown))])
-        # (a few, as tall as they are: a scrollbar's least height, 58px, is more than two rows', and showed one name
-        # with an empty row under it; more than POP_HEIGHT holds even at twice the size, scrolled)
-        self.pop_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER if len(self.pop_shown) * 48 <=
-                                   self.POP_HEIGHT else Gtk.PolicyType.AUTOMATIC)
         at = next((i for i, it in enumerate(self.pop_shown) if kept and it["surface"] == kept["surface"]), None)
         self.pop_moved = at is not None  # (the same search, listed again: what's picked stays picked)
         if at is None and (not issues or self._exact()):  # (# picks nothing it wasn't asked to: Enter's a new line)
             at = 0
-        self.pop_sel.set_selected(Gtk.INVALID_LIST_POSITION if at is None or not self.pop_shown else at)
-        if self.pop_shown:
-            self.pop_list.scroll_to(at or 0, Gtk.ListScrollFlags.NONE, None)
-        self.pop_scroll.set_visible(bool(self.pop_shown))
         if space is None:
-            self.pop_note.set_text("Attach a folder to @ what's in it")
+            note = "Attach a folder to @ what's in it"
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
                 self.waiting = space.refresh(self._catalogued)
-            busy = " · cataloguing…" if space.busy else ""
-            self.pop_note.set_text((f"{matched} found" if matched else "Nothing found") + busy)
+            note = (f"{matched} found" if matched else "Nothing found") + (" · cataloguing…" if space.busy else "")
         it = self.buf.get_iter_at_offset(self.token[0])
         loc = self.view.char_rect(it)
         x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, loc.x, loc.y)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = x, y, 1, loc.height
-        self.pop.set_pointing_to(rect)
-        if not self.pop.get_visible():
-            self.pop.popup()
+        self.picks.show(len(self.pop_shown), at, note, rect)
 
     def _catalogued(self):
         self.waiting = None
@@ -3331,17 +3282,14 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval == Gdk.KEY_Escape:
             self._hide_pop()
             return True
-        steps = {Gdk.KEY_Up: -1, Gdk.KEY_Down: 1, Gdk.KEY_Page_Up: -10, Gdk.KEY_Page_Down: 10}
+        steps = widgets.PickList.STEPS
         if state & Gdk.ModifierType.SHIFT_MASK and keyval in (*steps, Gdk.KEY_Left, Gdk.KEY_Right):
             self._hide_pop()  # (Shift and an arrow: selecting the text, not picking in the list)
             return False
         if keyval in steps:
             if self.pop_shown:
-                i = self.pop_sel.get_selected()
-                i = 0 if i == Gtk.INVALID_LIST_POSITION else max(0, min(len(self.pop_shown) - 1, i + steps[keyval]))
-                self.pop_sel.set_selected(i)
+                self.picks.move(steps[keyval])
                 self.pop_moved = True
-                self.pop_list.scroll_to(i, Gtk.ListScrollFlags.NONE, None)  # (kept in sight as it moves)
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab) and self.pop_selected() is not None:
             if self._issue_list() and not self.pop_moved:

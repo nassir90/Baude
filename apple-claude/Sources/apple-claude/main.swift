@@ -164,7 +164,9 @@ final class Agent: @unchecked Sendable {
                             "models": [["value": "apple", "resolvedModel": modelName, "displayName": "Apple Foundation Model"]],
                             "current_permission_mode": mode]
             case "get_settings": response = ["applied": ["model": "apple", "effort": NSNull()] as [String: Any]]
-            case "get_context_usage": response = ["categories": [Any](), "totalTokens": 0, "maxTokens": 4096, "percentage": 0]
+            case "get_context_usage":
+                Task { await self.answerContextUsage(msg["request_id"] ?? "") }
+                return
             case "set_permission_mode":
                 lock.lock(); mode = request["mode"] as? String ?? mode; lock.unlock()
             default: break
@@ -260,6 +262,16 @@ final class Agent: @unchecked Sendable {
             }
         }
         return error.localizedDescription
+    }
+
+    /// How much of the model's window this chat takes up: the instructions, the tool, and everything said so far.
+    func answerContextUsage(_ requestID: Any) async {
+        let model = SystemLanguageModel.default
+        let used = (try? await model.tokenCount(for: currentSession().transcript)) ?? 0
+        let size = model.contextSize
+        emit(["type": "control_response", "response": ["subtype": "success", "request_id": requestID,
+              "response": ["categories": [Any](), "totalTokens": used, "maxTokens": size,
+                           "percentage": size > 0 ? Double(used) * 100 / Double(size) : 0] as [String: Any]] as [String: Any]])
     }
 
     func currentSession() -> LanguageModelSession {

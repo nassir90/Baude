@@ -10371,8 +10371,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.connect("realize", lambda *_: self.get_frame_clock().connect_after("layout", self.on_layout))
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
         self.moved_at, self.still_timer, self.holding, self.cull_at = 0.0, None, False, None
-        self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_due = collections.deque(), None, 1, False
-        self.fill_sweeping = False
+        self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
+        self.fill_sweeping, self.above_changed = False, False
 
         # composer (widgets.Composer: Record's too)
         self.attach_btn = Gtk.Button(icon_name="list-add-symbolic",
@@ -10791,8 +10791,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         held = self.hold_view_anchor() if self.zoom_job is None and self.restore_scroll is None else None
         if getattr(self, "keep_place", None) is not None:
             self.hold_keep_place(held)
-        if self.estimate_due and self.zoom_job is None:
-            self.estimate_slots()  # (what's drawn laid out: the places not drawn sized by it; held next pass)
         if self.zoom_job is not None:
             self.view_anchor = None
             self.hold_zoom_place()
@@ -10809,6 +10807,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 # drawn above it could have said otherwise, and the end would be jumped to once the hold was over)
                 self.follow.stick = from_bottom <= 1
             return
+        if self.above_changed:
+            self.above_changed = False
+            if self.stick_bottom:  # (an earlier chunk drawn or sized again: the end's kept at once, not glided to as
+                self.follow.to_end()  # new content at the end is)
         self.follow.laid_out()
         if held is not True:  # (moved this pass: what's in view is found once it's laid out where it's moved to)
             self.note_view_anchor()
@@ -13122,7 +13124,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.history_box.prepend(slot)  # (above what's drawn: the newest's, or a rewritten transcript's chunks)
         self.history_box.set_visible(self.history_box.get_first_child() is not None)
         self.estimate_slots()
-        self.estimate_due = True  # (again once what's drawn is laid out)
+        self.estimate_soon()  # (again once what's drawn is laid out)
 
     def px_per_item(self):
         """How tall an item of this chat's is, on average: what's drawn (the newest, the chunks drawn) over how many."""
@@ -13144,15 +13146,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def estimate_slots(self):
         """Each undrawn chunk's place as tall as its items are likely to be (px_per_item): set again only when that's
         changed by a tenth, since each change moves the thumb (the view's held: hold_view_anchor)."""
-        self.estimate_due = False
         if not self.chunk_slots and not self.fill_jobs:
             return
         per = self.px_per_item()
         if abs(per - self.estimated_per) < per / 10:
             return
-        self.estimated_per = per
+        self.estimated_per, self.above_changed = per, True
         for slot in (self.chunk_slots or []) + [job.slot for job in self.fill_jobs]:
             slot.set_size_request(-1, round(per * (slot.span[1] - slot.span[0])))
+
+    def estimate_soon(self):
+        """estimate_slots once what's drawn now has been laid out: as a frame begins (in GTK's update, before its layout,
+        so the view's hold sees the change in the same frame: sized after a layout pass, it took more passes than GTK
+        runs in a frame, and a frame was drawn with the view thousands of px off)."""
+        if self.estimate_tick is None:
+            self.estimate_tick = [0, self.scroller.add_tick_callback(self._estimate_frame)]
+
+    def _estimate_frame(self, _widget, _clock):
+        self.estimate_tick[0] += 1
+        if self.estimate_tick[0] < 2:  # (the frame after next: what was added is laid out by then)
+            return GLib.SOURCE_CONTINUE
+        self.estimate_tick = None
+        if self.zoom_job is None and self.history is not None:
+            self.estimate_slots()
+        return GLib.SOURCE_REMOVE
 
     def index_history(self, history):
         """A slice of indexing the start of a long chat (HistoryIndex.index_some), between frames."""
@@ -13252,8 +13269,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if slot.spacer is not None:
             slot.remove(slot.spacer)
             slot.spacer = None
-        slot.filled = True
-        self.estimate_due = True
+        slot.filled, self.above_changed = True, True
+        self.estimate_soon()
         self.update_earlier_btn()
         if job.broken:
             self.history_rewritten()
@@ -13264,6 +13281,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.fill_tick is not None:
             self.scroller.remove_tick_callback(self.fill_tick)
             self.fill_tick = None
+        if self.estimate_tick is not None:
+            self.scroller.remove_tick_callback(self.estimate_tick[1])
+            self.estimate_tick = None
         self.estimated_per, self.cull_at = 0, None
 
     def plan_fill(self):
@@ -13334,6 +13354,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             if not job.hidden:
                 break
             job.hidden.pop().set_visible(True)  # (the newest first: next to what's shown)
+            self.above_changed = True
         if not job.hidden:
             self.fill_jobs.remove(job)
             self.fill_done(job)

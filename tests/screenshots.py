@@ -268,7 +268,7 @@ def _(app):
     return win
 
 
-@scene("24-output-collapsed", "Several finished tool calls in a row: a line each, a failed one a card")
+@scene("24-output-collapsed", "Several finished tool calls, a line each: their sections folded, at the right")
 def _(app):
     win = app.window(opts())
     for i, (cmd, out, err) in enumerate([("git status --short", " M baude.py", False),
@@ -277,6 +277,7 @@ def _(app):
         tool_with_output(win, "Bash", {"command": cmd}, f"c{i}", out, err)
         win.tool_cards[f"c{i}"].input_toggle.set_expanded(False)
         win.tool_cards[f"c{i}"].output_toggle.set_expanded(False)
+    T.find(win.transcript, baude.ToolGroup)[0].toggle.set_expanded(True)  # (three in a row: their group, opened)
     return win
 
 
@@ -309,18 +310,18 @@ def greet(name: str) -> str:
 """
 
 
-@scene("28-tool-group", "Consecutive tool calls, one line each; Claude's narration between steps (summarized "
-                       "thinking) stays visible, dimmed, above them")
+@scene("28-tool-group", "Consecutive tool calls folded into one line, N tool calls; Claude's narration between "
+                       "steps (summarized thinking) stays visible, dimmed, above it")
 def _(app):
     win = app.window(opts())
     tool_group(win)
     return win
 
 
-@scene("29-tool-group-open", "One of those lines opened: its command and its output; arrows in one 16px column")
+@scene("29-tool-group-open", "The same group opened: each call one line, › command and › output at its right")
 def _(app):
     win = app.window(opts())
-    tool_group(win).cards()[2].open_line()
+    tool_group(win).toggle.set_expanded(True)
     return win
 
 
@@ -1243,8 +1244,9 @@ def _(app):
     T.wait_for(lambda: "helper counted" in T.labels_text(win.panel.agent_view("toolu_ag1")), "outer reply")
     win.show_panel(True, "agents")
     win.panel.open_agent("toolu_ag1")
-    inner = win.tool_cards["toolu_ag1_inner"]
-    inner.open_line() if inner.line else inner.output_toggle.set_expanded(True)
+    for group in T.find(win.panel.agent_view("toolu_ag1"), baude.ToolGroup):
+        group.toggle.set_expanded(True)
+    win.tool_cards["toolu_ag1_inner"].output_toggle.set_expanded(True)
     return win
 
 

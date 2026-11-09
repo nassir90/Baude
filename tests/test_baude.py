@@ -2736,14 +2736,22 @@ def test_tool_card_alignment(app):
                 assert ok
                 out.append((round(b.get_x() + b.get_width() / 2), b.get_width(), b.get_height()))
             return out
-        def aligned(widgets):
+        def one_line(widgets):
+            """the status and the sections' arrows: 16px, on the line the summary is on, the arrows right of it"""
             got = boxes(widgets)
-            assert len({x for x, _, _ in got}) == 1 and {(w, h) for _, w, h in got} == {(16, 16)}, got
+            ok, head = card.header.compute_bounds(card)
+            assert {(w, h) for _, w, h in got} == {(16, 16)}, got
+            middles = [b.get_y() + b.get_height() / 2 for b in [w.compute_bounds(card)[1] for w in widgets + [card.header]]]
+            assert max(middles) - min(middles) <= 1, ("one line", middles)
+            assert all(x > head.get_x() + head.get_width() for x, _, _ in got[1:]), "the arrows at its right end"
         assert not card.output_toggle.get_visible(), "no output section before there is output"
-        aligned([card.status, card.input_toggle.arrow])                            # spinner over arrow
+        one_line([card.status, card.input_toggle.arrow])
+        ok, before = card.input_toggle.arrow.compute_bounds(card)
         win.render_tool_results([{"type": "tool_result", "tool_use_id": "a1", "content": "ok"}])
         assert card.output_toggle.get_visible()
-        aligned([card.status, card.input_toggle.arrow, card.output_toggle.arrow])  # ✓ over two arrows
+        one_line([card.status, card.input_toggle.arrow, card.output_toggle.arrow])
+        ok, after = card.input_toggle.arrow.compute_bounds(card)
+        assert before.get_x() == after.get_x(), "the command's arrow stays put when the output's comes"
         assert not card.input_toggle.get_expanded() and not card.output_toggle.get_expanded(), "folded at first"
         assert card.input_toggle.get_child() is None and card.output_toggle.get_child() is None, \
             "and not built until opened (not even the boxes they go in)"
@@ -3003,19 +3011,12 @@ def test_tool_grouping(app):
         g = groups[0]
         # the narration splits the run: the first call stays a card, the five after it group
         assert len(g.cards()) == 5 and not find(g, baude.ThinkingView), "narration isn't folded into it"
-        assert not any(c.line for c in g.cards()), "calls still running are cards"
+        assert not g.toggle.get_expanded(), "collapsed by default"
+        assert g.state == "running"
         for i in range(6):
             win.render_tool_results([{"type": "tool_result", "tool_use_id": f"g{i}", "content": "ok",
                                       "is_error": i == 3}])
-        assert [c.line for c in g.cards()] == [True, True, False, True, True], "finished calls are lines; not a failed one"
-        assert g.cards()[2].status.get_mapped(), "the failed call shows its status"
-        assert not win.tool_cards["g0"].line, "a call on its own stays a card"
-        line = win.tool_cards["g4"]
-        assert not line.output_toggle.get_child() or not line.output_toggle.get_child().get_mapped(), "closed"
-        line.open_line()
-        pump(0.2)
-        assert line.output_toggle.get_child().get_mapped(), "opening a line shows what came back"
-        assert line.input_toggle.get_child().get_mapped(), "and what was asked"
+        assert g.state == "error" and g.status.get_icon_name() == "window-close-symbolic"
         win.render_assistant([{"type": "text", "text": "Next step."},
                               {"type": "tool_use", "id": "h1", "name": "Bash", "input": {"command": "a"}},
                               {"type": "tool_use", "id": "h2", "name": "Bash", "input": {"command": "b"}}])
@@ -3023,16 +3024,15 @@ def test_tool_grouping(app):
         for i in (1, 2):
             win.render_tool_results([{"type": "tool_result", "tool_use_id": f"h{i}", "content": "ok"}])
         g2 = find(win.transcript, baude.ToolGroup)[-1]
-        assert all(c.line for c in g2.cards())
-        # an image a call returned shows under its line
+        assert g2.state == "done"
+        # a group holding an image result opens so the image is visible
         win.render_assistant([{"type": "text", "text": "Screens."},
                               {"type": "tool_use", "id": "m1", "name": "Bash", "input": {"command": "shot"}},
                               {"type": "tool_use", "id": "m2", "name": "Read", "input": {"file_path": "/tmp/s.png"}}])
         win.render_tool_results([{"type": "tool_result", "tool_use_id": "m2", "content": [
             {"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                          "data": base64.b64encode(baude_png(60, 40)).decode()}}]}])
-        pump(0.2)
-        assert win.tool_cards["m2"].line and win.tool_cards["m2"].media_box.get_mapped()
+        assert find(win.transcript, baude.ToolGroup)[-1].toggle.get_expanded()
         snapshot(win, "tool_groups")
     finally:
         close(win)
@@ -4510,10 +4510,11 @@ def test_task_notification_is_a_note(app):
         label = find(notes[1], Gtk.Label)[0]
         assert "<a href" in label.get_label(), "the description links back to its card"
         card = win.tool_cards["toolu_bgsync"]
+        group = next((g for g in find(win.transcript, baude.ToolGroup) if card in walk(g)), None)
         win.scroller.get_vadjustment().set_value(win.scroller.get_vadjustment().get_upper())
         label.emit("activate-link", "card")
         pump(0.6)
-        assert not card.line or card.line_open, "a line opens"
+        assert group is None or group.toggle.get_expanded(), "its group opens"
         ok, b = card.compute_bounds(win.transcript)
         top = win.scroller.get_vadjustment().get_value()
         assert top - 5 <= b.get_y() <= top + win.scroller.get_vadjustment().get_page_size(), "scrolled to the card"

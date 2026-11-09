@@ -24,7 +24,7 @@ GRID_WIDTH = 760  # the grid's image width: two columns on a 1040px page, sharp 
 # (scene in the matrix, caption), in the order they appear on the page
 SHOTS = [
     ("02-turn-complete", "A finished turn: thinking, the reply in markdown, a tool call, and what it cost"),
-    ("29-tool-group-open", "Tool calls in a row, one line each; open one for its command and what came back"),
+    ("29-tool-group-open", "Tool calls in a row fold into one line; open it for each call, a line each"),
     ("10-permission-bash", "Manual mode asks before each call, shown as what it means: a command and its description"),
     ("11-permission-edit", "An edit to approve, as a red and green diff"),
     ("14-permission-mcp", "MCP tools under friendly names, their fields as rows"),

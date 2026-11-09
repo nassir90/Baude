@@ -5678,50 +5678,56 @@ def _slot(widget):
 
 
 class Disclosure:
-    """A "details" toggle whose arrow sits in the same icon column as the status above it
-    (Gtk.Expander draws its arrow with its own padding, so it can't line up)."""
+    """A "details" toggle, › command, at the right end of a card's one line (appended to toggles, a box there); what it
+    opens goes under that line, across the card (the grid's row, from the column after the status icon)."""
 
-    def __init__(self, grid, row, label="details"):
+    def __init__(self, toggles, grid, row, label="details", keep_place=False, also=()):
+        """also: other labels it may come to have (set_label): it's as wide as the widest, so none move then."""
         self.on_expand = []  # run on every opening: content built only once someone looks
         self.grid, self.row, self.revealer = grid, row, None  # (the revealer: once there's something in it)
+        self.keep_place, self.shown = keep_place, True  # (keep_place: hidden, it still takes its room, so none move)
         self.arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
         self.arrow.add_css_class("soft-icon")
         text = self.text = Gtk.Label(label=label, xalign=0)
         text.add_css_class("dim-label")
-        for w in (self.arrow, text):
-            click = Gtk.GestureClick()
-            click.connect("released", lambda *_: self.set_expanded(not self.get_expanded()))
-            w.add_controller(click)
-            pointers.hand(w)
-        grid.attach(self.arrow, 0, row, 1, 1)
-        grid.attach(text, 1, row, 1, 1)
-        self.hold_place(True)
-
-    def hold_place(self, on):
-        """Until there's a revealer, the arrow and label take the row spacing its (empty, folded) row added below them,
-        so a card is as tall either way and nothing moves when it comes."""
-        gap = self.grid.get_row_spacing() if on and isinstance(self.grid, Gtk.Grid) else 0
-        for w in (self.arrow, self.text):
-            w.set_margin_bottom(gap)
+        self.button = Gtk.Box(spacing=2)
+        self.button.append(self.arrow)
+        if also:  # (a stack is as wide as its widest child, shown or not: text, and each label it may have, unseen)
+            stack = Gtk.Stack(hhomogeneous=True)
+            for other in (text, *(Gtk.Label(label=a, xalign=0, css_classes=["dim-label"]) for a in (label, *also))):
+                stack.add_child(other)
+            stack.set_visible_child(text)
+            self.button.append(stack)
+        else:
+            self.button.append(text)
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: self.set_expanded(not self.get_expanded()))
+        self.button.add_controller(click)
+        pointers.hand(self.button)
+        toggles.append(self.button)
 
     def set_child(self, child):
         if self.revealer is None:  # (a long session has thousands of these, most never opened: made when needed)
             self.revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-                                         transition_duration=120, visible=self.arrow.get_visible())
-            self.grid.attach(self.revealer, 1, self.row + 1, 1, 1)
-            self.hold_place(False)
+                                         transition_duration=120, visible=self.shown)
+            self.grid.attach(self.revealer, 1, self.row, 2, 1)
         self.revealer.set_child(child)
 
     def set_label(self, label):
         self.text.set_label(label)
 
     def set_visible(self, visible):
-        for w in (self.arrow, self.text, self.revealer):
-            if w is not None:
-                w.set_visible(visible)
+        self.shown = visible
+        if self.keep_place:
+            self.button.set_opacity(1 if visible else 0)
+            self.button.set_can_target(visible)
+        else:
+            self.button.set_visible(visible)
+        if self.revealer is not None:
+            self.revealer.set_visible(visible)
 
     def get_visible(self):
-        return self.arrow.get_visible()
+        return self.shown
 
     def get_child(self):
         return self.revealer.get_child() if self.revealer is not None else None
@@ -5835,9 +5841,7 @@ class ThinkingView(Gtk.Box):
 
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
-    when the CLI runs it as a background task (its result only says it started).
-    In a run of calls (ToolGroup), a finished one is a single line, [>] Name  summary: opening it shows what the card's
-    rows would (set_line)."""
+    when the CLI runs it as a background task (its result only says it started)."""
 
     def __init__(self, name, tool_id):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -5846,24 +5850,23 @@ class ToolCard(Gtk.Box):
         self.name, self.tool_id, self.partial_json, self.input = name, tool_id, "", {}
         self.state, self.task, self.decision, self.listeners = "running", None, None, []
         self.artifact = None
-        # rows sharing one icon column:  [status] Name  summary
-        #                                 [  >   ] command   (what was asked)
-        #                                 [  >   ] output    (what came back; once there is some)
-        grid = self.grid = Gtk.Grid(column_spacing=8, row_spacing=4)
+        # one line:  [status] Name  summary (cut off with …)        › command  › output
+        # and under it, what those open: what was asked, what came back (once there is some)
+        grid = self.grid = Gtk.Grid(column_spacing=8)
         self.status = _status_icon("running")
         self.header = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True, selectable=True)
         self.header.set_can_focus(False)  # selectable for copying, but not a tab stop in every card
+        toggles = Gtk.Box(spacing=12)
         grid.attach(self.status, 0, 0, 1, 1)
         grid.attach(self.header, 1, 0, 1, 1)
+        grid.attach(toggles, 2, 0, 1, 1)
         self.append(grid)
         base = self.base = name.split("__")[-1]
-        self.input_toggle = Disclosure(grid, 1, "command" if base in ("Bash", "BashOutput", "PowerShell")
+        self.input_toggle = Disclosure(toggles, grid, 1, "command" if base in ("Bash", "BashOutput", "PowerShell")
                                        else "prompt" if base in ("Task", "Agent") else "input")
-        self.output_toggle = Disclosure(grid, 3, "output")
-        self.has_input, self.has_output = True, False  # (the output's row: once there is some)
-        # one line, in a run: (in_run) and when nothing about it needs a look (line); its arrow is made when first needed
-        self.in_run, self.line, self.line_open, self.line_arrow = False, False, False, None
-        self.show_rows()
+        # (output's place kept till it comes, so command doesn't move then, and lines up with the others' above it)
+        self.output_toggle = Disclosure(toggles, grid, 2, "output", keep_place=True, also=("error",))
+        self.output_toggle.set_visible(False)  # until there is output
         # what's folded away is built when first opened (a long session has thousands of these), and so are the
         # boxes it goes in: the input's, the output's (media_box, children, result_box: made when first used)
         self.input_box, self._media_box, self._output = None, None, None
@@ -5875,13 +5878,12 @@ class ToolCard(Gtk.Box):
     # ---- state
     def set_state(self, state):
         self.state = state
-        if self.status.get_parent() is not None:
-            self.grid.remove(self.status)
+        self.grid.remove(self.status)
         self.status = _status_icon(state)
+        self.grid.attach(self.status, 0, 0, 1, 1)
         if state == "error":
             self.add_css_class("error")
             self.output_toggle.set_label("error")
-        self.refresh_line()
         self.refresh_header()
         for fn in self.listeners:
             fn(self)
@@ -5889,70 +5891,7 @@ class ToolCard(Gtk.Box):
     def set_decision(self, decision):
         """'allowed' / 'denied' / 'always allowed' from a permission prompt, shown in the header."""
         self.decision = decision
-        self.refresh_line()
         self.refresh_header()
-
-    # ---- one line, in a run
-    def join_run(self):
-        """In a run of calls (ToolGroup): from now on a finished call is one line."""
-        self.in_run = True
-        self.refresh_line()
-
-    def refresh_line(self):
-        """One line when it's in a run and nothing about it needs a look: still running (or waiting to be allowed),
-        denied, failed or cut short is a card, its status at the front."""
-        line = self.in_run and self.state == "done" and self.decision != "denied"
-        if line and self.line_arrow is None:
-            self.line_arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
-            self.line_arrow.add_css_class("soft-icon")
-            # (the arrow is out of the card while it's a card again, where a chat's freeing doesn't reach it: so its
-            # click holds the card weakly, or the two would keep each other)
-            ref = weakref.ref(self)
-            for w in (self.line_arrow, self.header):
-                click = Gtk.GestureClick()
-                click.connect("released", lambda *_: (c := ref()) is not None and c.line and c.open_line(not c.line_open))
-                w.add_controller(click)
-            pointers.hand(self.line_arrow)
-        self.line = line
-        icon, gone = (self.line_arrow, self.status) if line else (self.status, self.line_arrow)
-        if gone is not None and gone.get_parent() is not None:
-            self.grid.remove(gone)
-        if icon.get_parent() is None:
-            self.grid.attach(icon, 0, 0, 1, 1)
-        (self.add_css_class if line else self.remove_css_class)("tool-line")
-        # a click on the line opens it, so it isn't for selecting text then
-        if line:
-            self.header.set_selectable(False)
-            pointers.hand(self.header)
-        else:
-            pointers.set_pointer(self.header, None)
-            self.header.set_selectable(True)
-        self.show_rows()
-
-    def open_line(self, opened=True):
-        """Open (or close) a line: what the card's rows would show, its command or input and its output, opened."""
-        self.line_open = opened
-        if self.line_arrow is not None:
-            self.line_arrow.set_from_icon_name("pan-down-symbolic" if opened else "pan-end-symbolic")
-        for toggle, has in ((self.input_toggle, self.has_input), (self.output_toggle, self.has_output)):
-            if has:
-                toggle.set_expanded(opened)
-        self.show_rows()
-
-    def show_rows(self):
-        """The command and output rows: a card's, each with its arrow; a line's, only what they hold, while it's open."""
-        for toggle, has in ((self.input_toggle, self.has_input), (self.output_toggle, self.has_output)):
-            if not self.line:
-                toggle.set_visible(has)
-                continue
-            toggle.arrow.set_visible(False)
-            toggle.text.set_visible(False)
-            if has and self.line_open and not toggle.get_expanded():
-                toggle.set_expanded(True)  # (output that came after it was opened)
-            if toggle.revealer is not None:
-                toggle.revealer.set_visible(has and self.line_open)
-        if self.line:  # (nothing to open, as an image's Read: no arrow, its place kept)
-            self.line_arrow.set_opacity(1 if self.has_input or self.has_output else 0)
 
     def refresh_header(self):
         s = summarize_tool(self.name, self.input)
@@ -5969,9 +5908,7 @@ class ToolCard(Gtk.Box):
         self.header.set_markup(f"<b>{html.escape(title)}</b>{src}  {html.escape(s)}{tail}")
 
     def show_output(self):
-        if not self.has_output:
-            self.has_output = True
-            self.show_rows()
+        self.output_toggle.set_visible(True)
 
     def set_input(self, inp):
         self.input = inp if isinstance(inp, dict) else {}
@@ -5979,9 +5916,7 @@ class ToolCard(Gtk.Box):
         # a plain Read's only input is the path, which the header already shows
         redundant = self.name == "Read" and not (self.input.get("offset") or self.input.get("limit") or
                                                  self.input.get("pages"))
-        if self.has_input == redundant:
-            self.has_input = not redundant
-            self.show_rows()
+        self.input_toggle.set_visible(not redundant)
         self.input_stale = True
         if self.input_toggle.get_expanded():
             self.build_input()
@@ -5993,21 +5928,19 @@ class ToolCard(Gtk.Box):
         """Images the tool returned, right under the header (an image Read is the image)."""
         if self._media_box is None:
             self._media_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False,
-                                      margin_top=2, margin_bottom=2)
-            self.grid.attach(self._media_box, 1, 5, 1, 1)
+                                      margin_top=6, margin_bottom=2)
+            self.grid.attach(self._media_box, 1, 3, 2, 1)
         return self._media_box
 
     def output_boxes(self):
         """(children, result_box): subagent messages land in the first when there's no side-panel view for them."""
         if self._output is None:
-            out = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=2, margin_bottom=2)
+            out = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=6, margin_bottom=2)
             self._output = (Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4),
                             Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6))
             out.append(self._output[0])
             out.append(self._output[1])
             self.output_toggle.set_child(out)
-            if self.line:
-                self.show_rows()  # (a line opened before there was any: shown now)
         return self._output
 
     children = property(lambda self: self.output_boxes()[0])
@@ -6018,7 +5951,7 @@ class ToolCard(Gtk.Box):
             return
         self.input_stale = False
         if self.input_box is None:
-            self.input_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=2, margin_bottom=2)
+            self.input_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=6, margin_bottom=2)
             self.input_toggle.set_child(self.input_box)
         if (c := self.input_box.get_first_child()) is not None:
             self.input_box.remove(c)
@@ -6121,27 +6054,50 @@ def read_tail(path, limit=6000):
         return ""
 
 
-class ToolGroup(Gtk.Box):
-    """Consecutive tool calls, close together: each finished one a line, [>] Bash  List files, that opens to show
-    its command and output; one still running (or waiting to be allowed), denied or failed stays a card
-    (ToolCard.refresh_line). What a call showed (images, a published artifact) shows under its line."""
+class ToolGroup(Gtk.Grid):
+    """Consecutive tool calls folded into one line, [status] 3 tool calls ›; opened, the calls, a line each."""
 
     def __init__(self):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        super().__init__(column_spacing=8)  # (no row gap: folded, nothing under its line)
         self.add_css_class("tool-group")
+        self.state = "running"
+        self.status = _status_icon("running")
+        self.attach(self.status, 0, 0, 1, 1)
+        row = Gtk.Box()
+        self.attach(row, 1, 0, 1, 1)
+        self.toggle = Disclosure(row, self, 1, "")
+        self.toggle.button.reorder_child_after(self.toggle.arrow, self.toggle.text)  # (the arrow follows the text)
+        self.toggle.text.remove_css_class("dim-label")
+        self.items = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=4)
+        self.toggle.set_child(self.items)
 
     def add_item(self, widget):
-        self.append(widget)
+        self.items.append(widget)
         if isinstance(widget, ToolCard):
-            widget.join_run()
+            widget.listeners.append(lambda *_: self.refresh())
+        self.refresh()
 
     def cards(self):
-        out, child = [], self.get_first_child()
+        out, child = [], self.items.get_first_child()
         while child is not None:
             if isinstance(child, ToolCard):
                 out.append(child)
             child = child.get_next_sibling()
         return out
+
+    def refresh(self):
+        cards = self.cards()
+        self.toggle.set_label(f"{len(cards)} tool calls")
+        states = {c.state for c in cards}
+        state = "running" if states & {"running", "background"} else "error" if "error" in states else \
+            "interrupted" if "interrupted" in states and len(states) == 1 else "done"
+        if state != self.state:
+            self.state = state
+            self.remove(self.status)
+            self.status = _status_icon(state)
+            self.attach(self.status, 0, 0, 1, 1)
+        if any(c.has_media() for c in cards) and not self.toggle.get_expanded():
+            self.toggle.set_expanded(True)  # images are the point; don't hide them
 
 
 # ------------------------------------------------------- desktop launcher --
@@ -10628,7 +10584,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def add(self, widget, parent_tool=None):
         """Append to the chat, or to a subagent's transcript (side panel, else inside its card).
-        Consecutive tool calls go together in a ToolGroup."""
+        Tool calls and the thinking between them fold into a ToolGroup."""
         if parent_tool and isinstance(widget, ToolCard):
             self.tool_parent[widget.tool_id] = parent_tool
         if parent_tool and (view := self.panel.agent_view(parent_tool)) is not None:
@@ -10668,14 +10624,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return task_note_widget(note, self.tool_cards.get(note.get("tool_use_id")), self.jump_to_card)
 
     def jump_to_card(self, card):
-        """Scroll the chat back to a card (opened, if it's a line in a run of calls) and flash it."""
+        """Scroll the chat back to a card (opening the group it's folded into) and flash it."""
         p = card.get_parent()
         while p is not None and p is not self.transcript:
+            if isinstance(p, ToolGroup):
+                p.toggle.set_expanded(True)
             p = p.get_parent()
         if p is None:
             return
-        if card.line:
-            card.open_line()
         self.stick_bottom = False
         card.add_css_class("flash")
         GLib.timeout_add(1400, lambda: card.remove_css_class("flash") and False)
@@ -10686,7 +10642,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 adj = self.scroller.get_vadjustment()
                 adj.set_value(max(0, b.get_y() - 48))
             return False
-        GLib.timeout_add(160, scroll)  # after an opened line has laid out
+        GLib.timeout_add(160, scroll)  # after the group's slide-down has laid out
 
     def note(self, text, parent_tool=None):
         return self.add(sel_label(html.escape(text), css="sysnote"), parent_tool)

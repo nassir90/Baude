@@ -243,12 +243,14 @@ def apple_exe():
 
 # (beta) models on this Mac, through pi-claude (pi-claude/: pi, the coding agent, on a model mlx_lm.server or
 # mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json that are downloaded, after Apple's;
-# Manual only, no effort, like Apple's; one to another keeps the conversation (pi's session), to Claude's doesn't
+# Manual only, like Apple's, and no effort but a thinking level for those that think; one to another keeps the
+# conversation (pi's session), to Claude's doesn't
 PI_CLAUDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "pi-claude")
 try:
     with open(os.path.join(PI_CLAUDE, "models.json")) as f:
-        LOCAL_MODELS = [{"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]}
-                        for m in json.load(f)]
+        LOCAL_MODELS = [{"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]} |
+                        ({"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}
+                         if m.get("thinking") else {}) for m in json.load(f)]
 except (OSError, ValueError, KeyError):
     LOCAL_MODELS = []
 
@@ -276,7 +278,7 @@ MODES = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"
          ("auto", "Auto"), ("dontAsk", "Don't ask"), ("bypassPermissions", "Bypass permissions")]
 
 
-EFFORT_LABELS = {"low": "Low effort", "medium": "Medium effort", "high": "High effort",
+EFFORT_LABELS = {"off": "No thinking", "low": "Low effort", "medium": "Medium effort", "high": "High effort",
                  "xhigh": "Extra-high effort", "max": "Max effort"}
 
 
@@ -10171,6 +10173,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         ARTIFACT_TITLES.clear()    # titles belong to the conversation in this window
         self.models_info = {}      # model value -> initialize's model entry
         self.effort = None
+        self.local_effort = "off"  # (a model on this Mac that thinks: its own level, Claude's effort apart; none at first)
         self.settings = load_settings()
         self.zoom = min(ZOOM_MAX, max(ZOOM_MIN, float(load_settings().get("zoom", 1.0))))
         self.zoom_default = min(ZOOM_MAX, max(ZOOM_MIN, float(self.settings.get("zoom_default") or 1.0)))  # (Ctrl+0's)
@@ -11057,8 +11060,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", None, None, exe=exe)
             elif model_program(self.model) == "pi":  # (a model on this Mac: pi-claude, Manual, no effort)
                 exe = os.environ.get("BAUDE_PI_CLAUDE") or os.path.join(PI_CLAUDE, "pi-claude")
-                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", resume, None,
-                                       exe=exe)
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", resume,
+                                       self.local_effort if self.effort_dd.get_sensitive() else None, exe=exe)
             else:
                 self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, self.mode,
                                        resume, self.effort if self.effort_dd.get_sensitive() else None)
@@ -11311,7 +11314,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.refresh_context()  # different models have different windows
 
     def on_effort_changed(self, value):
-        self.effort = value
+        if model_program(self.model) == "pi":
+            self.local_effort = value
+        else:
+            self.effort = value
         if self.proc:
             self.proc.control({"subtype": "apply_flag_settings", "settings": {"effortLevel": value}})
             self.note(f"thinking effort → {self.effort_dd.label()}")
@@ -11322,8 +11328,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         levels = info.get("supportedEffortLevels") if info.get("supportsEffort") else None
         if levels:
             self.effort_dd.set_choices([(l, EFFORT_LABELS.get(l, l.title())) for l in levels])
-            if self.effort in levels:
-                self.effort_dd.select(self.effort)
+            want = self.local_effort if model_program(self.model) == "pi" else self.effort
+            if want in levels:
+                self.effort_dd.select(want)
             self.effort_dd.set_tooltip_text("Thinking effort")
         else:
             self.effort_dd.set_choices([("", "Effort")])
@@ -11333,7 +11340,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def sync_effort(self, effort):
         if effort and effort in self.effort_dd.values:
-            self.effort = effort
+            if model_program(self.model) == "pi":
+                self.local_effort = effort
+            else:
+                self.effort = effort
             self.effort_dd.select(effort)
 
     def on_mode_changed(self, value):
@@ -11347,7 +11357,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     CHAT_MODELS = 500
 
     def keep_chat_model(self):
-        if not (self.session_id and self.model) or self.resume_pending:
+        if not (self.session_id and self.model) or self.resume_pending or self.model == "default":
             return
         kept = load_settings().get("chat_models") or {}
         if kept.get(self.session_id) != self.model:
@@ -11359,8 +11369,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def apply_chat_model(self, info):
         """Put the picker on the model the chat info names was on. A Claude transcript with no model Baude knows goes
         on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on."""
-        want = (load_settings().get("chat_models") or {}).get(info["id"]) or transcript_model(info["path"])
-        models = getattr(self, "models_info", {})
+        kept = (load_settings().get("chat_models") or {}).get(info["id"])
+        want = (kept if kept != "default" else None) or transcript_model(info["path"])
+        models = {v: m for v, m in getattr(self, "models_info", {}).items() if v != "default"}  # (an alias, not a model)
         model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) if want else None
         if model is None and want and model_program(want) == "claude":  # ("claude-opus-5-5" for the picker's "opus")
             model = next((v for v in models if model_program(v) == "claude" and v in want), None)
@@ -11375,10 +11386,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.sync_local()
 
     def sync_local(self):
-        """Apple's model and those on this Mac: Manual their only mode, and no effort; the pickers for them gone while
-        one of them is the one."""
+        """Apple's model and those on this Mac: Manual their only mode, and no effort but the thinking levels of one
+        that thinks; the pickers for them gone while one of them is the one."""
         local = model_program(self.model) != "claude"
-        self.effort_dd.set_visible(not local)
+        self.effort_dd.set_visible(not local or self.effort_dd.get_sensitive())  # (a local model that thinks: its levels)
         self.mode_dd.set_visible(not local)
         if local and self.mode != "default":
             self.mode = "default"
@@ -13024,7 +13035,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 "subtype": "error", "request_id": rid, "error": f"baude: unsupported {req.get('subtype')}"}})
             return
         name, inp = req.get("tool_name"), req.get("input", {})
-        if name in self.always_allow:
+        if name in self.always_allow and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             return
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
@@ -13100,9 +13111,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             else:
                 self.note(f"{decision} {name}")
 
-        for label, beh, always, css in (("Allow", "allow", False, "suggested-action"),
-                                        (f"Always allow {tool_display(name)[0]}", "allow", True, None),
-                                        ("Deny", "deny", False, "destructive-action")):
+        choices = [("Allow", "allow", False, "suggested-action"),
+                   (f"Always allow {tool_display(name)[0]}", "allow", True, None),
+                   ("Deny", "deny", False, "destructive-action")]
+        if model_program(self.model) != "claude":  # (Apple's model, or one on this Mac: each call asked, no always)
+            del choices[1]
+        for label, beh, always, css in choices:
             b = Gtk.Button(label=label)
             if css:
                 b.add_css_class(css)

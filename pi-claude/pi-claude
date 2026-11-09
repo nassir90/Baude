@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """pi-claude: stands in for `claude -p --input-format stream-json --output-format stream-json ...` for Baude, running
-pi (the coding agent, in its RPC mode) on a model on this Mac that mlx_lm.server or mlx_vlm.server serves.
+pi (the coding agent, in its RPC mode) on a model on this Mac.
 
 Of the flags Baude passes it uses --model (a value in models.json), --resume (pi's session of that id, kept in
-~/.local/share/baude/pi/sessions) and --permission-mode. The model's server and pi start with the first message, and
-stop with this. Each of pi's tool calls is put to Baude as a permission question, through ask.ts (a pi extension), and
-shown to it as Claude's tool of that kind (bash as Bash, read as Read, edit as Edit, write as Write).
+~/.local/share/baude/pi/sessions), --effort (the thinking level, for a model that thinks) and --permission-mode. pi
+starts with the first message and stops with this. Each of pi's tool calls is put to Baude as a permission question,
+through ask.ts (a pi extension), and shown to it as Claude's tool of that kind (bash as Bash, read as Read, ...).
+
+Every chat, in every Baude window, shares one server: `pi-claude --serve` keeps mlx_vlm.server, which holds one model at
+a time (16 GB holds no more), behind a gate on PORT: a request for the model it has goes ahead, one for another waits
+for those running to finish (a swap stops what's generating). The first chat to need it starts it; it unloads the
+model after UNLOAD_AFTER without a request, and stops IDLE after the last chat on a local model has gone.
 """
+import contextlib
+import fcntl
+import http.client
+import http.server
 import json
 import os
 import shutil
@@ -26,6 +35,12 @@ PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "p
 MODELS = {m["value"]: m for m in json.load(open(os.path.join(HERE, "models.json")))}
 CONTEXT = 32768  # (the window pi is told: these models take more, but not in 16 GB beside everything else)
 MAX_OUT = 4096
+MAX_OUT_THINKING = 16384  # (thinking and answer share it: pi's high budget, less 1024 for the answer)
+PORT = int(os.environ.get("BAUDE_MLX_PORT") or 48151)
+RUN = os.path.join(HOME, "run")  # (the server's keeper: server.json; the chats using it: users/<pid>)
+IDLE = 60
+UNLOAD_AFTER = 600
+LEVELS = ("off", "minimal", "low", "medium", "high")
 
 
 def flag(name):
@@ -35,6 +50,17 @@ def flag(name):
 
 model = MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
 session_id = flag("--resume") or str(uuid.uuid4())
+
+
+def level(effort):
+    """Baude's effort as pi's thinking level (Claude's xhigh and max as high); off for a model that doesn't think."""
+    if not model.get("thinking"):
+        return "off"
+    effort = {"xhigh": "high", "max": "high"}.get(effort, effort)
+    return effort if effort in LEVELS else "off"
+
+
+thinking = level(flag("--effort"))
 mode = {"manual": "default", None: "default"}.get(flag("--permission-mode"), flag("--permission-mode"))
 cwd = os.getcwd()
 
@@ -113,7 +139,194 @@ def result_text(result):
     return "\n".join(parts)
 
 
-# ---- the model's server and pi
+# ---- the shared server (pi-claude --serve)
+
+@contextlib.contextmanager
+def run_lock():
+    os.makedirs(os.path.join(RUN, "users"), exist_ok=True)
+    with open(os.path.join(RUN, "lock"), "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
+def keeper():
+    try:
+        with open(os.path.join(RUN, "server.json")) as f:
+            return json.load(f).get("pid")
+    except (OSError, ValueError):
+        return None
+
+
+def users():
+    """How many chats use the server: users/<pid> files of live processes (the dead ones' cleared)."""
+    n = 0
+    for name in os.listdir(os.path.join(RUN, "users")):
+        if name.isdigit() and pid_alive(int(name)):
+            n += 1
+        else:
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(RUN, "users", name))
+    return n
+
+
+class Gate:
+    """Requests for the model the server has go ahead together; one for another waits for them to finish, and once
+    one waits, more for the one it has wait behind it."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.model, self.running, self.waiting, self.last = None, 0, {}, time.time()
+
+    @contextlib.contextmanager
+    def enter(self, want):
+        with self.cond:
+            self.waiting[want] = self.waiting.get(want, 0) + 1
+            while not (self.running == 0 or self.model == want and
+                       not any(n for m, n in self.waiting.items() if m != want)):
+                self.cond.wait()
+            self.waiting[want] -= 1
+            self.model, self.running = want, self.running + 1
+        try:
+            yield
+        finally:
+            with self.cond:
+                self.running -= 1
+                self.last = time.time()
+                self.cond.notify_all()
+
+
+def mlx_vlm_server():
+    return which("mlx_vlm.server", os.path.expanduser("~/.local/bin/mlx_vlm.server"))
+
+
+def serve():
+    """Keep mlx_vlm.server on a port of its own, behind the gate on PORT, while chats use it."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        inner = s.getsockname()[1]
+    os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
+    log = open(os.path.join(HOME, "logs", "server.log"), "a")
+    # (sh waits on its stdin, a pipe from here, and stops the server when it closes: when this exits, however)
+    server = subprocess.Popen(
+        ["sh", "-c", '"$@" & pid=$!; cat > /dev/null; kill $pid 2>/dev/null; wait $pid', "sh", mlx_vlm_server(),
+         "--host", "127.0.0.1", "--port", str(inner), "--max-tokens", str(MAX_OUT)],
+        stdin=subprocess.PIPE, stdout=log, stderr=log, env=os.environ | {"HF_HUB_OFFLINE": "1"})
+    gate = Gate()
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            self.forward(None)
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            try:
+                want = json.loads(body).get("model")
+            except ValueError:
+                want = None
+            if want:
+                with gate.enter(want):
+                    self.forward(body)
+            else:
+                self.forward(body)
+
+        def forward(self, body):
+            up = http.client.HTTPConnection("127.0.0.1", inner, timeout=None)
+            try:
+                up.request(self.command, self.path, body,
+                           {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")})
+                r = up.getresponse()
+                self.send_response(r.status)
+                for k, v in r.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection", "content-length"):
+                        self.send_header(k, v)
+                self.send_header("Connection", "close")
+                self.end_headers()
+                while chunk := r.read1(65536):  # (as it comes: a reply streams)
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except OSError:
+                pass  # (the chat stopped it, or the server's gone)
+            finally:
+                up.close()
+
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Proxy)
+    proxy.daemon_threads = True
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    idle_since = None
+    while server.poll() is None:
+        time.sleep(5)
+        with gate.cond:
+            unload = gate.model and not gate.running and time.time() - gate.last > UNLOAD_AFTER
+            if unload:
+                gate.model = None
+        if unload:  # (nothing asked of it for a while: the memory back)
+            with contextlib.suppress(OSError):
+                urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{inner}/unload", method="POST"),
+                                       timeout=30).read()
+        with run_lock():
+            if users():
+                idle_since = None
+                continue
+            idle_since = idle_since or time.time()
+            if time.time() - idle_since < IDLE:
+                continue
+            if keeper() == os.getpid():
+                os.remove(os.path.join(RUN, "server.json"))
+            break
+    with run_lock():
+        if keeper() == os.getpid():
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(RUN, "server.json"))
+    proxy.server_close()
+    server.stdin.close()
+    server.wait(30)
+
+
+def use_server():
+    """Count this chat in, start the server if it isn't running, and wait until it answers."""
+    if not mlx_vlm_server():
+        raise RuntimeError("mlx_vlm.server isn't installed (uv tool install mlx-vlm)")
+    with run_lock():
+        open(os.path.join(RUN, "users", str(os.getpid())), "w").close()
+        pid = keeper()
+        if not (pid and pid_alive(pid)):
+            pid = subprocess.Popen([sys.executable, os.path.realpath(__file__), "--serve"], start_new_session=True,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL).pid
+            with open(os.path.join(RUN, "server.json"), "w") as f:
+                json.dump({"pid": pid, "port": PORT}, f)
+            say("starting the MLX server…")
+    t0 = time.time()
+    while time.time() - t0 < 300:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/v1/models", timeout=2).read()
+            return
+        except OSError:
+            if not pid_alive(pid):
+                raise RuntimeError("the MLX server stopped (see ~/.local/share/baude/pi/logs/server.log)")
+            time.sleep(0.25)
+    raise RuntimeError("the MLX server didn't come up in 5 minutes (see ~/.local/share/baude/pi/logs/server.log)")
+
+
+def leave_server():
+    with contextlib.suppress(OSError):
+        os.remove(os.path.join(RUN, "users", str(os.getpid())))
+
+
+# ---- pi
 
 class Engine:
     def __init__(self):
@@ -121,7 +334,7 @@ class Engine:
         self.ready = threading.Event()
         self.failed = None
         self.started = False
-        self.server = self.pi = None
+        self.pi = None
         self.agent_dir = None
         self.waiting = {}  # pi command id -> callback(response)
         self.asks = {}  # Baude request id -> (pi dialog id, pi tool name, pi input, Claude tool name)
@@ -140,8 +353,8 @@ class Engine:
 
     def _boot(self):
         try:
-            port = self._serve()
-            self._pi(port)
+            use_server()
+            self._pi()
         except Exception as e:  # noqa: BLE001 (any failure ends up as the turn's error)
             self.failed = str(e)
         self.ready.set()
@@ -149,61 +362,31 @@ class Engine:
             self.prompt(*item)
         self.queue.clear()
 
-    def _serve(self):
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
-        local = os.path.expanduser("~/.local/bin")
-        if model["server"] == "lm":
-            exe = which("mlx_lm.server", os.path.join(local, "mlx_lm.server"))
-            args = [exe, "--model", model["repo"], "--port", str(port), "--max-tokens", str(MAX_OUT)]
-            if model.get("templateArgs"):
-                args += ["--chat-template-args", json.dumps(model["templateArgs"])]
-        else:
-            exe = which("mlx_vlm.server", os.path.join(local, "mlx_vlm.server"))
-            args = [exe, "--model", model["repo"], "--host", "127.0.0.1", "--port", str(port),
-                    "--max-tokens", str(MAX_OUT)]
-        if not exe:
-            raise RuntimeError(f"{'mlx_lm' if model['server'] == 'lm' else 'mlx_vlm'}.server isn't installed")
-        os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
-        log = open(os.path.join(HOME, "logs", f"{model['value']}.log"), "a")
-        # (sh waits on its stdin, a pipe from here, and stops the server when it closes: when this exits, however)
-        self.server = subprocess.Popen(
-            ["sh", "-c", '"$@" & pid=$!; cat > /dev/null; kill $pid 2>/dev/null; wait $pid', "sh", *args],
-            stdin=subprocess.PIPE, stdout=log, stderr=log, env=os.environ | {"HF_HUB_OFFLINE": "1"})
-        say(f"loading {model['displayName']}…")
-        t0 = time.time()
-        while time.time() - t0 < 300:
-            if self.server.poll() is not None:
-                raise RuntimeError(f"{model['displayName']}'s server stopped (see {log.name})")
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1).read()
-                return port
-            except OSError:
-                time.sleep(0.25)
-        raise RuntimeError(f"{model['displayName']}'s server didn't come up in 5 minutes (see {log.name})")
-
-    def _pi(self, port):
+    def _pi(self):
         if not os.access(PI, os.X_OK):
             raise RuntimeError(f"pi isn't installed (npm install @earendil-works/pi-coding-agent, in {HOME})")
         self.agent_dir = tempfile.mkdtemp(prefix="baude-pi-")
         with open(os.path.join(self.agent_dir, "models.json"), "w") as f:
             json.dump({"providers": {"mlx": {
-                "baseUrl": f"http://127.0.0.1:{port}/v1", "api": "openai-completions", "apiKey": "local",
+                "baseUrl": f"http://127.0.0.1:{PORT}/v1", "api": "openai-completions", "apiKey": "local",
                 "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False, "supportsStore": False,
                            "maxTokensField": "max_tokens"},
                 "models": [{"id": model["repo"], "name": model["displayName"], "input": model["input"],
-                            "contextWindow": CONTEXT, "maxTokens": MAX_OUT,
-                            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}]}}}, f)
+                            "contextWindow": CONTEXT, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}} |
+                           ({"reasoning": True, "maxTokens": MAX_OUT_THINKING,  # (enable_thinking, and a budget)
+                             "compat": {"thinkingFormat": "qwen", "thinkingTokenBudgetField": "thinking_budget"}}
+                            if model.get("thinking") else {"maxTokens": MAX_OUT})]}}}, f)
         node = which("node", os.path.expanduser("~/.local/node/bin/node"), "/opt/homebrew/bin/node")
         sessions = os.path.join(HOME, "sessions")
         os.makedirs(sessions, exist_ok=True)
         args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", "mlx", "--model", model["repo"],
-                "--session-dir", sessions, "--session-id", session_id, "--no-extensions",
+                "--session-dir", sessions, "--session-id", session_id, "--thinking", thinking,
+                "--no-extensions",
                 "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp",
                 "--no-approve", "--offline", "--append-system-prompt",
                 f"The user's project is {cwd}, the working folder: the files they mention are there, not in pi's "
                 "own documentation."]
+        os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
         log = open(os.path.join(HOME, "logs", "pi.log"), "a")
         self.pi = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
                                    env=os.environ | {"PI_CODING_AGENT_DIR": self.agent_dir, "PI_OFFLINE": "1",
@@ -211,12 +394,10 @@ class Engine:
         threading.Thread(target=self._read_pi, daemon=True).start()
 
     def stop(self):
-        for p in (self.pi, self.server):
-            if p and p.poll() is None:
-                try:
-                    p.stdin.close()
-                except OSError:
-                    pass
+        leave_server()
+        if self.pi and self.pi.poll() is None:
+            with contextlib.suppress(OSError):
+                self.pi.stdin.close()
         if self.pi:
             try:
                 self.pi.wait(3)
@@ -414,7 +595,7 @@ def reply(request_id, response=None):
 
 
 def handle(msg):
-    global mode
+    global mode, thinking
     t = msg.get("type")
     if t == "control_request":
         req, rid = msg.get("request") or {}, msg.get("request_id")
@@ -437,7 +618,12 @@ def handle(msg):
             else:
                 usage({})
         elif sub == "get_settings":
-            reply(rid, {"applied": {"model": model["value"], "effort": None}})
+            reply(rid, {"applied": {"model": model["value"], "effort": thinking if model.get("thinking") else None}})
+        elif sub == "apply_flag_settings" and "effortLevel" in (req.get("settings") or {}):
+            thinking = level(req["settings"]["effortLevel"])
+            if engine.ready.is_set() and not engine.failed:
+                engine.send({"type": "set_thinking_level", "level": thinking})
+            reply(rid)
         elif sub == "set_permission_mode":
             mode = req.get("mode") or mode
             reply(rid)
@@ -471,6 +657,8 @@ def handle(msg):
 
 
 def main():
+    if "--serve" in sys.argv:
+        return serve()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         for line in sys.stdin:

@@ -5835,7 +5835,9 @@ class ThinkingView(Gtk.Box):
 
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
-    when the CLI runs it as a background task (its result only says it started)."""
+    when the CLI runs it as a background task (its result only says it started).
+    In a run of calls (ToolGroup), a finished one is a single line, [>] Name  summary: opening it shows what the card's
+    rows would (set_line)."""
 
     def __init__(self, name, tool_id):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -5858,7 +5860,10 @@ class ToolCard(Gtk.Box):
         self.input_toggle = Disclosure(grid, 1, "command" if base in ("Bash", "BashOutput", "PowerShell")
                                        else "prompt" if base in ("Task", "Agent") else "input")
         self.output_toggle = Disclosure(grid, 3, "output")
-        self.output_toggle.set_visible(False)  # until there is output
+        self.has_input, self.has_output = True, False  # (the output's row: once there is some)
+        # one line, in a run: (in_run) and when nothing about it needs a look (line); its arrow is made when first needed
+        self.in_run, self.line, self.line_open, self.line_arrow = False, False, False, None
+        self.show_rows()
         # what's folded away is built when first opened (a long session has thousands of these), and so are the
         # boxes it goes in: the input's, the output's (media_box, children, result_box: made when first used)
         self.input_box, self._media_box, self._output = None, None, None
@@ -5870,12 +5875,13 @@ class ToolCard(Gtk.Box):
     # ---- state
     def set_state(self, state):
         self.state = state
-        self.grid.remove(self.status)
+        if self.status.get_parent() is not None:
+            self.grid.remove(self.status)
         self.status = _status_icon(state)
-        self.grid.attach(self.status, 0, 0, 1, 1)
         if state == "error":
             self.add_css_class("error")
             self.output_toggle.set_label("error")
+        self.refresh_line()
         self.refresh_header()
         for fn in self.listeners:
             fn(self)
@@ -5883,7 +5889,70 @@ class ToolCard(Gtk.Box):
     def set_decision(self, decision):
         """'allowed' / 'denied' / 'always allowed' from a permission prompt, shown in the header."""
         self.decision = decision
+        self.refresh_line()
         self.refresh_header()
+
+    # ---- one line, in a run
+    def join_run(self):
+        """In a run of calls (ToolGroup): from now on a finished call is one line."""
+        self.in_run = True
+        self.refresh_line()
+
+    def refresh_line(self):
+        """One line when it's in a run and nothing about it needs a look: still running (or waiting to be allowed),
+        denied, failed or cut short is a card, its status at the front."""
+        line = self.in_run and self.state == "done" and self.decision != "denied"
+        if line and self.line_arrow is None:
+            self.line_arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
+            self.line_arrow.add_css_class("soft-icon")
+            # (the arrow is out of the card while it's a card again, where a chat's freeing doesn't reach it: so its
+            # click holds the card weakly, or the two would keep each other)
+            ref = weakref.ref(self)
+            for w in (self.line_arrow, self.header):
+                click = Gtk.GestureClick()
+                click.connect("released", lambda *_: (c := ref()) is not None and c.line and c.open_line(not c.line_open))
+                w.add_controller(click)
+            pointers.hand(self.line_arrow)
+        self.line = line
+        icon, gone = (self.line_arrow, self.status) if line else (self.status, self.line_arrow)
+        if gone is not None and gone.get_parent() is not None:
+            self.grid.remove(gone)
+        if icon.get_parent() is None:
+            self.grid.attach(icon, 0, 0, 1, 1)
+        (self.add_css_class if line else self.remove_css_class)("tool-line")
+        # a click on the line opens it, so it isn't for selecting text then
+        if line:
+            self.header.set_selectable(False)
+            pointers.hand(self.header)
+        else:
+            pointers.set_pointer(self.header, None)
+            self.header.set_selectable(True)
+        self.show_rows()
+
+    def open_line(self, opened=True):
+        """Open (or close) a line: what the card's rows would show, its command or input and its output, opened."""
+        self.line_open = opened
+        if self.line_arrow is not None:
+            self.line_arrow.set_from_icon_name("pan-down-symbolic" if opened else "pan-end-symbolic")
+        for toggle, has in ((self.input_toggle, self.has_input), (self.output_toggle, self.has_output)):
+            if has:
+                toggle.set_expanded(opened)
+        self.show_rows()
+
+    def show_rows(self):
+        """The command and output rows: a card's, each with its arrow; a line's, only what they hold, while it's open."""
+        for toggle, has in ((self.input_toggle, self.has_input), (self.output_toggle, self.has_output)):
+            if not self.line:
+                toggle.set_visible(has)
+                continue
+            toggle.arrow.set_visible(False)
+            toggle.text.set_visible(False)
+            if has and self.line_open and not toggle.get_expanded():
+                toggle.set_expanded(True)  # (output that came after it was opened)
+            if toggle.revealer is not None:
+                toggle.revealer.set_visible(has and self.line_open)
+        if self.line:  # (nothing to open, as an image's Read: no arrow, its place kept)
+            self.line_arrow.set_opacity(1 if self.has_input or self.has_output else 0)
 
     def refresh_header(self):
         s = summarize_tool(self.name, self.input)
@@ -5900,7 +5969,9 @@ class ToolCard(Gtk.Box):
         self.header.set_markup(f"<b>{html.escape(title)}</b>{src}  {html.escape(s)}{tail}")
 
     def show_output(self):
-        self.output_toggle.set_visible(True)
+        if not self.has_output:
+            self.has_output = True
+            self.show_rows()
 
     def set_input(self, inp):
         self.input = inp if isinstance(inp, dict) else {}
@@ -5908,7 +5979,9 @@ class ToolCard(Gtk.Box):
         # a plain Read's only input is the path, which the header already shows
         redundant = self.name == "Read" and not (self.input.get("offset") or self.input.get("limit") or
                                                  self.input.get("pages"))
-        self.input_toggle.set_visible(not redundant)
+        if self.has_input == redundant:
+            self.has_input = not redundant
+            self.show_rows()
         self.input_stale = True
         if self.input_toggle.get_expanded():
             self.build_input()
@@ -5933,6 +6006,8 @@ class ToolCard(Gtk.Box):
             out.append(self._output[0])
             out.append(self._output[1])
             self.output_toggle.set_child(out)
+            if self.line:
+                self.show_rows()  # (a line opened before there was any: shown now)
         return self._output
 
     children = property(lambda self: self.output_boxes()[0])
@@ -6046,79 +6121,27 @@ def read_tail(path, limit=6000):
         return ""
 
 
-TOOL_KINDS = {"Bash": "command", "BashOutput": "command", "PowerShell": "command", "Read": "read",
-              "Edit": "edit", "MultiEdit": "edit", "Write": "edit", "NotebookEdit": "edit"}
-
-
-def group_summary(cards):
-    """'Ran 2 commands, read a file, edited 3 files, used a tool' (Claude Desktop style)."""
-    counts = {}
-    for c in cards:
-        kind = TOOL_KINDS.get(c.base, "tool")
-        counts[kind] = counts.get(kind, 0) + 1
-    def n(k, one, many):
-        return one if counts[k] == 1 else f"{counts[k]} {many}"
-    parts = []
-    if "command" in counts:
-        parts.append("ran " + n("command", "a command", "commands"))
-    if "read" in counts:
-        parts.append("read " + n("read", "a file", "files"))
-    if "edit" in counts:
-        parts.append("edited " + n("edit", "a file", "files"))
-    if "tool" in counts:
-        parts.append("used " + n("tool", "a tool", "tools"))
-    text = ", ".join(parts)
-    return text[:1].upper() + text[1:]
-
-
-class ToolGroup(Gtk.Grid):
-    """Consecutive tool calls (and the thinking between them) folded into one line:
-    [status] Ran 2 commands, read a file ›   — click to see the individual calls."""
+class ToolGroup(Gtk.Box):
+    """Consecutive tool calls, close together: each finished one a line, [>] Bash  List files, that opens to show
+    its command and output; one still running (or waiting to be allowed), denied or failed stays a card
+    (ToolCard.refresh_line). What a call showed (images, a published artifact) shows under its line."""
 
     def __init__(self):
-        super().__init__(column_spacing=8, row_spacing=4)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.add_css_class("tool-group")
-        self.state = "running"
-        self.status = _status_icon("running")
-        self.attach(self.status, 0, 0, 1, 1)
-        self.toggle = Disclosure(self, 0, "")
-        self.remove(self.toggle.arrow)  # the status icon owns column 0; the arrow follows the text
-        row = Gtk.Box(spacing=4)
-        self.remove(self.toggle.text)
-        row.append(self.toggle.text)
-        row.append(self.toggle.arrow)
-        self.toggle.text.remove_css_class("dim-label")
-        self.attach(row, 1, 0, 1, 1)
-        self.items = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=4)
-        self.toggle.set_child(self.items)
 
     def add_item(self, widget):
-        self.items.append(widget)
+        self.append(widget)
         if isinstance(widget, ToolCard):
-            widget.listeners.append(lambda *_: self.refresh())
-        self.refresh()
+            widget.join_run()
 
     def cards(self):
-        out, child = [], self.items.get_first_child()
+        out, child = [], self.get_first_child()
         while child is not None:
             if isinstance(child, ToolCard):
                 out.append(child)
             child = child.get_next_sibling()
         return out
-
-    def refresh(self):
-        cards = self.cards()
-        self.toggle.set_label(group_summary(cards))
-        states = {c.state for c in cards}
-        state = "running" if states & {"running", "background"} else "error" if "error" in states else \
-            "interrupted" if "interrupted" in states and len(states) == 1 else "done"
-        if state != self.state:
-            self.state = state
-            self.remove(self.status)
-            self.status = _status_icon(state)
-            self.attach(self.status, 0, 0, 1, 1)
-        if any(c.has_media() for c in cards) and not self.toggle.get_expanded():
-            self.toggle.set_expanded(True)  # images are the point; don't hide them
 
 
 # ------------------------------------------------------- desktop launcher --
@@ -10591,7 +10614,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def add(self, widget, parent_tool=None):
         """Append to the chat, or to a subagent's transcript (side panel, else inside its card).
-        Tool calls and the thinking between them fold into a ToolGroup."""
+        Consecutive tool calls go together in a ToolGroup."""
         if parent_tool and isinstance(widget, ToolCard):
             self.tool_parent[widget.tool_id] = parent_tool
         if parent_tool and (view := self.panel.agent_view(parent_tool)) is not None:
@@ -10631,14 +10654,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return task_note_widget(note, self.tool_cards.get(note.get("tool_use_id")), self.jump_to_card)
 
     def jump_to_card(self, card):
-        """Scroll the chat back to a card (opening the group it's folded into) and flash it."""
+        """Scroll the chat back to a card (opened, if it's a line in a run of calls) and flash it."""
         p = card.get_parent()
         while p is not None and p is not self.transcript:
-            if isinstance(p, ToolGroup):
-                p.toggle.set_expanded(True)
             p = p.get_parent()
         if p is None:
             return
+        if card.line:
+            card.open_line()
         self.stick_bottom = False
         card.add_css_class("flash")
         GLib.timeout_add(1400, lambda: card.remove_css_class("flash") and False)
@@ -10649,7 +10672,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 adj = self.scroller.get_vadjustment()
                 adj.set_value(max(0, b.get_y() - 48))
             return False
-        GLib.timeout_add(160, scroll)  # after the group's slide-down has laid out
+        GLib.timeout_add(160, scroll)  # after an opened line has laid out
 
     def note(self, text, parent_tool=None):
         return self.add(sel_label(html.escape(text), css="sysnote"), parent_tool)

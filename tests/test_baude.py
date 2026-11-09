@@ -3003,14 +3003,19 @@ def test_tool_grouping(app):
         g = groups[0]
         # the narration splits the run: the first call stays a card, the five after it group
         assert len(g.cards()) == 5 and not find(g, baude.ThinkingView), "narration isn't folded into it"
-        assert g.toggle.text.get_label() == "Ran a command, read a file, edited a file, used 2 tools", \
-            g.toggle.text.get_label()
-        assert not g.toggle.get_expanded(), "collapsed by default"
-        assert g.state == "running"
+        assert not any(c.line for c in g.cards()), "calls still running are cards"
         for i in range(6):
             win.render_tool_results([{"type": "tool_result", "tool_use_id": f"g{i}", "content": "ok",
                                       "is_error": i == 3}])
-        assert g.state == "error" and g.status.get_icon_name() == "window-close-symbolic"
+        assert [c.line for c in g.cards()] == [True, True, False, True, True], "finished calls are lines; not a failed one"
+        assert g.cards()[2].status.get_mapped(), "the failed call shows its status"
+        assert not win.tool_cards["g0"].line, "a call on its own stays a card"
+        line = win.tool_cards["g4"]
+        assert not line.output_toggle.get_child() or not line.output_toggle.get_child().get_mapped(), "closed"
+        line.open_line()
+        pump(0.2)
+        assert line.output_toggle.get_child().get_mapped(), "opening a line shows what came back"
+        assert line.input_toggle.get_child().get_mapped(), "and what was asked"
         win.render_assistant([{"type": "text", "text": "Next step."},
                               {"type": "tool_use", "id": "h1", "name": "Bash", "input": {"command": "a"}},
                               {"type": "tool_use", "id": "h2", "name": "Bash", "input": {"command": "b"}}])
@@ -3018,15 +3023,16 @@ def test_tool_grouping(app):
         for i in (1, 2):
             win.render_tool_results([{"type": "tool_result", "tool_use_id": f"h{i}", "content": "ok"}])
         g2 = find(win.transcript, baude.ToolGroup)[-1]
-        assert g2.state == "done" and g2.toggle.text.get_label() == "Ran 2 commands"
-        # a group holding an image result opens so the image is visible
+        assert all(c.line for c in g2.cards())
+        # an image a call returned shows under its line
         win.render_assistant([{"type": "text", "text": "Screens."},
                               {"type": "tool_use", "id": "m1", "name": "Bash", "input": {"command": "shot"}},
                               {"type": "tool_use", "id": "m2", "name": "Read", "input": {"file_path": "/tmp/s.png"}}])
         win.render_tool_results([{"type": "tool_result", "tool_use_id": "m2", "content": [
             {"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                          "data": base64.b64encode(baude_png(60, 40)).decode()}}]}])
-        assert find(win.transcript, baude.ToolGroup)[-1].toggle.get_expanded()
+        pump(0.2)
+        assert win.tool_cards["m2"].line and win.tool_cards["m2"].media_box.get_mapped()
         snapshot(win, "tool_groups")
     finally:
         close(win)
@@ -4504,11 +4510,10 @@ def test_task_notification_is_a_note(app):
         label = find(notes[1], Gtk.Label)[0]
         assert "<a href" in label.get_label(), "the description links back to its card"
         card = win.tool_cards["toolu_bgsync"]
-        group = next((g for g in find(win.transcript, baude.ToolGroup) if card in walk(g)), None)
         win.scroller.get_vadjustment().set_value(win.scroller.get_vadjustment().get_upper())
         label.emit("activate-link", "card")
         pump(0.6)
-        assert group is None or group.toggle.get_expanded(), "its group opens"
+        assert not card.line or card.line_open, "a line opens"
         ok, b = card.compute_bounds(win.transcript)
         top = win.scroller.get_vadjustment().get_value()
         assert top - 5 <= b.get_y() <= top + win.scroller.get_vadjustment().get_page_size(), "scrolled to the card"

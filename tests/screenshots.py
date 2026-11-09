@@ -268,7 +268,7 @@ def _(app):
     return win
 
 
-@scene("24-output-collapsed", "Several finished tool calls, collapsed: status icon over two arrows")
+@scene("24-output-collapsed", "Several finished tool calls in a row: a line each, a failed one a card")
 def _(app):
     win = app.window(opts())
     for i, (cmd, out, err) in enumerate([("git status --short", " M baude.py", False),
@@ -309,18 +309,18 @@ def greet(name: str) -> str:
 """
 
 
-@scene("28-tool-group", "Consecutive tool calls folded into one line (collapsed); Claude's narration between "
-                       "steps (summarized thinking) stays visible, dimmed, above it")
+@scene("28-tool-group", "Consecutive tool calls, one line each; Claude's narration between steps (summarized "
+                       "thinking) stays visible, dimmed, above them")
 def _(app):
     win = app.window(opts())
     tool_group(win)
     return win
 
 
-@scene("29-tool-group-open", "The same group opened: each call, icons in one 16px column")
+@scene("29-tool-group-open", "One of those lines opened: its command and its output; arrows in one 16px column")
 def _(app):
     win = app.window(opts())
-    tool_group(win).toggle.set_expanded(True)
+    tool_group(win).cards()[2].open_line()
     return win
 
 
@@ -1243,9 +1243,8 @@ def _(app):
     T.wait_for(lambda: "helper counted" in T.labels_text(win.panel.agent_view("toolu_ag1")), "outer reply")
     win.show_panel(True, "agents")
     win.panel.open_agent("toolu_ag1")
-    for group in T.find(win.panel.agent_view("toolu_ag1"), baude.ToolGroup):
-        group.toggle.set_expanded(True)
-    win.tool_cards["toolu_ag1_inner"].output_toggle.set_expanded(True)
+    inner = win.tool_cards["toolu_ag1_inner"]
+    inner.open_line() if inner.line else inner.output_toggle.set_expanded(True)
     return win
 
 

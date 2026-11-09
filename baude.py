@@ -229,6 +229,18 @@ trace("imported")
 # (value, label). MODELS is only a fallback: the CLI's initialize response lists the real
 # models, and reports the permission mode it actually started in.
 MODELS = [("opus", "Opus"), ("fable", "Fable"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+# (beta) Apple's on-device model, through apple-claude (apple-claude/: a Swift stand-in for claude on FoundationModels,
+# its one tool Exec, each command asked for): in the model picker after Claude's; Manual only, no effort
+APPLE_MODEL = {"value": "apple", "resolvedModel": "apple-foundation-model", "displayName": "Apple Foundation Model"}
+
+
+def apple_exe():
+    """apple-claude: BAUDE_APPLE_CLAUDE, else as `swift build -c release` in apple-claude/ leaves it; None if not built."""
+    exe = os.environ.get("BAUDE_APPLE_CLAUDE") or \
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "apple-claude", ".build", "release", "apple-claude")
+    return exe if os.access(exe, os.X_OK) else None
+
+
 MODES = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"),
          ("auto", "Auto"), ("dontAsk", "Don't ask"), ("bypassPermissions", "Bypass permissions")]
 
@@ -7732,10 +7744,10 @@ def spent_since(proc, msg):
 class ClaudeProc:
     """Owns the claude subprocess. Callbacks are delivered on the GTK main loop."""
 
-    def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None):
+    def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
-        exe = claude_exe()
+        exe = exe or claude_exe()  # (apple-claude for Apple's model: start_proc)
         args = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                 "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio",
                 "--forward-subagent-text"]  # subagents' own messages, for the side panel
@@ -10985,8 +10997,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             # while a session is only being viewed, claude runs fresh (it supplies models and commands
             # but writes nothing); it resumes the session when the first message is sent
             resume = None if self.resume_pending else self.session_id
-            self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, self.mode,
-                                   resume, self.effort if self.effort_dd.get_sensitive() else None)
+            if self.model == APPLE_MODEL["value"]:  # (Apple's model: apple-claude, Manual, no effort, a chat of its own)
+                if (exe := apple_exe()) is None:
+                    self.note("Apple Foundation Model: apple-claude isn't built yet (swift build -c release, in apple-claude/)")
+                    self.proc = None
+                    self.update_status()
+                    return
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", None, None, exe=exe)
+            else:
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, self.mode,
+                                       resume, self.effort if self.effort_dd.get_sensitive() else None)
             self.proc.resumed = resume
             self.pending.clear()
         except OSError as e:
@@ -11218,8 +11238,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.note("interrupt requested")
 
     def on_model_changed(self, value):
+        apple = APPLE_MODEL["value"]
+        crossed = (value == apple) != (self.model == apple)  # (Claude's to Apple's, or back: another program)
         self.model = value
         self.sync_effort_choices()
+        self.sync_apple()
+        if crossed:
+            self.note(f"model → {self.model_dd.label()}: a new conversation")
+            self.restart_proc(resume=False)
+            return
         if self.proc:
             self.proc.control({"subtype": "set_model", "model": value})
             self.note(f"model → {self.model_dd.label()}")
@@ -11258,13 +11285,29 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.proc.control({"subtype": "set_permission_mode", "mode": value})
             self.note(f"permission mode → {self.mode_dd.label()}")
 
+    def sync_apple(self):
+        """Apple's model: Manual its only mode, and no effort; the pickers for them gone while it's the one."""
+        apple = self.model == APPLE_MODEL["value"]
+        self.effort_dd.set_visible(not apple)
+        self.mode_dd.set_visible(not apple)
+        if apple and self.mode != "default":
+            self.mode = "default"
+            if "default" in self.mode_dd.values:
+                self.mode_dd.select("default")
+
     def sync_models(self, models):
-        """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5").
+        """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and Apple's on-device
+        model after them (APPLE_MODEL). apple-claude's list is its one model: Claude's, as claude last listed them, stay.
 
         The list's "default" entry is an alias, not a model: it is dropped, and when no model
         was chosen the entry it resolves to is selected instead.
         """
         models = [m for m in models or [] if m.get("value")]
+        if models and all(m["value"] == APPLE_MODEL["value"] for m in models):
+            models = getattr(self, "claude_models", [])
+        else:
+            self.claude_models = models
+        models = [m for m in models if m["value"] != APPLE_MODEL["value"]] + [APPLE_MODEL]
         self.models_info = {m["value"]: m for m in models}
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
@@ -11275,6 +11318,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), want)
             self.model_dd.select(hit)
         self.sync_effort_choices()
+        self.sync_apple()
 
     def read_only_mode(self):
         """Every chat opened (a new one, or one picked in the sidebar) starts in Plan, read-only, whatever mode the

@@ -711,7 +711,13 @@ def session_path(session):
 
 def session_info(path):
     """(title, cwd) of a transcript, from its first and last 256 KB."""
-    title = first = cwd = None
+    return session_facts(path)[:2]
+
+
+def session_facts(path):
+    """(title, cwd, when it was last typed in) of a transcript, the first two from its first and last 256 KB, the last
+    as epoch seconds (widgets.typed_at: read back from the end till there's one, widgets.last_typed), else None."""
+    title = first = cwd = said = None
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as f:
@@ -719,8 +725,9 @@ def session_info(path):
             f.seek(max(0, size - 262144))
             tail = f.read() if size > 262144 else b""
     except OSError:
-        return None, None
+        return None, None, None
     for chunk in (head, tail):
+        last = chunk is tail or not tail  # (the end of the file: where the last thing typed is looked for)
         for raw in chunk.split(b"\n"):
             if not raw.startswith(b"{"):
                 continue
@@ -729,6 +736,8 @@ def session_info(path):
             except ValueError:
                 continue
             cwd = cwd or d.get("cwd")
+            if last and (when := widgets.typed_at(d)) and when > (said or ""):
+                said = when
             k = d.get("type")
             if k == "custom-title" and d.get("customTitle"):
                 title = d["customTitle"]
@@ -739,7 +748,7 @@ def session_info(path):
                 if not _is_noise(t):
                     first = t
     title = title or (first or "").split("\n")[0][:90] or "Untitled chat"
-    return title, cwd
+    return title, cwd, widgets.ref_epoch(said) if said or not tail else widgets.last_typed(path)
 
 
 def projects_dir():
@@ -794,9 +803,12 @@ def recent_sessions(limit=80):
     paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     out = []
     for p in paths[:limit]:
-        title, cwd = session_info(p)
+        title, cwd, said = session_facts(p)
         if title:
-            out.append({"path": p, "title": title, "cwd": cwd, "mtime": os.path.getmtime(p)})
+            mtime = os.path.getmtime(p)
+            # (used: when it was last typed in, what the list goes by; the file's time moves with every reply)
+            out.append({"path": p, "title": title, "cwd": cwd, "mtime": mtime, "used": said or mtime})
+    out.sort(key=lambda s: -s["used"])
     return out
 
 
@@ -1200,7 +1212,7 @@ class AttachDialog(Adw.Dialog):
         seen = {}  # the folders the chats ran in, the most recent first
         for s in self.sessions:
             if s["cwd"] and os.path.isdir(s["cwd"]) and s["cwd"] not in seen:
-                seen[s["cwd"]] = s["mtime"]
+                seen[s["cwd"]] = s["used"]
         shown = [d for d in seen if not q or q in d.lower()]
         for d in shown if q else shown[:self.FOLDERS]:
             row = Adw.ActionRow(title=GLib.markup_escape_text(os.path.basename(d.rstrip(os.sep)) or d), activatable=True)
@@ -1213,7 +1225,7 @@ class AttachDialog(Adw.Dialog):
             if q and q not in s["title"].lower() and q not in (s["cwd"] or "").lower():
                 continue
             row = Adw.ActionRow(title=GLib.markup_escape_text(s["title"]), activatable=True)
-            widgets.subtitle_time(row, s["mtime"], f"{short_dir(s['cwd'])} · ")
+            widgets.subtitle_time(row, s["used"], f"{short_dir(s['cwd'])} · ")
             if time.time() - s["mtime"] < 180:
                 live = Gtk.Label(label="live")
                 live.add_css_class("success")
@@ -1497,7 +1509,7 @@ class ChatNames(lookup.SearchSpace):
     afresh every TTL seconds."""
 
     TTL = 120
-    _info = {}  # (a transcript: (its mtime, its size, its title, its folder))
+    _info = {}  # (a transcript: (its mtime, its size, its title, its folder, when it was last typed in))
 
     def __init__(self):
         super().__init__(None, GLib.timeout_add)
@@ -1536,17 +1548,17 @@ class ChatNames(lookup.SearchSpace):
                     continue
                 known = self._info.get(p)
                 if known is None or known[:2] != (st.st_mtime, st.st_size):
-                    title, cwd = session_info(p)
-                    known = self._info[p] = (st.st_mtime, st.st_size, title, cwd)
-                if known[2]:
-                    chats.append({"path": p, "title": known[2], "cwd": known[3], "mtime": known[0]})
-            chats.sort(key=lambda c: -c["mtime"])
+                    title, cwd, said = session_facts(p)
+                    known = self._info[p] = (st.st_mtime, st.st_size, title, cwd, said or st.st_mtime)
+                if known[2]:  # (used: when it was last typed in, what ⌘K's chats go by)
+                    chats.append({"path": p, "title": known[2], "cwd": known[3], "mtime": known[0], "used": known[4]})
+            chats.sort(key=lambda c: -c["used"])
         finally:
             self.chats, self.at, self.reading = chats, time.time(), False
 
     def make_items(self):
         return [{"surface": c["title"], "canonical": "", "icon": "claude", "what": "Chat", "kind": "chat",
-                 "at": c["mtime"], "ago": (ago := widgets.time_ago(c["mtime"])),  # (under the pointer: widgets.time_tip)
+                 "at": c["used"], "ago": (ago := widgets.time_ago(c["used"])),  # (under the pointer: widgets.time_tip)
                  "where": (where := short_dir(c["cwd"]) if c["cwd"] else "no folder"), "summary": f"{where} · {ago}",
                  "path": c["path"], "line": None, "entry": None, "faint": False} for c in self.chats]
 

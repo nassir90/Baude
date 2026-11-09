@@ -625,6 +625,72 @@ def ref_epoch(iso):
         return None
 
 
+_NOT_TYPED = ("<task-notification>", "<ci-monitor-event>", "<side-sessions-event>", "<local-command-stdout>",
+              "<local-command-stderr>")
+
+
+def typed_at(rec):
+    """When a transcript record is something the person typed, its ISO time: a prompt, or one sent while a turn ran
+    (a queued_command); None for the rest: tool results, what claude or the app put in (a task's ending, a CI event, a
+    scheduled run, another session's message). A chat's last one says when it was last used (Baude's sidebar and
+    Record's lists go by it): the file's own time moves with every reply, rename and record claude keeps."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        a = rec.get("attachment") or {}
+        if a.get("type") == "queued_command" and a.get("commandMode", "prompt") == "prompt" \
+                and (a.get("origin") or {}).get("kind", "human") == "human":
+            return a.get("timestamp") or rec.get("timestamp")
+        return None
+    if kind != "user" or rec.get("isMeta") or rec.get("isSidechain") or rec.get("isCompactSummary") \
+            or rec.get("turnOrigin") in ("task_notification", "scheduled", "peer"):
+        return None
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        if any(isinstance(c, dict) and c.get("type") == "tool_result" for c in content):
+            return None
+        if any(isinstance(c, dict) and c.get("type") == "image" for c in content):
+            return rec.get("timestamp")
+        content = " ".join(c.get("text") or "" for c in content if isinstance(c, dict) and c.get("type") == "text")
+    if not isinstance(content, str) or not content.strip() or content.lstrip().startswith(_NOT_TYPED):
+        return None
+    return rec.get("timestamp")
+
+
+def last_typed(path, chunk=262144, limit=32 << 20):
+    """When a transcript was last typed in (typed_at), as epoch seconds, read back from its end a chunk at a time: the
+    tool results after the last prompt can run to megabytes. None if nothing typed is in its last `limit` bytes."""
+    try:
+        with open(path, "rb") as f:
+            end = f.seek(0, os.SEEK_END)
+            carry, read = b"", 0
+            while end > 0 and read < limit:
+                start = max(0, end - chunk)
+                f.seek(start)
+                data = f.read(end - start) + carry
+                read += end - start
+                lines = data.split(b"\n")
+                carry = lines.pop(0) if start > 0 else b""  # (cut off at the chunk's start: whole with the next)
+                if len(carry) > limit:
+                    carry = b""  # (one enormous line: a tool's result, never something typed)
+                said = None
+                for raw in lines:
+                    if b'"user"' not in raw[:4096] and b'"queued_command"' not in raw[:300] \
+                            or b'"tool_use_id"' in raw[:1500]:  # (a tool's result: not decoded)
+                        continue
+                    try:
+                        when = typed_at(json.loads(raw))
+                    except ValueError:
+                        continue
+                    if when and when > (said or ""):
+                        said = when
+                if said:
+                    return ref_epoch(said)
+                end = start
+    except OSError:
+        pass
+    return None
+
+
 # ------------------------------------------------------- signal: Kubernetes --
 # Replies about a cluster name its objects (`deploy/relay-svc`, "the `beacon-runner` Deployment", a pod
 # `relay-svc-7d9f8b6c5-x2x4z`, `relay-svc.relay.svc.cluster.local`), their configuration (`.Values.image.tag`,

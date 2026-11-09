@@ -6945,7 +6945,7 @@ def scan_session(path, state=None):
     else:
         st = {"offset": 0, "title": None, "agent_name": None, "last_prompt": None, "relocated": None,
               "summary": None, "uuids": set(), "born": None, "foreign": set(), "cwd": None, "source": "",
-              "prompts": 0, "first_prompt": None, "cost": 0.0}
+              "prompts": 0, "first_prompt": None, "cost": 0.0, "said": None}
     sid = os.path.splitext(os.path.basename(path))[0]
     try:
         mtime = os.path.getmtime(path)
@@ -6962,7 +6962,10 @@ def scan_session(path, state=None):
     info = {"id": sid, "path": path, "title": st["title"], "source": st["source"],
             "cwd": st["relocated"] or st["cwd"], "first_prompt": st["first_prompt"], "prompts": st["prompts"],
             "mtime": mtime, "uuids": st["uuids"], "born": st["born"], "copied_from": st["foreign"],
-            "cost": st.get("cost") or 0.0}
+            "cost": st.get("cost") or 0.0,
+            # (when it was last used: the last thing typed in it, else when it began; not the file's time, which moves
+            # with every reply and every record claude keeps)
+            "said": ref_epoch(st.get("said")) or ref_epoch(st["born"]) or mtime}
     first = " ".join(clean_prompt(st["first_prompt"] or st["last_prompt"] or "").split())
     first = re.sub(r"(\*\*|__|`|~~|^#+\s*)", "", first)  # titles are plain text
     info["title"] = info["title"] or st["agent_name"] or st["summary"] or \
@@ -6999,6 +7002,14 @@ def _scan_line(st, line, sid):
         if t in ("custom-title", "agent-name", "relocated", "last-prompt", "summary", "cost-state"):
             return
     head = line[:2000]
+    if '"queued_command"' in line[:300]:  # (typed while a turn ran: kept as an attachment, not a user record)
+        try:
+            when = widgets.typed_at(json.loads(line))
+        except ValueError:
+            when = None
+        if when and when > (st.get("said") or ""):
+            st["said"] = when
+        return
     if '"type":"user"' not in head and '"type": "user"' not in head:
         return
     if st["cwd"] is not None and _TOOL_RESULT_REC.search(line[:1500]):
@@ -7014,6 +7025,8 @@ def _scan_line(st, line, sid):
     if st["cwd"] is None:
         st["cwd"] = rec.get("cwd")
         st["source"] = SESSION_SOURCES.get(rec.get("entrypoint"), rec.get("entrypoint") or "")
+    if (when := widgets.typed_at(rec)) and when > (st.get("said") or ""):
+        st["said"] = when
     if _is_prompt(rec):
         st["prompts"] += 1
         if st["first_prompt"] is None:
@@ -7282,9 +7295,15 @@ def list_sessions(progress=None):
             out.append(info)
         if progress is not None and time.monotonic() - reported > (0.4 if not shown else 1.5):
             reported, shown = time.monotonic(), True  # (often enough to see it come, not to slow it)
-            progress(sorted(out, key=lambda i: i["mtime"], reverse=True))
-    out.sort(key=lambda i: i["mtime"], reverse=True)
+            progress(sorted(out, key=last_used, reverse=True))
+    out.sort(key=last_used, reverse=True)
     return out
+
+
+def last_used(info):
+    """When a listed chat was last used: the last thing typed in it (scan_session's said), for the open one not saved
+    yet now; what the sidebar's order and its days go by."""
+    return info.get("said") or info.get("mtime") or 0.0
 
 
 _info_cache = {}  # path -> (inode, size, mtime, scan state, info); None -> loaded from disk yet
@@ -7314,7 +7333,7 @@ def cached_session_info(path):
 
 
 _info_dirty = [False]
-_INFO_CACHE_VERSION = 5  # (4: record ids as packed record_keys; 5: cost-state's cost)
+_INFO_CACHE_VERSION = 6  # (4: record ids as packed record_keys; 5: cost-state's cost; 6: when last typed in)
 
 
 def _info_cache_path():
@@ -8209,7 +8228,7 @@ class SessionSidebar(Gtk.Box):
         by_date, now = self.by_date(), self.clock()
         groups, listed = {}, []
         archived = self.archived_ids()
-        for info in self.sessions:
+        for info in sorted(self.sessions, key=last_used, reverse=True):  # (the last typed in first)
             if info["id"] in archived:
                 continue
             folder = info.get("folder", info.get("cwd"))
@@ -8247,14 +8266,14 @@ class SessionSidebar(Gtk.Box):
                     trees[-1].append(row)
             # (the open, unsaved one first, then the newest; a sort keeps sessions' order where it's the same. Nothing
             # listed, a search that finds nothing say, leaves the one empty tree, which has no first session)
-            trees = sorted(filter(None, trees), key=lambda t: (not t[0][0].get("unsaved"), -t[0][0]["mtime"]))
+            trees = sorted(filter(None, trees), key=lambda t: (not t[0][0].get("unsaved"), -last_used(t[0][0])))
             groups = {}
             for rows in trees:
-                key, label = date_group(rows[0][0]["mtime"], now)
+                key, label = date_group(last_used(rows[0][0]), now)
                 groups.setdefault(key, [label, None, []])[2].extend(rows)
         # (days don't overlap: by day too, the latest activity of a top-level session puts them in order)
         order = sorted(groups.items(),
-                       key=lambda kv: (kv[0] != here, -max(i["mtime"] for i, depth, _ in kv[1][2] if not depth)))
+                       key=lambda kv: (kv[0] != here, -max(last_used(i) for i, depth, _ in kv[1][2] if not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
         gone = [i for i in self.sessions if i["id"] in archived
                 and (not q or q in (i.get("title") or "").lower())]
@@ -10508,9 +10527,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             "size": [self.get_width(), self.get_height()], "maximized": self.is_maximized(),
             "frame": widgets.window_frame(self),  # (macOS: the display it's on, where; put back by put_back)
             "panel": self.panel.get_visible(),
+            "places": self.PLACES,  # (where the other chats were left: open_at)
         }
 
     def apply_restart_state(self, state):
+        for sid, place in (state.get("places") or {}).items():
+            self.PLACES.setdefault(sid, place)
         if state.get("size") and not state.get("maximized"):
             self.set_default_size(*state["size"])
         widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
@@ -10656,6 +10678,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.restore_scroll = None
             else:
                 self.follow.put(max(0.0, adj.get_upper() - adj.get_page_size() - from_bottom))
+                # (following the end only if that's where it's held: GTK clamping the view while earlier parts are
+                # drawn above it could have said otherwise, and the end would be jumped to once the hold was over)
+                self.follow.stick = from_bottom <= 1
             return
         self.follow.laid_out()
 
@@ -11092,6 +11117,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.start_proc()
 
     def clear_transcript(self, closing=False):
+        self.remember_place()  # (to open it there again)
+        self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
@@ -11242,7 +11269,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
         self.add(self.user_bubble(text, atts))
-        self.stick_bottom = True
+        self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.user(self.user_content(text, atts))
         self.set_busy(True)
 
@@ -12722,6 +12749,39 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     # items drawn when a session opens, and per earlier chunk (loaded as you scroll near the top, or by
     # "Show earlier messages"): only the last screen is in view, and each item costs layout time
     HISTORY_CHUNK = 60
+    PLACES = {}  # session id -> where its chat was left (chat_place): every window's, kept over a restart
+    MAX_PLACES = 500
+
+    def chat_place(self):
+        """Where the chat is scrolled to, for opening it there again (open_at): measured from its end (what's added at
+        its top as you scroll up doesn't move it), with how many of its items were drawn. None if it was never laid out."""
+        adj = self.scroller.get_vadjustment()
+        if adj.get_page_size() <= 0:
+            return None
+        from_bottom = max(0.0, adj.get_upper() - adj.get_page_size() - adj.get_value())
+        return {"from_bottom": from_bottom, "at_end": self.stick_bottom or from_bottom <= 1,
+                "shown": self.history.shown if self.history else 0}
+
+    def remember_place(self):
+        """The open chat's place remembered (chat_place), as it's left for another."""
+        if self.session_id and (place := self.chat_place()) is not None:
+            self.PLACES.pop(self.session_id, None)
+            self.PLACES[self.session_id] = place
+            while len(self.PLACES) > self.MAX_PLACES:  # (the longest unopened go)
+                del self.PLACES[next(iter(self.PLACES))]
+
+    def open_at(self, place):
+        """A chat just drawn shown where it was left (place: chat_place), its earlier parts drawn back as they were;
+        never left before, at its end. There at once and held there while it lays out (on_layout: images and code
+        come in sizes later), so it doesn't glide down to its end or move under you."""
+        if place and not place.get("at_end"):
+            while self.history and self.history.unshown and self.history.shown < place.get("shown", 0):
+                self.show_earlier()
+            self.stick_bottom = False
+            from_bottom = float(place.get("from_bottom") or 0)
+        else:
+            self.stick_bottom, from_bottom = True, 0.0
+        self.restore_scroll = (from_bottom, time.monotonic() + 2.0)
 
     def load_history(self, path, live=False):
         """Draw the newest part of a saved session; older parts load on demand from the top."""
@@ -12743,7 +12803,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.queue_history_refs(self.history.earlier_replies())
         self.update_earlier_btn()
         self.resumed_note = bool(items)  # "— resumed —" goes in when you first write, not on opening
-        self.stick_bottom = True
+        self.open_at(self.PLACES.get(self.session_id))
 
     def update_earlier_btn(self):
         n = self.history.count() if self.history else 0

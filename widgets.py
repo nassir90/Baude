@@ -5460,6 +5460,111 @@ class FadeLabel(Gtk.Label):
         snapshot_faded(snapshot, draw, width, height, at_start=rtl)
 
 
+def warm_shaders(window):
+    """Have the renderer make its shaders for what the windows draw while nothing else is happening, soon after the
+    first window's first frame, rather than in the frame that first needs each: GTK's GL renderer makes one the first
+    time something needs it, and on macOS (through Metal) a frame that met a few took 175 to 313 ms, the first scroll's
+    as a chat came into view. What a chat is made of (_warm_scenes) is drawn by the window's renderer to a texture nobody
+    sees, a scene at a time, each when the main loop has nothing else to do: they're the shaders its frames use. Once a
+    run: the windows share them."""
+    if getattr(warm_shaders, "started", False):
+        return
+    warm_shaders.started = True
+
+    def painted(clock, handler):
+        clock.disconnect(handler[0])
+        GLib.idle_add(_warm_step, window, _warm_scenes(window), priority=GLib.PRIORITY_LOW)
+
+    def realized(*_):
+        handler = []
+        handler.append(window.get_frame_clock().connect("after-paint", painted, handler))
+    if window.get_realized():
+        realized()
+    else:
+        window.connect("realize", realized)
+
+
+def _warm_step(window, scenes):
+    """warm_shaders' next scene, drawn; again while there are more and the window's there to draw them."""
+    renderer = window.get_renderer() if window.get_realized() else None
+    if renderer is None or isinstance(renderer, Gsk.CairoRenderer) or not scenes:  # (cairo has no shaders)
+        return False
+    snap = Gtk.Snapshot()
+    scenes.pop(0)(snap)
+    if (node := snap.to_node()) is not None:
+        renderer.render_texture(node, Graphene.Rect().init(0, 0, 40, 40))
+    return bool(scenes)
+
+
+def _warm_scenes(widget):
+    """What warm_shaders draws, a scene at a time ([fn(snapshot)]): what a chat and the left pane are made of beyond what
+    a window's first frame already had the renderer make (colours, rounded ones, text, borders), each scene a shader or
+    two. Not every kind of node in every setting: each shader takes 40 to 150 ms to make, and five long chats, opened
+    and scrolled through, needed only these (GSK_DEBUG=shaders lists the ones made)."""
+    ink, clear = Gdk.RGBA(), Gdk.RGBA()
+    ink.parse("rgba(40, 60, 90, 0.8)")
+    clear.parse("rgba(0, 0, 0, 0)")
+    stops = []
+    for offset, color in ((0.0, ink), (1.0, clear)):
+        stop = Gsk.ColorStop()
+        stop.offset, stop.color = offset, color  # (a copy: set whole)
+        stops.append(stop)
+    layout = widget.create_pango_layout(None)
+    layout.set_markup("Ag <b>fn()</b> <tt>code</tt> ✓", -1)
+    pixels = GLib.Bytes.new(bytes([90, 120, 200, 255, 128, 128, 128, 128] * 32))  # (8 x 8, two colours)
+    pictures = [Gdk.MemoryTexture.new(8, 8, fmt, pixels, 32)  # (as images come, and as drawings and icons do)
+                for fmt in (Gdk.MemoryFormat.R8G8B8A8, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED)]
+    shape = Gsk.Path.parse("M 4 4 L 36 10 L 14 34 Z")
+    box, corner = Gsk.RoundedRect(), Gsk.RoundedRect()  # (kept: what init_from_rect gives back doesn't keep it)
+    box.init_from_rect(Graphene.Rect().init(4, 4, 32, 24), 6)
+    corner.init_from_rect(Graphene.Rect().init(6, 6, 28, 28), 10)
+
+    def rect(x, y, w, h):
+        return Graphene.Rect().init(x, y, w, h)
+
+    def point(x, y):
+        return Graphene.Point().init(x, y)
+
+    def text(s):
+        s.save()
+        s.translate(point(2, 2))
+        s.append_layout(layout, ink)
+        s.restore()
+
+    def basics(s):  # (what a first frame has, for a window whose first frame didn't)
+        s.append_color(ink, rect(0, 0, 4, 4))
+        s.push_rounded_clip(corner)
+        s.append_color(ink, rect(2, 2, 36, 36))
+        s.pop()
+        s.append_border(box, [1, 1, 1, 1], [ink] * 4)
+        text(s)
+
+    def textures(s):  # (pictures, and drawings and icons, as they are and scaled)
+        for i, picture in enumerate(pictures):
+            s.append_texture(picture, rect(2 + 10 * i, 2, 8, 8))
+            s.append_scaled_texture(picture, Gsk.ScalingFilter.LINEAR, rect(2 + 14 * i, 14, 13, 13))
+
+    def rounded_textures(s):  # (an image in a card, cut at its rounded corners)
+        s.push_rounded_clip(corner)
+        textures(s)
+        s.pop()
+
+    def logo(s):  # (draw_ref_icon: a logo's shapes, scaled, with a cut-out)
+        s.scale(0.83, 0.83)
+        s.push_mask(Gsk.MaskMode.LUMINANCE)
+        s.append_fill(shape, Gsk.FillRule.WINDING, ink)
+        s.pop()
+        s.append_fill(shape, Gsk.FillRule.WINDING, ink)
+        s.append_stroke(shape, Gsk.Stroke.new(1.5), ink)
+        s.pop()
+    return [basics,
+            lambda s: s.append_outset_shadow(box, ink, 0, 2, 0, 6),  # (a popover's, a card's)
+            lambda s: s.append_linear_gradient(rect(0, 0, 40, 40), point(0, 0), point(40, 0), stops),
+            textures, rounded_textures,
+            lambda s: snapshot_faded(s, text, 30, 20, at_start=False),  # (a name cut short: FadeLabel)
+            logo]
+
+
 def load_css():
     """Baude's stylesheet (CSS), once per display: what's drawn with its classes elsewhere (Record's lists, the
     viewers) looks as it does in Baude."""

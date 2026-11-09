@@ -6998,12 +6998,7 @@ def scan_session(path, state=None):
     is re-scanned on every change, and they grow to tens of MB. info is None if it isn't a
     session worth listing (no prompts and no title). Its record ids (record_key) are the state's own
     frozensets, shared with the info: carrying on copies them first, so the state passed in isn't changed."""
-    if state:
-        st = {**state, "uuids": set(state["uuids"]), "foreign": set(state["foreign"])}
-    else:
-        st = {"offset": 0, "title": None, "agent_name": None, "last_prompt": None, "relocated": None,
-              "summary": None, "uuids": set(), "born": None, "foreign": set(), "cwd": None, "source": "",
-              "prompts": 0, "first_prompt": None, "cost": 0.0, "said": None}
+    st = {**state, "uuids": set(state["uuids"]), "foreign": set(state["foreign"])} if state else _scan_state()
     sid = os.path.splitext(os.path.basename(path))[0]
     try:
         mtime = os.path.getmtime(path)
@@ -7029,6 +7024,13 @@ def scan_session(path, state=None):
     info["title"] = info["title"] or st["agent_name"] or st["summary"] or \
         (first[:90] + ("…" if len(first) > 90 else "")) or None
     return st, (info if info["prompts"] or info["title"] else None)
+
+
+def _scan_state():
+    """scan_session's tallies before any line's read."""
+    return {"offset": 0, "title": None, "agent_name": None, "last_prompt": None, "relocated": None, "summary": None,
+            "uuids": set(), "born": None, "foreign": set(), "cwd": None, "source": "", "prompts": 0,
+            "first_prompt": None, "cost": 0.0, "said": None}
 
 
 def _scan_line(st, line, sid):
@@ -7388,6 +7390,44 @@ def cached_session_info(path):
         _info_cache[path] = (st.st_ino, st.st_size, st.st_mtime, state, info)
         _info_dirty[0] = True
     return info
+
+
+def session_cost(path):
+    """What claude had spent on a session when it last exited (its last cost-state), as cached_session_info says: from
+    it while it has the transcript as it is, or has only what was appended since to read; else from the transcript's
+    end back to that record (a chat opened before the session index has read it: read whole, a 160 MB one took 0.26 s
+    of opening it). 0.0 for none."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0.0
+    with _info_lock:
+        _load_info_cache()
+        hit = _info_cache.get(path)
+    if hit and (hit[:3] == (st.st_ino, st.st_size, st.st_mtime) or hit[0] == st.st_ino and st.st_size > hit[1]):
+        return (cached_session_info(path) or {}).get("cost") or 0.0
+    sid = os.path.splitext(os.path.basename(path))[0]
+    try:
+        with open(path, "rb") as f:
+            at, carry = st.st_size, b""
+            while at > 0:
+                start = max(0, at - (1 << 20))
+                f.seek(start)
+                data = f.read(at - start) + carry
+                whole = data.find(b"\n") + 1 if start else 0  # (the line it begins in is read with the block before)
+                carry, at = data[:whole], start
+                hit = data.rfind(b'"cost-state"', whole)
+                while hit >= 0:
+                    begin, stop = data.rfind(b"\n", 0, hit) + 1, data.find(b"\n", hit)
+                    if stop >= 0:  # (a whole line, as scan_session reads them: not one still being written)
+                        tally = {**_scan_state(), "cost": None}
+                        _scan_line(tally, str(memoryview(data)[begin:stop], "utf-8", "replace"), sid)
+                        if tally["cost"] is not None:
+                            return tally["cost"]
+                    hit = data.rfind(b'"cost-state"', whole, begin)
+    except OSError:
+        pass
+    return 0.0
 
 
 _info_dirty = [False]
@@ -9134,7 +9174,7 @@ def git_checkout(path):
 
 
 _FOLDERS = {}
-_REF_WHERE = re.compile(r'"(cwd|file_path|notebook_path|command|name)":\s*"((?:[^"\\]|\\.)*)"')
+_REF_WHERE = re.compile(rb'"(cwd|file_path|notebook_path|command|name)":[ \t\r\f\v]*"((?:[^"\\\n]|\\.)*)"')  # (in a line)
 _REF_CD = re.compile(r"(?:^|&&|;|\|\||\n|\(|\{|\bthen\b|\bdo\b)\s*(?:cd|pushd)\s+(\"[^\"]+\"|'[^']+'|(?:\\ |[^\s;&|()])+)")
 _REF_GIT_C = re.compile(r"\bgit\s+-C\s+(\"[^\"]+\"|'[^']+'|(?:\\ |\S)+)\s+(?:commit|push|pull|merge|rebase|checkout|switch|"
                         r"cherry-pick|reset|revert|add|rm|mv|stash|tag|am|apply|restore)\b")
@@ -9142,65 +9182,162 @@ _REF_WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
 
 def transcript_folders(path):
-    """Where a chat worked, in its transcript's order, each folder once (the most recent last): [(folder, acted)]. The
-    folder each message ran in (acted False: prompts are recorded there whatever the chat does), and, acted, the
-    folders its commands cd into or change with git -C (cd ../wt && ..., git -C ../wt commit), and the folders of the
-    files it edits or writes. Reading a file somewhere isn't working there. A worktree beside the repository is outside
-    the project, so Claude Code puts the shell back after each command there, and only the commands and edits say the
-    chat worked in it. Kept per file size: a growing transcript is read again only once it has grown, and then only
-    what it grew by, a line at a time (they get to hundreds of MB, and this runs as they grow)."""
+    """Where a chat worked, the most recent first, each folder once: (folder, acted). The folder each message ran in
+    (acted False: prompts are recorded there whatever the chat does), and, acted, the folders its commands cd into or
+    change with git -C (cd ../wt && ..., git -C ../wt commit), and the folders of the files it edits or writes. Reading
+    a file somewhere isn't working there. A worktree beside the repository is outside the project, so Claude Code puts
+    the shell back after each command there, and only the commands and edits say the chat worked in it. Read from the
+    transcript's end back, only as far as they're asked for: chat_checkout wants the latest that says something, mostly
+    in the last few hundred KB (read whole, a 50 to 85 MB chat took 0.3 to 1.5 s of opening it). Kept per transcript, and
+    as it grows only what it grew by is read (this runs for each line another program appends)."""
     try:
         size = os.path.getsize(path)
-    except OSError:
-        return []
-    hit = _FOLDERS.get(path)
-    if hit and hit[0] == size:
-        return hit[1]
-    fresh = {"offset": 0, "order": {}, "cwd": None, "writing": False, "last": None}
-    st = hit[2] if hit and size > hit[2]["offset"] else fresh
-
-    def seen(d, acted):  # (a folder acted in and one only run in are two entries, each where it was last)
-        if d and os.path.isabs(d):
-            key = (os.path.normpath(d), acted)
-            order.pop(key, None)
-            order[key] = True
-
-    def target(t):
-        d = os.path.expanduser(t.strip("\"'").replace("\\ ", " "))
-        return d if os.path.isabs(d) else os.path.join(st["cwd"], d) if st["cwd"] else None
-    try:
         with open(path, "rb") as f:
-            if st["last"] is not None:  # (carrying on: still the file read, its last line where it was?)
-                f.seek(st["last"][0])
-                if _line_sum(f.readline()) != st["last"][1]:
-                    st = fresh  # (rewritten: from the start)
-            order = st["order"]
-            f.seek(st["offset"])
-            for raw in f:
-                if not raw.endswith(b"\n"):
-                    break  # (a line still being written: read next time)
-                st["last"] = (st["offset"], _line_sum(raw))
-                st["offset"] += len(raw)
-                for m in _REF_WHERE.finditer(raw.decode("utf-8", "replace")):
-                    try:
-                        value = json.loads(f'"{m[2]}"')
-                    except ValueError:
-                        continue
-                    if m[1] == "name":
-                        st["writing"] = value in _REF_WRITERS  # (the tool whose input follows)
-                    elif m[1] == "cwd":
-                        st["cwd"] = value
-                        seen(value, False)
-                    elif m[1] == "command":
-                        for t in _REF_CD.findall(value) + _REF_GIT_C.findall(value):
-                            seen(target(t), True)
-                    elif st["writing"] and os.path.isabs(value):
-                        seen(os.path.dirname(value), True)
-                        st["writing"] = False
+            trail = _folder_trail(path, f, size)
+            i = 0
+            while True:
+                while i < len(trail["keys"]):
+                    yield trail["keys"][i]
+                    i += 1
+                if not _trail_take(trail, f):
+                    return
     except OSError:
-        return []
-    _FOLDERS[path] = (size, list(order), st)
-    return _FOLDERS[path][1]
+        return
+
+
+def _folder_events(data, cwd=..., writing=...):
+    """What transcript_folders reads in whole transcript lines (bytes), in order, from the state the lines before them
+    leave: cwd, the folder the last message ran in (None before any); writing, whether the call whose input comes next
+    writes files; `...` for either where those lines aren't read yet. ([(folder, acted)], cwd, writing): the state they
+    leave, `...` still where they don't say. One that hangs on a state not read is (target, "cd") (a cd into a relative
+    folder, before their first message's folder) or (folder, "write") (a file's, before their first call: written if the
+    call before them writes). Folders as found: _trail_folders normalizes them, and drops relative ones."""
+    events = []
+    for m in _REF_WHERE.finditer(data):
+        try:
+            value = json.loads('"' + m[2].decode("utf-8", "replace") + '"')
+        except ValueError:
+            continue
+        if m[1] == b"name":
+            writing = value in _REF_WRITERS  # (the tool whose input follows)
+        elif m[1] == b"cwd":
+            cwd = value
+            events.append((value, False))
+        elif m[1] == b"command":
+            for t in _REF_CD.findall(value) + _REF_GIT_C.findall(value):
+                d = os.path.expanduser(t.strip("\"'").replace("\\ ", " "))
+                if os.path.isabs(d):
+                    events.append((d, True))
+                elif cwd is ...:
+                    events.append((d, "cd"))
+                elif cwd:
+                    events.append((os.path.join(cwd, d), True))
+        elif writing is not False and os.path.isabs(value):
+            events.append((os.path.dirname(value), True if writing is True else "write"))
+            writing = False
+    return events, cwd, writing
+
+
+def _folder_trail(path, f, size):
+    """transcript_folders' memory of a transcript: "keys", its folders found so far, newest first; "seen", them as a set;
+    "blocks", what's read of it, newest first, each [start, events (_folder_events; None once in keys), cwd, writing];
+    the first "taken" of them in keys. The lines added since it was last looked at are read now (a line still being
+    written isn't), and their folders go first; one rewritten (shorter, or its end not what was read) is read again."""
+    trail = _FOLDERS.get(path)
+    if trail is not None and trail["size"] == size:
+        return trail
+    end, at, step = 0, size, 1 << 16
+    while at > 0:  # (the whole lines end at the last newline)
+        start = max(0, at - step)
+        f.seek(start)
+        if (nl := f.read(at - start).rfind(b"\n")) >= 0:
+            end = start + nl + 1
+            break
+        at, step = start, step * 2
+    if trail is not None:
+        f.seek(trail["last"][0])
+        if end < trail["end"] or hash(f.read(trail["end"] - trail["last"][0])) != trail["last"][1]:
+            trail = None
+    if trail is None:
+        trail = _FOLDERS[path] = {"end": end, "keys": [], "seen": set(), "blocks": [], "taken": 0}
+    elif end > trail["end"]:
+        f.seek(trail["end"])
+        trail["blocks"].insert(0, [trail["end"], *_folder_events(f.read(end - trail["end"]))])
+        trail["taken"] += 1
+        fresh = _trail_folders(trail, f, 0)
+        trail["seen"].update(fresh)
+        fresh_set = set(fresh)
+        trail["keys"] = fresh + [k for k in trail["keys"] if k not in fresh_set]
+    back = max(0, end - 4096)
+    f.seek(back)
+    trail.update(size=size, end=end, last=(back, hash(f.read(end - back))))  # (to tell it's the file read, next time)
+    return trail
+
+
+def _trail_read(trail, f):
+    """The lines of a trail's transcript before the earliest read, parsed: 256 KB of them, twice as many each time
+    after, to 8 MB (a line longer than that, all of it). False at its start."""
+    blocks = trail["blocks"]
+    at = blocks[-1][0] if blocks else trail["end"]
+    size = (1 << 18) << min(len(blocks), 5)
+    while at > 0:
+        start = max(0, at - size)
+        f.seek(start)
+        data = f.read(at - start)
+        nl = data.find(b"\n") if start else -1  # (the line it begins in: part of the block before)
+        if start and not 0 <= nl < len(data) - 1:
+            size *= 2
+            continue
+        blocks.append([start + nl + 1, *_folder_events(data[nl + 1:])])
+        return True
+    return False
+
+
+def _trail_state(trail, f, i):
+    """(cwd, writing) where a trail's block i begins: as the blocks before it leave them, read back as far as it takes."""
+    blocks, cwd, writing = trail["blocks"], ..., ...
+    while cwd is ... or writing is ...:
+        if blocks[i][0] == 0:  # (the transcript's start: none yet)
+            return None if cwd is ... else cwd, False if writing is ... else writing
+        i += 1
+        if i == len(blocks):
+            _trail_read(trail, f)
+        cwd = blocks[i][2] if cwd is ... else cwd
+        writing = blocks[i][3] if writing is ... else writing
+    return cwd, writing
+
+
+def _trail_folders(trail, f, i):
+    """A trail's block i as its folders, newest first, each once: what hangs on the lines before it, as they say."""
+    events, trail["blocks"][i][1] = trail["blocks"][i][1], None
+    if any(acted in ("cd", "write") for _d, acted in events):
+        cwd, writing = _trail_state(trail, f, i)
+    out, seen = [], set()
+    for d, acted in reversed(events):
+        if acted == "cd":
+            d, acted = os.path.join(cwd, d) if cwd else None, True
+        elif acted == "write":
+            if not writing:
+                continue
+            acted = True
+        if d and os.path.isabs(d):  # (a folder acted in and one only run in are two entries, each where it was last)
+            key = (os.path.normpath(d), acted)
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+    return out
+
+
+def _trail_take(trail, f):
+    """The next block back of a trail's transcript into its keys (read now if it isn't yet). False at its start."""
+    if trail["taken"] == len(trail["blocks"]) and not _trail_read(trail, f):
+        return False
+    for key in _trail_folders(trail, f, trail["taken"]):
+        if key not in trail["seen"]:
+            trail["seen"].add(key)
+            trail["keys"].append(key)
+    trail["taken"] += 1
+    return True
 
 
 _TREES = {}
@@ -9231,7 +9368,7 @@ def chat_checkout(folder, transcript):
     if here is None:
         return None
     trees = sorted(git_trees(here[1]), key=len, reverse=True)  # (the deepest first: .claude/worktrees/x in its repo)
-    for d, acted in reversed(transcript_folders(transcript)):
+    for d, acted in transcript_folders(transcript):  # (the latest first)
         real = os.path.realpath(d)
         tree = next((t for t in trees if real == t or real.startswith(t + os.sep)), None)
         if tree == here[0] and acted:
@@ -10608,6 +10745,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                                                             lambda sw, _p: self.set_signal(links=sw.get_active()))
 
         update.watch_input(self)  # (what quiet reads: a new version waits while you're at it)
+        widgets.warm_shaders(self)  # (the first window's: after its first frame)
         restore = take_restart_state(getattr(opts, "restore", None))
         if restore:
             self.session_id = restore.get("session_id") or self.session_id
@@ -13619,7 +13757,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         except OSError:
             st = None
         live = st is not None and time.time() - st.st_mtime < LIVE_SECONDS
-        self.total_cost = (cached_session_info(path) or {}).get("cost") or 0.0  # (claude's, as it last exited)
+        self.total_cost = session_cost(path)  # (claude's, as it last exited)
         self.load_history(path, live=live)
         self.resume_pending, self.view_path = True, path
         self.tail.start(path, st.st_size if st else 0)

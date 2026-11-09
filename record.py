@@ -4916,6 +4916,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
         widgets.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
+        widgets.warm_shaders(self)  # (after its first frame)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
 

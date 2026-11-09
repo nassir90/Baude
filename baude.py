@@ -10705,7 +10705,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def on_layout(self, _clock):
         """Right after each layout pass: what's being held in place first, else the newest content in view."""
-        held = self.hold_view_anchor()
+        # (a zoom, or a restart's place put back: those hold the view themselves, this one would fight them)
+        held = self.hold_view_anchor() if self.zoom_job is None and self.restore_scroll is None else None
         if getattr(self, "keep_place", None) is not None:
             self.hold_keep_place(held)
         if self.zoom_job is not None:

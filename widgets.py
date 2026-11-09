@@ -5003,7 +5003,8 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .tool-card.error { border-color: @error_color; }
-.perm-card { border: 2px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
+/* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */
+.perm-card { border: 1px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
 .mono { font-family: monospace; font-size: 0.9em; }
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
@@ -5128,7 +5129,7 @@ dropdown.git-branches popover listview > row { min-height: 0; margin: 0; padding
 .ref-loc { padding: 2px 6px; min-height: 24px; }
 .ref-on image { color: @accent_color; }
 .ref-links image { color: alpha(@accent_color, 0.5); }
-.reader-glossary { font-size: 0.85em; margin-left: 10px; padding-left: 8px; border-left: 2px solid @accent_color; }
+.reader-glossary { font-size: 0.85em; margin-left: 10px; padding-left: 8px; border-left: 3px solid @accent_color; }
 .reader-part { font-size: 0.8em; opacity: 0.55; margin-top: 4px; }
 .reader-refused { font-size: 0.8em; color: @warning_color; margin-left: 10px; }
 .ref-option { padding: 2px 12px; min-height: 26px; font-weight: normal; background: none; box-shadow: inset 0 0 0 1px alpha(currentColor, 0.18); }

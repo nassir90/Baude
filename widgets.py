@@ -4140,15 +4140,19 @@ class ScrollGlide:
     to keep what's read where it was, was undone the next frame, the view thrown thousands of pixels, and the glide went
     on from there. Its scrolls are taken after a code block's own scroller's (bubbling up to the viewport), and Ctrl's
     (zoom) and Shift's (sideways) are left to others. more(): whether there's more to draw above, a glide that reaches
-    the top waiting a moment for it."""
+    the top waiting a moment for it. A wheel's click glides there over WHEEL_S rather than jumping a fifth of a screen in
+    one frame (clicks in a row add up), and a touchpad's pixels are moved by once a frame, together: they come at their
+    own rate, two in one frame and none in the next. rested(): a glide or a wheel's click has come to rest by itself."""
 
     FRICTION = 4.0  # (GTK's: the speed falls by e each quarter second)
     STOP = 10.0  # px/s
     WAIT = 0.5  # s at the top, for what's drawn above it
+    WHEEL_S = 0.12  # s a wheel's click takes to get there (most of the way: it eases out)
 
-    def __init__(self, scroller, more=None):
-        self.scroller, self.more = scroller, more or (lambda: False)
+    def __init__(self, scroller, more=None, rested=None):
+        self.scroller, self.more, self.rested = scroller, more or (lambda: False), rested or (lambda: None)
         self.v, self.tick, self.last, self.waited = 0.0, None, None, 0.0
+        self.wheel = self.pan = 0.0  # (px a wheel's clicks have still to go; a touchpad's, since the last frame)
         scroller.set_kinetic_scrolling(False)  # (its glide off: this one's)
         ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL |
                                         Gtk.EventControllerScrollFlags.KINETIC)
@@ -4169,8 +4173,10 @@ class ScrollGlide:
     def _scroll(self, ctl, _dx, dy):
         if dy == 0 or ctl.get_current_event_state() & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
             return False
-        self.stop()
-        self.step(dy * self._detent(ctl))
+        if ctl.get_unit() == Gdk.ScrollUnit.WHEEL:
+            self.wheel_by(dy * self._detent(ctl))
+        else:
+            self.pan_by(dy)
         return True
 
     def _decelerate(self, ctl, _vx, vy):
@@ -4180,20 +4186,38 @@ class ScrollGlide:
         adj = self.scroller.get_vadjustment()
         adj.set_value(adj.get_value() + dy)
 
+    def wheel_by(self, dy):
+        """A wheel's click: glide dy px over WHEEL_S, on from where the clicks before it have still to go."""
+        self.v, self.pan = 0.0, 0.0  # (a glide's over)
+        self.wheel += dy
+        self._run()
+
+    def pan_by(self, dy):
+        """A touchpad's dy px, moved by in the next frame with any others that come before it."""
+        self.v, self.wheel = 0.0, 0.0
+        self.pan += dy
+        self._run()
+
     def glide(self, v):
         """Glide on at v px/s (> 0 down), slowing as GTK's does."""
         self.stop()
         if abs(v) < self.STOP:
             return
-        clock = self.scroller.get_frame_clock()
-        self.v, self.waited = v, 0.0
-        self.last = clock.get_frame_time() / 1e6 if clock is not None else None
-        self.tick = self.scroller.add_tick_callback(self._frame)
+        self.v = v
+        self._run()
+
+    def _run(self):
+        if self.tick is None:
+            clock = self.scroller.get_frame_clock()
+            self.last = clock.get_frame_time() / 1e6 if clock is not None else None
+            self.waited = 0.0
+            self.tick = self.scroller.add_tick_callback(self._frame)
 
     def gliding(self):
         return self.tick is not None
 
     def stop(self):
+        self.v = self.wheel = self.pan = 0.0
         if self.tick is not None:
             self.scroller.remove_tick_callback(self.tick)
             self.tick = None
@@ -4202,20 +4226,36 @@ class ScrollGlide:
         now = clock.get_frame_time() / 1e6
         dt = min(max(now - self.last, 0.0), 0.1) if self.last is not None else 1 / 60
         self.last = now
-        decay = math.exp(-self.FRICTION * dt)
-        dy, self.v = self.v * (1 - decay) / self.FRICTION, self.v * decay
+        moving = bool(self.v or self.wheel)  # (what comes to rest by itself, as against a touchpad's pixels)
+        dy, self.pan = self.pan, 0.0
+        if self.wheel:
+            part = self.wheel * (1 - math.exp(-3 * dt / self.WHEEL_S))  # (95% of the way in WHEEL_S)
+            if abs(self.wheel - part) < 0.5:
+                part = self.wheel
+            self.wheel -= part
+            dy += part
+        glided = 0.0
+        if self.v:
+            decay = math.exp(-self.FRICTION * dt)
+            glided, self.v = self.v * (1 - decay) / self.FRICTION, self.v * decay
+            dy += glided
         adj = self.scroller.get_vadjustment()
         before = adj.get_value()
-        adj.set_value(before + dy)
+        if dy:
+            adj.set_value(before + dy)
         if adj.get_value() == before and dy:  # (at an end)
+            self.wheel = 0.0
             self.waited += dt
-            if not (dy < 0 and self.more()) or self.waited > self.WAIT:
-                self.tick = None
-                return GLib.SOURCE_REMOVE
+            if not (glided < 0 and self.more()) or self.waited > self.WAIT:
+                self.v = 0.0
         if abs(self.v) < self.STOP:
-            self.tick = None
-            return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
+            self.v = 0.0
+        if self.v or self.wheel or self.pan:
+            return GLib.SOURCE_CONTINUE
+        self.tick = None
+        if moving:
+            self.rested()
+        return GLib.SOURCE_REMOVE
 
 
 def layout_origin(label):

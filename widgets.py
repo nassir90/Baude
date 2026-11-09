@@ -4029,6 +4029,91 @@ def hold_place(scroller, place, seconds=2.0):
         mapped[0] = scroller.connect("map", shown)
 
 
+class ScrollGlide:
+    """A scrolled window's own scrolling: a wheel's or touchpad's scrolls, and the glide after a fling, each a step from
+    where the view is now. GTK's own glide puts the view where its reckoning of the fling says each frame, and takes no
+    notice of it being moved meanwhile: a chunk of a chat's history drawn above mid-glide, the view moved by its height
+    to keep what's read where it was, was undone the next frame, the view thrown thousands of pixels, and the glide went
+    on from there. Its scrolls are taken after a code block's own scroller's (bubbling up to the viewport), and Ctrl's
+    (zoom) and Shift's (sideways) are left to others. more(): whether there's more to draw above, a glide that reaches
+    the top waiting a moment for it."""
+
+    FRICTION = 4.0  # (GTK's: the speed falls by e each quarter second)
+    STOP = 10.0  # px/s
+    WAIT = 0.5  # s at the top, for what's drawn above it
+
+    def __init__(self, scroller, more=None):
+        self.scroller, self.more = scroller, more or (lambda: False)
+        self.v, self.tick, self.last, self.waited = 0.0, None, None, 0.0
+        scroller.set_kinetic_scrolling(False)  # (its glide off: this one's)
+        ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL |
+                                        Gtk.EventControllerScrollFlags.KINETIC)
+        ctl.connect("scroll-begin", lambda *_: self.stop())
+        ctl.connect("scroll", self._scroll)
+        ctl.connect("decelerate", self._decelerate)
+        scroller.get_child().add_controller(ctl)  # (the viewport: after what's in it, before the scroller's own)
+        press = Gtk.GestureClick(button=0, propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        press.connect("pressed", lambda *_: self.stop())  # (a click or the scrollbar taken: the glide's over)
+        scroller.add_controller(press)
+
+    def _detent(self, ctl):
+        """What a wheel's click scrolls, as GTK has it; 1 for a touchpad's pixels."""
+        if ctl.get_unit() != Gdk.ScrollUnit.WHEEL:
+            return 1.0
+        return max(1.0, self.scroller.get_vadjustment().get_page_size()) ** (2 / 3)
+
+    def _scroll(self, ctl, _dx, dy):
+        if dy == 0 or ctl.get_current_event_state() & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            return False
+        self.stop()
+        self.step(dy * self._detent(ctl))
+        return True
+
+    def _decelerate(self, ctl, _vx, vy):
+        self.glide(vy * self._detent(ctl))
+
+    def step(self, dy):
+        adj = self.scroller.get_vadjustment()
+        adj.set_value(adj.get_value() + dy)
+
+    def glide(self, v):
+        """Glide on at v px/s (> 0 down), slowing as GTK's does."""
+        self.stop()
+        if abs(v) < self.STOP:
+            return
+        clock = self.scroller.get_frame_clock()
+        self.v, self.waited = v, 0.0
+        self.last = clock.get_frame_time() / 1e6 if clock is not None else None
+        self.tick = self.scroller.add_tick_callback(self._frame)
+
+    def gliding(self):
+        return self.tick is not None
+
+    def stop(self):
+        if self.tick is not None:
+            self.scroller.remove_tick_callback(self.tick)
+            self.tick = None
+
+    def _frame(self, _widget, clock):
+        now = clock.get_frame_time() / 1e6
+        dt = min(max(now - self.last, 0.0), 0.1) if self.last is not None else 1 / 60
+        self.last = now
+        decay = math.exp(-self.FRICTION * dt)
+        dy, self.v = self.v * (1 - decay) / self.FRICTION, self.v * decay
+        adj = self.scroller.get_vadjustment()
+        before = adj.get_value()
+        adj.set_value(before + dy)
+        if adj.get_value() == before and dy:  # (at an end)
+            self.waited += dt
+            if not (dy < 0 and self.more()) or self.waited > self.WAIT:
+                self.tick = None
+                return GLib.SOURCE_REMOVE
+        if abs(self.v) < self.STOP:
+            self.tick = None
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+
 def layout_origin(label):
     """Where a label's text is drawn in it (GTK's get_layout_location, which GTK 4 doesn't give): its alignment's."""
     layout = label.get_layout()

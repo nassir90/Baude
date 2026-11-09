@@ -6433,15 +6433,9 @@ class Attachment:
                                "data": base64.b64encode(self.data).decode()}}
         return None
 
-    def thumbnail(self, size):
-        """A square, centre-cropped texture (2x for HiDPI)."""
-        pb = _pixbuf_from_bytes(self.data)
-        w, h = pb.get_width(), pb.get_height()
-        side = min(w, h)
-        pb = pb.new_subpixbuf((w - side) // 2, (h - side) // 2, side, side)
-        pb = pb.scale_simple(size * 2, size * 2, GdkPixbuf.InterpType.BILINEAR)
-        ok, png = pb.save_to_bufferv("png", [], [])
-        return Gdk.Texture.new_from_bytes(GLib.Bytes.new(png))
+    def thumbnail(self, size, scale=2.0):
+        """A square, centre-cropped texture, size logical pixels on a screen of this scale."""
+        return thumbnail_texture(self.data, size, scale)
 
     def icon(self):
         return file_icon(self.name)
@@ -6455,16 +6449,33 @@ def clipboard_has(formats, gtype, mime_prefixes):
     return any(m.startswith(p) for m in formats.get_mime_types() or [] for p in mime_prefixes)
 
 
+def thumbnail_texture(data, size, scale):
+    """A square, centre-cropped texture of an image's bytes: size logical pixels on a screen of this scale."""
+    pb = _pixbuf_from_bytes(data)
+    w, h = pb.get_width(), pb.get_height()
+    side, px = min(w, h), max(1, round(size * scale))
+    pb = pb.new_subpixbuf((w - side) // 2, (h - side) // 2, side, side).scale_simple(px, px,
+                                                                                     GdkPixbuf.InterpType.BILINEAR)
+    fmt = Gdk.MemoryFormat.R8G8B8A8 if pb.get_has_alpha() else Gdk.MemoryFormat.R8G8B8
+    return Gdk.MemoryTexture.new(px, px, fmt, pb.read_pixel_bytes(), pb.get_rowstride())
+
+
 def attachment_widget(att, size, on_remove=None):
-    """A thumbnail (images) or icon + name, optionally with a remove button."""
+    """A thumbnail (images) or icon + name, optionally with a remove button. A thumbnail is its size at once, and decoded
+    off the main thread as it nears the view (widgets.FixedPicture): made here, a chat's history stopped for 9 ms an
+    image as it was drawn, 300 ms a chunk of screenshots, mid-scroll."""
     box = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER, tooltip_text=att.path or att.name)
-    try:
-        texture = att.thumbnail(size) if att.kind == "image" else None
-    except GLib.Error:  # (an image no loader here reads, say a HEIC sent from elsewhere: shown as a file is)
-        texture = None
-    if texture is not None:
-        thumb = Gtk.Image.new_from_paintable(texture)
-        thumb.set_pixel_size(size)
+    thumb = None
+    if att.kind == "image" and widgets.image_dims(att.data):
+        thumb = widgets.FixedPicture(size=(size, size), load=lambda scale, data=att.data:
+                                     thumbnail_texture(data, size, scale))
+    elif att.kind == "image":  # (a header image_dims can't read: decoded now, to know it's an image at all)
+        try:
+            thumb = Gtk.Image.new_from_paintable(att.thumbnail(size))
+            thumb.set_pixel_size(size)
+        except GLib.Error:  # (an image no loader here reads, say a HEIC sent from elsewhere: shown as a file is)
+            thumb = None
+    if thumb is not None:
         thumb.add_css_class("attach-thumb")
         make_image_interactive(thumb, att.data, att.path, att.name)
         box.append(thumb)
@@ -6479,7 +6490,7 @@ def attachment_widget(att, size, on_remove=None):
         rm.connect("clicked", lambda *_: on_remove(att))
         box.append(rm)
     box.add_css_class("attach-chip")
-    if texture is not None and not on_remove:
+    if thumb is not None and not on_remove:
         box.add_css_class("image")
     return box
 
@@ -10319,6 +10330,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         wheel.connect("scroll", self.on_reader_scroll)
         self.scroller.add_controller(wheel)
+        # (its own scrolling and glide, each a step from where the view is: GTK's glide undid the view's moving by a
+        # chunk of history drawn above it, mid-glide)
+        self.scroll_glide = widgets.ScrollGlide(self.scroller, lambda: bool(self.history and self.history.more))
         self.connect("realize", lambda *_: self.get_frame_clock().connect_after("layout", self.on_layout))
 
         # composer (widgets.Composer: Record's too)
@@ -10691,10 +10705,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def on_layout(self, _clock):
         """Right after each layout pass: what's being held in place first, else the newest content in view."""
+        held = self.hold_view_anchor()
+        if getattr(self, "keep_place", None) is not None:
+            self.hold_keep_place(held)
         if self.zoom_job is not None:
+            self.view_anchor = None
             self.hold_zoom_place()
             return
         if self.restore_scroll is not None:
+            self.view_anchor = None
             from_bottom, until = self.restore_scroll
             adj = self.scroller.get_vadjustment()
             if time.monotonic() > until:
@@ -10706,6 +10725,59 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.follow.stick = from_bottom <= 1
             return
         self.follow.laid_out()
+        if held is not True:  # (moved this pass: what's in view is found once it's laid out where it's moved to)
+            self.note_view_anchor()
+
+    # ---- the view held to the message at its top as what's above it changes height (a chunk of history drawn, a web
+    # image arriving in place of its link, a card filling in): GTK keeps the scrolled distance, so all of that pushed
+    # what's read down, or up. After each layout pass the first message in view is noted with where it is in the chat;
+    # after the next, the view moves by as much as it has. Not while following the end, nor across a change of width
+    # (a reflow: zoom_job and keep_place_through_restyle hold the view then).
+
+    def chat_message_of(self, widget):
+        """The message widget is in (a child of the chat, or of a history chunk): None for the chat's own boxes, the
+        Show earlier button, or what's outside the chat (the scrollbar)."""
+        hist = getattr(self, "history_box", None)
+        while widget is not None:
+            parent = widget.get_parent()
+            if parent is self.transcript or (hist is not None and parent is not None and parent.get_parent() is hist):
+                return None if widget is hist or widget is getattr(self, "earlier_btn", None) else widget
+            widget = parent
+        return None
+
+    def note_view_anchor(self):
+        self.view_anchor = None
+        if self.stick_bottom or self.transcript.get_width() <= 0:
+            return
+        w, page = self.scroller.get_width(), self.scroller.get_height()
+        for y in range(1, max(2, page), 12):  # (down from the top, past the gaps between messages)
+            for x in (0.5, 0.3, 0.7, 0.15, 0.85):  # (and across: a reply's at the left, your message at the right)
+                if (msg := self.chat_message_of(self.scroller.pick(w * x, y, Gtk.PickFlags.DEFAULT))) is not None:
+                    ok, b = msg.compute_bounds(self.transcript)
+                    if ok:
+                        self.view_anchor = (msg, b.get_y(), self.transcript.get_width())
+                    return
+
+    def hold_view_anchor(self):
+        """The view moved by as much as the message noted at its top has (note_view_anchor): True if it was moved,
+        False if it's where it was, None if there's nothing to hold to."""
+        anchor = getattr(self, "view_anchor", None)
+        if anchor is None:
+            return None
+        msg, y, width = anchor
+        if self.stick_bottom or width != self.transcript.get_width() or not msg.is_ancestor(self.transcript):
+            self.view_anchor = None
+            return None
+        ok, b = msg.compute_bounds(self.transcript)
+        if not ok:
+            self.view_anchor = None
+            return None
+        if abs(b.get_y() - y) < 0.5:
+            return False
+        adj = self.scroller.get_vadjustment()
+        adj.set_value(adj.get_value() + b.get_y() - y)
+        self.view_anchor = (msg, b.get_y(), width)  # (held to it till the view's laid out where it's been moved)
+        return True
 
     def set_busy(self, busy):
         self.busy = busy
@@ -12879,7 +12951,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.history_box.prepend(box)
         box.set_margin_bottom(10 if drawn else 0)  # (the chunk below it; the lowest has the chat's own spacing)
         adj = self.scroller.get_vadjustment()
-        before, value = adj.get_upper(), adj.get_value()
+        before = adj.get_upper()
         self.render_target = box
         try:
             self.render_history(items)
@@ -12889,24 +12961,29 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.history_box.set_visible(True)
         self.update_earlier_btn()
 
-        # once the chunk is laid out, shift the view by what was added above it (only once:
-        # later growth, like a reply streaming in at the bottom, must not move it)
-        def keep_place(*_):
-            self.cancel_keep_place()
-            adj.set_value(value + adj.get_upper() - before)
+        # once the chunk is laid out, shift the view by what was added above it (only once: later growth, like a reply
+        # streaming in at the bottom, must not move it), right after the layout pass it's in (on_layout), so the frame
+        # is drawn with it: at notify::upper the frame was drawn first, the view a chunk's height off (6000 px of
+        # screenshots), and set back from where it was, not where it's been scrolled to since
         self.cancel_keep_place()
-        handler = adj.connect("notify::upper", keep_place)
         # if the layout settles without a size change, don't leave it armed: fired much later (by
         # a zoom, a new message) it would throw the view off by the old chunk's height
         expire = GLib.timeout_add(1500, lambda: (self.cancel_keep_place(), False)[1])
-        self.keep_place = (adj, handler, expire)
+        self.keep_place = (adj, before, expire)
+
+    def hold_keep_place(self, held):
+        """After a layout pass: the view moved by what a chunk drawn above added, once it's laid out (show_earlier),
+        unless the message at the view's top has held it already (held: hold_view_anchor's)."""
+        adj, before, _expire = self.keep_place
+        if adj.get_upper() != before:
+            self.cancel_keep_place()
+            if held is None:
+                adj.set_value(adj.get_value() + adj.get_upper() - before)
 
     def cancel_keep_place(self):
         pending, self.keep_place = getattr(self, "keep_place", None), None
         if pending:
-            adj, handler, expire = pending
-            if adj.handler_is_connected(handler):
-                adj.disconnect(handler)
+            _adj, _before, expire = pending
             GLib.source_remove(expire) if GLib.MainContext.default().find_source_by_id(expire) else None
 
     def render_history(self, items, final=True):

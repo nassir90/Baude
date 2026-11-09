@@ -1,0 +1,12 @@
+[
+  {"value": "mlx-qwen3-4b", "repo": "mlx-community/Qwen3-4B-Instruct-2507-4bit", "displayName": "Qwen3 4B (MLX)",
+   "server": "lm", "input": ["text"]},
+  {"value": "mlx-qwen3-8b", "repo": "mlx-community/Qwen3-8B-4bit", "displayName": "Qwen3 8B (MLX)",
+   "server": "lm", "input": ["text"], "templateArgs": {"enable_thinking": false}},
+  {"value": "mlx-gemma-3-4b", "repo": "mlx-community/gemma-3-4b-it-4bit", "displayName": "Gemma 3 4B (MLX)",
+   "server": "vlm", "input": ["text", "image"]},
+  {"value": "mlx-qwen3-vl-8b", "repo": "lmstudio-community/Qwen3-VL-8B-Instruct-MLX-4bit", "displayName": "Qwen3-VL 8B (MLX)",
+   "server": "vlm", "input": ["text", "image"]},
+  {"value": "mlx-ui-tars-7b", "repo": "mlx-community/UI-TARS-1.5-7B-4bit", "displayName": "UI-TARS 1.5 7B (MLX)",
+   "server": "vlm", "input": ["text", "image"]}
+]

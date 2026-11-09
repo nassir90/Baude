@@ -241,6 +241,37 @@ def apple_exe():
     return exe if os.access(exe, os.X_OK) else None
 
 
+# (beta) models on this Mac, through pi-claude (pi-claude/: pi, the coding agent, on a model mlx_lm.server or
+# mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json that are downloaded, after Apple's;
+# Manual only, no effort, like Apple's; one to another keeps the conversation (pi's session), to Claude's doesn't
+PI_CLAUDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "pi-claude")
+try:
+    with open(os.path.join(PI_CLAUDE, "models.json")) as f:
+        LOCAL_MODELS = [{"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]}
+                        for m in json.load(f)]
+except (OSError, ValueError, KeyError):
+    LOCAL_MODELS = []
+
+
+def local_models():
+    """LOCAL_MODELS whose weights are in the Hugging Face cache, while pi (in ~/.local/share/baude/pi) is installed."""
+    pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
+    if not os.access(pi, os.X_OK):
+        return []
+    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(  # (where huggingface_hub looks)
+        os.environ.get("HF_HOME") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+                                                  "huggingface"), "hub")
+    return [m for m in LOCAL_MODELS
+            if os.path.isdir(os.path.join(hub, "models--" + m["resolvedModel"].replace("/", "--")))]
+
+
+def model_program(value):
+    """What runs a model: "apple" (apple-claude), "pi" (pi-claude), or "claude"."""
+    if value == APPLE_MODEL["value"]:
+        return "apple"
+    return "pi" if any(m["value"] == value for m in LOCAL_MODELS) else "claude"
+
+
 MODES = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"),
          ("auto", "Auto"), ("dontAsk", "Don't ask"), ("bypassPermissions", "Bypass permissions")]
 
@@ -6878,6 +6909,26 @@ def read_session_info(path):
     return scan_session(path)[1]
 
 
+_CHAT_MODEL = re.compile(rb'"isSidechain":\s*false,\s*"message":\s*\{\s*"model":\s*"([^"<][^"]*)"')
+
+
+def transcript_model(path):
+    """The model a transcript's last reply came from (a subagent's, or a <synthetic> one, aside): its last 256 KB
+    first, all of it if they hold none. None if it has none."""
+    try:
+        with open(path, "rb") as f:
+            size = f.seek(0, 2)
+            for back in (1 << 18, size):
+                f.seek(max(0, size - back))
+                if hits := _CHAT_MODEL.findall(f.read()):
+                    return hits[-1].decode()
+                if back >= size:
+                    break
+    except OSError:
+        pass
+    return None
+
+
 _TOOL_RESULT_REC = re.compile(r'"content":\s*\[\s*\{\s*"(?:tool_use_id|type":\s*"tool_result)')
 
 
@@ -11004,6 +11055,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     self.update_status()
                     return
                 self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", None, None, exe=exe)
+            elif model_program(self.model) == "pi":  # (a model on this Mac: pi-claude, Manual, no effort)
+                exe = os.environ.get("BAUDE_PI_CLAUDE") or os.path.join(PI_CLAUDE, "pi-claude")
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", resume, None,
+                                       exe=exe)
             else:
                 self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, self.mode,
                                        resume, self.effort if self.effort_dd.get_sensitive() else None)
@@ -11238,14 +11293,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.note("interrupt requested")
 
     def on_model_changed(self, value):
-        apple = APPLE_MODEL["value"]
-        crossed = (value == apple) != (self.model == apple)  # (Claude's to Apple's, or back: another program)
-        self.model = value
+        was, self.model = self.model, value
         self.sync_effort_choices()
-        self.sync_apple()
-        if crossed:
+        self.sync_local()
+        if model_program(value) != model_program(was):  # (Claude's to Apple's, say: another program)
             self.note(f"model → {self.model_dd.label()}: a new conversation")
             self.restart_proc(resume=False)
+            return
+        if model_program(value) == "pi" and value != was:  # (pi-claude serves one model: pi's session goes on)
+            self.note(f"model → {self.model_dd.label()}")
+            self.restart_proc(resume=True)
             return
         if self.proc:
             self.proc.control({"subtype": "set_model", "model": value})
@@ -11285,29 +11342,63 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.proc.control({"subtype": "set_permission_mode", "mode": value})
             self.note(f"permission mode → {self.mode_dd.label()}")
 
-    def sync_apple(self):
-        """Apple's model: Manual its only mode, and no effort; the pickers for them gone while it's the one."""
-        apple = self.model == APPLE_MODEL["value"]
-        self.effort_dd.set_visible(not apple)
-        self.mode_dd.set_visible(not apple)
-        if apple and self.mode != "default":
+    # ---- each chat's own model: picked in one, it isn't the others'. Kept by session id as a turn ends (chat_models);
+    # a chat opened is put back on it, or on its transcript's last reply's model (one Baude hasn't kept)
+    CHAT_MODELS = 500
+
+    def keep_chat_model(self):
+        if not (self.session_id and self.model) or self.resume_pending:
+            return
+        kept = load_settings().get("chat_models") or {}
+        if kept.get(self.session_id) != self.model:
+            chats = {k: v for k, v in kept.items() if k != self.session_id} | {self.session_id: self.model}
+            save_settings(chat_models=dict(list(chats.items())[-self.CHAT_MODELS:]))
+        if model_program(self.model) == "claude":
+            self.claude_model = self.model  # (where a chat goes that has no model of its own: apply_chat_model)
+
+    def apply_chat_model(self, info):
+        """Put the picker on the model the chat info names was on. A Claude transcript with no model Baude knows goes
+        on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on."""
+        want = (load_settings().get("chat_models") or {}).get(info["id"]) or transcript_model(info["path"])
+        models = getattr(self, "models_info", {})
+        model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) if want else None
+        if model is None and want and model_program(want) == "claude":  # ("claude-opus-5-5" for the picker's "opus")
+            model = next((v for v in models if model_program(v) == "claude" and v in want), None)
+        if model is None and model_program(self.model) != "claude":
+            model = getattr(self, "claude_model", None)
+        elif model is None:
+            return
+        self.model = model
+        if model:
+            self.model_dd.select(model)
+        self.sync_effort_choices()
+        self.sync_local()
+
+    def sync_local(self):
+        """Apple's model and those on this Mac: Manual their only mode, and no effort; the pickers for them gone while
+        one of them is the one."""
+        local = model_program(self.model) != "claude"
+        self.effort_dd.set_visible(not local)
+        self.mode_dd.set_visible(not local)
+        if local and self.mode != "default":
             self.mode = "default"
             if "default" in self.mode_dd.values:
                 self.mode_dd.select("default")
 
     def sync_models(self, models):
         """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and Apple's on-device
-        model after them (APPLE_MODEL). apple-claude's list is its one model: Claude's, as claude last listed them, stay.
+        model after them (APPLE_MODEL), then those on this Mac (local_models). apple-claude's and pi-claude's lists are
+        their one model: Claude's, as claude last listed them, stay.
 
         The list's "default" entry is an alias, not a model: it is dropped, and when no model
         was chosen the entry it resolves to is selected instead.
         """
         models = [m for m in models or [] if m.get("value")]
-        if models and all(m["value"] == APPLE_MODEL["value"] for m in models):
+        if models and all(model_program(m["value"]) != "claude" for m in models):
             models = getattr(self, "claude_models", [])
         else:
             self.claude_models = models
-        models = [m for m in models if m["value"] != APPLE_MODEL["value"]] + [APPLE_MODEL]
+        models = [m for m in models if model_program(m["value"]) == "claude"] + [APPLE_MODEL] + local_models()
         self.models_info = {m["value"]: m for m in models}
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
@@ -11318,7 +11409,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), want)
             self.model_dd.select(hit)
         self.sync_effort_choices()
-        self.sync_apple()
+        self.sync_local()
 
     def read_only_mode(self):
         """Every chat opened (a new one, or one picked in the sidebar) starts in Plan, read-only, whatever mode the
@@ -11426,7 +11517,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return False
 
     def h_stderr(self, msg):
-        self.note("stderr: " + msg["text"])
+        own = model_program(self.model) != "claude"  # (apple-claude and pi-claude say things there for the chat)
+        self.note(("" if own else "stderr: ") + msg["text"])
 
     def h_system(self, msg):
         st = msg.get("subtype")
@@ -12795,6 +12887,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
         self.reset_stream_state()
         self.session_id = info["id"]  # (before the history: Signal files its replies under it)
+        self.apply_chat_model(info)  # (the model it was on, not the chat before's)
         self.signal_pending, self.switching_chat = None, False
         tree = main_folder(self.run_cwd)[1]  # (the checkout it works in, before Signal starts: from what it did, else
         self.ref_checkout = chat_checkout(self.cwd, info["path"]) or (tree if tree and os.path.isdir(tree) else None)  # the worktree it runs in)
@@ -12899,6 +12992,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             if needs_login(msg.get("result")):
                 self.login_prompt(msg["result"])
         self.set_busy(False)
+        self.keep_chat_model()
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_proc(resume=True) and False)

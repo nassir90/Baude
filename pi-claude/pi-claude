@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+"""pi-claude: stands in for `claude -p --input-format stream-json --output-format stream-json ...` for Baude, running
+pi (the coding agent, in its RPC mode) on a model on this Mac that mlx_lm.server or mlx_vlm.server serves.
+
+Of the flags Baude passes it uses --model (a value in models.json), --resume (pi's session of that id, kept in
+~/.local/share/baude/pi/sessions) and --permission-mode. The model's server and pi start with the first message, and
+stop with this. Each of pi's tool calls is put to Baude as a permission question, through ask.ts (a pi extension), and
+shown to it as Claude's tool of that kind (bash as Bash, read as Read, edit as Edit, write as Write).
+"""
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.request
+import uuid
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+HOME = os.path.expanduser("~/.local/share/baude/pi")
+PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "pi")
+MODELS = {m["value"]: m for m in json.load(open(os.path.join(HERE, "models.json")))}
+CONTEXT = 32768  # (the window pi is told: these models take more, but not in 16 GB beside everything else)
+MAX_OUT = 4096
+
+
+def flag(name):
+    args = sys.argv[1:]
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
+
+
+model = MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
+session_id = flag("--resume") or str(uuid.uuid4())
+mode = {"manual": "default", None: "default"}.get(flag("--permission-mode"), flag("--permission-mode"))
+cwd = os.getcwd()
+
+out_lock = threading.Lock()
+
+
+def emit(obj):
+    with out_lock:
+        sys.stdout.write(json.dumps(obj) + "\n")
+        sys.stdout.flush()
+
+
+def say(text):
+    """A line in Baude's chat (it shows a program's stderr as a note)."""
+    sys.stderr.write(text + "\n")
+    sys.stderr.flush()
+
+
+def new_id(prefix):
+    return prefix + uuid.uuid4().hex[:24]
+
+
+def which(name, *more):
+    for path in (shutil.which(name), *more):
+        if path and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+# ---- pi's tools as Claude's, and back
+
+def drop_none(d):
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def to_claude(name, args):
+    a = args or {}
+    if name == "bash":
+        return "Bash", drop_none({"command": a.get("command")})
+    if name == "read":
+        return "Read", drop_none({"file_path": a.get("path"), "offset": a.get("offset"), "limit": a.get("limit")})
+    if name == "write":
+        return "Write", drop_none({"file_path": a.get("path"), "content": a.get("content")})
+    if name == "edit":
+        edits = a.get("edits") or []
+        if len(edits) == 1:
+            return "Edit", drop_none({"file_path": a.get("path"), "old_string": edits[0].get("oldText"),
+                                      "new_string": edits[0].get("newText")})
+        return "MultiEdit", {"file_path": a.get("path"), "edits": [
+            {"old_string": e.get("oldText"), "new_string": e.get("newText")} for e in edits]}
+    return name, a
+
+
+def from_claude(name, inp, was):
+    """Baude's answer's input (Claude's shape) as pi's, over what pi asked with."""
+    i = inp or {}
+    if name == "Bash":
+        return was | drop_none({"command": i.get("command")})
+    if name in ("Read", "Write"):
+        return was | drop_none({"path": i.get("file_path"), "offset": i.get("offset"), "limit": i.get("limit"),
+                                "content": i.get("content")})
+    if name == "Edit":
+        return was | {"path": i.get("file_path", was.get("path")),
+                      "edits": [{"oldText": i.get("old_string"), "newText": i.get("new_string")}]}
+    if name == "MultiEdit":
+        return was | {"path": i.get("file_path", was.get("path")),
+                      "edits": [{"oldText": e.get("old_string"), "newText": e.get("new_string")}
+                                for e in i.get("edits") or []]}
+    return was | i
+
+
+def result_text(result):
+    parts = []
+    for c in (result or {}).get("content") or []:
+        parts.append(c.get("text", "") if c.get("type") == "text" else f"[{c.get('type', 'content')}]")
+    return "\n".join(parts)
+
+
+# ---- the model's server and pi
+
+class Engine:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.ready = threading.Event()
+        self.failed = None
+        self.started = False
+        self.server = self.pi = None
+        self.agent_dir = None
+        self.waiting = {}  # pi command id -> callback(response)
+        self.asks = {}  # Baude request id -> (pi dialog id, pi tool name, pi input, Claude tool name)
+        self.ids = iter(range(1, 1 << 62))
+        self.queue = []
+        self.turn = None
+
+    # starting
+
+    def start(self):
+        with self.lock:
+            if self.started:
+                return
+            self.started = True
+        threading.Thread(target=self._boot, daemon=True).start()
+
+    def _boot(self):
+        try:
+            port = self._serve()
+            self._pi(port)
+        except Exception as e:  # noqa: BLE001 (any failure ends up as the turn's error)
+            self.failed = str(e)
+        self.ready.set()
+        for item in self.queue:
+            self.prompt(*item)
+        self.queue.clear()
+
+    def _serve(self):
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        local = os.path.expanduser("~/.local/bin")
+        if model["server"] == "lm":
+            exe = which("mlx_lm.server", os.path.join(local, "mlx_lm.server"))
+            args = [exe, "--model", model["repo"], "--port", str(port), "--max-tokens", str(MAX_OUT)]
+            if model.get("templateArgs"):
+                args += ["--chat-template-args", json.dumps(model["templateArgs"])]
+        else:
+            exe = which("mlx_vlm.server", os.path.join(local, "mlx_vlm.server"))
+            args = [exe, "--model", model["repo"], "--host", "127.0.0.1", "--port", str(port),
+                    "--max-tokens", str(MAX_OUT)]
+        if not exe:
+            raise RuntimeError(f"{'mlx_lm' if model['server'] == 'lm' else 'mlx_vlm'}.server isn't installed")
+        os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
+        log = open(os.path.join(HOME, "logs", f"{model['value']}.log"), "a")
+        # (sh waits on its stdin, a pipe from here, and stops the server when it closes: when this exits, however)
+        self.server = subprocess.Popen(
+            ["sh", "-c", '"$@" & pid=$!; cat > /dev/null; kill $pid 2>/dev/null; wait $pid', "sh", *args],
+            stdin=subprocess.PIPE, stdout=log, stderr=log, env=os.environ | {"HF_HUB_OFFLINE": "1"})
+        say(f"loading {model['displayName']}…")
+        t0 = time.time()
+        while time.time() - t0 < 300:
+            if self.server.poll() is not None:
+                raise RuntimeError(f"{model['displayName']}'s server stopped (see {log.name})")
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1).read()
+                return port
+            except OSError:
+                time.sleep(0.25)
+        raise RuntimeError(f"{model['displayName']}'s server didn't come up in 5 minutes (see {log.name})")
+
+    def _pi(self, port):
+        if not os.access(PI, os.X_OK):
+            raise RuntimeError(f"pi isn't installed (npm install @earendil-works/pi-coding-agent, in {HOME})")
+        self.agent_dir = tempfile.mkdtemp(prefix="baude-pi-")
+        with open(os.path.join(self.agent_dir, "models.json"), "w") as f:
+            json.dump({"providers": {"mlx": {
+                "baseUrl": f"http://127.0.0.1:{port}/v1", "api": "openai-completions", "apiKey": "local",
+                "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False, "supportsStore": False,
+                           "maxTokensField": "max_tokens"},
+                "models": [{"id": model["repo"], "name": model["displayName"], "input": model["input"],
+                            "contextWindow": CONTEXT, "maxTokens": MAX_OUT,
+                            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}]}}}, f)
+        node = which("node", os.path.expanduser("~/.local/node/bin/node"), "/opt/homebrew/bin/node")
+        sessions = os.path.join(HOME, "sessions")
+        os.makedirs(sessions, exist_ok=True)
+        args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", "mlx", "--model", model["repo"],
+                "--session-dir", sessions, "--session-id", session_id, "--no-extensions",
+                "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp",
+                "--no-approve", "--offline", "--append-system-prompt",
+                f"The user's project is {cwd}, the working folder: the files they mention are there, not in pi's "
+                "own documentation."]
+        log = open(os.path.join(HOME, "logs", "pi.log"), "a")
+        self.pi = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
+                                   env=os.environ | {"PI_CODING_AGENT_DIR": self.agent_dir, "PI_OFFLINE": "1",
+                                                     "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
+        threading.Thread(target=self._read_pi, daemon=True).start()
+
+    def stop(self):
+        for p in (self.pi, self.server):
+            if p and p.poll() is None:
+                try:
+                    p.stdin.close()
+                except OSError:
+                    pass
+        if self.pi:
+            try:
+                self.pi.wait(3)
+            except subprocess.TimeoutExpired:
+                self.pi.kill()
+        if self.agent_dir:
+            shutil.rmtree(self.agent_dir, ignore_errors=True)
+
+    # talking to pi
+
+    def send(self, cmd, callback=None):
+        cid = f"b{next(self.ids)}"
+        if callback:
+            self.waiting[cid] = callback
+        with self.lock:
+            self.pi.stdin.write((json.dumps(cmd | {"id": cid}) + "\n").encode())
+            self.pi.stdin.flush()
+
+    def prompt(self, text, images):
+        if not self.ready.is_set():
+            self.queue.append((text, images))
+            self.start()
+            return
+        busy = self.turn is not None
+        if not busy:
+            self.turn = {"start": time.time(), "text": "", "messages": 0, "error": None, "usage": {}}
+        if self.failed:
+            self.turn["error"] = self.failed
+            self.end_turn()
+            return
+        cmd = {"type": "prompt", "message": text}
+        if images:
+            cmd["images"] = images
+        if busy:
+            cmd["streamingBehavior"] = "followUp"
+
+        def accepted(r):
+            if not r.get("success") and self.turn:
+                self.turn["error"] = r.get("error") or "pi didn't take the message"
+                self.end_turn()
+        self.send(cmd, accepted)
+
+    def _read_pi(self):
+        for line in self.pi.stdout:
+            line = line.rstrip(b"\r\n")
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            try:
+                self.on_pi(rec)
+            except Exception as e:  # noqa: BLE001 (one odd record shouldn't end the chat)
+                say(f"pi-claude: {e}")
+        if self.turn:
+            self.turn["error"] = "pi stopped (see ~/.local/share/baude/pi/logs/pi.log)"
+            self.end_turn()
+        self.failed = "pi stopped"
+
+    def on_pi(self, rec):
+        t = rec.get("type")
+        if t == "response":
+            cb = self.waiting.pop(rec.get("id"), None)
+            if cb:
+                cb(rec)
+        elif t == "message_start" and rec["message"].get("role") == "assistant":
+            self.mid = new_id("msg_")
+            self.stream({"type": "message_start", "message": {"id": self.mid, "model": model["repo"],
+                                                              "role": "assistant", "content": []}})
+        elif t == "message_update":
+            e = rec.get("assistantMessageEvent") or {}
+            i = e.get("contentIndex", 0)
+            if e.get("type") == "text_start":
+                self.stream({"type": "content_block_start", "index": i, "content_block": {"type": "text", "text": ""}})
+            elif e.get("type") == "text_delta":
+                self.stream({"type": "content_block_delta", "index": i,
+                             "delta": {"type": "text_delta", "text": e.get("delta", "")}})
+            elif e.get("type") == "thinking_start":
+                self.stream({"type": "content_block_start", "index": i,
+                             "content_block": {"type": "thinking", "thinking": ""}})
+            elif e.get("type") == "thinking_delta":
+                self.stream({"type": "content_block_delta", "index": i,
+                             "delta": {"type": "thinking_delta", "thinking": e.get("delta", "")}})
+            elif e.get("type") in ("text_end", "thinking_end"):
+                self.stream({"type": "content_block_stop", "index": i})
+        elif t == "message_end" and rec["message"].get("role") == "assistant":
+            self.assistant_done(rec["message"])
+        elif t == "tool_execution_end":
+            emit({"type": "user", "parent_tool_use_id": None, "session_id": session_id,
+                  "message": {"role": "user", "content": [{
+                      "type": "tool_result", "tool_use_id": rec.get("toolCallId"),
+                      "content": result_text(rec.get("result")), "is_error": bool(rec.get("isError"))}]}})
+        elif t == "extension_ui_request":
+            self.on_dialog(rec)
+        elif t == "compaction_end" and rec.get("result"):
+            emit({"type": "system", "subtype": "compact_boundary", "session_id": session_id})
+        elif t == "agent_settled":
+            self.end_turn()
+
+    def stream(self, event):
+        emit({"type": "stream_event", "event": event, "parent_tool_use_id": None, "session_id": session_id})
+
+    def assistant_done(self, m):
+        content = []
+        for c in m.get("content") or []:
+            if c.get("type") == "text" and c.get("text"):
+                content.append({"type": "text", "text": c["text"]})
+            elif c.get("type") == "thinking" and c.get("thinking"):
+                content.append({"type": "thinking", "thinking": c["thinking"], "signature": ""})
+            elif c.get("type") == "toolCall":
+                name, inp = to_claude(c.get("name"), c.get("arguments"))
+                content.append({"type": "tool_use", "id": c.get("id"), "name": name, "input": inp})
+        if m.get("stopReason") == "error" and m.get("errorMessage"):
+            content.append({"type": "text", "text": f"⚠ {m['errorMessage']}"})
+            if self.turn:
+                self.turn["error"] = m["errorMessage"]
+        if not content:
+            return
+        u = m.get("usage") or {}
+        emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session_id,
+              "message": {"id": getattr(self, "mid", new_id("msg_")), "model": model["repo"], "role": "assistant",
+                          "content": content,
+                          "usage": {"input_tokens": u.get("input", 0), "output_tokens": u.get("output", 0)}}})
+        if self.turn:
+            self.turn["messages"] += 1
+            text = "".join(c["text"] for c in content if c["type"] == "text")
+            if text:
+                self.turn["text"] = text
+            for k in ("input", "output"):
+                self.turn["usage"][k] = self.turn["usage"].get(k, 0) + (u.get(k) or 0)
+
+    def end_turn(self):
+        turn, self.turn = self.turn, None
+        if not turn:
+            return
+        if turn["error"] and not turn["text"]:
+            emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session_id,
+                  "message": {"id": new_id("msg_"), "model": model["repo"], "role": "assistant",
+                              "content": [{"type": "text", "text": f"⚠ {turn['error']}"}]}})
+        emit({"type": "result", "subtype": "success", "is_error": bool(turn["error"]), "session_id": session_id,
+              "result": turn["text"] or turn["error"] or "", "num_turns": max(1, turn["messages"]),
+              "duration_ms": int((time.time() - turn["start"]) * 1000), "total_cost_usd": 0,
+              "usage": {"input_tokens": turn["usage"].get("input", 0),
+                        "output_tokens": turn["usage"].get("output", 0)}})
+
+    # permission questions
+
+    def on_dialog(self, rec):
+        method, did = rec.get("method"), rec.get("id")
+        ask = None
+        if method == "input":
+            try:
+                ask = json.loads(rec.get("title") or "")
+            except ValueError:
+                pass
+        if not isinstance(ask, dict) or ask.get("baude") != "can_use_tool":
+            if method in ("select", "confirm", "input", "editor"):  # (only ask.ts's are for Baude)
+                self.send({"type": "extension_ui_response", "id": did, "cancelled": True})
+            return
+        name, inp = to_claude(ask.get("tool"), ask.get("input"))
+        if mode == "bypassPermissions":
+            return self.answer(did, {"behavior": "allow"})
+        rid = new_id("req_")
+        self.asks[rid] = (did, ask.get("input") or {}, name)
+        emit({"type": "control_request", "request_id": rid, "request": {
+            "subtype": "can_use_tool", "tool_name": name, "input": inp, "tool_use_id": ask.get("id")}})
+
+    def answer(self, did, reply):
+        with self.lock:
+            self.pi.stdin.write((json.dumps({"type": "extension_ui_response", "id": did,
+                                             "value": json.dumps(reply)}) + "\n").encode())
+            self.pi.stdin.flush()
+
+    def on_permission(self, rid, response):
+        did, was, name = self.asks.pop(rid, (None, None, None))
+        if did is None:
+            return
+        if response.get("behavior") == "allow":
+            self.answer(did, {"behavior": "allow", "input": from_claude(name, response.get("updatedInput"), was)})
+        else:
+            self.answer(did, {"behavior": "deny", "message": response.get("message") or "The user said no to this."})
+
+    def deny_all(self, message):
+        for rid in list(self.asks):
+            self.on_permission(rid, {"behavior": "deny", "message": message})
+
+
+engine = Engine()
+
+
+def reply(request_id, response=None):
+    emit({"type": "control_response", "response": {"subtype": "success", "request_id": request_id,
+                                                   "response": response or {}}})
+
+
+def handle(msg):
+    global mode
+    t = msg.get("type")
+    if t == "control_request":
+        req, rid = msg.get("request") or {}, msg.get("request_id")
+        sub = req.get("subtype")
+        if sub == "initialize":
+            reply(rid, {"commands": [], "current_permission_mode": mode,
+                        "models": [{"value": model["value"], "resolvedModel": model["repo"],
+                                    "displayName": model["displayName"]}]})
+            emit({"type": "system", "subtype": "init", "session_id": session_id, "cwd": cwd,
+                  "model": model["displayName"], "tools": ["Read", "Bash", "Edit", "Write"],
+                  "permissionMode": mode})
+        elif sub == "get_context_usage":
+            def usage(r):
+                u = (r.get("data") or {}).get("contextUsage") or {}
+                used, size = u.get("tokens") or 0, u.get("contextWindow") or CONTEXT
+                reply(rid, {"categories": [], "totalTokens": used, "maxTokens": size,
+                            "percentage": used * 100 / size if size else 0})
+            if engine.ready.is_set() and not engine.failed:
+                engine.send({"type": "get_session_stats"}, usage)
+            else:
+                usage({})
+        elif sub == "get_settings":
+            reply(rid, {"applied": {"model": model["value"], "effort": None}})
+        elif sub == "set_permission_mode":
+            mode = req.get("mode") or mode
+            reply(rid)
+            emit({"type": "system", "subtype": "status", "status": None, "permissionMode": mode,
+                  "session_id": session_id})
+        elif sub == "interrupt":
+            engine.deny_all("Interrupted by the user")
+            if engine.ready.is_set() and not engine.failed:
+                engine.send({"type": "abort"})
+            reply(rid)
+        else:
+            reply(rid)
+    elif t == "control_response":
+        r = msg.get("response") or {}
+        answer = r.get("response") if r.get("subtype") == "success" else None
+        engine.on_permission(r.get("request_id"), answer or {"behavior": "deny", "message": "Permission denied"})
+    elif t == "user":
+        content = (msg.get("message") or {}).get("content")
+        if isinstance(content, str):
+            return engine.prompt(content, [])
+        texts, images = [], []
+        for b in content or []:
+            if b.get("type") == "text":
+                texts.append(b.get("text", ""))
+            elif b.get("type") == "image" and (b.get("source") or {}).get("type") == "base64":
+                images.append({"type": "image", "data": b["source"]["data"], "mimeType": b["source"]["media_type"]})
+        if images and "image" not in model["input"]:
+            texts.append(f"[{len(images)} image(s) {model['displayName']} can't see]")
+            images = []
+        engine.prompt("\n".join(texts), images)
+
+
+def main():
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if line:
+                try:
+                    handle(json.loads(line))
+                except ValueError:
+                    pass
+    finally:
+        engine.stop()
+
+
+if __name__ == "__main__":
+    main()

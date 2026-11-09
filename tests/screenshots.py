@@ -268,7 +268,7 @@ def _(app):
     return win
 
 
-@scene("24-output-collapsed", "Several finished tool calls, a line each: their sections folded, at the right")
+@scene("24-output-collapsed", "Several finished tool calls, a line each: the name, its Command and Output buttons, a failed one red")
 def _(app):
     win = app.window(opts())
     for i, (cmd, out, err) in enumerate([("git status --short", " M baude.py", False),
@@ -318,7 +318,7 @@ def _(app):
     return win
 
 
-@scene("29-tool-group-open", "The same group opened: each call one line, › command and › output at its right")
+@scene("29-tool-group-open", "The same group opened: each call one line, its Command and Output buttons after the name; no indent")
 def _(app):
     win = app.window(opts())
     tool_group(win).toggle.set_expanded(True)

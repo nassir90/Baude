@@ -338,7 +338,7 @@ def test_turn_allow(app):
         assert "Done, one file." in text, text
         card = find(win.transcript, baude.ToolCard)[0]
         assert card.decision == "allowed", "decision shown on the card"
-        assert card.status.get_icon_name() == "object-select-symbolic"
+        assert card.state == "done"
         assert "$0.0125" in win.status.get_text(), win.status.get_text()
         perm = [json.loads(l) for l in fake_log() if '"perm1"' in l and "control_response" in l]
         assert perm and perm[0]["response"]["response"]["behavior"] == "allow"
@@ -2542,7 +2542,8 @@ def test_mcp_card_and_permission(app):
         name = "mcp__github__create_issue"
         inp = {"title": "Jitter", "assignees": [{"login": "naza"}]}
         win.render_assistant([{"type": "tool_use", "id": "mc", "name": name, "input": inp}])
-        assert win.tool_cards["mc"].header.get_text().startswith("Create issue  GitHub")
+        mc = win.tool_cards["mc"]
+        assert mc.title.get_text() == "Create issue" and mc.header.get_text().startswith("GitHub")
         win.on_msg(win.proc, {"type": "control_request", "request_id": "pm", "request": {
             "subtype": "can_use_tool", "tool_name": name, "input": inp, "tool_use_id": "mc"}})
         card = button(win, "Allow").get_ancestor(Gtk.Box).get_parent()
@@ -2728,41 +2729,40 @@ def test_tool_card_alignment(app):
         win.render_assistant([{"type": "tool_use", "id": "a1", "name": "Bash",
                                "input": {"command": "ls", "description": "List files"}}])
         card = win.tool_cards["a1"]
-        def boxes(widgets):
+        def bounds(w):
+            ok, b = w.compute_bounds(card)
+            assert ok
+            return b
+        def one_line(buttons):
+            """the sections' buttons on one line with the name and summary, between them"""
             pump(0.1)
-            out = []
-            for w in widgets:
-                ok, b = w.compute_bounds(card)
-                assert ok
-                out.append((round(b.get_x() + b.get_width() / 2), b.get_width(), b.get_height()))
-            return out
-        def one_line(widgets):
-            """the status and the sections' arrows: 16px, on the line the summary is on, the arrows right of it"""
-            got = boxes(widgets)
-            ok, head = card.header.compute_bounds(card)
-            assert {(w, h) for _, w, h in got} == {(16, 16)}, got
-            middles = [b.get_y() + b.get_height() / 2 for b in [w.compute_bounds(card)[1] for w in widgets + [card.header]]]
+            name, head = bounds(card.title), bounds(card.header)
+            middles = [b.get_y() + b.get_height() / 2 for b in map(bounds, buttons + [card.title, card.header])]
             assert max(middles) - min(middles) <= 1, ("one line", middles)
-            assert all(x > head.get_x() + head.get_width() for x, _, _ in got[1:]), "the arrows at its right end"
+            assert all(name.get_x() + name.get_width() <= bounds(b).get_x() and
+                       bounds(b).get_x() + bounds(b).get_width() <= head.get_x() for b in buttons), "after the name"
         assert not card.output_toggle.get_visible(), "no output section before there is output"
-        one_line([card.status, card.input_toggle.arrow])
-        ok, before = card.input_toggle.arrow.compute_bounds(card)
+        one_line([card.input_toggle.button])
+        assert bounds(card.status).get_x() > bounds(card.header).get_x(), "a running call's spinner at the end"
+        before = bounds(card.title)
         win.render_tool_results([{"type": "tool_result", "tool_use_id": "a1", "content": "ok"}])
         assert card.output_toggle.get_visible()
-        one_line([card.status, card.input_toggle.arrow, card.output_toggle.arrow])
-        ok, after = card.input_toggle.arrow.compute_bounds(card)
-        assert before.get_x() == after.get_x(), "the command's arrow stays put when the output's comes"
+        one_line([card.input_toggle.button, card.output_toggle.button])
+        assert before.get_x() == bounds(card.title).get_x(), "the name stays put when the output's button comes"
+        assert card.status is None, "nothing at the end once it's done: no tick"
         assert not card.input_toggle.get_expanded() and not card.output_toggle.get_expanded(), "folded at first"
         assert card.input_toggle.get_child() is None and card.output_toggle.get_child() is None, \
             "and not built until opened (not even the boxes they go in)"
         assert "ls" in labels_text(opened(card.output_toggle) and opened(card.input_toggle))
-        card.input_toggle.set_expanded(False)
+        card.input_toggle.button.emit("clicked")
+        assert not card.input_toggle.get_expanded(), "a click on its button closes it"
         assert "ok" in labels_text(opened(card.output_toggle)) and "ls" not in labels_text(card.output_toggle.get_child())
-        assert card.output_toggle.arrow.get_icon_name() == "pan-down-symbolic"
-        assert card.input_toggle.arrow.get_icon_name() == "pan-end-symbolic", "sections open independently"
+        assert card.output_toggle.button.get_active() and not card.input_toggle.button.get_active(), \
+            "sections open independently"
         win.render_assistant([{"type": "tool_use", "id": "a2", "name": "Bash", "input": {"command": "false"}}])
         win.render_tool_results([{"type": "tool_result", "tool_use_id": "a2", "content": "boom", "is_error": True}])
-        assert win.tool_cards["a2"].status.get_icon_name() == "window-close-symbolic"
+        assert win.tool_cards["a2"].status is None and win.tool_cards["a2"].has_css_class("error"), \
+            "a failed call: its border says so"
         snapshot(win, "tool_card_alignment")
     finally:
         close(win)
@@ -3016,7 +3016,7 @@ def test_tool_grouping(app):
         for i in range(6):
             win.render_tool_results([{"type": "tool_result", "tool_use_id": f"g{i}", "content": "ok",
                                       "is_error": i == 3}])
-        assert g.state == "error" and g.status.get_icon_name() == "window-close-symbolic"
+        assert g.state == "error"
         win.render_assistant([{"type": "text", "text": "Next step."},
                               {"type": "tool_use", "id": "h1", "name": "Bash", "input": {"command": "a"}},
                               {"type": "tool_use", "id": "h2", "name": "Bash", "input": {"command": "b"}}])
@@ -4996,7 +4996,8 @@ def test_undescribed_command_header(app):
         win.render_assistant([{"type": "tool_use", "id": "wd", "name": "Bash",
                                "input": {"command": cmd, "description": "Sync the bench folder"}}])
         bare, described = win.tool_cards["nd"], win.tool_cards["wd"]
-        assert bare.header.get_text().strip() == "Bash", "no description: nothing of ours after the name"
+        assert bare.title.get_text() == "Bash" and not bare.header.get_text().strip(), \
+            "no description: nothing of ours after the name"
         assert "Sync the bench folder" in described.header.get_text(), "Claude's description is shown"
         assert bare.header.get_selectable() and described.header.get_selectable(), "the header can be copied"
         assert cmd in labels_text(opened(bare.input_toggle)), "the command is in its section"

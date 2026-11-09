@@ -5079,8 +5079,10 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .sidebar-header .folder-arrow { min-width: 20px; min-height: 20px; padding: 0; opacity: 0; transition: opacity 120ms; }
 .sidebar-header.hover .folder-arrow, .sidebar-header .folder-arrow.collapsed { opacity: 0.75; }
 .session-sidebar .sidebar-plus { min-width: 24px; min-height: 24px; padding: 0; }
-.tool-group { padding: 2px 10px; }
+.tool-group { padding: 2px 0; }  /* (no indent: the calls' boxes start where the chat's text does) */
 .tool-group > box > box > label { opacity: 0.8; }
+/* a tool card's Command / Output: small toggle buttons after its name, only a little rounded */
+.tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
 /* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed */
 .side-panel { background: transparent; }
 .side-question { border: 1px solid @baude_rule; border-radius: 10px; padding: 10px 12px; }

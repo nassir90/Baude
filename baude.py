@@ -11013,6 +11013,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def refresh_context(self):
         self.request({"subtype": "get_context_usage"}, self.show_context)
 
+    CONTEXT_EVERY_MS = 1000
+
+    def refresh_context_soon(self):
+        """The meter asked again a moment after each step of a turn (a reply, a tool's result), at most once a second:
+        asked only as a turn ended, a small model's 32k filled through a turn of tool calls with the bar standing
+        still, then jumped (a large window hid it)."""
+        if getattr(self, "context_soon", None) is None:
+            self.context_soon = GLib.timeout_add(self.CONTEXT_EVERY_MS, self._context_now)
+
+    def _context_now(self):
+        self.context_soon = None
+        if self.proc:
+            self.refresh_context()
+        return False
+
     def show_context(self, usage):
         used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
         if not total:
@@ -11810,6 +11825,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     self.add(sel_label(f'<span foreground="red">{html.escape(c["text"])}</span>'), parent)
             return
         self.render_assistant(m.get("content", []), parent, streamed=m.get("id") in self.streamed_ids)
+        if parent is None:
+            self.refresh_context_soon()
 
     def render_assistant(self, content, parent=None, streamed=False, written_at=None):
         """Assistant content blocks. Streamed messages already drew their text and thinking."""
@@ -12816,6 +12833,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         content = msg.get("message", {}).get("content")
         if isinstance(content, list):  # a plain string is the echo of our own prompt
             self.render_tool_results(content)
+            if not msg.get("parent_tool_use_id"):
+                self.refresh_context_soon()
 
     # ---- history
     # items drawn when a session opens, and per earlier chunk (loaded as you scroll near the top, or by

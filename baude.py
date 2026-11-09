@@ -13092,7 +13092,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def update_earlier_btn(self):
         n = self.history.count() if self.history else 0
         self.earlier_btn.set_label("Show earlier messages" if n is None else f"Show earlier messages ({n} more)")
-        self.earlier_btn.set_visible(bool(self.history and self.history.more))
+        top = self.history_box.get_first_child() if self.history else None
+        # (not once the chat's start is drawn, out of turn: nothing's earlier than that)
+        self.earlier_btn.set_visible(bool(self.history and self.history.more) and not getattr(top, "filled", False))
 
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't

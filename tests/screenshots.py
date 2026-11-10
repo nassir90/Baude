@@ -1533,8 +1533,9 @@ def saved_note(name, text, png, issue=None):
     return folder
 
 
-def fixes_tab(app, select=None, show_all=False, viewer="ADMIN", notes=False):
-    """A window with ☰ → Ongoing Feedback open, read from a fake GitHub: returned with the page ready."""
+def fixes_tab(app, select=None, show_all=False, viewer="ADMIN", notes=False, private=False):
+    """A window with ☰ → Ongoing Feedback open, read from a fake GitHub: returned with the page ready. private: there's
+    a private repository for feedback (fixes.PRIVATE_FEEDBACK) too, that it's shown."""
     fake = os.path.join(T.TMP, "fake-gh")
     with open(fake, "w") as f:
         f.write(f'#!/bin/sh\nexec "{sys.executable}" "{os.path.join(HERE, "fake_gh.py")}" "$@"\n')
@@ -1571,18 +1572,29 @@ def fixes_tab(app, select=None, show_all=False, viewer="ADMIN", notes=False):
               comments=[{"author": {"login": "nassir90"}, "authorAssociation": "OWNER", "createdAt": ago_iso(500000),
                         "body": "Rejected from Baude."}]),
     ]}
+    if private:
+        inside = {**issue(3, "The approval card's border is thicker than the tool rows'",
+                          "Approvals have a 2px border, failed and passed tools 1px.", 5400, comments=[
+                              fix_comment("Every card's border is now 1px (`.perm-card` in `widgets.py`).", age=300,
+                                          state="ready", round=1, machine="naza-mbp")]),
+                  "url": "https://github.com/nassir90/BaudeInternal/issues/3"}
+        state["issues_on"] = {"nassir90/BaudeInternal": [inside]}
+        state["prs"].append({**pr, "number": 44, "title": "One border width for every card",
+                             "headRefName": "fix/BaudeInternal-3", "url": "https://github.com/nassir90/Baude/pull/44",
+                             "updatedAt": ago_iso(300), "closingIssuesReferences": []})
     path = os.path.join(T.TMP, "fake-gh.json")
     with open(path, "w") as f:
         json.dump(state, f)
     os.environ.update(BAUDE_GH=fake, FAKE_GH_STATE=path, FAKE_GH_SIGNED_IN="1")
     T.feedback._gh_seen.update(at=None, repo=None)
     T.fixes._can_write.clear()
+    T.fixes._private_seen.clear()
     if notes:
         png = window_png(app)
         saved_note("20261020-142000", "The sessions sidebar jumps when a chat finishes\n\nIt scrolls back to the top, and I "
                                       "lose my place.", png)
         saved_note("20261021-142000", "The input box is hard to find when the chat is empty", png,
-                   {"url": "https://github.com/nassir90/Baude/issues/12", "number": 12, "repo": T.feedback.issue_repo()})
+                   {"url": "https://github.com/nassir90/Baude/issues/12", "number": 12, "repo": T.feedback.code_repo()})
     app.next_size = (W, H)
     win = app.window(opts())
     win.activate_action("win.fixes")
@@ -1633,6 +1645,12 @@ def _(app):
 @scene("96h-feedback-note-on-issue", "A note filed as an issue: shown under that issue, with its captures")
 def _(app):
     return fixes_tab(app, select=12, notes=True)[0]
+
+
+@scene("96i-feedback-private", "Feedback kept on a private repository, beside Baude's: each says where it is, its fix "
+                                "a PR on Baude")
+def _(app):
+    return fixes_tab(app, select="BaudeInternal-3", private=True, notes=True)[0]
 
 
 @scene("96f-feedback-read-only", "Without write access to the repository: read only")

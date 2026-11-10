@@ -1993,7 +1993,7 @@ def test_pointers_feedback(app):
     once a tooltip's window has shown the arrow. In Send Feedback (a dialog: a move under one goes no further up), a capture's
     thumbnail the magnifying glass."""
     import mouse
-    if not mouse.available() or feedback.issue_repo() is None:
+    if not mouse.available() or feedback.code_repo() is None:
         return
     png = Gdk.MemoryTexture.new(40, 20, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(bytes(40 * 20 * 4)), 160) \
         .save_to_png_bytes().get_data()
@@ -5199,7 +5199,7 @@ def test_feedback_files_issue(app):
                 "if args[:2] == ['issue', 'create']:\n"
                 "    print('https://github.com/' + args[args.index('--repo') + 1] + '/issues/99')\n")
     os.chmod(fake, 0o755)
-    repo = feedback.issue_repo()
+    repo = feedback.code_repo()
     os.environ.update(BAUDE_GH=fake, FAKE_GH_SIGNED_IN="1")
     feedback._gh_seen.update(at=None, repo=None)
     win = app.window()
@@ -5416,7 +5416,7 @@ def test_feedback_page_is_there_as_it_reads(app):
     the refresh turning; the list says it's loading, the right has nothing and no spinner. Read, it fills. Opened again,
     what was read last time is there at once, as it's read again. (#64)"""
     import threading
-    if feedback.issue_repo() is None:
+    if feedback.code_repo() is None:
         return
     fake_github([gh_issue(1, "Ready one", [gh_round("working", ago=500), gh_round("ready", text="It's fixed.")]),
                  gh_issue(2, "Open one")], [gh_pr(11, 1)])
@@ -5473,7 +5473,7 @@ def test_fixes_tab(app):
     What can be done goes by where it stands: open, Fix here starts a round; ready, Merge or Discard, asked first, or
     another round asked for by a reply. No Approve or Reject, no words explaining them. Without write access, none of it. gh signed
     out, it says so; gh failing, what was read stays and it says so; an action failing, a toast."""
-    if feedback.issue_repo() is None:
+    if feedback.code_repo() is None:
         return  # (a checkout not from GitHub: nowhere to read it from)
     png = Gdk.MemoryTexture.new(40, 20, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(bytes(40 * 20 * 4)), 160) \
         .save_to_png_bytes().get_data()
@@ -6724,7 +6724,7 @@ def test_feedback_items(app):
     its issue read, a note filed as it shows under it, not on a row of its own; one filed elsewhere or not listed keeps its."""
     png = Gdk.MemoryTexture.new(40, 20, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(bytes(40 * 20 * 4)), 160) \
         .save_to_png_bytes().get_data()
-    repo = feedback.issue_repo() or "o/r"
+    repo = feedback.code_repo() or "o/r"
 
     def note(name, text, resolution=None, issue=None, captures=0):
         folder = os.path.join(baude.feedback_dir(), name)
@@ -6786,7 +6786,7 @@ def test_feedback_items(app):
         assert fixview.where_it_is(page.current()) == "#77" and button(page.clamp, "Issue") is not None
         assert "can't be read" in page.hint.get_label()
 
-        if feedback.issue_repo() is not None:  # (read from GitHub: the note under its issue)
+        if feedback.code_repo() is not None:  # (read from GitHub: the note under its issue)
             fake_github([gh_issue(1, "The issue", body="As filed.")])
             page.refresh()
             wait_for(lambda: any(i["number"] == 1 for i in page.items), "the issue read")
@@ -8550,16 +8550,16 @@ def test_feedback_region_text_in_the_issue(app):
             feedback.gh = saved
 
         # marking regions says where their words go, whatever gh says, naming the repository if the checkout does
-        kept = feedback.issue_repo
-        feedback.issue_repo = lambda: "o/r"
+        kept = feedback.code_repo
+        feedback.code_repo = lambda: "o/r"
         try:
             hint = feedback.RegionEditor(cap).hint.get_label()
             assert "GitHub issue on o/r" in hint, hint
-            feedback.issue_repo = lambda: None
+            feedback.code_repo = lambda: None
             hint = feedback.RegionEditor(cap).hint.get_label()
             assert "GitHub" not in hint and "stay with the note" in hint, hint
         finally:
-            feedback.issue_repo = kept
+            feedback.code_repo = kept
     finally:
         os.environ["BAUDE_GH"] = ""
         feedback._gh_seen.update(at=None, repo=None)
@@ -13366,7 +13366,7 @@ def test_relative_times_say_when(app):
 
 
     # Ongoing Feedback (the page, both apps')
-    if feedback.issue_repo() is not None:
+    if feedback.code_repo() is not None:
         fake_github([gh_issue(1, "Ready one", [gh_round("ready", ago=7200, text="It's fixed.")]), gh_issue(2, "Open one")],
                     [gh_pr(11, 1)])
         win = app.window()
@@ -13673,8 +13673,8 @@ def test_saved_notes_file_themselves(app):
                 json.dump({"url": "https://github.com/o/r/issues/99", "number": 99, "repo": "o/r"}, f)
         return folder
 
-    saved = feedback.gh, feedback.issue_repo, dict(feedback._gh_seen), dict(feedback._not_taken)
-    feedback.gh, feedback.issue_repo = gh, lambda: "o/r"
+    saved = feedback.gh, feedback.code_repo, dict(feedback._gh_seen), dict(feedback._not_taken)
+    feedback.gh, feedback.code_repo = gh, lambda: "o/r"
     feedback._gh_seen.update(at=None, repo=None)
     feedback._not_taken.clear()
     env = os.environ.get("BAUDE_GH")
@@ -13754,7 +13754,7 @@ def test_saved_notes_file_themselves(app):
         os.utime(os.path.join(odd, "feedback.md"), (time.time() - 3600,) * 2)
         assert [n for n in feedback.feedback_items() if n["folder"] == odd][0]["issue"] is None
     finally:
-        feedback.gh, feedback.issue_repo = saved[0], saved[1]
+        feedback.gh, feedback.code_repo = saved[0], saved[1]
         feedback._gh_seen.clear()
         feedback._gh_seen.update(saved[2])
         feedback._not_taken.clear()
@@ -14475,7 +14475,7 @@ def test_github_in_the_glossary_search(app):
         if pr:
             item.update(draft=False, pull_request={"merged_at": gh_time(99) if merged else None})
         return item
-    own = fixes.issue_repo()
+    own = fixes.code_repo()
     state = fake_github([gh_issue(3, "Baude's own"), gh_issue(5, "Baude's other")])
     with open(state) as f:
         saved = json.load(f)

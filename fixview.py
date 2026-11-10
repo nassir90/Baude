@@ -59,13 +59,13 @@ def note_item(note):
 
 
 def with_notes(issues, notes, repo):
-    """All the feedback, in the order it's listed: the issues, each with the notes here that were filed as it, and the
-    other notes as items of their own."""
+    """All the feedback, in the order it's listed: the issues, each with the notes here that were filed as it (where
+    its issue.json says, its issue_location: repo if it doesn't), and the other notes as items of their own."""
     items = [{**issue, "notes": []} for issue in issues]
-    by_number = {item["number"]: item for item in items}
+    by_place = {(item.get("issue_location", repo), item["number"]): item for item in items}
     for note in notes:
         filed = note["issue"]
-        item = by_number.get(filed.get("number")) if filed and filed.get("repo", repo) == repo else None
+        item = by_place.get((filed.get("repo", repo), filed.get("number"))) if filed else None
         if item is not None:
             item["notes"].append(note)
         else:
@@ -73,12 +73,9 @@ def with_notes(issues, notes, repo):
     return sorted(items, key=fixes.sort_key)
 
 
-def where_it_is(item):
-    """What a row and a heading call it: its issue's number. None yet, nothing: its status says so."""
-    number = item["number"]
-    filed = next((n["issue"] for n in item["notes"] if n["issue"]), None)
-    return f"#{number}" if isinstance(number, int) else f"#{filed['number']}" if filed and filed.get("number") \
-        else ""
+def read_from(locations, repo):
+    """What the feedback was read from, as the page's foot says it: each repository of issue_locations, by name."""
+    return ", ".join(r.rpartition("/")[2] for r in locations or [repo])
 
 
 def web(win, url):
@@ -87,11 +84,13 @@ def web(win, url):
 
 
 def open_github(win, listed):
-    """A pull request or an issue the @ list or ⌘K has (lookup.GITHUB) opened: an issue on Baude's own repository is
-    feedback, shown on this tab, with what's been done about it; anything else, its page on GitHub."""
-    if listed["pr"] or listed["repo"] != fixes.issue_repo():
+    """A pull request or an issue the @ list or ⌘K has (lookup.GITHUB) opened: an issue on a repository Baude's feedback
+    is on (fixes.issue_locations) is feedback, shown on this tab, with what's been done about it; anything else, its page
+    on GitHub."""
+    code = fixes.code_repo()
+    if listed["pr"] or listed["repo"] not in fixes.issue_locations(fixes.known_submit_issue_target(), code):
         return web(win, listed["url"])
-    win.open_fixes().show_issue(listed["number"], listed["url"])
+    win.open_fixes().show_issue(fixes.key_of(listed["repo"], listed["number"], code), listed["url"])
 
 
 class FixesPage(Gtk.Box):
@@ -163,13 +162,15 @@ class FixesPage(Gtk.Box):
     def listed(self):
         """What's ongoing (or all of it), and the one selected, even if it's finished since: it stays what's shown, so
         nothing typed or pressed lands on another, until you move on."""
-        return [i for i in self.items if self.show_all or i["status"] in fixes.ONGOING or i["number"] == self.selected]
+        return [i for i in self.items
+                if self.show_all or i["status"] in fixes.ONGOING or fixes.fix_key(i) == self.selected]
 
     def fill_list(self):
         """The list as it is now (left alone if it looks the same: where it's scrolled to stays), what's selected kept;
         with nothing selected, the first."""
         listed = self.listed()
-        looks = [(i["number"], i["title"], i["status"], i["updated"], where_it_is(i), sum(n["captures"] for n in i["notes"]))
+        looks = [(fixes.fix_key(i), i["title"], i["status"], i["updated"], fixes.github_location(i),
+                  sum(n["captures"] for n in i["notes"]))
                  for i in listed]
         if looks != self.rows_drawn:
             self.rows_drawn = looks
@@ -179,7 +180,7 @@ class FixesPage(Gtk.Box):
                 self.rows.append(self.row(item))
         else:
             retime(self.rows)  # (only how long ago's moved on)
-        at = next((n for n, i in enumerate(listed) if i["number"] == self.selected), 0)
+        at = next((n for n, i in enumerate(listed) if fixes.fix_key(i) == self.selected), 0)
         keep = self.rows.get_row_at_index(at)
         if keep is not None:
             self.rows.select_row(keep)
@@ -197,16 +198,16 @@ class FixesPage(Gtk.Box):
         captures = sum(n["captures"] for n in item["notes"])
         more = f" · {captures} capture{'s' if captures != 1 else ''}" if captures else ""
         meta.append(say_time(dim("", ellipsize=Pango.EllipsizeMode.END, hexpand=True), item["updated"],
-                             "".join(f"{w} · " for w in [where_it_is(item)] if w), more))
+                             "".join(f"{w} · " for w in [fixes.github_location(item)] if w), more))
         box.append(meta)
         row = Gtk.ListBoxRow(child=box)
-        row.number = item["number"]
+        row.number = fixes.fix_key(item)  # (what it goes by: issues on two repositories share numbers)
         return row
 
     def show_issue(self, number, url):
         """An issue named elsewhere selected, as soon as it's read (finished, it's listed while it's selected); if it
         turns out not to be here, its page on GitHub, what's selected left as it was."""
-        if any(i["number"] == number for i in self.items):
+        if any(fixes.fix_key(i) == number for i in self.items):
             self.select(number)
             return self.fill_list()
         self.wanted = (number, url)
@@ -231,7 +232,7 @@ class FixesPage(Gtk.Box):
         self.gap = Gtk.Box(hexpand=True)
         self.spinner = Adw.Spinner(visible=False)
         self.stop_btn = Gtk.Button(label="Stop", tooltip_text="Stop the fix running on this machine")
-        self.stop_btn.connect("clicked", lambda *_: self.run(fixes.stop, self.current()["number"]))
+        self.stop_btn.connect("clicked", lambda *_: self.run(fixes.stop, fixes.fix_key(self.current())))
         self.reopen_btn = Gtk.Button(label="Reopen", tooltip_text="Open the issue again")
         self.reopen_btn.connect("clicked", lambda *_: self.run(fixes.reopen, self.repo, self.current()))
         self.discard_btn = Gtk.Button(label="Discard", css_classes=["destructive-action"],
@@ -240,7 +241,8 @@ class FixesPage(Gtk.Box):
         self.merge_btn = Gtk.Button(label="Merge", css_classes=["suggested-action"])
         self.merge_btn.connect("clicked", lambda *_: self.merge())
         self.fix_btn = Gtk.Button(label="Fix here", css_classes=["suggested-action"])
-        self.fix_btn.connect("clicked", lambda *_: self.run(fixes.start_fix, self.current()["number"], None, self.claude))
+        self.fix_btn.connect("clicked", lambda *_: self.run(fixes.start_fix, fixes.fix_key(self.current()), None,
+                                                            self.claude))
         for w in (self.reply_entry, self.reply_btn, self.gap, self.spinner, self.stop_btn, self.reopen_btn,
                   self.discard_btn, self.merge_btn, self.fix_btn):
             line.append(w)
@@ -251,7 +253,7 @@ class FixesPage(Gtk.Box):
         return box
 
     def current(self):
-        return next((i for i in self.items if i["number"] == self.selected), None)
+        return next((i for i in self.items if fixes.fix_key(i) == self.selected), None)
 
     def select(self, number):
         if number != self.selected:
@@ -282,7 +284,7 @@ class FixesPage(Gtk.Box):
         meta.append(status_pill(item["status"]))
         said_by = [f"from {item['author']}"] if item["author"] else []
         meta.append(say_time(dim("", ellipsize=Pango.EllipsizeMode.END, hexpand=True), item["created"],
-                             "".join(f"{w} · " for w in [where_it_is(item), *said_by] if w)))
+                             "".join(f"{w} · " for w in [fixes.github_location(item), *said_by] if w)))
         if item["url"]:
             meta.append(self.link("Issue", item["url"]))
         if item["pr"]:
@@ -417,7 +419,7 @@ class FixesPage(Gtk.Box):
         if status == fixes.READY:
             self.merge_btn.set_tooltip_text(f"Merge PR #{item['pr']['number']}: every running Baude and Record updates to it")
         elif status == fixes.OPEN:
-            self.fix_btn.set_tooltip_text(f"Fix it on this machine, on branch fix/{item['number']}")
+            self.fix_btn.set_tooltip_text(f"Fix it on this machine, on branch fix/{fixes.fix_key(item)}")
         self.hint.set_label(self.hint_for(item) if item else "")
         self.hint.set_visible(bool(self.hint.get_label()))
         shown = self.hint.get_visible() or self.busy or replies or any(
@@ -431,7 +433,7 @@ class FixesPage(Gtk.Box):
             return "Filed as an issue, but it can't be read from GitHub here just now, so this is only the note saved here."
         if status == fixes.WORKING:
             if working:
-                return f"#{item['number']} is running on {working['machine'] or 'another machine'}"
+                return f"{fixes.github_location(item)} is running on {working['machine'] or 'another machine'}"
             return f"PR #{item['pr']['number']} is a draft: in progress."
         if not self.can_write:
             return f"Only people with write access to {self.repo} can fix or merge." \
@@ -442,13 +444,13 @@ class FixesPage(Gtk.Box):
 
     def merge(self):
         item = self.current()
-        self.confirm(f"Merge the fix for #{item['number']}?",
+        self.confirm(f"Merge the fix for {fixes.github_location(item)}?",
                      f"PR #{item['pr']['number']} goes into main, and every running Baude and Record updates itself "
                      "from main.", "Merge", False, lambda: self.run(fixes.merge, self.repo, item))
 
     def discard(self):
         item = self.current()
-        self.confirm(f"Discard the fix for #{item['number']}?",
+        self.confirm(f"Discard the fix for {fixes.github_location(item)}?",
                      f"PR #{item['pr']['number']} is closed and its branch deleted. The feedback stays open.",
                      "Discard", True, lambda: self.run(fixes.discard, self.repo, item))
 
@@ -539,10 +541,12 @@ class FixesPage(Gtk.Box):
             return
         last = fixes.last_list() or {}
         self.repo, self.issues, self.can_write = last.get("repo"), last.get("items", []), bool(last.get("can_write"))
+        for issue in self.issues:  # (read before each said where it is: from the one repository read then)
+            issue.setdefault("issue_location", self.repo)
         self.items = with_notes(self.issues, feedback.feedback_items(), self.repo)
         self.fill_list()
         if last.get("read"):
-            say_time(self.note, last["read"], f"{self.repo} · read ")
+            say_time(self.note, last["read"], f"{read_from(last.get('locations'), self.repo)} · read ")
         self.draw_detail()
         self.sync_bar()
         GLib.idle_add(self.count_in_tab)  # (it's shown before its tab's told which it is)
@@ -583,7 +587,7 @@ class FixesPage(Gtk.Box):
         self.items = with_notes(self.issues, notes, repo)
         if self.wanted is not None:
             (number, url), self.wanted = self.wanted, None
-            if any(i["number"] == number for i in self.items):
+            if any(fixes.fix_key(i) == number for i in self.items):
                 self.select(number)
             else:
                 web(self.win, url)
@@ -599,7 +603,7 @@ class FixesPage(Gtk.Box):
         self.fill_list()
         self.note.set_label("GitHub isn't connected: only what's saved here" if repo is None else
                             f"Couldn't read it just now: {error.splitlines()[0]}" if error else
-                            f"{repo} · read {time.strftime('%H:%M')}")
+                            f"{read_from(data and data.get('locations'), repo)} · read {time.strftime('%H:%M')}")
         self.note.set_tooltip_text(error)
         self.stack.set_visible_child_name("main")
         self.draw_detail()

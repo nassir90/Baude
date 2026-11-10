@@ -3,6 +3,8 @@ the same: the issues on Baude's repository are the feedback, one's fix a pull re
 it a comment on the issue (a hidden mark says which round, how it went and its images), and the images files on a
 branch of their own (SHOTS_BRANCH: the repository's own access rules, no other host). Where one stands is worked out
 from those alone (load, status_of), so a PR made by hand, from fix/N or closing the issue, counts as one made here.
+Feedback can be kept off a public repository, on a private one of its own (PRIVATE_FEEDBACK): the issues are there, the
+fixes' branches (fix/<name>-N), PRs and images still on the code's, each PR in words of its own.
 
 Fix here starts a round on the machine of whoever pressed it: a worktree on fix/N, a headless claude with
 file tools only, the scenes it names (tests/screenshots.py) rendered offscreen before and after, then the branch, the
@@ -54,7 +56,12 @@ HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
 MARK = re.compile(r"<!-- baude-fix (\{.*?\}) -->", re.S)
 TEXT_END = "<!-- /baude-fix -->"  # (a round's comment: what's before this is its reply, what's after its images' table)
-SHOT_PATH = re.compile(r"\d+/\d+/[\w-]+\.png")
+KEY = r"(?:\d+|[A-Za-z][\w.]*-\d+)"  # (what a fix goes by: key_of)
+SHOT_PATH = re.compile(KEY + r"/\d+/[\w-]+\.png")
+# (feedback kept off a public repository: a checkout of the key's files and reads it on the value's, for whoever gh shows
+# that one to, anyone else on the checkout's own. The fixes' branches, PRs and images stay on the checkout's)
+PRIVATE_FEEDBACK = {"nassir90/Baude": "nassir90/BaudeInternal"}
+_private_seen = {}
 HEADINGS = {"working": "in progress", "ready": "ready for review", "failed": "failed", "stopped": "stopped",
             "nochange": "no change", "discarded": "fix discarded"}
 
@@ -116,9 +123,10 @@ def must_gh(*args, body=None, timeout=60):
     return out
 
 
-def issue_repo(root=ROOT):
+def code_repo(root=ROOT):
     """owner/name of the GitHub repository root's checkout came from (its origin as configured: not as an insteadOf
-    rewrites it), or None."""
+    rewrites it), or None: the code's, where fixes' branches, PRs and images go (the feedback can be on another:
+    submit_issue_target, issue_locations)."""
     try:
         url = subprocess.run(["git", "-C", root, "config", "--get", "remote.origin.url"], capture_output=True, text=True,
                              timeout=5, stdin=subprocess.DEVNULL).stdout.strip()
@@ -126,6 +134,64 @@ def issue_repo(root=ROOT):
         return None
     m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", url)
     return m.group(1) if m else None
+
+
+def submit_issue_target(root=ROOT):
+    """Where new feedback's filed (owner/name): the private repository the checkout's has (PRIVATE_FEEDBACK) if gh shows
+    it to you, else the checkout's own. None if that isn't on GitHub, or if gh can't say just now which (feedback meant to
+    be private isn't filed in public for want of an answer). Asks gh once: off the main loop."""
+    code = code_repo(root)
+    private = PRIVATE_FEEDBACK.get(code)
+    if private is None:
+        return code
+    if private not in _private_seen:
+        ok, out = gh("repo", "view", private, "--json", "name", timeout=20)
+        if not ok and "Could not resolve to a Repository" not in out:
+            return None  # (offline, signed out: asked again next time)
+        _private_seen[private] = ok
+    return private if _private_seen[private] else code
+
+
+def known_submit_issue_target(root=ROOT):
+    """submit_issue_target, if that's known without asking gh; else None."""
+    code = code_repo(root)
+    private = PRIVATE_FEEDBACK.get(code)
+    seen = _private_seen.get(private)
+    return code if private is None else None if seen is None else private if seen else code
+
+
+def issue_locations(target, code):
+    """Where feedback's read from, each issue's issue_location one of them: where it's filed now (target, from
+    submit_issue_target) and the code's repository, where it was before, and where whoever can't see a private one files
+    it."""
+    return list(dict.fromkeys(r for r in (target, code) if r))
+
+
+def key_of(repo, number, code):
+    """What the fix of feedback number on repo goes by (its branch fix/<key>, its folder here, its images' folder): its
+    number, or, for feedback on a repository other than the code's (PRIVATE_FEEDBACK), that one's name and its number,
+    so it isn't taken for the code's issue of that number."""
+    return number if repo in (None, code) else f"{repo.split('/', 1)[1]}-{number}"
+
+
+def parse_key(text):
+    """A key as `fixes.py fix` is given it."""
+    if not re.fullmatch(KEY, str(text)):
+        raise ValueError(f"not a fix: {text}")
+    return int(text) if str(text).isdigit() else str(text)
+
+
+def repo_of(key):
+    """The repository and number of the feedback key is (key_of the other way round)."""
+    code = code_repo()
+    if isinstance(key, int):
+        return code, key
+    name, _, number = key.rpartition("-")
+    return f"{(code or '').split('/')[0]}/{name}", int(number)
+
+
+def fix_key(item):
+    return item.get("key", item["number"])  # (a list read before there were keys: its numbers)
 
 
 def git(root, *args, check=True, timeout=120, env=None, binary=False):
@@ -207,11 +273,11 @@ def epoch(iso):
         return 0.0
 
 
-def pr_of(number, prs):
-    """The pull request that's issue number's fix (from fix/N, or closing it): an open one, else a merged one, else
-    the last closed; None if there's none."""
-    mine = [p for p in prs if (p.get("headRefName") == f"fix/{number}" and not p.get("isCrossRepository"))
-            or any(i.get("number") == number for i in p.get("closingIssuesReferences") or [])]
+def pr_of(key, prs):
+    """The pull request that's the fix of feedback key (key_of: from fix/<key>, or, an issue of the code's repository,
+    closing it): an open one, else a merged one, else the last closed; None if there's none."""
+    mine = [p for p in prs if (p.get("headRefName") == f"fix/{key}" and not p.get("isCrossRepository"))
+            or any(i.get("number") == key for i in p.get("closingIssuesReferences") or [])]
     rank = {"OPEN": 2, "MERGED": 1}
     return max(mine, key=lambda p: (rank.get(p.get("state"), 0), epoch(p.get("updatedAt"))), default=None)
 
@@ -244,13 +310,15 @@ def running_rounds(marks, now):
     return [e for e in going.values() if now - e["at"] < STALE_S]
 
 
-def item_of(issue, prs, now=None):
-    """An issue as the view and the fixer read it: {number, title, body, author, url, created, updated, status, pr,
-    thread: [{author, at, text, mark, trusted}], rounds, working: {machine, round, at} or None, here: running on this
-    machine, error: why the last round here didn't go ahead}. A mark counts only from someone with access to the
-    repository: anyone else's comment is what they said."""
+def item_of(issue, prs, now=None, key=None, location=None):
+    """An issue as the view and the fixer read it: {number, key (key_of: its number if it's the code's), issue_location
+    (the repository it's on), title, body, author, url, created, updated, status, pr, thread: [{author, at, text, mark,
+    trusted}], rounds, working: {machine, round, at} or None, here: running on this machine, error: why the last round
+    here didn't go ahead}. A mark counts only from someone with access to the repository: anyone else's comment is what
+    they said."""
     now = time.time() if now is None else now
     number = issue["number"]
+    key = number if key is None else key
     thread = []
     for c in issue.get("comments") or []:
         trusted = c.get("authorAssociation") in TRUSTED
@@ -258,7 +326,7 @@ def item_of(issue, prs, now=None):
                        "text": comment_text(c.get("body")), "mark": parse_mark(c.get("body")) if trusted else None,
                        "trusted": trusted})
     marks = [e for e in thread if e["mark"]]
-    here = running_here(number)
+    here = running_here(key)
     # (this machine's, with nothing running: it died)
     going = [e for e in running_rounds(marks, now) if here or e["mark"].get("machine") != machine()]
     working = None
@@ -267,12 +335,12 @@ def item_of(issue, prs, now=None):
                    "at": going[-1]["at"]}
     elif here:  # (just started: its first comment isn't there yet)
         working = {"machine": machine(), "round": rounds_of(marks) + 1, "at": now}
-    pr = pr_of(number, prs)
-    return {"number": number, "title": issue.get("title") or "", "body": (issue.get("body") or "").strip(),
+    pr = pr_of(key, prs)
+    return {"number": number, "key": key, "issue_location": location, "title": issue.get("title") or "", "body": (issue.get("body") or "").strip(),
             "author": (issue.get("author") or {}).get("login") or "", "url": issue.get("url") or "",
             "created": epoch(issue.get("createdAt")), "updated": epoch(issue.get("updatedAt")),
             "status": status_of(issue, pr, working), "thread": thread, "rounds": rounds_of(marks),
-            "working": working, "here": here, "error": read_state(number).get("error"),
+            "working": working, "here": here, "error": read_state(key).get("error"),
             "pr": pr and {"number": pr["number"], "url": pr.get("url") or "", "state": pr.get("state") or "",
                           "head": pr.get("headRefName") or "", "sha": pr.get("headRefOid") or "",
                           "cross": bool(pr.get("isCrossRepository"))}}
@@ -300,51 +368,77 @@ def can_write(repo):
     return _can_write[repo]
 
 
-def load(repo):
-    """All of repo's issues and where each stands, in the order they're listed, off the main loop: {items, can_write}.
-    Raises Failure with gh's error."""
-    issues = json.loads(must_gh("issue", "list", "--repo", repo, "--state", "all", "--limit", LIST_LIMIT,
-                                "--json", ISSUE_FIELDS) or "[]")
-    prs = json.loads(must_gh("pr", "list", "--repo", repo, "--state", "all", "--limit", LIST_LIMIT,
+def load(target):
+    """All the feedback and where each stands, in the order it's listed, off the main loop: {items, can_write}. It's the
+    issues on each of issue_locations (target, where it's filed now, and the code's repository); their fixes' PRs are
+    the code's. Raises Failure with gh's error."""
+    code = code_repo() or target
+    locations = issue_locations(target, code)
+    prs = json.loads(must_gh("pr", "list", "--repo", code, "--state", "all", "--limit", LIST_LIMIT,
                              "--json", PR_FIELDS) or "[]")
-    return {"items": sorted((item_of(i, prs) for i in issues), key=sort_key), "can_write": can_write(repo)}
+    items = []
+    for location in locations:
+        issues = json.loads(must_gh("issue", "list", "--repo", location, "--state", "all", "--limit", LIST_LIMIT,
+                                    "--json", ISSUE_FIELDS) or "[]")
+        items += [item_of(i, prs, key=key_of(location, i["number"], code), location=location) for i in issues]
+    return {"items": sorted(items, key=sort_key), "can_write": all(can_write(r) for r in locations),
+            "locations": locations}
+
+
+def github_location(item):
+    """Where an item's issue is on GitHub, as a row, a heading, a PR or a commit names it: its repository's name and its
+    number (Baude#12, BaudeInternal#3); "" for a note not filed. A note's (fixview.note_item) is where it was filed."""
+    location, number = item.get("issue_location"), item["number"]
+    if not isinstance(number, int):  # (a note saved here: its number's its folder)
+        filed = next((n["issue"] for n in item.get("notes") or () if n["issue"]), None) or {}
+        location, number = filed.get("repo"), filed.get("number")
+    return f"{location.rpartition('/')[2]}#{number}" if location and number else ""
+
+
+def location_of(item, repo):
+    return item.get("issue_location") or repo  # (a list read before there were locations: the one it was read from)
 
 
 # ------------------------------------------------------------------ what's done --
 
 def ours(item):
-    """Its open PR is from this repository's fix/N, so a round can go on from it (one made by hand can be merged or
-    discarded, no more: a round pushes to fix/N)."""
+    """Its open PR is from this repository's fix/<key>, so a round can go on from it (one made by hand can be merged or
+    discarded, no more: a round pushes to fix/<key>)."""
     pr = item["pr"]
-    return bool(pr) and pr["state"] == "OPEN" and pr["head"] == f"fix/{item['number']}" and not pr["cross"]
+    return bool(pr) and pr["state"] == "OPEN" and pr["head"] == f"fix/{fix_key(item)}" and not pr["cross"]
 
 
 def merge(repo, item):
     """A fix merged: its PR merged (a merge commit, as Self's), as long as it's still the commit that was read, its
-    branch deleted and its worktree here gone."""
-    pr = item["pr"]
-    must_gh("pr", "merge", str(pr["number"]), "--repo", repo, "--merge", "--delete-branch",
+    branch deleted and its worktree here gone. Private feedback (no PR closes an issue on another repository) is closed
+    with a word of where it went."""
+    pr, location, code = item["pr"], location_of(item, repo), code_repo() or repo
+    must_gh("pr", "merge", str(pr["number"]), "--repo", code, "--merge", "--delete-branch",
             *(("--match-head-commit", pr["sha"]) if pr.get("sha") else ()), timeout=120)
-    remove_worktree(item["number"])
+    remove_worktree(fix_key(item))
+    if code != location:
+        gh("issue", "close", str(item["number"]), "--repo", location, "--comment",
+           f"Merged: {pr.get('url') or f'{code}#{pr['number']}'}", timeout=60)  # (merged even if this didn't go)
 
 
 def discard(repo, item):
     """A fix discarded: its PR closed, its branch deleted. The feedback stays open, to fix again."""
-    must_gh("pr", "close", str(item["pr"]["number"]), "--repo", repo, "--delete-branch",
+    code = code_repo() or repo
+    must_gh("pr", "close", str(item["pr"]["number"]), "--repo", code, "--delete-branch",
             "--comment", "Discarded from Baude.", timeout=120)
-    must_gh("issue", "comment", str(item["number"]), "--repo", repo, "--body-file", "-",
-            body=round_body(repo, state="discarded", round=max(item["rounds"], 1), machine=machine()))
-    remove_worktree(item["number"])
+    must_gh("issue", "comment", str(item["number"]), "--repo", location_of(item, repo), "--body-file", "-",
+            body=round_body(code, state="discarded", round=max(item["rounds"], 1), machine=machine()))
+    remove_worktree(fix_key(item))
 
 
 def reopen(repo, item):
-    must_gh("issue", "reopen", str(item["number"]), "--repo", repo)
+    must_gh("issue", "reopen", str(item["number"]), "--repo", location_of(item, repo))
 
 
 def reply(repo, item, text, claude=None):
     """Asking for changes: said on the issue, and another round started."""
-    must_gh("issue", "comment", str(item["number"]), "--repo", repo, "--body-file", "-", body=text)
-    return start_fix(item["number"], reply=text, claude=claude)
+    must_gh("issue", "comment", str(item["number"]), "--repo", location_of(item, repo), "--body-file", "-", body=text)
+    return start_fix(fix_key(item), reply=text, claude=claude)
 
 
 # ---------------------------------------------------------------- this machine's --
@@ -660,20 +754,40 @@ def first_prompt(item, reply_text=None):
     if said:
         parts += ["", "Said on it since:", "", *said]
     parts.append(fence)
+    if private(item):
+        parts += ["", "This feedback is kept private. Your reply also goes on a public pull request, where nobody can read "
+                      "the feedback: say what changed in your own words, for someone who hasn't seen it, and quote "
+                      "nothing from it. Begin your reply with a line of its own, `Title: ` and a short title for that "
+                      "pull request."]
     if reply_text:
         parts += ["", f"The reviewer now asks: {reply_text}"]
     return "\n".join(parts)
 
 
-def fresh_worktree(number, base):
-    """A worktree of fix/N as the repository has it (or of base, if it's new): on no local branch, so nobody's own fix/N
-    here is touched. Claude's sessions go by folder, so it's always the same one, made again: what an earlier round
-    left unfinished and unpushed here is gone."""
-    src = os.path.join(fix_dir(number), "src")
+def private(item):
+    """Its feedback is on a repository other than the code's (key_of)."""
+    return not isinstance(fix_key(item), int)
+
+
+def public_title(item, text):
+    """A round's reply as (the PR's title, the rest): the feedback's own title, or for private feedback (first_prompt)
+    the one the reply begins with."""
+    if not private(item):
+        return item["title"], text
+    m = re.match(r"\s*\**Title:\**\s*(.+?)\s*(?:\n|$)", text or "")
+    return (m.group(1).strip("*` ") or f"A fix from {github_location(item)}", text[m.end():].strip()) if m \
+        else (f"A fix from {github_location(item)}", text)
+
+
+def fresh_worktree(key, base):
+    """A worktree of fix/<key> as the repository has it (or of base, if it's new): on no local branch, so nobody's own
+    fix/<key> here is touched. Claude's sessions go by folder, so it's always the same one, made again: what an earlier
+    round left unfinished and unpushed here is gone."""
+    src = os.path.join(fix_dir(key), "src")
     git(ROOT, "fetch", "--quiet", "--prune", "origin")  # (--prune: a fix discarded or merged isn't started from)
-    remote = f"origin/fix/{number}"
+    remote = f"origin/fix/{key}"
     start = remote if git(ROOT, "rev-parse", "--verify", "--quiet", remote, check=False) else f"origin/{base}"
-    remove_worktree(number)
+    remove_worktree(key)
     git(ROOT, "worktree", "add", "--detach", src, start)
     return src
 
@@ -683,43 +797,46 @@ def base_branch():
     return head.split("/", 1)[1] if head and "/" in head else "main"
 
 
-def commit_all(src, item, round_no):
-    """What claude changed committed, all but what it said to show. True if there was anything."""
+def commit_all(src, item, round_no, title=None):
+    """What claude changed committed, all but what it said to show. True if there was anything. Private feedback's
+    commit says what it's from, in the title the round's reply gave (public_title), and nothing of its words."""
     git(src, "add", "--all", "--", ".", f":(exclude){SHOTS_FILE}")
     if git(src, "diff", "--cached", "--quiet", check=False) is not None:
         return False
     number = item["number"]
-    git(src, "commit", "--quiet", "-m", f"Fix #{number}, round {round_no}: {item['title']}\n\nFixes #{number}\n\n"
-                                        "Co-Authored-By: Claude <noreply@anthropic.com>")
+    message = f"{title or public_title(item, '')[0]}\n\nFrom {github_location(item)}, round {round_no}." if private(item) \
+        else f"Fix #{number}, round {round_no}: {item['title']}\n\nFixes #{number}"
+    git(src, "commit", "--quiet", "-m", f"{message}\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
     return True
 
 
-def commit_and_push(src, item, round_no):
-    """What claude changed on the repository's fix/N as soon as it's made, so nothing after it (the images, Stop) can
-    lose it: the next round starts from there. True if there was anything."""
-    if not commit_all(src, item, round_no):
+def commit_and_push(src, item, round_no, title=None):
+    """What claude changed on the repository's fix/<key> as soon as it's made, so nothing after it (the images, Stop)
+    can lose it: the next round starts from there. True if there was anything."""
+    if not commit_all(src, item, round_no, title):
         return False
-    git(src, "push", "--quiet", "origin", f"HEAD:refs/heads/fix/{item['number']}")
+    git(src, "push", "--quiet", "origin", f"HEAD:refs/heads/fix/{fix_key(item)}")
     return True
 
 
 def one_round(repo, item, round_no, reply_text):
     """A round: claude's change committed and pushed, its images taken and pushed, and a PR for it if there's none.
     Returns the mark's state, what to say, and the images."""
-    number, base = item["number"], base_branch()
-    src = fresh_worktree(number, base)
-    session = read_state(number).get("session") if reply_text else None  # (a new round's claude reads it all afresh)
-    kept_shots = os.path.join(fix_dir(number), SHOTS_FILE)
+    key, base, code = fix_key(item), base_branch(), code_repo() or repo
+    src = fresh_worktree(key, base)
+    session = read_state(key).get("session") if reply_text else None  # (a new round's claude reads it all afresh)
+    kept_shots = os.path.join(fix_dir(key), SHOTS_FILE)
     if session and os.path.exists(kept_shots):  # (the worktree's new; the claude going on from before won't know)
         shutil.copy(kept_shots, os.path.join(src, SHOTS_FILE))
     try:
-        session, text = run_claude(src, reply_text if session else first_prompt(item, reply_text), session, number)
+        session, text = run_claude(src, reply_text if session else first_prompt(item, reply_text), session, key)
     except Failure:
         if session is None:
             raise
-        session, text = run_claude(src, first_prompt(item, reply_text), None, number)  # (its session isn't here now)
-    write_state(number, session=session)
-    changed = commit_and_push(src, item, round_no)
+        session, text = run_claude(src, first_prompt(item, reply_text), None, key)  # (its session isn't here now)
+    write_state(key, session=session)
+    title, text = public_title(item, text)
+    changed = commit_and_push(src, item, round_no, title)
     if os.path.exists(os.path.join(src, SHOTS_FILE)):
         shutil.copy(os.path.join(src, SHOTS_FILE), kept_shots)
     has_pr = bool(item["pr"]) and item["pr"]["state"] == "OPEN"
@@ -727,28 +844,29 @@ def one_round(repo, item, round_no, reply_text):
         return "nochange", text, []  # (a commit a failed round left, with no PR yet: that goes on, below)
     merge_base = git(src, "merge-base", "HEAD", f"origin/{base}")
     why = no_shots_why()
-    shots, problems = ([], []) if why else take_shots(src, merge_base, number, round_no)
+    shots, problems = ([], []) if why else take_shots(src, merge_base, key, round_no)
     if problems:  # (sent back once: it can't run them itself)
         session, more = run_claude(src, "These scenes in fix-shots.json failed when rendered. Fix them, then reply as "
-                                        "before:\n\n" + "\n\n".join(problems), session, number)
-        write_state(number, session=session)
-        text = more or text
-        commit_and_push(src, item, round_no)
-        shots, problems = take_shots(src, merge_base, number, round_no)
+                                        "before:\n\n" + "\n\n".join(problems), session, key)
+        write_state(key, session=session)
+        text = public_title(item, more)[1] if more else text
+        commit_and_push(src, item, round_no, title)
+        shots, problems = take_shots(src, merge_base, key, round_no)
     if why:
         text += f"\n\nNo images: {why}."
     if problems:
         text += "\n\nNo image of " + "; ".join(f"`{p}`" for p in problems)
-    shots = upload_shots(number, round_no, shots) if shots else []
+    shots = upload_shots(key, round_no, shots) if shots else []
     if not has_pr:
-        must_gh("pr", "create", "--repo", repo, "--head", f"fix/{number}", "--base", base, "--title", item["title"],
-                "--body-file", "-", body=f"Fixes #{number}\n\n{text}\n\n_Made from Baude's Feedback tab._\n")
+        source = f"From {github_location(item)}." if private(item) else f"Fixes #{item['number']}"
+        must_gh("pr", "create", "--repo", code, "--head", f"fix/{key}", "--base", base, "--title", title,
+                "--body-file", "-", body=f"{source}\n\n{text}\n\n_Made from Baude's Feedback tab._\n")
     return "ready", text, shots
 
 
-def first_on(repo, number, round_no):
+def first_on(repo, key, round_no):
     """The machine that said first that it was starting this round: comments have one order, whoever reads them."""
-    item = next((i for i in load(repo)["items"] if i["number"] == number), None)
+    item = next((i for i in load(repo)["items"] if fix_key(i) == key), None)
     return next((e["mark"].get("machine") for e in (item["thread"] if item else ())
                  if e["mark"] and e["mark"]["state"] == "working" and e["mark"]["round"] == round_no), None)
 
@@ -759,19 +877,21 @@ def refused(number, why):
     return 0
 
 
-def fix(number, reply_text=None):
-    """One round of issue number's fix, said on the issue as it starts and as it ends, however it ends."""
-    repo = issue_repo()
-    if repo is None:
+def fix(key, reply_text=None):
+    """One round of the fix of feedback key (key_of: an issue's number, if it's the code's repository's), said on the
+    issue as it starts and as it ends, however it ends."""
+    code = code_repo()
+    if code is None:
         raise Failure("this checkout's origin isn't on GitHub")
-    item = next((i for i in load(repo)["items"] if i["number"] == number), None)
+    repo, number = repo_of(key)
+    item = next((i for i in load(repo)["items"] if fix_key(i) == key), None)
     if item is None or item["status"] in (MERGED, REJECTED, CLOSED):
-        return refused(number, f"#{number} isn't open any more")
+        return refused(key, f"#{number} isn't open any more")
     if item["pr"] and item["pr"]["state"] == "OPEN" and not ours(item):
-        return refused(number, f"PR #{item['pr']['number']} wasn't made here: merge or discard it")
+        return refused(key, f"PR #{item['pr']['number']} wasn't made here: merge or discard it")
     me, working = machine(), item["working"]
     if working and working["machine"] != me:
-        return refused(number, f"{working['machine']} started on it first")
+        return refused(key, f"{working['machine']} started on it first")
     round_no = item["rounds"] + 1
 
     def stopped(*_):
@@ -782,11 +902,11 @@ def fix(number, reply_text=None):
     signal.signal(signal.SIGTERM, stopped)
     signal.signal(signal.SIGALRM, too_long)
     signal.alarm(ROUND_TIMEOUT_S)
-    write_state(number, pid=os.getpid(), error=None)
+    write_state(key, pid=os.getpid(), error=None)
     try:
         must_gh("issue", "comment", str(number), "--repo", repo, "--body-file", "-",
-                body=round_body(repo, state="working", round=round_no, machine=me))
-        first = first_on(repo, number, round_no)
+                body=round_body(code, state="working", round=round_no, machine=me))
+        first = first_on(repo, key, round_no)
         if first not in (None, me):  # (two pressed at once: one goes on)
             state, text, shots = "stopped", f"{first} started on it first.", []
         else:
@@ -799,17 +919,17 @@ def fix(number, reply_text=None):
     signal.signal(signal.SIGTERM, signal.SIG_IGN)  # (it's ending: what it says about that isn't interrupted)
     try:
         must_gh("issue", "comment", str(number), "--repo", repo, "--body-file", "-",
-                body=round_body(repo, text, state=state, round=round_no, machine=me, shots=shots))
+                body=round_body(code, text, state=state, round=round_no, machine=me, shots=shots))
     finally:
-        write_state(number, pid=None)
+        write_state(key, pid=None)
     return 0 if state in ("ready", "nochange", "stopped") else 1
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="One round of a fix for an issue on Baude's repository")
+    ap = argparse.ArgumentParser(description="One round of a fix for an issue of Baude's feedback")
     sub = ap.add_subparsers(dest="command", required=True)
     one = sub.add_parser("fix")
-    one.add_argument("number", type=int)
+    one.add_argument("number", type=parse_key, help="its number, or <repository>-<number> for private feedback")
     one.add_argument("--reply")
     args = ap.parse_args(argv)
     try:

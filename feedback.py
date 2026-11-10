@@ -1,8 +1,8 @@
 """Menu → Send Feedback…, or ⌘. / Ctrl+. over whatever's open (Baude's and Record's): a note, an issue or a suggestion,
 and screen captures of the window (the image and the text on screen, with regions you mark), saved under
 ~/.local/share/baude/feedback/<time>/; with the gh CLI signed in to GitHub, filed as an issue on the repository Baude came
-from too (issues). ☰ → Ongoing Feedback lists them with the issues (fixview.py: feedback_items). A window takes feedback by
-mixing in FeedbackHost."""
+from too, or the private one it has for feedback if gh shows you that (issues). ☰ → Ongoing Feedback lists them with the
+issues (fixview.py: feedback_items). A window takes feedback by mixing in FeedbackHost."""
 import base64
 import html
 import json
@@ -17,7 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
-from fixes import gh, gh_path, issue_repo  # noqa: E402,F401
+from fixes import gh, gh_path, code_repo, known_submit_issue_target, submit_issue_target  # noqa: E402,F401
 import pointers  # noqa: E402
 from widgets import (  # noqa: E402,F401
     FEEDBACK_KEY, ZOOM_MODS, FixedPicture, ShutBar, _data_home, discard, fit_size, no_text_drag, scaled_texture,
@@ -386,10 +386,11 @@ class ThumbRegions(Gtk.Widget):
 
 def region_hint():
     """What marking regions says: where their words go, whatever gh says just now (a note's filed when it can be:
-    keep_filing), to the repository the checkout's from, known without asking gh. None: nowhere to file it."""
-    repo = issue_repo()
+    keep_filing), to the repository feedback goes to, as far as that's known without asking gh. None: nowhere to file it."""
+    repo = known_submit_issue_target()
     return "Drag over what you mean · those words " + \
-        (f"go in the note's GitHub issue on {repo}" if repo else "stay with the note") + " · right-click a region to remove it"
+        (f"go in the note's GitHub issue on {repo}" if repo else "go in the note's GitHub issue" if code_repo() else
+         "stay with the note") + " · right-click a region to remove it"
 
 
 class RegionEditor(Adw.Dialog):
@@ -496,12 +497,13 @@ _SENT_FROM = "_Sent from Baude's Send Feedback…_"
 
 
 def issues_repo():
-    """Where notes are filed (owner/name): Baude's repository, if gh is there and signed in to GitHub; else None.
-    Slow the first time (gh asks GitHub): off the main loop (check_issues)."""
+    """Where notes are filed (owner/name): Baude's repository, or the private one it has for feedback if gh shows you
+    that (fixes.submit_issue_target), if gh is there and signed in to GitHub; else None. Slow the first time (gh asks GitHub):
+    off the main loop (check_issues)."""
     now, seen = time.monotonic(), _gh_seen["at"]  # (once: it's set from the thread that files, too)
     if seen is not None and now - seen < GH_CHECKED_S:
         return _gh_seen["repo"]
-    repo = issue_repo() if gh_path() else None
+    repo = submit_issue_target() if gh_path() else None
     if repo is not None and not gh("auth", "status", "--hostname", "github.com", timeout=20)[0]:
         repo = None
     _gh_seen.update(at=now, repo=repo)

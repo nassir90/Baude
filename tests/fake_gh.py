@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A stand-in for the gh CLI, for the Feedback tab and its fixer: GitHub's issues and pull requests, in a JSON file
-(FAKE_GH_STATE: {viewer, issues, prs, calls}). What's changed is what `gh` would change; every call's kept in calls.
+(FAKE_GH_STATE: {viewer, issues, prs, calls, issues_on: {owner/name: the issues of a private repository it shows you}}).
+What's changed is what `gh` would change; every call's kept in calls.
 And `gh api`, as lookup.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}."""
 import fcntl
 import hashlib
@@ -97,9 +98,13 @@ def run(state, args):
     if args[:1] == ["api"] and "-i" in args:
         return rest(state, args)
     if what == ["repo", "view"]:
+        name = args[2] if len(args) > 2 else ""
+        if name.endswith("Internal") and name not in state.get("issues_on", {}):  # (fixes.PRIVATE_FEEDBACK's)
+            print(f"GraphQL: Could not resolve to a Repository with the name '{name}'. (repository)", file=sys.stderr)
+            return 1
         print(state.get("viewer", "ADMIN"))
     elif what == ["issue", "list"]:
-        print(json.dumps(state["issues"]))
+        print(json.dumps(state.get("issues_on", {}).get(opt(args, "--repo"), state["issues"])))
     elif what == ["pr", "list"]:
         print(json.dumps(state["prs"]))
     elif what == ["issue", "comment"]:

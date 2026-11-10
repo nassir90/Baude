@@ -1298,7 +1298,7 @@ def test_ongoing_feedback_tab(app):
             "prs": [{"number": 9, "title": "t", "state": "OPEN", "isDraft": False, "headRefName": "fix/1", "headRefOid": "sha9",
                      "url": "p/9", "mergedAt": None, "updatedAt": "2026-11-01T10:00:00Z",
                      "closingIssuesReferences": [{"number": 1}]}]}, f)
-    if feedback.issue_repo() is None:
+    if feedback.code_repo() is None:
         return  # (a checkout not from GitHub: nowhere to read it from)
     os.environ.update(BAUDE_GH=fake, FAKE_GH_STATE=state, FAKE_GH_SIGNED_IN="1")
     feedback._gh_seen.update(at=None, repo=None)
@@ -2642,7 +2642,7 @@ def test_pointers(app):
     hand.hover(d.view, *spot("the site"), "pointer")
     hand.hover(d.view, *spot("more"), "text")
 
-    if feedback.issue_repo() is None:
+    if feedback.code_repo() is None:
         return  # (a checkout not from GitHub: nowhere to read it from)
     fake = os.path.join(TMP, "fake-github-92")
     with open(fake, "w") as f:

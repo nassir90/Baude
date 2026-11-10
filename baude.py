@@ -7873,9 +7873,16 @@ class HistoryIndex:
         del self.starts[at:], self.sums[at:], self.replies[at:]
         self.oldest = oldest
 
-    def reindex(self):
-        """Index the transcript again: take found a line that isn't the one indexed (rewritten since it opened)."""
+    def reindex(self, drawn=()):
+        """Index the transcript again: take found a line that isn't the one indexed (rewritten since it opened). drawn:
+        the line sums of items drawn out of order (before the oldest drawn in order, which _reindex takes as undrawn),
+        left out of what's still to draw."""
         self._reindex()
+        if drawn:
+            keep = [i for i in range(len(self.starts)) if self.sums[i] not in drawn]
+            self.starts = array.array("q", (self.starts[i] for i in keep))
+            self.sums = array.array("q", (self.sums[i] for i in keep))
+            self.replies = bytearray(self.replies[i] for i in keep)
 
     def _read(self, begin, end):
         """Undrawn items begin..end, parsed again; None if a line isn't the one indexed."""
@@ -7944,6 +7951,8 @@ class HistoryIndex:
         try:
             with open(self.path, "rb") as f:
                 for i in range(len(self.starts) - 1, -1, -1):
+                    if i >= len(self.starts):  # (drawn since this began: take cut the index short)
+                        continue
                     if self.replies[i] and not any(begin <= i < end for begin, end in self.taken):
                         f.seek(self.starts[i])
                         raw = f.readline()
@@ -7957,10 +7966,10 @@ class HistoryIndex:
 class ChunkFill:
     """An earlier chunk of a chat being drawn into its place (BaudeWindow.fill_frame): where the items still to make are
     (HistoryIndex.take: each read as it's made), what's made but hidden till its turn (in order: shown from the bottom
-    up), and the calls there were before it began (made: render_history's)."""
+    up), and the calls its items made (calls: the ones it ends as interrupted if they never got a result)."""
 
-    def __init__(self, slot, places, made):
-        self.slot, self.items, self.made, self.hidden = slot, collections.deque(places), made, []
+    def __init__(self, slot, places):
+        self.slot, self.items, self.hidden, self.calls = slot, collections.deque(places), [], set()
         self.broken = False  # (a line that isn't the one indexed: the transcript was rewritten)
 
 
@@ -10589,7 +10598,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.restore_scroll = None  # (distance from the bottom, until) after a restart
         vadj = self.scroller.get_vadjustment()
         vadj.connect("value-changed", self.on_scrolled)
-        vadj.connect("value-changed", lambda *_: Signal.moved())  # (Signal's lookups wait while a chat moves)
         wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         wheel.connect("scroll", self.on_reader_scroll)
@@ -10597,12 +10605,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         # (its own scrolling and glide, each a step from where the view is: GTK's glide undid the view's moving by a
         # chunk of history drawn above it, mid-glide)
         self.scroll_glide = widgets.ScrollGlide(self.scroller, lambda: bool(self.history and self.history.more),
-                                                rested=self.chat_still)
+                                                rested=self.chat_still, moved=self.reader_moved)
+        # (the reader's other ways of moving it, as against GTK clamping it, the view held, or the end followed: the
+        # scrollbar while it's held, the keys while they're pressed and a moment after, as GTK eases to where they go)
+        self.thumb_held, self.keyed_at = False, 0.0
+        thumb = Gtk.EventControllerLegacy(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        thumb.connect("event", self.on_scrollbar_event)
+        self.scroller.get_vscrollbar().add_controller(thumb)
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", lambda *_: setattr(self, "keyed_at", time.monotonic()) or False)
+        self.scroller.add_controller(keys)
         self.connect("realize", lambda *_: self.get_frame_clock().connect_after("layout", self.on_layout))
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
-        self.moved_at, self.still_timer, self.holding, self.cull_at = 0.0, None, False, None
+        self.moved_at, self.still_timer, self.cull_at = 0.0, None, None
         self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
-        self.fill_sweeping, self.above_changed = False, False
+        self.fill_sweeping, self.above_changed, self.place_at = False, False, None
 
         # composer (widgets.Composer: Record's too)
         self.attach_btn = Gtk.Button(icon_name="list-add-symbolic",
@@ -10831,7 +10848,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             "cwd": self.run_cwd, "session_id": self.session_id, "viewing": self.resume_pending,
             "at_bottom": self.stick_bottom,
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
-            "shown": self.history.shown if self.history else 0,
+            "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
             "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
             "attachments": [a.state() for a in self.attachments],
             "feedback_draft": self.feedback_draft.state() if self.feedback_draft else None,
@@ -10867,11 +10884,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             # baude itself was running this session: nobody else is writing it
             self.tail.last_written, self.tail.turn_open = 0.0, False
             self.update_banner()
-        if self.history:
-            while self.history.unshown and self.history.shown < state.get("shown", 0):
-                self.show_earlier()
         self.stick_bottom = bool(state.get("at_bottom", True))
-        if not self.stick_bottom:
+        if not self.stick_bottom and not (self.history and state.get("chunk") and self.place_chunk(state["chunk"])):
             # hold the place (measured from the bottom) while the history lays out and images load
             self.restore_scroll = (float(state.get("from_bottom") or 0), time.monotonic() + 2.0)
 
@@ -10968,10 +10982,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return self.add(sel_label(html.escape(text), css="sysnote"), parent_tool)
 
     def on_scrolled(self, _adj):
-        if not (self.holding or self.follow.auto):  # (the reader's scroll: not the view held, nor following the end)
+        # (the scrollbar or the keys moved it: the reader; ScrollGlide says so itself. Not GTK clamping it, the view
+        # held, or the end followed: those aren't a move of the reader's, and neither waits for them)
+        if self.thumb_held or time.monotonic() - self.keyed_at < 0.3:
             self.reader_moved()
         if self.fill_tick is None and (self.chunk_slots or self.fill_jobs):
             self.plan_fill()  # (an earlier chunk near the view now, or under it: drawn first)
+
+    def on_scrollbar_event(self, controller, *_):
+        event = controller.get_current_event()  # (its argument's None under PyGObject 3.58)
+        kind = event.get_event_type() if event is not None else None
+        if kind == Gdk.EventType.BUTTON_PRESS:
+            self.thumb_held = True
+        elif kind in (Gdk.EventType.BUTTON_RELEASE, Gdk.EventType.GRAB_BROKEN):
+            self.thumb_held = False
+        return False
 
     # ---- while the chat's scrolled, nothing in it is under the pointer. GTK looks again at what's under a still pointer
     # each frame the chat moves (a synthesized motion: a pick through every widget of the chat from the bottom up to the
@@ -10982,6 +11007,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def reader_moved(self):
         self.moved_at = time.monotonic()
+        Signal.moved()  # (Signal's lookups wait while a chat's scrolled)
         if self.text_selection.dragging:
             return
         if self.transcript.get_can_target():
@@ -11008,8 +11034,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.plan_fill()  # (the rest of the history drawn on, now it's still)
 
     def chat_moving(self):
-        """Scrolled by the reader in the last moments (what's drawn ahead waits for the chat to be still)."""
-        return time.monotonic() - self.moved_at < 0.3
+        """Scrolled by the reader, and not still since (chat_still): what's drawn ahead waits for that."""
+        return self.still_timer is not None or self.scroll_glide.gliding()
 
     stick_bottom = property(lambda self: self.follow.stick, lambda self, on: setattr(self.follow, "stick", on))
 
@@ -11020,7 +11046,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def on_layout(self, _clock):
         """Right after each layout pass: what's being held in place first, else the newest content in view."""
         # (a zoom, or a restart's place put back: those hold the view themselves, this one would fight them)
-        held = self.hold_view_anchor() if self.zoom_job is None and self.restore_scroll is None else None
+        # (a chunk opened at, place_chunk: the view put in it; what's at its top is noted once it's laid out there)
+        placed = self.place_at is not None and self.put_place()
+        if placed:
+            self.view_anchor = None
+        held = True if placed else \
+            self.hold_view_anchor() if self.zoom_job is None and self.restore_scroll is None else None
         if getattr(self, "keep_place", None) is not None:
             self.hold_keep_place(held)
         if self.zoom_job is not None:
@@ -11164,12 +11195,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return True
 
     def hold_value(self, value):
-        """The view put at value to hold what's in it still (not the reader's scroll: reader_moved)."""
-        self.holding = True
-        try:
-            self.scroller.get_vadjustment().set_value(value)
-        finally:
-            self.holding = False
+        """The view put at value to hold what's in it still (not a move of the reader's: reader_moved isn't told)."""
+        self.scroller.get_vadjustment().set_value(value)
 
     def set_busy(self, busy):
         self.busy = busy
@@ -13360,13 +13387,57 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def chat_place(self):
         """Where the chat is scrolled to, for opening it there again (open_at): measured from its end (what's added at
-        its top as you scroll up doesn't move it), with how many of its items were drawn. None if it was never laid out."""
+        its top as you scroll up doesn't move it), and the earlier chunk at the top of the view, if it's in one
+        (view_chunk). None if it was never laid out."""
         adj = self.scroller.get_vadjustment()
         if adj.get_page_size() <= 0:
             return None
         from_bottom = max(0.0, adj.get_upper() - adj.get_page_size() - adj.get_value())
-        return {"from_bottom": from_bottom, "at_end": self.stick_bottom or from_bottom <= 1,
-                "shown": self.history.shown if self.history else 0}
+        at_end = self.stick_bottom or from_bottom <= 1
+        return {"from_bottom": from_bottom, "at_end": at_end, "chunk": None if at_end else self.view_chunk()}
+
+    def view_chunk(self):
+        """The earlier chunk at the top of the view, as [where it starts (its first item's line sum), how far into it
+        the view's top is]; None if that's in the newest part (drawn on opening anyway)."""
+        hist = getattr(self, "history_box", None)
+        top, _page = self.view_top()
+        slot = hist.get_first_child() if hist is not None and top is not None else None
+        while slot is not None:
+            ok, b = slot.compute_bounds(self.transcript)
+            if ok and b.get_y() <= top < b.get_y() + b.get_height() and slot.first_sum is not None:
+                return [slot.first_sum, top - b.get_y()]
+            slot = slot.get_next_sibling()
+        return None
+
+    def place_chunk(self, chunk):
+        """Open at an earlier chunk (view_chunk's): that one drawn now, the view put back in it once it's laid out
+        (on_layout), and held there as what's around it is drawn. Only that one: what was drawn ahead of the reader isn't
+        drawn again at once. False if it isn't there to draw (the transcript was rewritten)."""
+        first_sum, offset = chunk
+        self.history.finish()
+        self.make_chunk_slots()
+        slots = self.chunk_slots or []
+        slot = next((s for s in slots if s.first_sum == first_sum), None)
+        if slot is None:  # (the transcript grew since: its chunks begin elsewhere now; the one with that item in it)
+            sums = self.history.sums
+            at = next((i for i in range(len(sums)) if sums[i] == first_sum), None)
+            slot = next((s for s in slots if at is not None and s.span[0] <= at < s.span[1]), None)
+        if slot is None:
+            return False
+        self.fill_now(slot)
+        self.place_at = (slot, float(offset))
+        return True
+
+    def put_place(self):
+        """After the layout pass a chunk opened at (place_chunk) is in: the view's top where it was in it."""
+        slot, offset = self.place_at
+        ok, b = slot.compute_bounds(self.transcript)
+        top, _page = self.view_top()
+        if not ok or top is None or b.get_height() <= 0:
+            return False
+        self.place_at = None
+        self.hold_value(self.scroller.get_vadjustment().get_value() + b.get_y() + offset - top)
+        return True
 
     def remember_place(self):
         """The open chat's place remembered (chat_place), as it's left for another."""
@@ -13377,13 +13448,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 del self.PLACES[next(iter(self.PLACES))]
 
     def open_at(self, place):
-        """A chat just drawn shown where it was left (place: chat_place), its earlier parts drawn back as they were;
-        never left before, at its end. There at once and held there while it lays out (on_layout: images and code
-        come in sizes later), so it doesn't glide down to its end or move under you."""
+        """A chat just drawn shown where it was left (place: chat_place), the earlier chunk it was in drawn back
+        (place_chunk); never left before, at its end. There at once and held there while it lays out (on_layout: images
+        and code come in sizes later), so it doesn't glide down to its end or move under you."""
         if place and not place.get("at_end"):
-            while self.history and self.history.unshown and self.history.shown < place.get("shown", 0):
-                self.show_earlier()
             self.stick_bottom = False
+            if place.get("chunk") and self.place_chunk(place["chunk"]):
+                return
             from_bottom = float(place.get("from_bottom") or 0)
         else:
             self.stick_bottom, from_bottom = True, 0.0
@@ -13411,7 +13482,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.update_earlier_btn()
         self.resumed_note = bool(items)  # "— resumed —" goes in when you first write, not on opening
         self.open_at(self.PLACES.get(self.session_id))
-        self.moved_at = time.monotonic()  # (what's earlier is drawn ahead once the chat's been still a moment)
         GLib.timeout_add(self.FILL_AFTER_MS, lambda: (self.plan_fill(), False)[1])
 
     def update_earlier_btn(self):
@@ -13442,6 +13512,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             end = n - i * self.HISTORY_CHUNK
             slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, vexpand=False)  # (its spacer's expanding
             slot.span, slot.filled = (max(0, end - self.HISTORY_CHUNK), end), False           # goes no further)
+            slot.first_sum = self.history.sums[slot.span[0]] if slot.span[0] < end else None
             slot.spacer = Gtk.Box(vexpand=True)
             slot.append(slot.spacer)
             slot.set_margin_bottom(10 if i else 0)  # (the chunk below it; the lowest has the chat's own spacing)
@@ -13525,13 +13596,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             return
         adj = self.scroller.get_vadjustment()
         before = adj.get_upper()
-        job = next((job for job in self.fill_jobs if job.slot is slot), None) or self.start_fill(slot)
-        self.fill_jobs.remove(job)
-        while job.items:
-            self.fill_item(job)
-        while job.hidden:
-            job.hidden.pop().set_visible(True)
-        self.fill_done(job)
+        self.fill_now(slot)
         self.stick_bottom = False
 
         # once the chunk is laid out, shift the view by what was added above it (only once: later growth, like a reply
@@ -13544,10 +13609,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         expire = GLib.timeout_add(1500, lambda: (self.cancel_keep_place(), False)[1])
         self.keep_place = (adj, before, expire)
 
+    def fill_now(self, slot):
+        """Draw a chunk into its place at once (show_earlier, place_chunk), the part of it made already too."""
+        job = next((job for job in self.fill_jobs if job.slot is slot), None) or self.start_fill(slot)
+        self.fill_jobs.remove(job)
+        while job.items:
+            self.fill_item(job)
+        while job.hidden:
+            job.hidden.pop().set_visible(True)
+        self.fill_done(job)
+
     def start_fill(self, slot):
         """Begin drawing a chunk into its place (its items read again as they're made: HistoryIndex.take), first."""
         self.chunk_slots.remove(slot)
-        job = ChunkFill(slot, self.history.take(*slot.span), set(self.tool_cards))
+        job = ChunkFill(slot, self.history.take(*slot.span))
+        slot.sums = {line_sum for _start, line_sum in job.items}  # (what it draws: not drawn again after a rewrite)
         self.fill_jobs.appendleft(job)
         return job
 
@@ -13563,7 +13639,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 job.hidden.pop().set_visible(True)
             job.broken = False
             self.fill_done(job)
-        self.history.reindex()
+        drawn = set()
+        child = self.history_box.get_first_child()
+        while child is not None:
+            drawn |= getattr(child, "sums", set())
+            child = child.get_next_sibling()
+        self.history.reindex(drawn)
         self.chunk_slots, self.estimated_per = None, 0
         self.make_chunk_slots()
         self.update_earlier_btn()
@@ -13574,11 +13655,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if item is None:  # (not the line indexed: the rest of the chunk isn't either)
             job.broken = True
             job.items.clear()
+        before = set(self.tool_cards)
         self.render_target = job.slot
         try:
-            self.render_history([item] if item is not None else [], final=not job.items, made=job.made)
+            self.render_history([item] if item is not None else [], final=False)
         finally:
             self.render_target = None
+        job.calls.update(tid for tid in self.tool_cards if tid not in before)
+        if not job.items:  # (its calls that never got a result were interrupted; a later chunk's result puts it right)
+            for tid in job.calls:
+                card = self.tool_cards.get(tid)
+                if card is not None and card.state == "running" and tid not in self.orphan_results:
+                    card.set_state("interrupted")
         for w in [w for w in job.hidden if w.get_parent() is not job.slot]:  # (a call gone into a run's group: the
             w.set_visible(True)                                               # group's hidden instead)
             job.hidden.remove(w)
@@ -13611,7 +13699,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.estimate_tick is not None:
             self.scroller.remove_tick_callback(self.estimate_tick[1])
             self.estimate_tick = None
-        self.estimated_per, self.cull_at = 0, None
+        self.estimated_per, self.cull_at, self.place_at = 0, None, None
 
     def plan_fill(self):
         """Draw on, a frame at a time, if there's a chunk to draw (fill_frame picks which)."""
@@ -13702,8 +13790,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             _adj, _before, expire = pending
             GLib.source_remove(expire) if GLib.MainContext.default().find_source_by_id(expire) else None
 
-    def render_history(self, items, final=True, made=None):
-        made = set(self.tool_cards) if made is None else made
+    def render_history(self, items, final=True):
+        made = set(self.tool_cards)
         for kind, content, *rest in items:
             if kind == "tool_results":
                 self.render_tool_results(content, from_file=True)

@@ -4142,15 +4142,17 @@ class ScrollGlide:
     (zoom) and Shift's (sideways) are left to others. more(): whether there's more to draw above, a glide that reaches
     the top waiting a moment for it. A wheel's click glides there over WHEEL_S rather than jumping a fifth of a screen in
     one frame (clicks in a row add up), and a touchpad's pixels are moved by once a frame, together: they come at their
-    own rate, two in one frame and none in the next. rested(): a glide or a wheel's click has come to rest by itself."""
+    own rate, two in one frame and none in the next. rested(): a glide or a wheel's click has come to rest by itself.
+    moved(): it's moved the view (the reader's scroll, as against the view being put somewhere)."""
 
     FRICTION = 4.0  # (GTK's: the speed falls by e each quarter second)
     STOP = 10.0  # px/s
     WAIT = 0.5  # s at the top, for what's drawn above it
     WHEEL_S = 0.12  # s a wheel's click takes to get there (most of the way: it eases out)
 
-    def __init__(self, scroller, more=None, rested=None):
+    def __init__(self, scroller, more=None, rested=None, moved=None):
         self.scroller, self.more, self.rested = scroller, more or (lambda: False), rested or (lambda: None)
+        self.moved = moved or (lambda: None)
         self.v, self.tick, self.last, self.waited = 0.0, None, None, 0.0
         self.wheel = self.pan = 0.0  # (px a wheel's clicks have still to go; a touchpad's, since the last frame)
         scroller.set_kinetic_scrolling(False)  # (its glide off: this one's)
@@ -4184,7 +4186,10 @@ class ScrollGlide:
 
     def step(self, dy):
         adj = self.scroller.get_vadjustment()
-        adj.set_value(adj.get_value() + dy)
+        before = adj.get_value()
+        adj.set_value(before + dy)
+        if adj.get_value() != before:
+            self.moved()
 
     def wheel_by(self, dy):
         """A wheel's click: glide dy px over WHEEL_S, on from where the clicks before it have still to go."""
@@ -4199,12 +4204,14 @@ class ScrollGlide:
         self._run()
 
     def glide(self, v):
-        """Glide on at v px/s (> 0 down), slowing as GTK's does."""
+        """Glide on at v px/s (> 0 down), slowing as GTK's does (a touchpad's pixels not moved by yet, moved by first)."""
+        pan = self.pan
         self.stop()
-        if abs(v) < self.STOP:
-            return
-        self.v = v
-        self._run()
+        self.pan = pan
+        if abs(v) >= self.STOP:
+            self.v = v
+        if self.v or self.pan:
+            self._run()
 
     def _run(self):
         if self.tick is None:
@@ -4243,6 +4250,8 @@ class ScrollGlide:
         before = adj.get_value()
         if dy:
             adj.set_value(before + dy)
+            if adj.get_value() != before:
+                self.moved()
         if adj.get_value() == before and dy:  # (at an end)
             self.wheel = 0.0
             self.waited += dt

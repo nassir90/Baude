@@ -8005,6 +8005,23 @@ def spent_since(proc, msg):
     return spent - seen if spent >= seen else spent
 
 
+def own_writes(proc, exiting=False):
+    """A chat's claude left mid-turn wrote its transcript: every window takes those writes as its own (own_mtimes), so
+    the chat opened after isn't one "active elsewhere". exiting: as it's stopped, with the cost it writes as it goes."""
+    if getattr(proc, "path", None) is None:
+        proc.path = (find_session(proc.key) or {}).get("path") if getattr(proc, "key", None) else None
+    if proc.path is None:
+        return
+    try:
+        mtime = os.stat(proc.path).st_mtime
+    except OSError:
+        return
+    app = Gio.Application.get_default()
+    for w in app.get_windows() if app is not None else []:
+        if isinstance(w, BaudeWindow):
+            w.own_mtimes[proc.path] = max(mtime, time.time() + 2) if exiting else mtime
+
+
 def background_proc(session_id):
     """The claude a Baude window keeps at a turn for a chat left mid-turn (BaudeWindow.detach_proc), if any."""
     app = Gio.Application.get_default()
@@ -8046,17 +8063,19 @@ class ClaudeProc:
             if not line:
                 continue
             if is_err:
-                GLib.idle_add(self.on_msg, self, {"type": "_stderr", "text": line})
+                GLib.idle_add(lambda m={"type": "_stderr", "text": line}: self.on_msg(self, m))
                 continue
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
                 msg = {"type": "_stderr", "text": line}
-            GLib.idle_add(self.on_msg, self, msg)
+            # (its handler looked up as it's delivered, not as it's read: a chat left mid-turn, or opened again, in between
+            # gets what's after from its new one, BaudeWindow.detach_proc and attach_proc)
+            GLib.idle_add(lambda m=msg: self.on_msg(self, m))
         if not is_err:
             code = self.p.wait()
             self.close_stdin()
-            GLib.idle_add(self.on_exit, code)
+            GLib.idle_add(lambda: self.on_exit(code))
 
     def send(self, obj):
         try:
@@ -10895,11 +10914,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def idle(self):
         """Nothing a restart would cut short or take from under you (update.Updater): no turn running or waiting on
-        you, no task of its running, no side question being answered or with a follow-up written to it (those don't come
+        you (here, or in a chat left mid-turn), no task of its running, no side question being answered or with a follow-up written to it (those don't come
         back; what's typed elsewhere does: restart_state), no dialog or capture open, and quiet (not the window you're in,
         or nothing typed, clicked or scrolled in it for a minute)."""
         bar = getattr(self, "capture_bar", None)
         return (not self.busy and not self.waiting_cards and not (self.proc is not None and self.running_tasks())
+                and not self.background  # (a chat left mid-turn, its claude still at it: a restart would cut it short)
                 and self.get_visible_dialog() is None and not (bar is not None and bar.get_reveal_child())
                 and not any(getattr(sq, "busy", False) or sq.follow.get_text().strip()
                             for sq in self.panel.side_questions())
@@ -11658,6 +11678,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def detach_proc(self):
         p, self.proc = self.proc, None
         p.owner, p.key, p.mode, p.model = self, self.session_id or f"new-{id(p)}", self.mode, self.model
+        p.path = (find_session(self.session_id) or {}).get("path") if self.session_id else None
         p.on_msg, p.on_exit = self.on_background_msg, lambda _code, p=p: self.let_go_background(p)
         self.background[p.key] = p
         self.waiting_cards.clear()
@@ -11665,9 +11686,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def on_background_msg(self, proc, msg):
         t, req = msg.get("type"), msg.get("request") or {}
+        if t != "stream_event":
+            own_writes(proc)  # (what it writes to its transcript meanwhile is Baude's, not another program's)
         if t == "system" and msg.get("subtype") == "init" and msg.get("session_id") not in (None, proc.key):
             self.background.pop(proc.key, None)  # (a new chat's: its id known now)
-            proc.key = msg["session_id"]
+            proc.key, proc.path = msg["session_id"], None
             self.background[proc.key] = proc
         elif t == "control_request" and req.get("subtype") != "can_use_tool":
             proc.send({"type": "control_response", "response": {
@@ -11689,6 +11712,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             del self.background[proc.key]
         proc.on_msg, proc.on_exit = (lambda *_: False), (lambda *_: None)
         proc.kill()
+        own_writes(proc, exiting=True)
         self.sidebar.restate()
 
     def take_background(self, session_id):
@@ -13912,8 +13936,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 pass
 
     def live_elsewhere(self):
-        """Is the viewed session in use by another program (Claude Desktop, a terminal)?"""
-        return self.resume_pending and self.tail.in_use()
+        """Is the viewed session in use by another program (Claude Desktop, a terminal)? Not Baude's own claude, at a turn
+        in it for a chat left mid-turn: written to here, that's the one that goes on with it (begin_resume)."""
+        return self.resume_pending and self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
         """While another program has the session, say so and keep the input off: two writers
@@ -13953,10 +13978,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.resumed_note:
             self.note("— resumed —")
             self.resumed_note = False
+        if (left := self.take_background(self.session_id)) is not None:  # (left mid-turn in a window, still at it)
+            self.attach_proc(left)
+            return
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
         GLib.idle_add(lambda: self.follow_checkout() and False)  # (the turn may have moved into a worktree)
+        if self.proc is not None:
+            self.proc.asks.clear()  # (the turn's over: what it asked and wasn't answered can't be now)
         if self.proc is not None and not hasattr(self.proc, "cost_seen"):  # (what --resume counted on from, read now,
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
@@ -14002,6 +14032,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             return
         name, inp = req.get("tool_name"), req.get("input", {})
         if name in self.always_allow and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
+            self.proc.asks.pop(rid, None)  # (one held while its chat was left: answered now)
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             return
         self.proc.asks[rid] = msg  # (asked again here if the chat's left and opened again before it's answered)
@@ -14106,8 +14137,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             # (however it stops asking, answered or not, it isn't waiting on you any more; the window held weakly, as the
             # card's listeners outlive its handlers)
             me = weakref.ref(self)
-            card.listeners.append(lambda c: c.asking is None and (w := me()) is not None and c in w.waiting_cards and (
-                w.waiting_cards.discard(c), w.update_session_state()))
+            card.listeners.append(lambda c: c.asking is None and (proc.asks.pop(rid, None), True) and (w := me()) is not None
+                                  and c in w.waiting_cards and (w.waiting_cards.discard(c), w.update_session_state()))
             card.ask(row)
         else:
             self.add(box)

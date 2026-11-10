@@ -2315,6 +2315,16 @@ class DiaryEditor(Gtk.Box, FindInText):
         """A page (a [[link]] followed): in a tab of its own (Window.open_note), shown. Returns its editor."""
         return self.win.open_note(name)
 
+    def _up_to_title(self):
+        """Up on the text's first line, as Down in the title comes down to it: up into the title, the caret at its end
+        (none of it selected, so what's typed next doesn't replace it). False anywhere lower: Up's as it always was."""
+        caret = self.buf.get_iter_at_mark(self.buf.get_insert())
+        if self.view.get_iter_location(caret).y != self.view.get_iter_location(self.buf.get_start_iter()).y:
+            return False  # (on a lower line, or the first one's lower rows, wrapped)
+        self.title.grab_focus_without_selecting()
+        self.title.set_position(-1)
+        return True
+
     def _title_entered(self):
         """Enter in the title: the page renamed, and on to its text, from the top. (A name that's taken: it stays in the
         title, to try another.)"""
@@ -3275,6 +3285,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
                 (Gdk.keyval_to_unicode(keyval) or keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter)):
             self._out_of_link()  # (what's typed at a link's edge goes beside it, not into its name)
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up) and not self.pop.get_visible() and not state & (
+                Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK
+                | Gdk.ModifierType.ALT_MASK) and self._up_to_title():
+            return True
         if not self.pop.get_visible():
             if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
                 return False  # (Shift+Enter: a line of the item's text under it; Enter: the list's next item)

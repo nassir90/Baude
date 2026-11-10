@@ -3237,6 +3237,11 @@ class MainTabs(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.view = Adw.TabView(vexpand=True, hexpand=True)
         self.bar = Adw.TabBar(view=self.view, autohide=False)
+        # (its scrolling ScrollGlide's, as the chat's is, ahead of the tab box's own: on macOS every scroll is a
+        # mouse's, and the bar took each of a touchpad's pixels up or down for a wheel's click, some 80 px, and its
+        # sideways ones 2.5 times over as they came. Its scrollers: the pinned tabs', the others')
+        self.bar_glides = [ScrollGlide(sw, sideways=True)
+                           for sw in walk(self.bar) if isinstance(sw, Gtk.ScrolledWindow)]
         self.pages, self.closed, self.shown_alone = {}, closed, shown_alone
         self.menu_page = None  # (the tab its menu was opened on, if it has one: copy_links)
         self.history, self.at, self.moving, self.reopen = [], -1, False, reopen
@@ -4143,22 +4148,24 @@ class ScrollGlide:
     the top waiting a moment for it. A wheel's click glides there over WHEEL_S rather than jumping a fifth of a screen in
     one frame (clicks in a row add up), and a touchpad's pixels are moved by once a frame, together: they come at their
     own rate, two in one frame and none in the next. rested(): a glide or a wheel's click has come to rest by itself.
-    moved(): it's moved the view (the reader's scroll, as against the view being put somewhere)."""
+    moved(): it's moved the view (the reader's scroll, as against the view being put somewhere). sideways: it scrolls
+    left and right instead (a tab strip): scrolls either way move it, Shift's too, a touchpad's swipe the way it
+    began."""
 
     FRICTION = 4.0  # (GTK's: the speed falls by e each quarter second)
     STOP = 10.0  # px/s
     WAIT = 0.5  # s at the top, for what's drawn above it
     WHEEL_S = 0.12  # s a wheel's click takes to get there (most of the way: it eases out)
 
-    def __init__(self, scroller, more=None, rested=None, moved=None):
+    def __init__(self, scroller, more=None, rested=None, moved=None, sideways=False):
         self.scroller, self.more, self.rested = scroller, more or (lambda: False), rested or (lambda: None)
-        self.moved = moved or (lambda: None)
+        self.moved, self.sideways, self.axis = moved or (lambda: None), sideways, None  # (axis: a swipe's way, x or y)
         self.v, self.tick, self.last, self.waited = 0.0, None, None, 0.0
         self.wheel = self.pan = 0.0  # (px a wheel's clicks have still to go; a touchpad's, since the last frame)
         scroller.set_kinetic_scrolling(False)  # (its glide off: this one's)
-        ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL |
-                                        Gtk.EventControllerScrollFlags.KINETIC)
-        ctl.connect("scroll-begin", lambda *_: self.stop())
+        flags = Gtk.EventControllerScrollFlags
+        ctl = Gtk.EventControllerScroll(flags=(flags.BOTH_AXES if sideways else flags.VERTICAL) | flags.KINETIC)
+        ctl.connect("scroll-begin", self._begin)
         ctl.connect("scroll", self._scroll)
         ctl.connect("decelerate", self._decelerate)
         scroller.get_child().add_controller(ctl)  # (the viewport: after what's in it, before the scroller's own)
@@ -4166,26 +4173,39 @@ class ScrollGlide:
         press.connect("pressed", lambda *_: self.stop())  # (a click or the scrollbar taken: the glide's over)
         scroller.add_controller(press)
 
+    def _adj(self):
+        return self.scroller.get_hadjustment() if self.sideways else self.scroller.get_vadjustment()
+
     def _detent(self, ctl):
         """What a wheel's click scrolls, as GTK has it; 1 for a touchpad's pixels."""
         if ctl.get_unit() != Gdk.ScrollUnit.WHEEL:
             return 1.0
-        return max(1.0, self.scroller.get_vadjustment().get_page_size()) ** (2 / 3)
+        return max(1.0, self._adj().get_page_size()) ** (2 / 3)
 
-    def _scroll(self, ctl, _dx, dy):
-        if dy == 0 or ctl.get_current_event_state() & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+    def _begin(self, _ctl):
+        self.axis = None  # (a new swipe: its way is its first move's)
+        self.stop()
+
+    def _scroll(self, ctl, dx, dy):
+        state, wheel = ctl.get_current_event_state(), ctl.get_unit() == Gdk.ScrollUnit.WHEEL
+        if self.sideways:  # (a wheel's click goes its own way; a touchpad's swipe, the way it began)
+            if state & Gdk.ModifierType.CONTROL_MASK:
+                return False
+            self.axis = way = (not wheel and self.axis) or ("x" if abs(dx) >= abs(dy) else "y")
+            dy = dx if way == "x" else dy
+        elif dy == 0 or state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
             return False
-        if ctl.get_unit() == Gdk.ScrollUnit.WHEEL:
+        if wheel:
             self.wheel_by(dy * self._detent(ctl))
         else:
             self.pan_by(dy)
         return True
 
-    def _decelerate(self, ctl, _vx, vy):
-        self.glide(vy * self._detent(ctl))
+    def _decelerate(self, ctl, vx, vy):
+        self.glide((vx if self.sideways and self.axis == "x" else vy) * self._detent(ctl))
 
     def step(self, dy):
-        adj = self.scroller.get_vadjustment()
+        adj = self._adj()
         before = adj.get_value()
         adj.set_value(before + dy)
         if adj.get_value() != before:
@@ -4204,7 +4224,8 @@ class ScrollGlide:
         self._run()
 
     def glide(self, v):
-        """Glide on at v px/s (> 0 down), slowing as GTK's does (a touchpad's pixels not moved by yet, moved by first)."""
+        """Glide on at v px/s (> 0 down, or right), slowing as GTK's does (a touchpad's pixels not moved by yet, moved
+        by first)."""
         pan = self.pan
         self.stop()
         self.pan = pan
@@ -4215,10 +4236,18 @@ class ScrollGlide:
 
     def _run(self):
         if self.tick is None:
-            clock = self.scroller.get_frame_clock()
-            self.last = clock.get_frame_time() / 1e6 if clock is not None else None
-            self.waited = 0.0
+            self.last, self.waited = None, 0.0  # (its first frame's time: _first_dt's)
             self.tick = self.scroller.add_tick_callback(self._frame)
+
+    def _first_dt(self, clock, now):
+        """The time a first frame moves it by: since the frame before (a frame's, after a while with none), less what a
+        touchpad's last pixels moved by in it took at the glide's speed. (The clock's time between frames is the next
+        frame's once that's nearer: a glide begun then stood still for a frame as the fingers left the touchpad.)"""
+        before = clock.get_timings(clock.get_frame_counter() - 1)
+        dt = now - before.get_frame_time() / 1e6 if before is not None else 0.0
+        if not 0.0 < dt < 0.1:
+            dt = clock.get_refresh_info(0)[0] / 1e6
+        return max(0.0, dt - abs(self.pan / self.v)) if self.pan and self.v else dt
 
     def gliding(self):
         return self.tick is not None
@@ -4231,7 +4260,7 @@ class ScrollGlide:
 
     def _frame(self, _widget, clock):
         now = clock.get_frame_time() / 1e6
-        dt = min(max(now - self.last, 0.0), 0.1) if self.last is not None else 1 / 60
+        dt = min(max(now - self.last, 0.0), 0.1) if self.last is not None else self._first_dt(clock, now)
         self.last = now
         moving = bool(self.v or self.wheel)  # (what comes to rest by itself, as against a touchpad's pixels)
         dy, self.pan = self.pan, 0.0
@@ -4246,7 +4275,7 @@ class ScrollGlide:
             decay = math.exp(-self.FRICTION * dt)
             glided, self.v = self.v * (1 - decay) / self.FRICTION, self.v * decay
             dy += glided
-        adj = self.scroller.get_vadjustment()
+        adj = self._adj()
         before = adj.get_value()
         if dy:
             adj.set_value(before + dy)

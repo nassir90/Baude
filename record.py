@@ -5883,8 +5883,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         notebook = self.current
         if notebook is None or name == HOME:
             return
-        d = Adw.AlertDialog(heading=f"Delete {short_page(name)}?",
-                            body="Links to it stay, and make it again when followed.")
+        d = Adw.AlertDialog(heading=f"Delete {short_page(name)}?")
         d.add_response("cancel", "Cancel")
         d.add_response("delete", "Delete")
         d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)

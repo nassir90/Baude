@@ -826,20 +826,51 @@ class Signal(Names):
             self._git_asked.update(names)
             self.jobs.put(("git", names, None))
 
+    FOLLOW_MS = 8  # how long a chat just opened is read at a time, between frames (_follow_some)
+
     def follow(self, transcript):
         """The chat shown (its transcript): what's new in it is read (what Claude saw, as evidence), and the reader
         reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
         decisions carry from reply to reply as they're drawn. This runs for each line another program appends to the
-        chat: only what was appended is read (SignalChat)."""
+        chat: only what was appended is read (SignalChat). A chat just opened is read FOLLOW_MS at a time between
+        frames, once it's still (_follow_some), to the same lists: read at once as it opened, an 85 MB chat and its
+        subagents' (96 MB more) held its first frame up 0.9 s."""
         if transcript:
             self.transcript = transcript
         if not self.transcript or not os.path.exists(self.transcript):
             return
-        new = self._chat is None or self._chat.path != self.transcript
-        if new:
-            self._chat, self._evidence_from = SignalChat(self.transcript, self.root, self.other_checkouts()), None
-        chat = self._chat
-        first = chat.read()
+        if self._chat is None or self._chat.path != self.transcript:
+            chat = self._chat = SignalChat(self.transcript, self.root, self.other_checkouts())
+            self._evidence_from, chat.behind = None, True
+            self._chat_read(chat, None, True)  # (another chat's lists go, even before this one's read)
+            GLib.idle_add(self._follow_some, chat, None, priority=GLib.PRIORITY_LOW)
+        elif not self._chat.behind:  # (else what's new is read with the rest)
+            self._chat_read(self._chat, self._chat.read())
+
+    def _follow_some(self, chat, first):
+        """FOLLOW_MS of reading a chat just opened (follow), then on in the next idle moment; or on once the chats
+        have been still a moment (STILL_S). first: the first reply its reads so far say changed. Once it's all read,
+        the replies drawn meanwhile are linked again where the reader's decisions say: a name means what the nearest
+        reply it decided says (decision), and which is nearest wasn't known."""
+        if chat is not self._chat:
+            return False  # (another chat now)
+        if (wait := Signal.moved_at + self.STILL_S - time.monotonic()) > 0:
+            GLib.timeout_add(int(wait * 1000) + 1, self._follow_some, chat, first, priority=GLib.PRIORITY_LOW)
+            return False
+        got = chat.read(time.monotonic() + self.FOLLOW_MS / 1000)
+        first = got if first is None else first if got is None else min(first, got)
+        if chat.behind:
+            GLib.idle_add(self._follow_some, chat, first, priority=GLib.PRIORITY_LOW)
+            return False
+        self._chat_read(chat, first, True)
+        self._phrase_res.clear()
+        if carried := [s for s, ds in self._by_surface.items() if any(d["by"] == "reader" for _k, d in ds)]:
+            self.notify(carried)
+        return False
+
+    def _chat_read(self, chat, first, new=False):
+        """What a read of the chat found (first: SignalChat.read's, None if nothing's new; new: it's just been read,
+        or is about to be): its lists, the evidence looked at again from first, and the reader on."""
         if first is not None or new:  # (another chat's lists go, even for one with nothing in it yet)
             first = first or len(chat.replies) + 1
             self.chat_events, self.chat_texts, self.chat_replies, self.chat_evidence = \
@@ -4303,6 +4334,7 @@ class SignalChat:
         self.path, self.root, self.checkouts = path, root, checkouts
         self.sub_dir = os.path.join(os.path.splitext(path)[0], "subagents")
         self.stamp = None  # (the files' sizes and times when last read: while they're the same, nothing's new)
+        self.behind = False  # (a read stopped for time: the rest next time, whatever the stamp)
         self._files = {}
         self.restart()
 
@@ -4316,19 +4348,20 @@ class SignalChat:
         # {"tid", "replies" (before it), "at", "n" (evidence[at:at + n]), "placed" (its events are in), "i"}
         self.subs, self.slots, self.slot_of = {}, [], {}
 
-    def read(self):
-        """Read what's new. Returns the number of the first reply whose evidence may have changed (a new reply, or
-        one after new evidence: 1 when read from the start, one past the last when only other events changed), or
-        None if nothing did."""
+    def read(self, until=None):
+        """Read what's new: all of it, or what there's time for till until (a time.monotonic()), the rest next time
+        (behind; a line or a subagent's transcript at least, then the time's looked at). Returns the number of the
+        first reply whose evidence may have changed (a new reply, or one after new evidence: 1 when read from the
+        start, one past the last when only other events changed), or None if nothing did."""
         stamp = self._stamp()
-        if stamp is None or stamp == self.stamp:
+        if stamp is None or stamp == self.stamp and not self.behind:
             return None
-        self.stamp = stamp
+        self.stamp, self.behind = stamp, False
         self._owned, self._first, self._changed = False, None, False
-        if self._read() is False:  # (rewritten or cut short: from the start)
+        if self._read(until) is False:  # (rewritten or cut short: from the start)
             self.restart()
             self._owned, self._first, self._changed = False, 1, True
-            if self._read() is False:
+            if self._read(until) is False:
                 self.stamp = None  # (still changing under it: again next time)
         return (self._first or len(self.replies) + 1) if self._changed else None
 
@@ -4357,8 +4390,8 @@ class SignalChat:
     def _affects(self, reply):
         self._first = reply if self._first is None else min(self._first, reply)
 
-    def _read(self):
-        """On from where it was: False if a file isn't the one read."""
+    def _read(self, until=None):
+        """On from where it was: False if a file isn't the one read. until: as read's."""
         # the subagents first (a call read below takes its subagent's events), each read only if its files changed
         metas = sorted(n for n in self._files if n.endswith(".meta.json"))
         if set(self.subs) - set(metas):
@@ -4391,15 +4424,19 @@ class SignalChat:
                 sub["events"] = (sub["events"] or []) + new
                 if self._sub_grew(sub, new) is False:
                     return False
+            if until is not None and time.monotonic() > until:
+                self.behind = True  # (the other subagents next time, then the chat: as if they were all read first)
+                return None
         present = {s["tid"]: s["events"] for s in self.subs.values() if s["tid"] and s["events"] is not None}
         new = []
         got = self._lines(self.path, self.offset, self.last,
-                          lambda line: new.extend(_ref_events_of(history_items((line,)), present)))
+                          lambda line: new.extend(_ref_events_of(history_items((line,)), present)), until)
         if got is None:
             return False
         if got is False:
             return None
         self.offset, self.last = got
+        self.behind = until is not None and time.monotonic() > until  # (stopped for time, or just done: next time)
         if not new:
             return None
         self._own()
@@ -4493,10 +4530,11 @@ class SignalChat:
         return None
 
     @staticmethod
-    def _lines(path, offset, last, take):
+    def _lines(path, offset, last, take, until=None):
         """Hands take each whole line of a transcript past offset, decoded, a line at a time (they're mostly tool
         output, up to hundreds of MB), and returns (offset, last) on from there. None if it isn't the file read (it's
-        shorter, or its last line read, last: (start, _line_sum), isn't there any more), False if there's no file."""
+        shorter, or its last line read, last: (start, _line_sum), isn't there any more), False if there's no file.
+        until (a time.monotonic()): no more lines once it's passed, the rest left for next time."""
         try:
             f = open(path, "rb")
         except FileNotFoundError:
@@ -4517,6 +4555,8 @@ class SignalChat:
                         break  # (still being written: read once it's done)
                     last, offset = (offset, _line_sum(raw)), offset + len(raw)
                     take(raw.decode("utf-8", "replace"))
+                    if until is not None and time.monotonic() > until:
+                        break
             except OSError:
                 pass
         return offset, last

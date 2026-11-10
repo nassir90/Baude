@@ -195,10 +195,25 @@ def git_exe():
     return git_exe.path
 
 
+_GIT_WAITS = threading.local()  # (what a thread waits for before each git it runs: git_wait)
+
+
+def git_wait(wait):
+    """Before each git this thread runs, wait() (Signal's worker: till the chats are still)."""
+    _GIT_WAITS.wait = wait
+
+
 def _git(cwd, *args, ok=(0,), raw=False, timeout=20):
-    """git's output (text, or bytes if raw), or None if it failed or git isn't there."""
+    """git's output (text, or bytes if raw), or None if it failed or git isn't there. It's started by posix_spawn, not
+    forked: in cwd by -C, and no fds closed (Python's own are close-on-exec), as Python needs for that. A fork holds
+    Python's lock 8 ms or more in a process Baude's size, and the window waited for each git a thread started."""
+    if cwd is not None and not os.path.isdir(cwd):
+        return None  # (as cwd= had it: no such folder)
+    if (wait := getattr(_GIT_WAITS, "wait", None)) is not None:
+        wait()
     try:
-        p = subprocess.run([git_exe(), *args], cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+        p = subprocess.run([git_exe(), *(("-C", cwd) if cwd is not None else ()), *args], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=timeout, close_fds=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if p.returncode not in ok:

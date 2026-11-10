@@ -1816,6 +1816,7 @@ def test_history_from_offsets(app):
         win.signal, win.queue_refs = object(), lambda text, written_at=None: looked_up.append(text)
         try:
             win.queue_history_refs(h.earlier_replies())
+            wait_for(lambda: len(looked_up) >= n + 10, "the replies not drawn, read (a few ms at a time)")
         finally:
             win.signal = signal
             del win.queue_refs

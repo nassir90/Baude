@@ -651,6 +651,20 @@ class Signal(Names):
 
     _instances = {}
     GITHUB_TTL = 600              # PR states change: GitHub answers are kept this long
+    STILL_S = 0.4                 # how long the chats are still before the workers go on (wait_still)
+    moved_at = 0.0                # when a chat last moved, any window's (time.monotonic(); main loop: moved)
+
+    @classmethod
+    def moved(cls):
+        """A chat moved: scrolled, gliding, its scrollbar dragged (its view's value changed; main loop)."""
+        cls.moved_at = time.monotonic()
+
+    def wait_still(self):
+        """(Worker.) Hold on while a chat moves, and STILL_S after (each git it starts too: git_wait). A lookup's own
+        Python and its gits kept the window waiting for Python's lock: a long chat flung up as it opened drew 14
+        frames a second, 39 with Signal off."""
+        while (left := Signal.moved_at + self.STILL_S - time.monotonic()) > 0:
+            time.sleep(left)
 
     @classmethod
     def for_folder(cls, folder, home=None, halted=False):
@@ -1201,16 +1215,21 @@ class Signal(Names):
 
     # ---- worker thread
     def _run(self):
+        lookup.git_wait(self.wait_still)
         while True:
             jobs = [self.jobs.get()]
-            if jobs[0][0] == "resolve":  # every reply queued meanwhile, in one go: one git status for all
+            self.wait_still()  # (and what's queued meanwhile goes with it)
+            if jobs[0][0] in ("resolve", "local"):  # every reply queued meanwhile, in one go: one git status for all
                 while len(jobs) < 200:
                     try:
                         jobs.append(self.jobs.get_nowait())
                     except queue.Empty:
                         break
             batch = [(arg, meta) for job, arg, meta in jobs if job == "resolve"]
+            self._local_st = None  # (the local lookups among them share one state of the repository, _job_local's:
+            # one a reply was 3 gits, 150 of them as a long chat opened)
             for job, arg, meta in [("batch", batch, None)] * bool(batch) + [j for j in jobs if j[0] != "resolve"]:
+                self.wait_still()
                 try:
                     getattr(self, "_job_" + job)(arg, meta)
                 except Exception as e:  # noqa: BLE001 (one bad name mustn't stop the rest)
@@ -1396,7 +1415,8 @@ class Signal(Names):
         """Names in replies Signal isn't running for, looked up here alone (look_locally): those found are posted,
         marked local; nothing goes in the glossary, nothing is copied into .baude, nothing is fetched or asked."""
         self._tell(activity=f"Looking up {len(names)} names here alone (Signal isn't running)…")
-        st, found, misses = self._repo_state(), [], {}
+        st = self._local_st = self._local_st or self._repo_state()  # (the replies drained with it share it: _run)
+        found, misses = [], {}
         for surface, kind in names.items():
             try:
                 ref = self._resolve(surface, kind, st, meta, keep=False)
@@ -1533,17 +1553,21 @@ class Signal(Names):
         if not path:
             return []
         seen = self._repos.setdefault(path, {"offset": 0, "tops": [], "dirs": {}})
+        lines, offset = [], seen["offset"]
         try:
             with open(path, "rb") as f:
-                f.seek(seen["offset"])
-                data = f.read()
+                f.seek(offset)
+                for raw in f:  # (a line at a time: a long chat decoded and split whole held Python's lock 0.2 s)
+                    if not raw.endswith(b"\n"):
+                        break  # (whole lines only: the rest is read next time)
+                    offset += len(raw)
+                    lines += raw.decode("utf-8", "replace").splitlines()
         except OSError:
             return seen["tops"]
-        end = data.rfind(b"\n") + 1  # (whole lines only: the rest is read next time)
-        seen["offset"] += end
+        seen["offset"] = offset
         home = os.path.expanduser("~")
         mine = {os.path.realpath(t) for t in (self.top, *self.other_checkouts()) if t}
-        for line in data[:end].decode("utf-8", "replace").splitlines():
+        for line in lines:
             paths = re.findall(r'"cwd":\s*"([^"]+)"', line[:3000])
             if re.search(r'"type":\s*"tool_use"', line) and len(line) < 500_000:
                 paths += re.findall(r'(?<![\w/.~:-])((?:~|/[\w.-]+)/[^\s"\'\\:;|&)<>`,]+)', line)
@@ -5390,18 +5414,31 @@ def ref_code_sites(hits, needle, touched=(), limit=4):
     return out
 
 
+_REF_PY_DEFS = {}  # the last few texts ref_py_scope parsed: their classes and functions (None: it doesn't parse)
+
+
 def ref_py_scope(text, line):
     """Where a line of Python is, by Python's own parser (no server needed): what it's directly in ("class",
-    "function" or "module"; None if it doesn't parse) and the classes around it, outermost first."""
+    "function" or "module"; None if it doesn't parse) and the classes around it, outermost first. A text is parsed
+    once (_REF_PY_DEFS): parsed again for each of a name's places (60 of them, say), baude.py's parse held Python's
+    lock a tenth of a second each time, and the window waited."""
     import ast
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
+    if text not in _REF_PY_DEFS:
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            _REF_PY_DEFS[text] = None
+        else:
+            _REF_PY_DEFS[text] = [(n.lineno, n.end_lineno or n.lineno, isinstance(n, ast.ClassDef), n.name)
+                                  for n in ast.walk(tree)
+                                  if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+        while len(_REF_PY_DEFS) > 8:
+            _REF_PY_DEFS.pop(next(iter(_REF_PY_DEFS)))
+    if (defs := _REF_PY_DEFS.get(text)) is None:
         return None, []
-    around = sorted((n for n in ast.walk(tree) if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-                     and n.lineno < line <= (n.end_lineno or n.lineno)), key=lambda n: n.lineno)
-    scope = "module" if not around else "class" if isinstance(around[-1], ast.ClassDef) else "function"
-    return scope, [n.name for n in around if isinstance(n, ast.ClassDef)]
+    around = sorted((d for d in defs if d[0] < line <= d[1]), key=lambda d: d[0])
+    scope = "module" if not around else "class" if around[-1][2] else "function"
+    return scope, [name for _first, _last, is_class, name in around if is_class]
 
 
 def ref_same_name(a, b):
@@ -10269,6 +10306,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.history = None        # a loaded session's items not drawn yet (HistoryIndex)
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
+        self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
         self.sub_tails = {}        # agent id -> how far its transcript has been read
         ARTIFACT_TITLES.clear()    # titles belong to the conversation in this window
@@ -10374,6 +10412,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.restore_scroll = None  # (distance from the bottom, until) after a restart
         vadj = self.scroller.get_vadjustment()
         vadj.connect("value-changed", self.on_scrolled)
+        vadj.connect("value-changed", lambda *_: Signal.moved())  # (Signal's lookups wait while a chat moves)
         wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         wheel.connect("scroll", self.on_reader_scroll)
@@ -12483,12 +12522,31 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.ref_surfaces.setdefault(s, True)
             self.panel.signal_page.changed()
 
+    HISTORY_REFS_MS = 4  # how long queue_history_refs reads at a time, between frames
+
     def queue_history_refs(self, items):
         """Replies earlier in a long session, not drawn yet: looked up too, newest first, after the ones on
         screen (so the Signal page covers the whole session, and links are ready when you scroll up). items:
-        newest first (HistoryIndex.earlier_replies, read from the transcript only once it's needed here)."""
+        newest first (HistoryIndex.earlier_replies, read from the transcript only once it's needed here). A few ms of
+        them at a time, between frames, and none while the chat moves (queue_history_some): all at once, a long
+        chat's froze the window for half a second or more, a second after it opened."""
         if self.signal is None:
             return
+        self.history_refs = items = iter(items)  # (these: not those given before, if they're not all read yet)
+        GLib.idle_add(self.queue_history_some, self.history, items, priority=GLib.PRIORITY_LOW)
+
+    def queue_history_some(self, history, items):
+        """HISTORY_REFS_MS of queue_history_refs' replies, then on in the next idle moment; or on once the chats have
+        been still a moment (Signal.STILL_S)."""
+        if items is not self.history_refs:
+            return False  # (given again since)
+        if history is not self.history or self.signal is None:
+            self.history_refs = None  # (another chat now, or Signal off)
+            return False
+        if (wait := Signal.moved_at + Signal.STILL_S - time.monotonic()) > 0:
+            GLib.timeout_add(int(wait * 1000) + 1, self.queue_history_some, history, items, priority=GLib.PRIORITY_LOW)
+            return False
+        end = time.monotonic() + self.HISTORY_REFS_MS / 1000
         for kind, content, *rest in items:
             if kind != "assistant" or (rest and rest[0]):
                 continue
@@ -12496,6 +12554,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 if isinstance(c, dict) and (text := c.get("text") or c.get("thinking") or "").strip() and \
                         c.get("type") in ("text", "thinking"):
                     self.queue_refs(text, ref_epoch(rest[1]) if len(rest) > 1 else None)
+            if time.monotonic() > end:
+                GLib.idle_add(self.queue_history_some, history, items, priority=GLib.PRIORITY_LOW)
+                return False
+        self.history_refs = None
+        return False
 
     def on_ref_status(self):
         """What Signal is doing changed: the button is lit while it's on and pulses while it works, and its

@@ -707,6 +707,7 @@ class Signal(Names):
         self.agent = SignalReader(self) if load_settings().get("signal_reader", True) else None  # the reader
         self.transcript = None  # the chat it reads, and what's in it (main loop; follow)
         self._chat, self._checkouts, self._evidence_soon = None, None, None  # (_chat: a SignalChat)
+        self._chats = {}  # (the chats read here lately, by transcript, the last followed last: follow)
         self._evidence_from = None  # (the first reply whose evidence may have changed since it went to the worker)
         self.chat_events, self.chat_texts, self.chat_replies, self.chat_evidence = [], [], [], []
         # per reply: what a name in it points at ((message, surface) -> decision; main loop), and the replies
@@ -827,6 +828,7 @@ class Signal(Names):
             self.jobs.put(("git", names, None))
 
     FOLLOW_MS = 8  # how long a chat just opened is read at a time, between frames (_follow_some)
+    CHATS = 4  # the chats kept read (_chats): windows of one repository share its Signal, each following its own
 
     def follow(self, transcript):
         """The chat shown (its transcript): what's new in it is read (what Claude saw, as evidence), and the reader
@@ -834,16 +836,28 @@ class Signal(Names):
         decisions carry from reply to reply as they're drawn. This runs for each line another program appends to the
         chat: only what was appended is read (SignalChat). A chat just opened is read FOLLOW_MS at a time between
         frames, once it's still (_follow_some), to the same lists: read at once as it opened, an 85 MB chat and its
-        subagents' (96 MB more) held its first frame up 0.9 s."""
+        subagents' (96 MB more) held its first frame up 0.9 s. The last few chats followed are kept (CHATS), each
+        read on from where it was: windows sharing this Signal each follow theirs as it grows, and one being read
+        isn't started again when another's grows."""
         if transcript:
             self.transcript = transcript
         if not self.transcript or not os.path.exists(self.transcript):
             return
         if self._chat is None or self._chat.path != self.transcript:
-            chat = self._chat = SignalChat(self.transcript, self.root, self.other_checkouts())
-            self._evidence_from, chat.behind = None, True
-            self._chat_read(chat, None, True)  # (another chat's lists go, even before this one's read)
-            GLib.idle_add(self._follow_some, chat, None, priority=GLib.PRIORITY_LOW)
+            chat = self._chats.pop(self.transcript, None)
+            if chat is None:
+                chat = SignalChat(self.transcript, self.root, self.other_checkouts())
+                chat.behind = True
+                GLib.idle_add(self._follow_some, chat, None, priority=GLib.PRIORITY_LOW)
+            self._chats[self.transcript] = chat
+            while len(self._chats) > self.CHATS:
+                self._chats.pop(next(iter(self._chats)))  # (its reading stops: _follow_some)
+            self._chat, self._evidence_from = chat, None
+            if chat.behind:  # (another chat's lists go: this one's as far as it's read, all of them once it is)
+                self._chat_read(chat, None, True)
+            else:  # (read before: on from there, its evidence looked at again from the start, as if read afresh)
+                chat.read()
+                self._chat_read(chat, 1, True)
         elif not self._chat.behind:  # (else what's new is read with the rest)
             self._chat_read(self._chat, self._chat.read())
 
@@ -851,9 +865,10 @@ class Signal(Names):
         """FOLLOW_MS of reading a chat just opened (follow), then on in the next idle moment; or on once the chats
         have been still a moment (STILL_S). first: the first reply its reads so far say changed. Once it's all read,
         the replies drawn meanwhile are linked again where the reader's decisions say: a name means what the nearest
-        reply it decided says (decision), and which is nearest wasn't known."""
-        if chat is not self._chat:
-            return False  # (another chat now)
+        reply it decided says (decision), and which is nearest wasn't known. A chat another window's has taken the place
+        of goes on being read (it's kept: _chats), and shows what's read of it when it's followed again."""
+        if self._chats.get(chat.path) is not chat:
+            return False  # (not kept any more: other chats since, or Signal's read them afresh)
         if (wait := Signal.moved_at + self.STILL_S - time.monotonic()) > 0:
             GLib.timeout_add(int(wait * 1000) + 1, self._follow_some, chat, first, priority=GLib.PRIORITY_LOW)
             return False
@@ -862,6 +877,8 @@ class Signal(Names):
         if chat.behind:
             GLib.idle_add(self._follow_some, chat, first, priority=GLib.PRIORITY_LOW)
             return False
+        if chat is not self._chat:
+            return False  # (read: its lists go out when it's followed again)
         self._chat_read(chat, first, True)
         self._phrase_res.clear()
         if carried := [s for s, ds in self._by_surface.items() if any(d["by"] == "reader" for _k, d in ds)]:
@@ -1139,6 +1156,7 @@ class Signal(Names):
         """Turned on again after stop: the glossary and the tools are read again; the window queues the replies."""
         if self.halted:
             self.halted, self._chat = False, None  # (the chat is read afresh: its evidence, the reader)
+            self._chats.clear()
             self.jobs.put(("load", None, None))
             self.jobs.put(("tools", None, None))
             if self.agent is not None:
@@ -4354,7 +4372,10 @@ class SignalChat:
         first reply whose evidence may have changed (a new reply, or one after new evidence: 1 when read from the
         start, one past the last when only other events changed), or None if nothing did."""
         stamp = self._stamp()
-        if stamp is None or stamp == self.stamp and not self.behind:
+        if stamp is None:
+            self.behind = False  # (gone: what was read is all there is, till it's back)
+            return None
+        if stamp == self.stamp and not self.behind:
             return None
         self.stamp, self.behind = stamp, False
         self._owned, self._first, self._changed = False, None, False
@@ -5455,6 +5476,7 @@ def ref_code_sites(hits, needle, touched=(), limit=4):
 
 
 _REF_PY_DEFS = {}  # the last few texts ref_py_scope parsed: their classes and functions (None: it doesn't parse)
+_REF_PY_LOCK = threading.Lock()  # (every Signal's worker uses it: one's taking a text out as another puts one in)
 
 
 def ref_py_scope(text, line):
@@ -5463,18 +5485,22 @@ def ref_py_scope(text, line):
     once (_REF_PY_DEFS): parsed again for each of a name's places (60 of them, say), baude.py's parse held Python's
     lock a tenth of a second each time, and the window waited."""
     import ast
-    if text not in _REF_PY_DEFS:
+    with _REF_PY_LOCK:
+        known = text in _REF_PY_DEFS
+        defs = _REF_PY_DEFS.get(text)
+    if not known:
         try:
             tree = ast.parse(text)
         except (SyntaxError, ValueError):
-            _REF_PY_DEFS[text] = None
+            defs = None
         else:
-            _REF_PY_DEFS[text] = [(n.lineno, n.end_lineno or n.lineno, isinstance(n, ast.ClassDef), n.name)
-                                  for n in ast.walk(tree)
-                                  if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
-        while len(_REF_PY_DEFS) > 8:
-            _REF_PY_DEFS.pop(next(iter(_REF_PY_DEFS)))
-    if (defs := _REF_PY_DEFS.get(text)) is None:
+            defs = [(n.lineno, n.end_lineno or n.lineno, isinstance(n, ast.ClassDef), n.name) for n in ast.walk(tree)
+                    if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+        with _REF_PY_LOCK:
+            _REF_PY_DEFS[text] = defs
+            while len(_REF_PY_DEFS) > 8:
+                _REF_PY_DEFS.pop(next(iter(_REF_PY_DEFS)))
+    if defs is None:
         return None, []
     around = sorted((d for d in defs if d[0] < line <= d[1]), key=lambda d: d[0])
     scope = "module" if not around else "class" if around[-1][2] else "function"

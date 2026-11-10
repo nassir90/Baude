@@ -2316,14 +2316,30 @@ class DiaryEditor(Gtk.Box, FindInText):
         return self.win.open_note(name)
 
     def _up_to_title(self):
-        """Up on the text's first line, as Down in the title comes down to it: up into the title, the caret at its end
-        (none of it selected, so what's typed next doesn't replace it). False anywhere lower: Up's as it always was."""
+        """Up on the text's first line, as Down in the title comes down to it: up into the title, the caret about
+        straight above where it was (title_offset_at), none of it selected, so what's typed next doesn't replace it.
+        False anywhere lower: Up's as it always was."""
         caret = self.buf.get_iter_at_mark(self.buf.get_insert())
-        if self.view.get_iter_location(caret).y != self.view.get_iter_location(self.buf.get_start_iter()).y:
+        at = self.view.get_iter_location(caret)
+        if at.y != self.view.get_iter_location(self.buf.get_start_iter()).y:
             return False  # (on a lower line, or the first one's lower rows, wrapped)
+        x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, at.x, at.y)
+        offset = self.title_offset_at(self.view, x)
         self.title.grab_focus_without_selecting()
-        self.title.set_position(-1)
+        self.title.set_position(offset)
         return True
+
+    def title_offset_at(self, widget, x):
+        """The place in the title's text nearest to x across widget (in its own coordinates): the end, past its last
+        letter; the start, left of its first. Where the text's laid out as the title draws it, so not if it's scrolled
+        along (a name longer than its box): about right is all it's for."""
+        text = self.title.get_delegate()
+        ok, point = widget.compute_point(text, Graphene.Point().init(x, 0))
+        words = self.title.get_text()
+        if not ok or not words:
+            return -1
+        _inside, index, trailing = text.create_pango_layout(words).xy_to_index(int(point.x * Pango.SCALE), 0)
+        return len(words.encode()[:index].decode(errors="ignore")) + trailing
 
     def _title_entered(self):
         """Enter in the title: the page renamed, and on to its text, from the top. (A name that's taken: it stays in the

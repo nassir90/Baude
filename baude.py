@@ -7170,13 +7170,17 @@ def collapse_copies(sessions, keep=()):
     in the same folder has the same title and holds at least 95% of its records (the last few
     differ) — or the newer one is itself 95% made of the older's records (Desktop sometimes copies
     only the history since the last compaction). Forks keep their own title ("... (fork)"), so they stay. Sessions in `keep` (the
-    open one) are never dropped. Survivors get "copies": how many were folded into them."""
+    open one) are never dropped, nor is a chat Claude Desktop lists for another it lists (a side session of the same
+    title, say: Desktop names a chat's copies itself, see apply_desktop_index). Survivors get "copies": how many were
+    folded into them."""
     kept, newest_first = [], sorted(sessions, key=lambda i: i["mtime"], reverse=True)
     for info in newest_first:
         mine = record_ids(info)
         owner = None
         if info["id"] not in keep and sum(map(len, mine)) >= 5:
             for newer in kept:
+                if info.get("desktop") and newer.get("desktop") and info["id"] != newer["id"]:
+                    continue  # (two chats Claude Desktop lists are two chats: it says which are copies itself)
                 theirs = record_ids(newer)
                 if newer.get("title") == info.get("title") and newer.get("cwd") == info.get("cwd") \
                         and shared_records(mine, theirs) >= 0.95 * min(sum(map(len, mine)), sum(map(len, theirs))):
@@ -7217,9 +7221,49 @@ def fold_records(owner, copy):
 
 
 def desktop_parents(info):
-    """The ids of the sessions a Claude Desktop chat came from, nearest first: the one it was forked from, else the
-    one that started it as a side session (Desktop's spawnedFrom)."""
-    return [i for i in (info.get("fork_of"), info.get("spawned_from")) if i]
+    """The id of the session Claude Desktop shows a chat of its under, as a list ([] for none): the one that started it
+    as a side session (spawned_from), or the one it was forked from (fork_of); apply_desktop_index sets one at most,
+    as Desktop picks one (desktop_link). Where that one isn't listed, the chat is a top-level one."""
+    return [i for i in (info.get("spawned_from"), info.get("fork_of")) if i]
+
+
+_DESKTOP_LINKS = ("side_session", "hand_off", "suggested_task", "fork")
+
+
+def desktop_link(entry):
+    """(kind, local id) of the chat Claude Desktop nests one of its chats under, or (None, None), as its sidebar picks
+    it: none once it's detached from it (lineageDetached); else its lineage; else the chat that started it as a side
+    session (spawnedFrom, a side session's only); else the one it was forked from. kind is "fork" for a fork."""
+    if entry.get("lineageDetached"):
+        return None, None
+    lineage = entry.get("lineage")
+    if isinstance(lineage, dict) and isinstance(lineage.get("sessionId"), str) and lineage["sessionId"] \
+            and lineage.get("kind") in _DESKTOP_LINKS and lineage.get("initiator") in ("claude", "user"):
+        return lineage["kind"], lineage["sessionId"]
+    spawned = entry.get("spawnedFrom") if isinstance(entry.get("spawnedFrom"), dict) else {}
+    if spawned.get("sideSession") and isinstance(spawned.get("sessionId"), str):
+        return "side_session", spawned["sessionId"]
+    if isinstance(entry.get("forkedFromSessionId"), str):
+        return "fork", entry["forkedFromSessionId"]
+    return None, None
+
+
+def desktop_used(entry):
+    """When Claude Desktop says one of its chats was last used (what its sidebar's order and days go by), as a
+    timestamp, or None: the last turn's start or end (lastTurnEdgeAt), else its last activity, else its creation."""
+    ms = next((entry[k] for k in ("lastTurnEdgeAt", "lastActivityAt", "createdAt")
+               if isinstance(entry.get(k), (int, float)) and entry[k] > 0), None)
+    return ms / 1000 if ms is not None else None
+
+
+def claude_desktop_dir():
+    """The Claude desktop app's own folder: $XDG_CONFIG_HOME/Claude when that's set (Linux's way, and how the tests
+    point it elsewhere), else ~/Library/Application Support/Claude on a Mac (where Electron keeps it), ~/.config/Claude
+    elsewhere."""
+    if os.environ.get("XDG_CONFIG_HOME"):
+        return os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude")
+    return os.path.join(os.path.expanduser("~/Library/Application Support" if sys.platform == "darwin" else "~/.config"),
+                        "Claude")
 
 
 _FORK_SUFFIX = re.compile(r"^(.*\S)\s+\(([^()]+)\)$")
@@ -7296,12 +7340,11 @@ def fork_tree(items):
 
 
 def desktop_index():
-    """Claude Desktop's own list of its chats ({cli session id: entry}), from
-    ~/.config/Claude/claude-code-sessions/*/*/local_*.json: title, archived, which earlier
-    transcripts are copies of it (priorCliSessionIds) and what it was forked from. Empty without
+    """Claude Desktop's own list of its chats ({cli session id: entry}), from claude-code-sessions/*/*/local_*.json in
+    its folder (claude_desktop_dir: on a Mac, in ~/Library/Application Support): title, archived, when it was last
+    used, which earlier transcripts are copies of it (priorCliSessionIds) and what it came from. Empty without
     Desktop. Entries are cached by file mtime (they're small, but carry big tool lists)."""
-    base = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                        "Claude", "claude-code-sessions")
+    base = os.path.join(claude_desktop_dir(), "claude-code-sessions")
     with _info_lock:
         _load_info_cache()
     out, archived = {}, set()
@@ -7332,8 +7375,9 @@ def desktop_index():
 
 _desktop_cache = {}
 # what's kept of each Desktop chat's file
-_DESKTOP_KEYS = ("sessionId", "cliSessionId", "title", "isArchived", "priorCliSessionIds", "forkedFromSessionId",
-                 "spawnedFrom", "cwd", "archived")
+_DESKTOP_KEYS = ("sessionId", "cliSessionId", "title", "worktreeName", "isArchived", "priorCliSessionIds",
+                 "forkedFromSessionId", "spawnedFrom", "lineage", "lineageDetached", "lastTurnEdgeAt", "lastActivityAt",
+                 "createdAt", "cwd", "archived")
 
 
 def _desktop_file(path):
@@ -7356,7 +7400,8 @@ def apply_desktop_index(sessions, index, keep=()):
     """Show Claude Desktop's chats the way Desktop does. A Desktop transcript its index doesn't list is
     gone from Desktop (deleted, or a stray from a test run with Desktop's environment): hidden. One
     it lists as an earlier copy of a chat folds into that chat. Listed chats take Desktop's title,
-    archived state, fork parent and the chat that started them as a side session (spawned_from). Sessions from
+    archived state, when it was last used (desktop_used) and the one chat Desktop shows them under (desktop_link): the
+    one that started them as a side session (spawned_from) or the one they were forked from (fork_of). Sessions from
     elsewhere (terminal, baude) are left alone."""
     if not index:
         return sessions
@@ -7366,10 +7411,11 @@ def apply_desktop_index(sessions, index, keep=()):
     for info in sessions:
         e = index.get(info["id"])
         if e is not None:
-            spawned = e.get("spawnedFrom") if isinstance(e.get("spawnedFrom"), dict) else {}
-            info = {**info, "desktop": True, "title": e.get("title") or info.get("title"),
-                    "desktop_archived": e["_archived"], "fork_of": local.get(e.get("forkedFromSessionId")),
-                    "spawned_from": local.get(spawned.get("sessionId"))}
+            kind, up = desktop_link(e)
+            up = local.get(up) if up else None
+            info = {**info, "desktop": True, "title": e.get("title") or e.get("worktreeName") or info.get("title"),
+                    "desktop_archived": e["_archived"], "desktop_used": desktop_used(e),
+                    "fork_of": up if kind == "fork" else None, "spawned_from": up if kind != "fork" else None}
             owners[info["id"]] = info
             out.append(info)
         elif info["id"] in prior and info["id"] not in keep:
@@ -7428,8 +7474,10 @@ def list_sessions(progress=None):
 
 def last_used(info):
     """When a listed chat was last used: the last thing typed in it (scan_session's said), for the open one not saved
-    yet now; what the sidebar's order and its days go by."""
-    return info.get("said") or info.get("mtime") or 0.0
+    yet now; for a Claude Desktop chat, when Desktop last saw it used (desktop_used, what Desktop's sidebar goes by),
+    unless it was typed in since (carried on in a terminal, or here). What the sidebar's order and its days go by."""
+    said = info.get("said") or info.get("mtime") or 0.0
+    return max(said, info["desktop_used"]) if info.get("desktop_used") else said
 
 
 _info_cache = {}  # path -> (inode, size, mtime, scan state, info); None -> loaded from disk yet
@@ -7569,7 +7617,15 @@ def save_info_cache(force=False):
         pass
 
 
-SCRATCH_MARK = os.sep + os.path.join(".config", "Claude", "scratch-workspaces") + os.sep
+# where Claude Desktop makes its "No folder" chats' folders: in its own folder (claude_desktop_dir), a Mac's and
+# Linux's
+SCRATCH_MARKS = tuple(os.sep + os.path.join(*parts, "Claude", "scratch-workspaces") + os.sep
+                      for parts in ((".config",), ("Library", "Application Support")))
+
+
+def is_scratch(path):
+    """Is path in one of Claude Desktop's per-chat scratch folders (SCRATCH_MARKS)?"""
+    return any(mark in path for mark in SCRATCH_MARKS)
 
 
 def session_group(cwd):
@@ -7577,7 +7633,7 @@ def session_group(cwd):
     are one group, like its "No folder" chats."""
     if not cwd:
         return "?", "Unknown folder"
-    if SCRATCH_MARK in cwd:
+    if is_scratch(cwd):
         return "scratch", "No folder (Claude Desktop)"
     return cwd, pretty_path(cwd)
 
@@ -7590,8 +7646,9 @@ def short_group_label(key, label):
 
 
 def date_group(mtime, now):
-    """(key, label) of a chat's day by its last activity, in local time: "Today", "Yesterday", each of the 3 days
-    before ("Oct 20"), else "Older". Keys say how many days ago (what's collapsed stays as the days move on)."""
+    """(key, label) of a chat's day by its last activity, in local time, as Claude Desktop's sidebar has them: "Today",
+    "Yesterday", each of the 5 days before ("Oct 20"), else "Older". Keys say how many days ago (what's collapsed stays
+    as the days move on)."""
     import datetime
     day = datetime.date.fromtimestamp(mtime)
     ago = (datetime.date.fromtimestamp(now) - day).days
@@ -7599,7 +7656,7 @@ def date_group(mtime, now):
         return "date:0", "Today"
     if ago == 1:
         return "date:1", "Yesterday"
-    return (f"date:{ago}", f"{day:%b} {day.day}") if ago <= 4 else ("date:older", "Older")
+    return (f"date:{ago}", f"{day:%b} {day.day}") if ago <= 6 else ("date:older", "Older")
 
 
 def next_midnight(now):
@@ -7622,7 +7679,7 @@ def main_folder(path):
     folder in a worktree to the same folder there. One that's gone is known from when it was last seen, or by its
     .claude/worktrees/ path; else it is its own folder, like a plain one. git runs once per folder, and only in one
     whose nearest .git is a file (a worktree's or a submodule's), so hundreds of sessions cost a few stats."""
-    if not path or SCRATCH_MARK in path:
+    if not path or is_scratch(path):
         return path, None
     if (hit := _MAINS.get(path)) is not None:
         return hit
@@ -8468,8 +8525,9 @@ class SessionSidebar(Gtk.Box):
         """[(key, label, folder, [(session, depth, is_last)])], each group's rows as fork_tree places them: by folder,
         this folder first, then by latest activity (a worktree's chats are in its repository's folder: see
         place_sessions; a Desktop chat is in the group of the one it came from); or by day (date_group), newest first,
-        where only the top-level sessions go by their day: a fork stays under the session it came from, in that one's
-        day, whatever its own."""
+        where a session and those under it (its forks, a Desktop chat's side sessions) go together, by the latest
+        activity of any of them, as Claude Desktop's sidebar has them: a fork used today brings the session it came from
+        into today, with it."""
         q = self.search.get_text().strip().lower()
         here = session_group(self.win.cwd)[0]
         by_date, now = self.by_date(), self.clock()
@@ -8513,14 +8571,16 @@ class SessionSidebar(Gtk.Box):
                     trees[-1].append(row)
             # (the open, unsaved one first, then the newest; a sort keeps sessions' order where it's the same. Nothing
             # listed, a search that finds nothing say, leaves the one empty tree, which has no first session)
-            trees = sorted(filter(None, trees), key=lambda t: (not t[0][0].get("unsaved"), -last_used(t[0][0])))
+            newest = lambda rows: max(last_used(info) for info, _depth, _last in rows)  # noqa: E731
+            trees = sorted(filter(None, trees), key=lambda t: (not t[0][0].get("unsaved"), -newest(t)))
             groups = {}
             for rows in trees:
-                key, label = date_group(last_used(rows[0][0]), now)
+                key, label = date_group(newest(rows), now)
                 groups.setdefault(key, [label, None, []])[2].extend(rows)
-        # (days don't overlap: by day too, the latest activity of a top-level session puts them in order)
-        order = sorted(groups.items(),
-                       key=lambda kv: (kv[0] != here, -max(last_used(i) for i, depth, _ in kv[1][2] if not depth)))
+        # (days don't overlap: by day the latest activity of any session in them puts them in order, by folder a
+        # top-level session's)
+        order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
+            last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
         gone = [i for i in self.sessions if i["id"] in archived
                 and (not q or q in (i.get("title") or "").lower())]

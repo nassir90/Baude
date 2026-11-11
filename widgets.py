@@ -5184,6 +5184,7 @@ entry:focus-within, spinbutton:focus-within, spinbutton.vertical > text:focus-wi
 row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none; }
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
+.api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }
 .tool-card.asking { border-color: @warning_color; }  /* (waiting for you to allow it: the approval's colour) */
 /* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */

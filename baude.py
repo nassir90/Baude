@@ -5873,6 +5873,17 @@ def _card_status(state):
 TASK_ENDINGS = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
 
+def api_error_label(text):
+    """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
+    colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: widgets.CSS), and
+    "API Error" in bold."""
+    m = re.match(r"(API Error)(.*)", text or "", re.S)
+    markup = f"<b>{m.group(1)}</b>{html.escape(m.group(2))}" if m else html.escape(text or "")
+    lbl = sel_label(markup, css="error")
+    lbl.add_css_class("api-error")
+    return lbl
+
+
 def task_note_widget(note, card=None, on_jump=None):
     """A background task ending, as one quiet line: ✓ Bash · <its description> — finished (exit 0).
     The description links back to the task's card (on_jump(card)); never the raw command or XML."""
@@ -12450,7 +12461,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if msg.get("is_api_error_message") or m.get("model") == "<synthetic>":
             for c in m.get("content", []):
                 if c.get("type") == "text":
-                    self.add(sel_label(f'<span foreground="red">{html.escape(c["text"])}</span>'), parent)
+                    self.add(api_error_label(c["text"]), parent)
             return
         self.render_assistant(m.get("content", []), parent, streamed=m.get("id") in self.streamed_ids)
         if parent is None:
@@ -13925,7 +13936,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 fold.add_css_class("sysnote")
                 self.add(fold)
             elif kind == "assistant" and rest and rest[0]:
-                self.add(sel_label(f'<span foreground="red">{html.escape(_first_text(content) or "")}</span>'))
+                self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":
                 self.render_assistant(content, written_at=ref_epoch(rest[1]) if len(rest) > 1 else None)
             else:

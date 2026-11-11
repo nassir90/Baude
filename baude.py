@@ -13574,7 +13574,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         """Draw the newest part of a saved session; older parts load on demand from the top."""
         self.history = HistoryIndex(path)
         items = self.history.load(self.HISTORY_CHUNK)
-        self.history_path = path
+        self.history_path, self.history_final = path, not live  # (finished: no task in it is running: settle_tasks)
         self.earlier_btn = Gtk.Button(halign=Gtk.Align.CENTER, visible=False)
         self.earlier_btn.add_css_class("pill")
         self.earlier_btn.connect("clicked", lambda *_: self.show_earlier())
@@ -13777,6 +13777,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 card = self.tool_cards.get(tid)
                 if card is not None and card.state == "running" and tid not in self.orphan_results:
                     card.set_state("interrupted")
+            if getattr(self, "history_final", False):  # (and its background tasks that never ended, as when it opened)
+                self.settle_tasks()
         for w in [w for w in job.hidden if w.get_parent() is not job.slot]:  # (a call gone into a run's group: the
             w.set_visible(True)                                               # group's hidden instead)
             job.hidden.remove(w)
@@ -13941,16 +13943,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:
                 card.set_state("interrupted")
-        # likewise background tasks a finished session never heard the end of
         if final:
-            for task in self.tasks.values():
-                if task.get("from_file") and task.get("status") == "running":
-                    task["status"] = "interrupted"
-                    card = self.tool_cards.get(task.get("tool_use_id"))
-                    if card is not None and card.state in ("running", "background"):
-                        card.set_state("interrupted")
-                    self.panel.update_task(task)
-            self.update_tasks_indicator()
+            self.settle_tasks()
+
+    def settle_tasks(self):
+        """Background tasks (commands, subagents) a finished session's transcript never heard the end of: interrupted,
+        not running for ever. When it opens, and as each earlier part is drawn (fill_item): one started there and
+        never ended came back as running, its spinner going, counted in the header, its subagent followed again."""
+        for task in self.tasks.values():
+            if task.get("from_file") and task.get("status") == "running":
+                task["status"] = "interrupted"
+                card = self.tool_cards.get(task.get("tool_use_id"))
+                if card is not None and card.state in ("running", "background"):
+                    card.set_state("interrupted")
+                self.panel.update_task(task)
+        self.update_tasks_indicator()
 
     def show_sessions(self):
         self.sidebar_slide.set_shown(True)

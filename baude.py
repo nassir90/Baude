@@ -752,7 +752,7 @@ class Signal(Names):
 
     def github_changed(self):
         """GitHub's lists are new: the pull requests and issues named here say where they stand now (nothing asked for:
-        it's what the lists say), as a closed issue's # goes grey and a merged pull request orange. The labels showing
+        it's what the lists say), as a closed issue's # goes grey and a merged pull request purple. The labels showing
         one that's changed are drawn again."""
         changed = []
         for ref in list(self.refs.values()):

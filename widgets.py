@@ -97,21 +97,21 @@ REF_ICON_SVG = {
     "external": (f'<path d="M9 2.5h4.5V7M13.5 2.5 7 9M11 9.5v3.5H3V5h3.5" {_REF_STROKE}/>'),
 }
 # A pull request has a branch's logo, an issue its #, in a colour of their own for where they stand (lookup.github_icon),
-# light or dark: green while it's open, orange once merged, grey if it came to nothing (closed unmerged, or an issue
+# light or dark: green while it's open, purple once merged, grey if it came to nothing (closed unmerged, or an issue
 # closed: an open issue is the text's colour, as most logos are).
 REF_ICON_SVG.update(pr_open=REF_ICON_SVG["git"], pr_merged=REF_ICON_SVG["git"], pr_closed=REF_ICON_SVG["git"],
                     issue_closed=REF_ICON_SVG["issue"])
-REF_ICON_TINTS = {"pr_open": "#2da44e", "pr_merged": "#e8730c", "pr_closed": "#8a8f98", "issue_closed": "#8a8f98"}
+REF_ICON_TINTS = {"pr_open": "#2da44e", "pr_merged": "#8957e5", "pr_closed": "#8a8f98", "issue_closed": "#8a8f98"}
 # git's merge (two branches' ends, one bending into the other): a pull request's pill has it before its number
 REF_ICON_SVG["merge"] = (f'<circle cx="4.6" cy="3.3" r="1.85" {_REF_STROKE}/><circle cx="4.6" cy="12.7" r="1.85" '
                          f'{_REF_STROKE}/><circle cx="11.6" cy="9" r="1.85" {_REF_STROKE}/><path d="M4.6 5.2v5.6M4.6 '
                          f'5.2c0 2.3 1.6 3.8 5.1 3.8" {_REF_STROKE}/>')
 # A pull request's pill, in a reply and on the Git page, is in the colour of where it stands (lookup.pull_state), the
 # same light or dark (each reads on either), its patch that colour faint: green while it's open, grey while it's a
-# draft, red once a review asks for changes (whatever else it is: it's held up), orange once merged; closed without
+# draft, red once a review asks for changes (whatever else it is: it's held up), purple once merged; closed without
 # being merged, the same grey fainter and struck through. One not known yet is a plain link on a patch of the text's
 # colour, and only takes its own when it's known: nothing moves.
-PR_COLORS = {"open": "#2da44e", "draft": "#8a8f98", "changes": "#e5484d", "merged": "#e8730c", "closed": "#8a8f98"}
+PR_COLORS = {"open": "#2da44e", "draft": "#8a8f98", "changes": "#e5484d", "merged": "#8957e5", "closed": "#8a8f98"}
 PR_SAID = {"open": "Open", "draft": "Draft", "changes": "Changes requested", "merged": "Merged",
            "closed": "Closed without being merged"}
 
@@ -1704,10 +1704,12 @@ class LinkLabel(WrapLabel):
 
 
 def pr_rgba(state, fg):
-    """A pill's colour (PR_COLORS), or fg (a copy) for one whose state isn't known."""
+    """A pill's colour (PR_COLORS); for one whose state isn't known (yet, or at all: one older than those read), a
+    link's, the accent's, as its number is (a link), so it's all one colour, logo, patch and number."""
     c = Gdk.RGBA()
     if not c.parse(PR_COLORS.get(state) or ""):
-        c = fg.copy()
+        style = Adw.StyleManager.get_default()
+        c = Adw.AccentColor.to_standalone_rgba(style.get_accent_color(), style.get_dark())  # (@accent_color: a link's)
     return c
 
 

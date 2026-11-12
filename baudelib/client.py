@@ -381,6 +381,7 @@ class Network:
                 remote.by_hand = remote.by_hand or old.by_hand
             if remote.key != key:
                 self.forgotten.add(remote.key)  # (the address it was known by: not a server of its own in servers.json)
+                remote.was = getattr(remote, "was", set()) | {remote.key}  # (what Baude may still know it by)
             remote.key = key
             self.servers[key] = remote
 

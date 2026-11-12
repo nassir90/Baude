@@ -7555,6 +7555,7 @@ def on_main(fn):
 
 
 _NETWORK = []
+_LOCAL_SERVER = {"wanted": None}  # (local_server's: what waits for the server on this machine it's started)
 
 
 def network():
@@ -7820,6 +7821,9 @@ class FilterList(Gtk.ListBox):
         shift = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY, propagation_phase=Gtk.PropagationPhase.CAPTURE)
         shift.connect("pressed", self.shift_click)
         self.add_controller(shift)
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self.on_key)
+        self.add_controller(keys)
         if menu is not None:
             right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
             right.connect("pressed", lambda _g, _n, x, y: (row := self.get_row_at_y(int(y))) is not None
@@ -7836,13 +7840,17 @@ class FilterList(Gtk.ListBox):
     def fill(self, items, shown):
         """items: [(key, label, note)], in order (note: a word, dim, after its name); shown: the keys ticked, or None
         for all of them. Built again only when the items change (a refill drops the keys' place in it)."""
+        if self.soon is not None:  # (a click not said yet: said first, which fills this again if it changed it)
+            GLib.source_remove(self.soon)
+            if self._picked():
+                return
         if items != self.items:
             self.filling = True
-            while (row := self.get_first_child()) is not None:
+            for row in list(self.rows()):  # (rows only: a right-click's menu on it is a child of the list too)
                 self.remove(row)
             for key, label, note in items:
                 # (the tick where a menu's check items have theirs, its name where theirs is)
-                box = Gtk.Box(spacing=8)
+                box = Gtk.Box(spacing=2)
                 tick = Gtk.Image(icon_name="object-select-symbolic", opacity=0)
                 box.append(tick)
                 box.append(Gtk.Label(label=label, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
@@ -7888,6 +7896,7 @@ class FilterList(Gtk.ListBox):
             self.soon = GLib.idle_add(self._picked)
 
     def _picked(self):
+        """(idle) Said, if it changed; True if so (and changed has filled the list again)."""
         self.soon = None
         rows = list(self.rows())
         keys = {r.key for r in rows if r.is_selected()}
@@ -7898,7 +7907,28 @@ class FilterList(Gtk.ListBox):
         self.shown = shown
         if news:
             self.changed(sorted(shown) if shown is not None else None)
-        return False
+        return news
+
+    def on_key(self, _ctl, keyval, _code, state):
+        """The arrows move among the rows without picking (GTK's list, picking several, picks the one moved to alone:
+        a filter narrowed at every press); Space or Enter picks that one only, as a click does, and Ctrl (⌘) and
+        Space adds or takes it away, as GTK's does. At either end: out of the list, to the menu's items."""
+        moves = {Gdk.KEY_Up: -1, Gdk.KEY_KP_Up: -1, Gdk.KEY_Down: 1, Gdk.KEY_KP_Down: 1}
+        if keyval not in moves or state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not state & (
+                    Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
+                if (row := self.get_focus_child()) is not None:
+                    self.unselect_all()
+                    self.select_row(row)
+                    return True
+            return False
+        rows = list(self.rows())
+        at = rows.index(row) if (row := self.get_focus_child()) in rows else -1
+        to = at + moves[keyval]
+        if at < 0 or not 0 <= to < len(rows):
+            return False
+        rows[to].grab_focus()
+        return True
 
 
 class SessionSidebar(Gtk.Box):
@@ -8069,15 +8099,19 @@ class SessionSidebar(Gtk.Box):
         machine's own chats, and a server's session started in none."""
         return [(g, g, "") for g in network().groups()] + [("", "No group", "")]
 
-    def picked(self, name, known):
-        """The hosts or groups picked (settings' sidebar_hosts, sidebar_groups) that are still there, or None: all."""
+    def picked(self, name, known, was=None):
+        """The hosts or groups picked (settings' sidebar_hosts, sidebar_groups) that are still there, or None: all of
+        them (none of those picked there, or every one there picked). was: {a key a host had: the one it has now}."""
         shown = load_settings().get(name)
         if not isinstance(shown, list):
             return None
-        return {k for k in shown if k in {key for key, *_ in known}} or None
+        keys = {key for key, *_ in known}
+        shown = {(was or {}).get(k, k) for k in shown} & keys
+        return shown if shown and shown != keys else None
 
     def host_filter(self):
-        return self.picked("sidebar_hosts", self.known_hosts())
+        was = {old: host_key(r) for r in network().remotes() for old in getattr(r, "was", ())}
+        return self.picked("sidebar_hosts", self.known_hosts(), was)
 
     def group_filter(self):
         return self.picked("sidebar_groups", self.known_groups())
@@ -8087,8 +8121,11 @@ class SessionSidebar(Gtk.Box):
         return (hosts is None or host_key(s["server"]) in hosts) and (groups is None or (s.get("group") or "") in groups)
 
     def filtered(self, **picked):
-        """Hosts or groups picked (sidebar_hosts=[keys], sidebar_groups=[names]; None: all of them): listed."""
-        save_settings(**picked)
+        """Hosts or groups picked (sidebar_hosts=[keys], sidebar_groups=[names]; None: all of them, as is every one
+        there): listed."""
+        known = {"sidebar_hosts": self.known_hosts, "sidebar_groups": self.known_groups}
+        save_settings(**{name: None if keys is None or set(keys) >= {k for k, *_ in known[name]()} else keys
+                         for name, keys in picked.items()})
         self.fill_filters()
         self.fill()
 
@@ -8097,10 +8134,10 @@ class SessionSidebar(Gtk.Box):
         not left out either, till it's back)."""
         if (old := load_settings().get("sidebar_network")) is not None:  # (⋮ → Group's one group, from before)
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
-        hosts, groups = self.host_filter(), self.group_filter()
-        self.host_list.fill(self.known_hosts(), hosts)
-        self.group_list.fill(self.known_groups(), groups)
-        self.actions.lookup_action("show_all").set_enabled(hosts is not None or groups is not None)
+        self.host_list.fill(self.known_hosts(), self.host_filter())
+        self.group_list.fill(self.known_groups(), self.group_filter())
+        self.actions.lookup_action("show_all").set_enabled(  # (as it is after both: a fill can change what's picked)
+            self.host_filter() is not None or self.group_filter() is not None)
 
     def host_menu(self, row, x, y):
         """Right-click a host (⋮ → Hosts): New Session Here (not on one that's gone)."""
@@ -8130,7 +8167,7 @@ class SessionSidebar(Gtk.Box):
         self.fill_filters()
         self.unhide_remote()
         hosts, groups = self.host_filter(), self.group_filter()
-        ids = frozenset(s["id"] for s in network().sessions())
+        ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"), s.get("said"),
                        s.get("group")) for s in network().sessions() if self.shows(s, hosts, groups))
@@ -8185,7 +8222,7 @@ class SessionSidebar(Gtk.Box):
         groups, listed, gone = {}, [], []
         archived, hidden = self.archived_ids(), self.hidden_remote()
         # (a server's sessions aren't this machine's own chats, though one on this machine keeps their transcripts here)
-        remote = self.remote_ids = frozenset(s["id"] for s in network().sessions())
+        remote = self.remote_ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
         for info in sorted(self.sessions if mine else [], key=last_used, reverse=True):  # (the last typed in first)
             if info["id"] in remote:
                 continue
@@ -8365,6 +8402,9 @@ class SessionSidebar(Gtk.Box):
         plus = ("list-add-symbolic", f"New session in {label}",
                 lambda: self.win.switch_to(lambda: self.win.start_in_folder(folder))) \
             if folder and os.path.isdir(folder) else None
+        if plus and not self.mine_listed():  # (a chat here wouldn't be listed: through This Mac's host, which is)
+            plus = ("list-add-symbolic", f"New session in {label}, through {THIS_MACHINE}'s server",
+                    lambda: self.win.ask_remote_start(folder=folder, here=True))
         if (r := self.remote_keys.get(key)) is not None:  # (a folder on a server: a session there, on it, if it's there)
             plus = ("list-add-symbolic", f"New session in {label}, on {remote_name(r)}",
                     lambda: self.win.ask_remote_start(server=r, folder=folder)) if r.state == "alive" else None
@@ -8560,13 +8600,18 @@ class SessionSidebar(Gtk.Box):
             self.win.new_session()
         self.refresh()
 
+    def mine_listed(self):
+        """Are this machine's own chats listed (This Mac's host, and No group, picked in ⋮)?"""
+        hosts, groups = self.host_filter(), self.group_filter()
+        return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
+
     def new_chat(self):
-        """New session: here, or, while only other hosts are listed (⋮ → Hosts), on one of them (ask_remote_start)."""
-        hosts = self.host_filter()
-        if hosts is not None and HERE_HOST not in hosts:
-            self.win.ask_remote_start(hosts=hosts)
-        else:
+        """New session: a chat here; or, while this machine's own chats aren't listed (⋮: only other hosts, or only
+        groups), one through a host that's listed (ask_remote_start), so it's listed too."""
+        if self.mine_listed():
             self.win.switch_to(self.win.new_session)
+        else:
+            self.win.ask_remote_start(hosts=self.host_filter())
 
     def hide_remote(self, info):
         """Delete a network session that isn't at a turn: its transcript is its server's, so it's only not listed here
@@ -14081,8 +14126,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             if server in servers:
                 servers.remove(server)
                 servers.insert(0, server)
+            if not servers and (hosts is None or HERE_HOST in hosts):  # (none there: through this machine's, started)
+                return self.ask_remote_start(folder=folder, here=True)
             if not servers:
-                toast(self.sidebar, "No server is on the network" if hosts is None else "None of those hosts is there")
+                toast(self.sidebar, "None of those hosts is there")
                 return
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
 
@@ -14155,13 +14202,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def local_server(self, then, wait_s=20):
         """A server on this machine, for New Session Here on it: then(it), on the main loop, once it's there. The one
-        that's there, else one started: baude_server.py, bound to this machine only, in a process of its own that
-        goes on after Baude does, as a server's does (its output in the network folder's server.log)."""
+        that's there (or on its way: its file says it's running), else one started: baude_server.py, bound to this
+        machine only, in a process of its own that goes on after Baude does, as a server's does (its output in the
+        network folder's server.log). One started at a time, for every window that wants one."""
         net = network()
         if (r := next((r for r in net.alive() if host_key(r) == HERE_HOST), None)) is not None:
             then(r)
             return
-        if getattr(self, "local_server_wanted", None) is None:  # (one started, whoever else waits for it)
+        if _LOCAL_SERVER["wanted"] is not None:
+            _LOCAL_SERVER["wanted"].append(then)
+            return
+        elsewhere = {r.key for r in net.alive() if host_key(r) != HERE_HOST}  # (said so: not this machine's after all)
+        if not [e for e in baudelib.wire.local_servers() if e.get("id") not in elsewhere]:  # (else one on its way)
             here = os.path.dirname(os.path.realpath(__file__))
             try:
                 os.makedirs(baudelib.client.network_home(), exist_ok=True)
@@ -14172,24 +14224,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             except OSError as e:
                 self.note(f"couldn't start a server on {THIS_MACHINE}: {e}")
                 return
-            self.local_server_wanted = []
             toast(self.sidebar, f"Starting a server on {THIS_MACHINE}…")
-            end = time.monotonic() + wait_s
+        _LOCAL_SERVER["wanted"] = [then]
+        end = time.monotonic() + wait_s
 
-            def look():
-                net.here()  # (its file's written as it binds: no need to wait for the next look)
-                r = next((r for r in net.alive() if host_key(r) == HERE_HOST), None)
-                if r is None and time.monotonic() < end:
-                    return True
-                wanted, self.local_server_wanted = self.local_server_wanted, None
-                if r is None:
-                    log = os.path.join(baudelib.client.network_home(), "server.log")
-                    self.note(f"the server on {THIS_MACHINE} didn't start: {pretty_path(log)} says why")
-                for fn in wanted:
-                    r is not None and fn(r)
-                return False
-            GLib.timeout_add(250, look)
-        self.local_server_wanted.append(then)
+        def look():
+            net.here()  # (its file's written as it binds: no need to wait for the next look)
+            net.look()
+            r = next((r for r in net.alive() if host_key(r) == HERE_HOST), None)
+            if r is None and time.monotonic() < end:
+                return True
+            wanted, _LOCAL_SERVER["wanted"] = _LOCAL_SERVER["wanted"], None
+            if r is None:
+                log = os.path.join(baudelib.client.network_home(), "server.log")
+                self.note(f"no server on {THIS_MACHINE} answered: {pretty_path(log)} may say why")
+            for fn in wanted:
+                r is not None and fn(r)
+            return False
+        GLib.timeout_add(250, look)
 
     def remote_new_conversation(self, model, label):
         """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new

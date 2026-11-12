@@ -154,7 +154,7 @@ class Session:
                 "mode": self.meta.get("mode"), "group": self.meta.get("group"), "created": self.meta.get("created"),
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
-                "prompts": info.get("prompts") or 0,
+                "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}

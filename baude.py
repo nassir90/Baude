@@ -5572,9 +5572,9 @@ def _path_label(path, extra=""):
 
 
 def _diff_block(old, new, path=""):
-    """Removed lines on red, added lines on green (no -/+ markers)."""
+    """Removed lines on red, added lines on green (no -/+ markers), highlighted as path's code."""
     lines = [("del", l) for l in (old or "").splitlines()] + [("add", l) for l in (new or "").splitlines()]
-    return CodeBlock(new or "", "", diff=lines or [("ctx", "")])
+    return CodeBlock(new or "", "", diff=lines or [("ctx", "")], path=path)
 
 
 def _value_widget(v, depth=0):
@@ -5658,23 +5658,24 @@ def tool_input_view(name, inp):
     base = name.split("__")[-1] if name.startswith("mcp__") else name
     # the header already shows the description, so the views don't repeat it
     if base in ("Bash", "BashOutput", "PowerShell") and "command" in inp:
-        add(CodeBlock(inp["command"], "bash" if base != "PowerShell" else "powershell"))
+        shell = "bash" if base != "PowerShell" else "powershell"
+        add(CodeBlock(inp["command"], shell, syntax=shell))
         rest = _kv_rows(inp, skip=("command", "description"))
     elif base == "Edit" and "file_path" in inp:
         add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
-        add(_diff_block(inp.get("old_string"), inp.get("new_string")))
+        add(_diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "MultiEdit" and "file_path" in inp:
         add(_path_label(inp["file_path"], f"{len(inp.get('edits') or [])} edits"))
         for e in inp.get("edits") or []:
-            add(_diff_block(e.get("old_string"), e.get("new_string")))
+            add(_diff_block(e.get("old_string"), e.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "Write" and "file_path" in inp:
         content = inp.get("content") or ""
         lines = content.splitlines()
         add(_path_label(inp["file_path"], f"{len(lines)} lines"))
         shown = "\n".join(lines[:2000]) + (f"\n… {len(lines) - 2000} more lines" if len(lines) > 2000 else "")
-        add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], "")))
+        add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], ""), path=inp["file_path"]))
         rest = None
     elif base == "Read" and "file_path" in inp:
         span = ""
@@ -5684,7 +5685,8 @@ def tool_input_view(name, inp):
         add(_path_label(inp["file_path"], span))
         rest = _kv_rows(inp, skip=("file_path", "offset", "limit"))
     elif base in ("Grep", "Glob") and "pattern" in inp:
-        add(CodeBlock(inp["pattern"], "regex" if base == "Grep" else "glob"))
+        grep = base == "Grep"  # (a regex drawn as one, and as it's written: a label's text, never markup or markdown)
+        add(CodeBlock(inp["pattern"], "regex" if grep else "glob", syntax="regex" if grep else None))
         rest = _kv_rows(inp, skip=("pattern",))
     elif base == "WebFetch" and "url" in inp:
         add(sel_label(f'<a href="{html.escape(inp["url"])}">{html.escape(inp["url"])}</a>'))
@@ -6075,7 +6077,14 @@ class ToolCard(Gtk.Box):
         title, source = tool_display(self.name)
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
-        self.header.set_markup(f"{src}{html.escape(s)}{tail}")
+        shown = html.escape(s)
+        if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
+            shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
+        markup = f"{src}{shown}{tail}"
+        self.header.set_markup(markup)
+        # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
+        # till its style next changes: the look given again as the label's own attributes)
+        self.header.set_attributes(Pango.parse_markup(markup, -1, "\0")[1])
 
     def show_output(self):
         self.toggles.set_visible(True)
@@ -6135,8 +6144,9 @@ class ToolCard(Gtk.Box):
 
     def build_output(self):
         pending, self.pending_output = self.pending_output, []
+        read = self.input.get("file_path") if self.base == "Read" else None  # (a file's lines: its code, numbered)
         for shown, lang in pending:
-            self.result_box.append(CodeBlock(shown, lang))
+            self.result_box.append(CodeBlock(shown, lang, path=read or "", numbered=bool(read)))
 
     def add_partial_json(self, chunk):
         self.partial_json += chunk

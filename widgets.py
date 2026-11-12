@@ -309,6 +309,17 @@ class PickList:
         if not self.pop.get_visible():
             self.pop.popup()
 
+    @staticmethod
+    def over(view, offset, box):
+        """Where a list over box points, as show takes it: its left side on view's character at offset (the / or @
+        that started it), box's height under it. Past the screen's edge, GTK slides it back on."""
+        caret = view.get_cursor_locations(view.get_buffer().get_iter_at_offset(offset))[0]
+        x, _y = view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, caret.x, caret.y)
+        ok, at = view.compute_point(box, Graphene.Point().init(x, 0))
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = round(at.x) if ok else 0, 0, 1, box.get_height()
+        return rect
+
     def picked(self):
         """The picked row's number, or None."""
         i = self.sel.get_selected()

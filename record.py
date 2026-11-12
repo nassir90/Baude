@@ -5657,7 +5657,7 @@ class RefCompleter:
         self.win, self.view, self.anchor = win, view, anchor
         self.picks = widgets.PickList(anchor, self._bind, self.accept, position=Gtk.PositionType.TOP)
         self.pop = self.picks.pop
-        self.pop.set_halign(Gtk.Align.START)  # (its left side on the box's)
+        self.pop.set_halign(Gtk.Align.START)  # (its left side on the @'s: PickList.over)
         self.pop.set_offset(0, -10)
         self.shown, self.query, self.moved, self.waiting, self.at = [], None, False, None, None
         buf = view.get_buffer()
@@ -5719,9 +5719,8 @@ class RefCompleter:
         note = (f"{matched} found" if matched else "Nothing found") + (" · cataloguing…" if space.busy else "")
         wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
         self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = 0, 0, self.anchor.get_width(), self.anchor.get_height()
-        self.picks.show(len(shown), (at or 0) if shown else None, note, rect)
+        self.picks.show(len(shown), (at or 0) if shown else None, note,
+                        widgets.PickList.over(self.view, word[0], self.anchor))
 
     def _catalogued(self):
         self.waiting = None

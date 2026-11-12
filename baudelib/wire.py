@@ -51,17 +51,17 @@ input: a control_response for its request_id, as claude's stream-json has it.
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
 
-Where a server is: a host process (baude_server.py) listens on a Unix socket only (socket_path(), in a folder that's
+Where a server is: a host process (baude_headless.py) listens on a Unix socket only (socket_path(), in a folder that's
 its user's alone: that folder is all the say there is in who may use it), with no port on the network. What's on the
 same machine connects to the socket (connect_local); another machine reaches it over ssh (connect_ssh), as
-`ssh <host> baude_server.py connect`, which carries these lines between ssh's stdin and stdout and the socket (bridge),
+`ssh <host> baude_headless.py connect`, which carries these lines between ssh's stdin and stdout and the socket (bridge),
 starting the host process if it isn't running. So ssh says who may, and keeps what's said private: the keys in
 authorized_keys and known_hosts, never a password asked for. reach(where) connects to any of them:
     {"via": "local"}                                this machine's host process (socket_path())
     {"via": "unix", "path": P}                      one listening on another socket
     {"via": "ssh", "dest": D, "command"?, "strict"?}  ssh D (an alias in ~/.ssh/config, a host, user@host): command,
                                                     the host process on D, as it's given here (default
-                                                    baude_server.py, found on its PATH); strict: its key must be
+                                                    baude_headless.py, found on its PATH); strict: its key must be
                                                     known already
 """
 import json
@@ -172,7 +172,7 @@ class Channel:
                 proc.kill()
 
 
-SSH_COMMAND = "baude_server.py"  # (the host process on another machine, found on its PATH)
+SSH_COMMAND = "baude_headless.py"  # (the host process on another machine, found on its PATH)
 _DEST = re.compile(r"[A-Za-z0-9_.@%:\[\]+-]+")
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -349,7 +349,7 @@ def said_where(where):
 
 def bridge(sock, rfd=0, wfd=1):
     """What comes in on rfd to the socket, and what the socket says out on wfd, as it comes, till either end's done
-    (`baude_server.py connect`: ssh's stdin and stdout, and the host process's socket)."""
+    (`baude_headless.py connect`: ssh's stdin and stdout, and the host process's socket)."""
     sock.setblocking(True)
     open_in = True
     while True:

@@ -59,6 +59,10 @@ from baudelib.transcripts import (  # (Claude Code's transcripts, without GTK: s
     transcript_model,
 )
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
+from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
+from baudelib.models import (  # noqa: E402,F401
+    APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
+)
 from lookup import (  # (⌘K's engine: the names a folder has; see lookup.py)
     CATALOGUE_TTL, GITHUB, Names, PG_LISTS, REF_KINDS, REF_LOC_FIELDS, Ref, _CATALOGUE_TOKEN, _KUBE_ACTION, _KUBE_NAME,
     _git, _km, _ks, _kube_args, arango_eval, at_once, catalogue_hits, catalogue_ref, catalogue_shaped, db_index,
@@ -240,49 +244,7 @@ def trace(what, once=True):
 
 trace("imported")
 # (MODELS, the fallback model list: baudelib.claude)
-# (beta) Apple's on-device model, through apple-claude (apple-claude/: a Swift stand-in for claude on FoundationModels,
-# its one tool Exec, each command asked for): in the model picker after Claude's; Manual only, no effort
-APPLE_MODEL = {"value": "apple", "resolvedModel": "apple-foundation-model", "displayName": "Apple Foundation Model"}
-
-
-def apple_exe():
-    """apple-claude: BAUDE_APPLE_CLAUDE, else as `swift build -c release` in apple-claude/ leaves it; None if not built."""
-    exe = os.environ.get("BAUDE_APPLE_CLAUDE") or \
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "apple-claude", ".build", "release", "apple-claude")
-    return exe if os.access(exe, os.X_OK) else None
-
-
-# (beta) models on this Mac, through pi-claude (pi-claude/: pi, the coding agent, on a model mlx_lm.server or
-# mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json that are downloaded, after Apple's;
-# Manual only, like Apple's, and no effort but a thinking level for those that think; one to another keeps the
-# conversation (pi's session), to Claude's doesn't
-PI_CLAUDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "pi-claude")
-try:
-    with open(os.path.join(PI_CLAUDE, "models.json")) as f:
-        LOCAL_MODELS = [{"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]} |
-                        ({"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}
-                         if m.get("thinking") else {}) for m in json.load(f)]
-except (OSError, ValueError, KeyError):
-    LOCAL_MODELS = []
-
-
-def local_models():
-    """LOCAL_MODELS whose weights are in the Hugging Face cache, while pi (in ~/.local/share/baude/pi) is installed."""
-    pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
-    if not os.access(pi, os.X_OK):
-        return []
-    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(  # (where huggingface_hub looks)
-        os.environ.get("HF_HOME") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
-                                                  "huggingface"), "hub")
-    return [m for m in LOCAL_MODELS
-            if os.path.isdir(os.path.join(hub, "models--" + m["resolvedModel"].replace("/", "--")))]
-
-
-def model_program(value):
-    """What runs a model: "apple" (apple-claude), "pi" (pi-claude), or "claude"."""
-    if value == APPLE_MODEL["value"]:
-        return "apple"
-    return "pi" if any(m["value"] == value for m in LOCAL_MODELS) else "claude"
+# (APPLE_MODEL, apple_exe, PI_CLAUDE, LOCAL_MODELS, local_models and model_program: baudelib.models)
 
 
 # (MODES and EFFORT_LABELS: baudelib.claude)
@@ -11408,20 +11370,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             # while a session is only being viewed, claude runs fresh (it supplies models and commands
             # but writes nothing); it resumes the session when the first message is sent
             resume = None if self.resume_pending else self.session_id
-            if self.model == APPLE_MODEL["value"]:  # (Apple's model: apple-claude, Manual, no effort, a chat of its own)
-                if (exe := apple_exe()) is None:
-                    self.note("Apple Foundation Model: apple-claude isn't built yet (swift build -c release, in apple-claude/)")
-                    self.proc = None
-                    self.update_status()
-                    return
-                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", None, None, exe=exe)
-            elif model_program(self.model) == "pi":  # (a model on this Mac: pi-claude, Manual, no effort)
-                exe = os.environ.get("BAUDE_PI_CLAUDE") or os.path.join(PI_CLAUDE, "pi-claude")
-                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, "default", resume,
-                                       self.local_effort if self.effort_dd.get_sensitive() else None, exe=exe)
-            else:
-                self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, self.mode,
-                                       resume, self.effort if self.effort_dd.get_sensitive() else None)
+            # (how what runs the model is started: baudelib.models. Apple's model: apple-claude, Manual, no effort, a
+            # chat of its own, never carried on; a model on this Mac: pi-claude, Manual, its thinking level)
+            kind = modelslib.program(self.model)
+            effort = (self.local_effort if kind["name"] == "pi" else self.effort) if self.effort_dd.get_sensitive() else None
+            run = modelslib.launch(self.model, self.mode, effort, resume if kind["resumes"] else None, resumed=True)
+            if run["missing"]:
+                self.note("Apple Foundation Model: apple-claude isn't built yet (swift build -c release, in apple-claude/)")
+                self.proc = None
+                self.update_status()
+                return
+            self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, run["mode"], run["resume"],
+                                   run["effort"], extra=run["extra"], exe=run["exe"])
             self.proc.resumed = resume
             self.pending.clear()
         except OSError as e:
@@ -11673,6 +11633,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def on_send(self):
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
+        if (typed == "/btw" or typed.startswith("/btw ") or typed in ("/login", "/logout") or
+                typed.startswith("/login ")) and self.remote is not None:
+            # (a side question forks the session with a claude here, and signing in is this machine's: a network
+            # session's claude is its server's)
+            buf.set_text("")
+            self.completer.hide()
+            self.note(f"/btw isn't there for a session on {remote_name(self.remote)} yet" if typed.startswith("/btw")
+                      else f"{remote_name(self.remote)}'s claude signs in there: run claude auth login on it")
+            return
         if typed == "/btw" or typed.startswith("/btw "):  # even mid-turn: it doesn't interrupt
             question = typed[4:].strip()
             if question:
@@ -11781,11 +11750,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         was, self.model = self.model, value
         self.sync_effort_choices()
         self.sync_local()
-        if model_program(value) != model_program(was):  # (Claude's to Apple's, say: another program)
+        if self.remote is not None and model_program(value) != model_program(was):
+            label = self.model_dd.label()
+            self.model = was  # (this one goes on with its own: the one picked is the new session's)
+            self.model_dd.select(was)
+            self.sync_effort_choices()
+            self.sync_local()
+            self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
+            return
+        if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
             self.note(f"model → {self.model_dd.label()}: a new conversation")
             self.restart_proc(resume=False)
             return
-        if model_program(value) == "pi" and value != was:  # (pi-claude serves one model: pi's session goes on)
+        if self.remote is None and model_program(value) == "pi" and value != was:  # (pi-claude serves one model: pi's
+            # session goes on; a network session's server starts it again on the new one itself)
             self.note(f"model → {self.model_dd.label()}")
             self.restart_proc(resume=True)
             return
@@ -11865,7 +11843,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def apply_chat_model(self, info):
         """Put the picker on the model the chat info names was on. A Claude transcript with no model Baude knows goes
-        on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on."""
+        on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on. A
+        network session's is the one its server says it's on."""
+        if info.get("remote") is not None and info.get("model"):
+            self.model = info["model"]
+            self.model_dd.select(self.model)  # (named as its server lists it once it's said: sync_models)
+            self.sync_effort_choices()
+            self.sync_local()
+            return
         kept = (load_settings().get("chat_models") or {}).get(info["id"])
         want = (kept if kept != "default" else None) or transcript_model(info["path"])
         models = {v: m for v, m in getattr(self, "models_info", {}).items() if v != "default"}  # (an alias, not a model)
@@ -11902,11 +11887,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         was chosen the entry it resolves to is selected instead.
         """
         models = [m for m in models or [] if m.get("value")]
-        if models and all(model_program(m["value"]) != "claude" for m in models):
+        if self.remote is not None:  # (a network session: what its server can run, not this machine)
+            if not any(model_program(m["value"]) == "claude" for m in models):
+                models = [m for m in getattr(self, "claude_models", []) if model_program(m["value"]) == "claude"] + models
+        elif models and all(model_program(m["value"]) != "claude" for m in models):
             models = getattr(self, "claude_models", [])
         else:
             self.claude_models = models
-        models = [m for m in models if model_program(m["value"]) == "claude"] + [APPLE_MODEL] + local_models()
+        if self.remote is None:
+            models = [m for m in models if model_program(m["value"]) == "claude"] + [APPLE_MODEL] + local_models()
         self.models_info = {m["value"]: m for m in models}
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
@@ -13866,7 +13855,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
         frame.add_css_class("card")
         field(3, "Prompt", frame)
-        effort = self.effort if self.effort_dd.get_sensitive() else None
+        effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
+            if self.effort_dd.get_sensitive() else None
         runs = " · ".join(x for x in (self.model_dd.label(), self.effort_dd.label() if effort else "",
                                       self.mode_dd.label()) if x)
         dlg = Adw.AlertDialog(heading="New session on the network", extra_child=grid, default_response="start",
@@ -13898,6 +13888,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.remote_fields = {"servers": servers_dd, "folder": where, "group": group_entry, "prompt": prompt}
         dlg.present(self)
         prompt.grab_focus()
+
+    def remote_new_conversation(self, model, label):
+        """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new
+        conversation, but on the same server, in the same folder and group, opened to be written in."""
+        r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
+        effort = self.local_effort if model_program(model) == "pi" else self.effort
+        self.note(f"model → {label}: a new conversation on {remote_name(r)}")
+        r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
+                   "mode": self.mode, "group": listed.get("group")},
+                  lambda reply: self.remote_started(r, reply))
 
     def remote_started(self, r, reply):
         """A server started a session asked for here: its group shown, and it opened."""
@@ -14165,7 +14165,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         threading.Thread(target=run, daemon=True).start()
 
     def login_prompt(self, why):
-        """A turn that failed for want of signing in: said, with Sign in (sign_in)."""
+        """A turn that failed for want of signing in: said, with Sign in (sign_in); a network session's: where to."""
+        if self.remote is not None:
+            self.note(f"{remote_name(self.remote)}'s claude isn't signed in: run claude auth login on it")
+            return
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("perm-card")
         card.append(sel_label("<b>Claude Code isn't signed in</b>  <span alpha='60%'>"

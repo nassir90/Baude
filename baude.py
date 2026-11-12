@@ -14621,21 +14621,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.toasts.add_toast(t)
 
     def restart_host(self, waited=0):
-        """This Mac's host process stopped and started again (a newer one, after an update): once nothing's at a turn
-        or asking there, as stopping it would end that; its claudes stop, their transcripts kept, and each of its
-        sessions resumes as it's next written to (the windows on them reattach as it's back)."""
+        """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
+        there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
+        cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
+        its sessions resumes as it's next written to (the windows on them reattach as it's back)."""
         r = local_host()
         if r is None:
             return
-        # (its listing, as last sent, and this Baude's own windows at a turn there: the listing comes on another
-        # connection than a chat's, so may not say yet what a window's just been asked; the host says last: if_idle)
-        busy = {x["id"] for x in r.sessions.values() if x.get("state") in ("working", "waiting")} | \
-            {w.session_id for w in self.get_application().windows() if w.remote is r and w.busy}
+        busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
 
         def later(n):
             if not waited:
                 toast(self.sidebar, f"Restarting {THIS_MACHINE}'s host process once {n} session"
-                                    f"{'s are' if n > 1 else ' is'} done")
+                                    f"{'s finish' if n > 1 else ' finishes'} running a command")
             GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
 
         def answered(reply):

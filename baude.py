@@ -9143,8 +9143,8 @@ class BaudeMeta(meta.MetaChat):
 
     def ghosts(self):
         """The chats Meta's deleted and that aren't kept so: listed still, struck through, where they were."""
-        return [{**info, "ghost": True} for a in self.unkept() if a["kind"] == "delete_chats"
-                for info in a["redo"].get("infos") or ()]
+        return [{**info, "ghost": True} for a in self.unkept() for p in meta.action_parts(a)
+                if p["kind"] == "delete_chats" for info in p["redo"].get("infos") or ()]  # (a bundle's parts too)
 
     # ---- chats
     def all_infos(self):

@@ -33,6 +33,7 @@ $XDG_DATA_HOME/record/records.json (macOS: ~/Library/Application Support/Record;
 else).
 """
 import codecs
+import difflib
 import contextlib
 import glob
 import html
@@ -900,8 +901,11 @@ that edit, and one to text an edit replaces replaces it, rather than adding a se
 outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
 
 The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from another \
-notebook into the one open): each changes them at once, as an action, marked in the pages' list. highlight_pages \
-marks pages there without changing them, to show which you mean.
+notebook into the one open): each changes them at once, marked in the pages' list. All you change of the pages in one \
+turn is one change for the user, undone as one: so do one goal (moving pages and fixing what refers to them) in one \
+turn. Links to the pages you move follow by themselves; edit_page changes a page's text at once, as part of that \
+change (what still says a page's old place, say), where propose_edit's draft waits for the user to accept it. \
+highlight_pages marks pages without changing them, to show which you mean.
 
 What the user @-references comes with their message: its text, or where to read it. Use it and the conversation as \
 what you know of the subject, and read more with your tools when that helps. Don't make facts up: where something \
@@ -967,6 +971,13 @@ RECORD_TOOLS = [
      "inputSchema": {"type": "object", "required": ["pages", "under"], "properties": {
          "pages": {"type": "array", "items": {"type": "string"}}, "under": {"type": "string"},
          "from_notebook": {"type": "string"}}}},
+    {"name": "edit_page",
+     "description": "Change a page's text at once, as part of the change you're making to the pages this turn "
+     "(fixing what refers to pages you moved, say): undone with the rest of it, as one. old_text is the text it "
+     "replaces, copied exactly and found once in the page; empty, new_text goes at the page's end. For writing the "
+     "user should review first: propose_edit.",
+     "inputSchema": {"type": "object", "required": ["page", "old_text", "new_text"], "properties": {
+         "page": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
     {"name": "highlight_pages",
      "description": "Mark pages in the pages' list, changing nothing, to show the user which you mean (till their "
      "next message).",
@@ -5300,6 +5311,7 @@ class RecordChat(meta.MetaChat):
         self.notebook, self.quote, self.selection = None, "", None
         self.add_css_class("record-column")  # (the frame's: widgets.CSS)
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.apply_zoom)
+        self._spans_seen = {}  # (a page's key: (its text before, now, where what was put in is): changed_spans)
         self.pending_box = self._pending_bar()
         self.bars.append(self.pending_box)
         self.quote_box = Gtk.Box(spacing=6)
@@ -5362,6 +5374,7 @@ class RecordChat(meta.MetaChat):
     def app_handlers(self):
         return {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
                 "withdraw_edit": self.withdraw_edit, "add_page": self.add_page, "delete_page": self.delete_page,
+                "edit_page": self.edit_page,
                 "move_pages": self.move_pages, "highlight_pages": self.highlight_pages}
 
     def make_settings(self):
@@ -5415,15 +5428,52 @@ class RecordChat(meta.MetaChat):
         tag = buf.get_tag_table().lookup("meta-tint") or buf.create_tag("meta-tint")
         buf.remove_tag(tag, *buf.get_bounds())
         slots = self.painted.setdefault(("page", key), {})
-        if mark is None or mark[0] != "added":
+        if mark is None or mark[0] not in ("added", "edited"):
             slots.pop("text", None)
             return
+        if mark[0] == "edited":  # (the text the change put in, as the page has it now, past what's proposed)
+            spans = [(editor.buf_offset(a), editor.buf_offset(b, past=False))
+                     for a, b in self.changed_spans(mark[2], key, editor.kept())]
+        else:
+            spans = [(0, buf.get_char_count())]
 
         def paint(lit=False):
-            tag.set_property("background-rgba", meta.mark_rgba("added", lit))
-            buf.apply_tag(tag, *buf.get_bounds())
+            tag.set_property("background-rgba", meta.mark_rgba(mark[0], lit))
+            for a, b in spans:
+                buf.apply_tag(tag, buf.get_iter_at_offset(a), buf.get_iter_at_offset(b))
         paint()
         slots["text"] = paint
+
+    def changed_spans(self, action, key, now):
+        """Where a page's text (now) has what a change of Meta's put in it: [(start, end)], against its text before
+        the change (text_before)."""
+        before = self.text_before(action, key) or ""
+        cached = self._spans_seen.get(key)
+        if cached is not None and cached[:2] == (before, now):
+            return cached[2]
+        words = lambda text: re.findall(r"\w+|\s+|[^\w\s]", text)  # noqa: E731  (whole words: "under Work", not "W")
+        old, new = words(before), words(now)
+        starts = [0]
+        for w in new:
+            starts.append(starts[-1] + len(w))
+        ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+        spans = [(starts[j1], starts[j2]) for op, _i1, _i2, j1, j2 in ops if op in ("replace", "insert") and j2 > j1]
+        self._spans_seen[key] = (before, now, spans)
+        return spans
+
+    def text_before(self, action, key):
+        """A page's text before a change of Meta's: as the first of its parts that touched the page had it, the
+        page's name traced back through the moves among them (None: it wasn't there)."""
+        book_id, _, name = key.partition("\n")
+        before = None
+        for part in reversed(action.get("parts") or [action]):
+            if part.get("kind") != "pages":
+                continue
+            name = (part["undo"].get("moved") or {}).get(name, name)
+            books = part["undo"]["books"].get(book_id) or {}
+            if name in books:
+                before = books[name]
+        return before
 
     def open_mark(self, kind, key, how, action):
         """A page in a change's box clicked: opened (in its notebook); one deleted, its text as it was, all red, in a
@@ -5433,7 +5483,7 @@ class RecordChat(meta.MetaChat):
         if kind != "page" or nb is None:
             return
         if how == "removed" and action["state"] == "done" and page not in nb["pages"]:
-            return self.open_gone(key, page, (action["undo"]["books"].get(book_id) or {}).get(page) or "")
+            return self.open_gone(key, page, self.text_before(action, key) or "")  # (a bundle's: its parts')
         if page in nb["pages"]:
             self.open_page(nb, page)
 
@@ -5457,7 +5507,7 @@ class RecordChat(meta.MetaChat):
 
     def tool_summary(self, name, inp):
         short = name.removeprefix("mcp__meta__")
-        if short in ("propose_edit", "add_page", "delete_page"):
+        if short in ("propose_edit", "add_page", "delete_page", "edit_page"):
             return short_page(str(inp.get("page") or ""))
         if short == "move_pages":
             pages = ", ".join(short_page(str(p)) for p in inp.get("pages") or ())
@@ -5915,6 +5965,10 @@ class RecordChat(meta.MetaChat):
         as the action left them; either only while every one it touched is as the other left it (apply_app)."""
         books = {t.get("id"): t for t in self.win.store.notebooks}
         after = {b: {p: books[b]["pages"].get(p) for p in pages} for b, pages in before.items()}
+        marked = {m[1] for m in marks}  # (and those whose text it changed, there before and after: edited)
+        marks = list(marks) + [("page", f"{b}\n{p}", "edited", "") for b, pages in before.items()
+                               for p, text in pages.items() if text is not None and after[b][p] is not None and
+                               after[b][p] != text and f"{b}\n{p}" not in marked]
         return self.act(turn, said, "pages",
                         {"books": before, "expect": after, "moved": {v: k for k, v in (moved or {}).items()}},
                         {"books": after, "expect": before, "moved": dict(moved or {})}, marks)
@@ -6020,8 +6074,8 @@ class RecordChat(meta.MetaChat):
             before = {nb["id"]: {k: was.get(k) for k in touched}}
             nb["pages"].clear()  # (the same dict: the notebook keeps it)
             nb["pages"].update(renamed)
-            marks = [("page", page_key(nb, new), "moved", f"from {old.rpartition(':')[0] or 'the top'}")
-                     for old, new in moved.items() if old in was]
+            marks = [("page", page_key(nb, new), "moved", f"from {old.rpartition(':')[0] or 'the top'}",
+                      page_key(nb, old)) for old, new in moved.items() if old in was]
             a = self._pages_act(turn, said, before, moved, marks)
             self.pages_changed(moved)
         else:
@@ -6030,11 +6084,28 @@ class RecordChat(meta.MetaChat):
             for old, new in moved.items():
                 if old in src["pages"]:
                     nb["pages"][new] = src["pages"].pop(old)
-            marks = [("page", page_key(nb, new), "moved", f"from {full_name(src)}") for new in moved.values()
-                     if new in nb["pages"]]
+            marks = [("page", page_key(nb, new), "moved", f"from {full_name(src)}", page_key(src, old))
+                     for old, new in moved.items() if new in nb["pages"]]
             a = self._pages_act(turn, said + f" from {full_name(src)}", before, marks=marks)
             self.pages_changed({})
         return {"text": f"Moved {len(moved)} page{'s' if len(moved) != 1 else ''} under {where} (action {a['id']})."}
+
+    def edit_page(self, turn, args):
+        """edit_page: a page's text changed at once, part of the turn's change to the pages (Meta.act), undone with
+        it."""
+        nb = self.notebook
+        page = self._named_page(args.get("page"))
+        text, old, new = nb["pages"].get(page, ""), str(args.get("old_text") or ""), str(args.get("new_text") or "")
+        if old == new:
+            raise ValueError("new_text is old_text: that changes nothing.")
+        at, found = place_change(text, old)
+        if at is None:
+            raise ValueError(found)
+        before = {nb["id"]: {page: text}}
+        nb["pages"][page] = text[:at] + new + text[at + len(found):]
+        a = self._pages_act(turn, f"Edited {short_page(page)}", before)
+        self.pages_changed({})
+        return {"text": f"Edited {page} (change {a['id']}, undone as one with the rest of this turn's)."}
 
     def highlight_pages(self, turn, args):
         nb = self.notebook

@@ -10573,7 +10573,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                            margin_start=12, margin_end=12, margin_bottom=6)
         composer.append(self.attach_strip)
         composer.append(box_overlay)
-        self.composer, self.read_only = composer, False  # (☰ → Read-only session hides it: apply_read_only)
+        # (☰ → Read-only session hides it, and so does another program having the session: show_composer)
+        self.composer, self.read_only, self.locked = composer, False, False
         self.set_send_button(busy=False)
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
@@ -11822,7 +11823,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.sidebar.fill()
 
     # ---- read-only sessions (☰ → Read-only session): no text box, for a chat you only watch (tailing one with
-    # Signal on, say); the status line, with the context it uses, stays. Remembered per session.
+    # Signal on, say); the status line, with the context it uses, stays. Remembered per session. A session another
+    # program has (update_banner) is read-only too while it does, and has no text box either: show_composer
     def read_only_ids(self):
         return [i for i in load_settings().get("read_only_sessions") or [] if isinstance(i, str)]
 
@@ -11838,10 +11840,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if on is None:
             on = bool(self.session_id) and self.session_id in self.read_only_ids()
         self.read_only = on
-        self.composer.set_visible(not on)
         if (action := self.lookup_action("readonly")) is not None:
             action.set_state(GLib.Variant.new_boolean(on))
-        if on and self.input.has_focus():
+        self.show_composer()
+
+    def show_composer(self):
+        """The text box, there unless the session can't be written to: read-only by choice (☰ → Read-only session),
+        or while another program has it (update_banner). Read-only is no text box at all, not a greyed-out one."""
+        hidden = self.read_only or self.locked
+        self.composer.set_visible(not hidden)
+        if hidden and self.input.has_focus():
             self.scroller.grab_focus()
 
     def on_exit(self, code):
@@ -14413,8 +14421,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return self.resume_pending and self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
-        """While another program has the session, say so and keep the input off: two writers
-        would interleave two conversations in one transcript."""
+        """While another program has the session, say so, with no text box (show_composer): two writers would
+        interleave two conversations in one transcript."""
         live = self.live_elsewhere()
         stop = None
         if live and self.remote is not None:
@@ -14432,7 +14440,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.banner.set_title("This session is currently active elsewhere")
         self.banner.set_button_label(stop)
         self.banner.set_revealed(live)
-        self.composer_box.set_sensitive(not live)
+        self.locked = live
+        self.show_composer()
 
     def tail_lines(self, lines):
         """Draw what other programs appended to the viewed session."""
@@ -14749,7 +14758,7 @@ def window_state(win):
         "locked: live elsewhere": live,
         "other program last wrote, s ago": round(now - last, 1) if last else None,
         "its turn open (tail.turn_open)": win.tail.turn_open,
-        "banner shown": win.banner.get_revealed(), "input enabled": win.composer_box.get_sensitive(),
+        "banner shown": win.banner.get_revealed(), "text box shown": win.composer.get_visible(),
         "busy": win.busy, "stick_bottom": win.stick_bottom,
         "claude": {"pid": proc.p.pid if proc else None, "alive": alive,
                    "args": proc.p.args if proc else None, "exit code": None if alive or not proc else proc.p.poll()},

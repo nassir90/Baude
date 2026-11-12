@@ -3233,7 +3233,7 @@ def test_resume_is_read_only_and_tails(app):
         start = [l for l in fake_log() if l.startswith("START")][-1]
         assert "--resume" not in start, "only viewing: claude doesn't resume it"
         assert hashlib.sha256(open(path, "rb").read()).hexdigest() == digest, "the file is untouched"
-        assert not win.banner.get_revealed() and win.composer_box.get_sensitive(), "quiet: no banner, you can write"
+        assert not win.banner.get_revealed() and win.composer.get_visible(), "quiet: no banner, you can write"
         assert "resumed" not in labels_text(win.transcript), "no '— resumed —' until you write"
         assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the helper's own id doesn't replace it"
         # someone else (Desktop, a terminal) carries on: it shows up live
@@ -3245,7 +3245,7 @@ def test_resume_is_read_only_and_tails(app):
         wait_for(lambda: "Written elsewhere" in labels_text(win.transcript), "tailed")
         assert win.tool_cards["ext1"].state == "running", "a call in progress isn't 'interrupted'"
         assert win.banner.get_revealed()
-        assert not win.composer_box.get_sensitive(), "no writing into a session another program is running"
+        assert not win.composer.get_visible(), "no writing into a session another program is running"
         assert win.session_state() == "working", "something is writing it"
         with open(path, "a") as f:
             f.write('ult","tool_use_id":"ext1","content":"built"}]}}\n')
@@ -3264,7 +3264,7 @@ def test_resume_is_read_only_and_tails(app):
         # the other program goes quiet: the banner goes, the input comes back
         win.tail.last_written = time.time() - 3600
         win.poll_tail()
-        assert not win.banner.get_revealed() and win.composer_box.get_sensitive()
+        assert not win.banner.get_revealed() and win.composer.get_visible()
         type_and_send(win, "my turn")
         wait_for(lambda: '"--resume", "f1f1f1f1-0000-4000-8000-000000000001"' in
                  [l for l in fake_log() if l.startswith("START")][-1], "resumed on the first message")
@@ -4555,11 +4555,11 @@ def test_own_session_is_not_active_elsewhere(app):
         win.session_id = "0e0e0000-0000-4000-8000-000000000001"  # as if baude's claude had been running it
         win.resume_session(win.sidebar.find_info("0e0e0000-0000-4000-8000-000000000002"))
         win.resume_session(win.sidebar.find_info("0e0e0000-0000-4000-8000-000000000001"))
-        assert not win.live_elsewhere() and not win.banner.get_revealed() and win.composer_box.get_sensitive()
+        assert not win.live_elsewhere() and not win.banner.get_revealed() and win.composer.get_visible()
         with open(mine, "a") as f:  # but if something else does write to it now, that shows
             f.write(json.dumps({"type": "user", "message": {"content": "from the terminal"}}) + "\n")
         wait_for(lambda: win.banner.get_revealed(), "written elsewhere")
-        assert not win.composer_box.get_sensitive()
+        assert not win.composer.get_visible()
     finally:
         close(win)
         os.remove(mine)

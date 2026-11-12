@@ -12,8 +12,10 @@ A client's requests (a "req" it picks comes back on the reply):
     input {session, msg}                            (a stream-json message for the session's claude: started on it,
                                                      with --resume, if it isn't running)
     stop {session}                                  -> stopped {session}
-    transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data}
-    read_file {path, limit?}                        -> file {path, size, data (base64), error?}
+    transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
+    read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
+    ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
+                                                     and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".
 
 A session is {id, title, cwd, model, effort, mode, tags, group, created, said, updated, size, state, prompts}: its id a
@@ -80,6 +82,14 @@ class Channel:
                 return None
             return msg if isinstance(msg, dict) else None
 
+    def keep_alive(self):
+        """A ping every PING_S till it's closed, so the other end, which takes SILENT_S of silence for gone, doesn't."""
+        def run():
+            while not self.closed and self.send({"op": "ping"}):
+                self.pinged.wait(PING_S)
+        self.pinged = threading.Event()
+        threading.Thread(target=run, daemon=True, name="ping").start()
+
     def __iter__(self):
         while (msg := self.read()) is not None:
             yield msg
@@ -87,6 +97,8 @@ class Channel:
     def close(self):
         with self.lock:
             self.closed = True
+        if hasattr(self, "pinged"):
+            self.pinged.set()
         if self.sock is not None:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)

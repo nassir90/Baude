@@ -7997,7 +7997,8 @@ class SessionSidebar(Gtk.Box):
             groups.setdefault(key, [label, folder if key != "scratch" else None, []])[2].append(info)
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         sid = self.win.session_id
-        if not q and self.win.chat_begun() and not any(i["id"] == sid for g in groups.values() for i in g[2]):
+        if not q and self.win.chat_begun() and self.win.remote is None and \
+                not any(i["id"] == sid for g in groups.values() for i in g[2]):
             key, label = session_group(self.win.cwd)
             groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
                 "id": sid, "title": getattr(self.win, "session_title", None) or "New session",
@@ -8233,8 +8234,9 @@ class SessionSidebar(Gtk.Box):
 
     # ---- right-click menu / F2: rename, archive, move to trash
     def find_info(self, sid):
-        return next((i for i in self.sessions if i["id"] == sid), None) or \
-            next((remote_info(s) for s in network().sessions() if s["id"] == sid), None)
+        """(a server on this machine keeps its sessions' transcripts here too: what the network says of one comes first)"""
+        return next((remote_info(s) for s in network().sessions() if s["id"] == sid), None) or \
+            next((i for i in self.sessions if i["id"] == sid), None)
 
     def show_menu(self, row, x, y):
         info, sid = row.info, GLib.Variant.new_string(row.info["id"])
@@ -8450,6 +8452,7 @@ class SessionSidebar(Gtk.Box):
         if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
             self.win.open_remote_soon(info)
             return
+        self.win.opening_remote = None  # (another picked meanwhile: not opened after all)
         self.win.switch_to(lambda: self.win.resume_session(info))
 
     def focus_search(self):
@@ -11294,6 +11297,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.note(f"couldn't reach {remote_name(r)}: {e}")
         if self.proc is not None:
             self.proc.mode = self.proc.listing.get("mode")
+            self.proc.cost_seen = self.total_cost  # (its claude counts on from what the transcript says was spent)
             self.pending.clear()
             for msg in list(self.proc.asks.values()):  # (what it's waiting on an answer to)
                 self.h_control_request(msg)
@@ -11308,6 +11312,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.remember_own_writes()
         if not resume:
             self.session_id = None
+            if self.remote is not None:  # (a new conversation is this machine's: Apple's model or one on this Mac)
+                self.remote, self.resume_pending, self.view_path = None, False, None
+                self.tail.stop()
+                MarkdownView.base_dir = self.run_cwd
+                self.update_banner()
             self.reset_stream_state()
         else:
             # the same conversation carries on: keep tool_use_id -> card, so results, task endings
@@ -11431,6 +11440,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def new_session(self, run_in=None):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
         Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that."""
+        self.opening_remote = None  # (a network session still being fetched: not opened after all)
         run_in = self.norm_dir(run_in) if run_in else self.cwd if os.path.isdir(self.cwd) else self.run_cwd
         if run_in != self.run_cwd:
             self.switching_chat = True  # (the new chat's own switches come below)
@@ -11479,7 +11489,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                                                          f"claude exited ({code})") + ". Send a message to carry on.")
             self.proc = None
             self.set_busy(False)
-            self.update_banner()
+            self.remote_view()
             return
         self.note(f"claude exited ({code}). Send a message to restart / resume.")
         self.proc = None
@@ -11560,6 +11570,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.start_proc()
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
             buf.set_text(text)
+            if self.remote is not None:
+                self.remote_view()
             return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
@@ -13624,13 +13636,27 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             return
         listed = self.remote.sessions.get(self.session_id)
         if listed and self.remote.state == "alive" and \
-                (listed.get("size") or 0) != self.remote.offsets.get(self.session_id, 0):
+                (listed.get("size") or 0) != self.remote.mirrored(self.session_id):
             self.sync_remote(self.remote, self.session_id)
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:
             self.start_remote_proc()  # (its server's there again, or at last: what it asks, its models)
         self.update_banner()
         self.update_session_state()
+
+    def remote_view(self):
+        """A network session with nothing of its server's attached (gone, or not there): watched from its mirror again,
+        as it's fetched, the banner saying why there's nothing to write in."""
+        if self.remote is None or self.resume_pending:
+            self.update_banner()
+            return
+        path = self.remote.mirror(self.session_id)
+        self.resume_pending, self.view_path = True, path
+        try:
+            self.tail.start(path, os.path.getsize(path))
+        except OSError:
+            self.tail.start(path, 0)
+        self.update_banner()
 
     def stop_remote_turn(self):
         """The banner's Stop: a network session at a turn on its server, interrupted there."""
@@ -13752,6 +13778,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if info.get("remote") is not None:
             return self.open_remote(info)
         self.remote = None
+        MarkdownView.base_dir = self.run_cwd  # (not a network session's folder, whatever's set below)
         self.remember_own_writes()  # before the view switches to the other session
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)

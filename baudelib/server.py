@@ -153,6 +153,10 @@ class Server:
 
     # ---- what it is
     def info(self):
+        with self.lock:
+            return self._info()
+
+    def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
@@ -189,6 +193,7 @@ class Server:
         self.tcp.server_close()
 
     def serve(self, sock):
+        sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
         conn = Conn(ch)
         with self.lock:
@@ -213,6 +218,8 @@ class Server:
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
+        if op == "ping":
+            return None
         if op == "hello":
             return reply("hello", server=self.info())
         if op == "subscribe":
@@ -239,6 +246,7 @@ class Server:
                 return self.take_input(conn, s, msg.get("msg") or {})
             if op == "stop":
                 if s.proc is not None:
+                    s.proc.stopping = True
                     s.proc.kill()
                 return reply("stopped", session=s.id)
             if op == "transcript":
@@ -269,18 +277,24 @@ class Server:
         return s
 
     def ensure_proc(self, s):
-        """(lock held) The session's claude, started if it isn't running: with its id the first time, resumed after."""
+        """(lock held) The session's claude, started if it isn't running: with its id until it's written a transcript,
+        resumed after. One being stopped is let go of first (what's sent now is the next one's)."""
+        if s.proc is not None and getattr(s.proc, "stopping", False):
+            old, s.proc, s.busy = s.proc, None, False
+            old.kill()
+            try:
+                old.p.wait(5)
+            except Exception:  # (still going: a claude of its own, about to go)
+                pass
         if s.proc is not None:
             return s.proc
-        first = not s.meta.get("ran")
+        first = s.transcript() is None
+        made = []  # (the claude its exit is about: claude_exited)
         s.proc = claude.ClaudeProc(
-            lambda p, m: self.from_claude(s, p, m), lambda code, s=s: self.claude_exited(s, code), s.meta["cwd"],
+            lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
             s.meta.get("model"), s.meta.get("mode"), None if first else (s.meta.get("cli_id") or s.id),
             s.meta.get("effort"), extra=("--session-id", s.id) if first else (), env=self.env, exe=self.exe)
-        s.proc.exited = False
-        if first:
-            s.meta["ran"] = True
-            self.save(s)
+        made.append(s.proc)
         s.used = time.time()
         return s.proc
 
@@ -326,9 +340,11 @@ class Server:
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         self.save(s)
-        if s.proc is None and (sub in SETTINGS or sub in ("apply_flag_settings", "interrupt")):
-            self.changed()
-            return answer({})  # (kept for when it runs; nothing running to interrupt)
+        if s.proc is None or getattr(s.proc, "stopping", False):  # (stopped: answered from what's kept, for when it
+            self.changed()                                          # runs; only a message starts it)
+            if sub == "get_settings":
+                return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
+            return answer({})
         on = f"srv_{next(self.rids)}"
         s.routes[on] = (conn, rid)
         self.ensure_proc(s).send({**msg, "request_id": on})
@@ -383,10 +399,10 @@ class Server:
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
 
-    def claude_exited(self, s, code):
+    def claude_exited(self, s, made, code):
         with self.lock:
-            if s.proc is None or s.proc.p.poll() is None:
-                return
+            if not made or s.proc is not made[0]:
+                return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
             for conn, theirs in s.waiting_init:
@@ -406,38 +422,47 @@ class Server:
         subscribers hear what changed, or a ping."""
         pinged = 0.0
         while not self.stopped.wait(0.5):
-            with self.lock:
-                for s in list(self.sessions.values()):
-                    path = s.transcript()
-                    try:
-                        st = os.stat(path) if path else None
-                    except OSError:
-                        st = None
-                    stat = (st.st_size, st.st_mtime) if st else None
-                    if stat != s.stat:
-                        if st and s.stat and st.st_size < s.stat[0]:
-                            s.scan = None  # (rewritten: read again)
-                        s.stat = stat
-                        if path and st:
-                            s.scan, s.info = transcripts.scan_session(path, s.scan)
-                        self.dirty = True
-                    if s.proc is not None and not s.busy and not s.asks and not s.live \
-                            and time.time() - s.used > self.idle_s:
-                        self.log(f"{s.id} idle: its claude stopped")
-                        s.proc.close_stdin()
-                        threading.Timer(10, s.proc.kill).start()
-                        s.used = time.time()
-                send, self.dirty = self.dirty, False
-                subscribers = [c for c in self.conns if c.subscribed]
-            if send:
-                msg = {"op": "sessions", "sessions": self.listing(), "server": self.info()}
-            elif time.monotonic() - pinged >= wire.PING_S:
-                msg = {"op": "ping"}
-            else:
-                continue
+            try:
+                pinged = self._look(pinged)
+            except Exception as e:  # (whatever it was, it's looked at again next time)
+                self.log(f"watching: {type(e).__name__}: {e}")
+
+    def _look(self, pinged):
+        """One look (_watch): (when subscribers were last pinged)."""
+        with self.lock:
+            for s in list(self.sessions.values()):
+                path = s.transcript()
+                try:
+                    st = os.stat(path) if path else None
+                except OSError:
+                    st = None
+                stat = (st.st_size, st.st_mtime) if st else None
+                if stat != s.stat:
+                    if st and s.stat and st.st_size < s.stat[0]:
+                        s.scan = None  # (rewritten: read again)
+                    s.stat = stat
+                    if path and st:
+                        s.scan, s.info = transcripts.scan_session(path, s.scan)
+                    self.dirty = True
+                if s.proc is not None and not s.busy and not s.asks and not s.live \
+                        and time.time() - s.used > self.idle_s and not getattr(s.proc, "stopping", False):
+                    self.log(f"{s.id} idle: its claude stopped")
+                    s.proc.stopping = True
+                    s.proc.close_stdin()
+                    threading.Timer(10, s.proc.kill).start()
+                    s.used = time.time()
+            send, self.dirty = self.dirty, False
+            conns = list(self.conns)
+        if send:
+            msg = {"op": "sessions", "sessions": self.listing(), "server": self.info()}
+            for c in conns:
+                if c.subscribed:
+                    c.send(msg)
+        if time.monotonic() - pinged >= wire.PING_S:  # (every connection: a client takes silence for gone)
             pinged = time.monotonic()
-            for c in subscribers:
-                c.send(msg)
+            for c in conns:
+                c.send({"op": "ping"})
+        return pinged
 
     # ---- reading
     def read_transcript(self, s, offset, limit=None):
@@ -459,12 +484,18 @@ class Server:
             return {"offset": 0, "next": 0, "size": 0, "data": ""}
         whole = data[:data.rfind(b"\n") + 1]
         return {"offset": offset, "next": offset + len(whole), "size": size,
-                "data": whole.decode("utf-8", "replace")}
+                "data": base64.b64encode(whole).decode("ascii")}  # (as it is, byte for byte: the mirror's size is where it's up to)
 
     def read_file(self, path, limit=None):
+        """A file in one of its sessions' folders (what a session's links name), not anywhere: there's no sign-in."""
         path = os.path.expanduser(path or "")
         if not os.path.isabs(path):
             return {"path": path, "error": "not an absolute path"}
+        real = os.path.realpath(path)
+        with self.lock:
+            folders = {os.path.realpath(s.meta["cwd"]) for s in self.sessions.values() if s.meta.get("cwd")}
+        if not any(real == f or real.startswith(f.rstrip(os.sep) + os.sep) for f in folders):
+            return {"path": path, "error": "not in one of its sessions' folders"}
         try:
             with open(path, "rb") as f:
                 data = f.read(min(int(limit or FILE_LIMIT), FILE_LIMIT) + 1)

@@ -5,6 +5,7 @@ a local one; and a session's claude, talked to as Baude talks to its own (Remote
 A server that goes (its connection drops, or it says nothing for wire.SILENT_S) isn't forgotten: it's "dead", its
 sessions still listed as they were, until it's back or it's been gone for FORGET_S. Calls to what's given (on_change,
 a request's callback, RemoteProc's on_msg and on_exit) come through dispatch, as ClaudeProc's do."""
+import base64
 import itertools
 import json
 import os
@@ -36,7 +37,7 @@ class Remote:
         self.network, self.key, self.host, self.port = network, key, host, port
         self.info = cached.get("info") or {}
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and s.get("id")}
-        self.offsets = dict(cached.get("offsets") or {})  # session id -> how far its mirror has the transcript
+        self.syncing = {}  # session id -> the lock its mirror's written under (sync)
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
@@ -81,6 +82,7 @@ class Remote:
             self.network.rekey(self, info["id"])
         self.info, self.seen = info, time.time()
         ch.sock.settimeout(wire.SILENT_S)
+        ch.keep_alive()
         ch.send({"op": "subscribe"})
         for msg in ch:
             self.seen = time.time()
@@ -91,7 +93,7 @@ class Remote:
                 if self.state != "alive":
                     self.state = "alive"
                 self.network.changed()
-            elif (req := msg.get("req")) is not None and req in self.calls:
+            elif op != "ping" and (req := msg.get("req")) is not None and req in self.calls:
                 self.calls.pop(req)(msg)
         with self.lock:
             self.ch = None
@@ -131,24 +133,31 @@ class Remote:
     def mirror(self, session_id):
         return os.path.join(self.network.home, self.key, f"{session_id}.jsonl")
 
+    def mirrored(self, session_id):
+        """How much of a session's transcript its mirror has (it's the transcript's first bytes, as they are)."""
+        try:
+            return os.path.getsize(self.mirror(session_id))
+        except OSError:
+            return 0
+
     def sync(self, session_id):
-        """Bring a session's mirror up to what the server has (not on the main loop). True if it is."""
+        """Bring a session's mirror up to what the server has (not on the main loop; one sync of a session at a time,
+        whichever window asks). True if it is."""
         path = self.mirror(session_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        at = self.offsets.get(session_id, 0) if os.path.exists(path) else 0
-        while True:
-            r = self.call({"op": "transcript", "session": session_id, "offset": at})
-            if r.get("op") != "transcript":
-                return False
-            if r["offset"] != at:  # (it's shorter than what's here: written again, so read again)
-                at = 0
-            data = r.get("data") or ""
-            with open(path, "a" if at else "w", encoding="utf-8") as f:
-                f.write(data)
-            at = r["next"]
-            self.offsets[session_id] = at
-            if not data or at >= r["size"]:
-                return True
+        with self.lock:
+            lock = self.syncing.setdefault(session_id, threading.Lock())
+        with lock:
+            while True:
+                at = self.mirrored(session_id)
+                r = self.call({"op": "transcript", "session": session_id, "offset": at})
+                if r.get("op") != "transcript":
+                    return False
+                data = base64.b64decode(r.get("data") or "")
+                with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
+                    f.write(data)
+                if not data or r["next"] >= r["size"]:
+                    return True
 
     def stop(self):
         self.stopped = True
@@ -160,7 +169,7 @@ class Remote:
 
     def cached(self):
         return {"host": self.host, "port": self.port, "info": self.info, "seen": self.seen,
-                "sessions": list(self.sessions.values()), "offsets": self.offsets}
+                "sessions": list(self.sessions.values())}
 
 
 class Network:
@@ -215,7 +224,6 @@ class Network:
             old = self.servers.pop(key, None)
             if old is not None and old is not remote:
                 old.stop()
-                remote.offsets = {**old.offsets, **remote.offsets}
                 remote.sessions = remote.sessions or old.sessions
             remote.key = key
             self.servers[key] = remote
@@ -314,7 +322,8 @@ class RemoteProc(claude.ClaudeProc):
         if not reply or reply.get("op") != "attached":
             self.ch.close()
             raise OSError((reply or {}).get("error") or "the server didn't answer")
-        self.ch.sock.settimeout(None)
+        self.ch.sock.settimeout(wire.SILENT_S)  # (the server pings: silence this long, and it's gone)
+        self.ch.keep_alive()
         self.listing = reply.get("session") or {}
         self.asks = {m["request_id"]: m for m in reply.get("asks") or [] if m.get("request_id")}
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()
@@ -328,6 +337,9 @@ class RemoteProc(claude.ClaudeProc):
             elif op == "exited" and msg.get("session") == self.session:
                 self.code = msg.get("code")
                 break
+            elif op == "error":  # (what was sent went nowhere: said, and the turn's over)
+                self.dispatch(lambda e=msg.get("error"): self.on_msg(self, {
+                    "type": "result", "subtype": "error", "is_error": True, "result": f"the server: {e}"}))
         self.ch.close()
         if not self.killed:
             code = -1 if self.code is None else self.code

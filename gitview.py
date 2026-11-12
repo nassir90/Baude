@@ -40,7 +40,7 @@ from widgets import (  # noqa: E402,F401
     RefreshButton, WorkerPool, discard, full_time, keep_times, on_label_link, pretty_path, ref_epoch, ref_pr_info,
     say_time, sel_label, themed_icon, toast,
 )
-from widgets import ellipsize_dropdown, empty_label  # noqa: E402
+from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 
 
@@ -67,10 +67,11 @@ def github_repo(top):
 
 # ----------------------------------------------------------------- git view --
 # The side panel's Git page: a branch's history as a commit log with lanes (the checkout the chat works in by
-# default, or any branch a worktree has checked out, or any local one), the branch it tracks upstream and the branch
-# it came from, when each commit was made (the clock time) and how much it changed (lines added and removed, in all
-# and per file), the commits this chat's own commands made, and the hours commits are made at. GitHub adds pull
-# requests when gh is signed in; otherwise there are links only. Everything is read with git, in a worker thread.
+# default, or any branch, local or remote; or several, their histories together), the branch it tracks upstream and
+# the branch it came from, when each commit was made (the clock time) and how much it changed (lines added and
+# removed, in all and per file), the commits this chat's own commands made, and the hours commits are made at.
+# GitHub adds pull requests when gh is signed in; otherwise there are links only. Everything is read with git, in a
+# worker thread.
 # (Who made each commit, with their picture: "authors' pictures", below.)
 
 GIT_POOL = WorkerPool(2)
@@ -316,6 +317,83 @@ def git_parent_branch(top, branch, upstream=None):
         return None
     behind = int((_git(top, "rev-list", "--count", f"{tip}..{best[1]}") or "0").strip() or 0)
     return {"name": best[1], "base": best[2], "ahead": best[0][0], "behind": behind}
+
+
+GIT_REMOTES_LISTED = 300  # remote branches the Git page's branch list has at most (the most recently changed)
+GIT_BASES_READ = 3        # branches this chat touched whose base is worked out (git_parent_branch) for the list's order
+_GIT_BASES = {}           # (top, branch, its tip) -> the name of the branch it came from, or None (git_branch_list)
+
+
+def git_remote_branches(top):
+    """The remote branches, most recently changed first (origin/HEAD left out), as git_checkouts' entries are."""
+    out = []
+    for line in (_git(top, "for-each-ref", "--sort=-committerdate", "--format=%(refname:short)%00%(objectname)%00"
+                      "%(symref)", "refs/remotes") or "").splitlines():
+        name, sha, symref = (line.split("\0") + ["", ""])[:3]
+        if name and not symref and "/" in name:
+            out.append({"rev": name, "name": name, "sha": sha, "upstream": None, "ahead": 0, "behind": 0,
+                        "gone": False, "worktree": None, "label": name, "remote": True})
+    return out[:GIT_REMOTES_LISTED]
+
+
+def git_branch_list(top, entries, mine, chat, parents=None):
+    """The Git page's branch list, in order: [entry + {touched}] (entries: git_checkouts' and git_remote_branches',
+    in that order). First the branches this chat touched: the branch its checkout has (mine), then those its own
+    commands committed on or pushed to (chat: chat_git_events), the latest first; and with each the branch it came
+    from: the one it tracks if that's another (made with -b from origin/main, it tracks that), else git_parent_branch's
+    guess (parents: {rev: name} already worked out). Each base before the branches made from it, those made from one
+    base together, a branch's own remote copy right after it. Then every other branch, in entries' order."""
+    by_rev = {e["rev"]: e for e in entries}
+
+    def known(name):  # (a branch a command named: the local one, else a remote's copy of it, origin's first)
+        if name in by_rev and not by_rev[name].get("remote"):
+            return name
+        copies = [e["rev"] for e in entries if e.get("remote") and e["rev"].split("/", 1)[1] == name]
+        return next((r for r in copies if r.startswith("origin/")), copies[0] if copies else None)
+    touched = [mine] if mine in by_rev else []
+    for ev in reversed((chat or {}).get("events", [])):
+        if ev["kind"] in ("commit", "push") and ev.get("branch") and \
+                (rev := known(ev["branch"])) is not None and rev not in touched:
+            touched.append(rev)
+    bases, copies, kids = {}, {}, {}
+    for i, rev in enumerate(touched):
+        e = by_rev[rev]
+        base = up = e.get("upstream")
+        if up and up.split("/", 1)[-1] == e["name"]:
+            copies[rev], base = up, None  # (its own remote copy: after it)
+        if base is None:  # (one made with -b from another tracks that: else, the likeliest)
+            base = (parents or {}).get(rev)
+            if base is None and i < GIT_BASES_READ:
+                key = (top, rev, e.get("sha"))
+                if key not in _GIT_BASES:
+                    found = git_parent_branch(top, rev, up)
+                    _GIT_BASES[key] = found["name"] if found else None
+                base = _GIT_BASES[key]
+        if base and base in by_rev and base != rev:
+            bases[rev] = base
+            kids.setdefault(base, []).append(rev)
+    out, seen = [], set()
+
+    def add(rev, touched=True):
+        if rev and rev in by_rev and rev not in seen:
+            seen.add(rev)
+            out.append({**by_rev[rev], "touched": touched})
+
+    def place(rev):  # (it, its remote copy, then what was made from it, the same way)
+        if rev not in seen:
+            add(rev)
+            add(copies.get(rev))
+            for kid in kids.get(rev, ()):
+                place(kid)
+    for rev in touched:
+        below = set()
+        while rev in bases and bases[rev] not in seen and rev not in below:  # (from the base it all came from)
+            below.add(rev)
+            rev = bases[rev]
+        place(rev)
+    for e in entries:
+        add(e["rev"], touched=False)
+    return out
 
 
 def git_commit_card(top, sha):
@@ -858,16 +936,17 @@ class GitHours(Gtk.Widget):
 
 
 class GitPage(Gtk.Stack):
-    """The side panel's Git page (see "git view" above). The list: a branch picker (each checkout's branch, the chat's
-    first and chosen at first, then the other local branches), what the branch tracks and what it came from, GitHub's
-    state, commits per hour, and the log, each row with its author's picture (GitAvatars). A commit opens its card:
-    when it was made, its message, the lines it changed in all and per file (each opens its diff), the branches that
-    have it, its pull requests, and the turn of this chat that made it."""
+    """The side panel's Git page (see "git view" above). The list: the branches shown, picked from a list (the ones
+    this chat touched first, the chat's own checkout's chosen at first; then the rest: git_branch_list), what the
+    branch tracks and what it came from, GitHub's state, commits per hour, and the log, each row with its author's
+    picture (GitAvatars). A commit opens its card: when it was made, its message, the lines it changed in all and
+    per file (each opens its diff), the branches that have it, its pull requests, and the turn of this chat that made
+    it."""
 
     def __init__(self, win):
         super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
         self.win, self.top, self.checkouts, self.commits, self.chat = win, None, [], [], {}
-        self.rev, self.follow, self.token, self.stale, self.state = None, True, 0, True, {}
+        self.revs, self.follow, self.token, self.stale, self.state = None, True, 0, True, {}
         self.opened = {}  # merge sha -> its own commits, shown under it (None while they're read)
         self.loaded_for, self.current, self.chat_key, self.soon = None, None, None, None
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -884,15 +963,34 @@ class GitPage(Gtk.Stack):
         self.refresh_btn.connect("clicked", lambda *_: self.load(gh=True))
         head.append(self.refresh_btn)
         top.append(head)
-        self.picker = Gtk.DropDown(model=Gtk.StringList(), margin_start=10, margin_end=10,
-                                   css_classes=["choice", "git-branches"],
-                                   tooltip_text="The branch shown: each checkout's (this chat's first), then the rest")
-        # (the branch shown is cut short with … to fit: a long branch or checkout name made the picker, and the panel
-        # it's in, as wide as the name. Its list still has every name whole, the one shown ticked, as GTK draws it)
-        ticked = self.picker.get_factory()
-        ellipsize_dropdown(self.picker)
-        self.picker.set_list_factory(ticked)
-        self.picker_handler = self.picker.connect("notify::selected", self.on_pick)
+        # the branches shown: a list chosen from as files are in a file manager (a click picks one, Shift and a click
+        # the ones from the last picked to it, Ctrl or ⌘ and a click adds one or takes it out; the arrows, Shift and
+        # the arrows, Ctrl+Space too), shown once it's closed (Escape, a click outside it, Enter or a double click):
+        # several, their histories together. The branches this chat touched first, then a rule, then the rest
+        # (git_branch_list). The button says what's shown, cut short with … to fit: a long name never widens the
+        # panel (a list's whole names are in its popover, a window of its own)
+        self.picker = Gtk.MenuButton(margin_start=10, margin_end=10, always_show_arrow=True,
+                                     css_classes=["git-branches"],
+                                     tooltip_text="The branches shown: this chat's first, then the rest. "
+                                                  "Shift or Ctrl (⌘) and a click picks more")
+        said = Gtk.Box(spacing=6)
+        self.picked_name = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self.picked_more = Gtk.Label(xalign=0, hexpand=True, visible=False)
+        self.picked_more.add_css_class("dim-label")
+        said.append(self.picked_name)
+        said.append(self.picked_more)
+        self.picker.set_child(said)
+        self.branches = Gtk.ListBox(selection_mode=Gtk.SelectionMode.MULTIPLE, activate_on_single_click=False)
+        self.branches.set_header_func(GitPage.branch_rule)
+        self.branches.connect("selected-rows-changed", lambda *_: self.tick_branches())
+        self.branches.connect("row-activated", lambda *_: self.branch_list.popdown())  # (Enter, a double click)
+        self.branch_list = Gtk.Popover(css_classes=["git-branches"], child=Gtk.ScrolledWindow(
+            child=self.branches, hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_width=True,
+            propagate_natural_height=True, max_content_height=420))
+        self.branch_list.connect("show", lambda *_: self.branches_shown())
+        self.branch_list.connect("closed", lambda *_: self.branches_closed())
+        self.picker.set_popover(self.branch_list)
+        self.picked = []  # (the branches shown, as the list was when it last closed or was read)
         top.append(self.picker)
         self.info = Gtk.Label(xalign=0, wrap=True, margin_start=12, margin_end=10, wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.info.connect("activate-link", on_label_link)
@@ -960,20 +1058,94 @@ class GitPage(Gtk.Stack):
         changes or one of its own is asked for."""
         self.follow, self.pinned = False, folder
         if rev or sha:
-            self.rev = rev  # (a commit: the chat's branch if it has it, else one that does)
+            self.revs = [rev] if rev else None  # (a commit: the chat's branch if it has it, else one that does)
         self.load(then=sha)
 
-    def on_pick(self, *_):
-        i = self.picker.get_selected()
-        if 0 <= i < len(self.checkouts):
-            self.rev, self.follow = self.checkouts[i]["rev"], False
-            self.load()
+    # ---- the branch list
+    @staticmethod
+    def branch_rule(row, before):
+        """The rule between the branches this chat touched and the rest."""
+        rule = before is not None and before.touched and not row.touched
+        if rule != isinstance(row.get_header(), Gtk.Separator):
+            row.set_header(Gtk.Separator(margin_top=4, margin_bottom=4) if rule else None)
+
+    def fill_branches(self, branches, picked):
+        """The list read again (branches: git_branch_list's), the ones shown (picked) chosen in it."""
+        while (row := self.branches.get_first_child()) is not None:
+            self.branches.remove(row)
+        for b in branches:
+            row = Gtk.ListBoxRow()
+            row.rev, row.touched, row.name = b["rev"], b["touched"], b["name"] or b["label"]
+            box = Gtk.Box(spacing=10)
+            box.append(Gtk.Label(label=b["label"] + ("  (this chat)" if b["rev"] == self.state.get("mine") else ""),
+                                 xalign=0, hexpand=True))
+            row.tick = Gtk.Image(icon_name="object-select-symbolic", opacity=0)
+            box.append(row.tick)
+            row.set_child(box)
+            self.branches.append(row)
+        self.choose(picked)
+        self.picked = [r.rev for r in self.branch_rows() if r.is_selected()]
+        self.say_picked()
+
+    def choose(self, revs):
+        """These branches chosen in the list, and no others; Shift goes on from the first of them (the one GTK's
+        list chose last)."""
+        rows = list(self.branch_rows())
+        for row in rows:
+            if row.rev not in revs:
+                self.branches.unselect_row(row)
+        for row in reversed([r for r in rows if r.rev in revs]):
+            self.branches.select_row(row)
+
+    def branch_rows(self):
+        row = self.branches.get_first_child()
+        while row is not None:
+            if isinstance(row, Gtk.ListBoxRow):
+                yield row
+            row = row.get_next_sibling()
+
+    def tick_branches(self):
+        for row in self.branch_rows():
+            row.tick.set_opacity(1 if row.is_selected() else 0)
+
+    def say_picked(self):
+        """The button: the branch shown, or the first of them and how many more."""
+        names = [r.name for r in self.branch_rows() if r.rev in self.picked]
+        self.picked_name.set_label(names[0] if names else "")
+        self.picked_more.set_label(f"+ {len(names) - 1} more")
+        self.picked_more.set_visible(len(names) > 1)
+        self.picker.set_tooltip_text("\n".join(names) if len(names) > 1 else
+                                     "The branches shown: this chat's first, then the rest. "
+                                     "Shift or Ctrl (⌘) and a click picks more")
+
+    def branches_shown(self):
+        """The list open: the keys at the first branch shown, so the arrows go on from there. (GTK's popover, opening,
+        has put them on the list's last chosen, and a list that's given them so chooses that one alone: the ones
+        shown are chosen again, before it's drawn)"""
+        self.choose(self.picked)
+        if (first := next((r for r in self.branch_rows() if r.is_selected()), None)) is not None:
+            first.grab_focus()
+
+    def branches_closed(self):
+        """The list closed: the branches chosen in it shown, if they're others (none chosen: those shown stay)."""
+        chosen = [r.rev for r in self.branch_rows() if r.is_selected()]
+        if chosen and chosen != self.picked:
+            self.pick(chosen)
+        elif getattr(self, "branches_later", None):  # (as last read: read while it was open, or none chosen)
+            self.fill_branches(*self.branches_later)
+
+    def pick(self, revs):
+        """Show these branches (several: their histories together), as the list does once it's closed."""
+        self.choose(revs)
+        self.picked, self.revs, self.follow = list(revs), list(revs), False
+        self.say_picked()
+        self.load()
 
     # ---- reading (worker thread)
     def load(self, then=None, gh=False):
         folder, transcript = self.chat_folder(), self.win.ref_transcript()
         self.token += 1
-        token, rev, follow, every = self.token, self.rev, self.follow, self.all_btn.get_active()
+        token, rev, follow, every = self.token, self.revs, self.follow, self.all_btn.get_active()
         self.stale, self.loaded_for = False, (folder, transcript)
         self.where.set_label("Reading the history…")
         if gh:  # (asked for: its button turns till it's read. The reads a chat going on brings aren't worth the motion)
@@ -985,28 +1157,34 @@ class GitPage(Gtk.Stack):
         GIT_POOL.submit(work)
 
     @staticmethod
-    def gather(folder, transcript, rev, follow, every, then=None, gh=False):
+    def gather(folder, transcript, picked, follow, every, then=None, gh=False):
+        """picked: the branches to show (several: their histories together), else (or follow) the chat's."""
         top = (_git(folder, "rev-parse", "--show-toplevel") or "").strip() if folder else ""
         if not top:
             return {"top": None, "folder": folder}
         checkouts = git_checkouts(top)
+        entries = checkouts + git_remote_branches(top)
         mine = next((c for c in checkouts if c["worktree"] == os.path.realpath(top)), None)
-        if then and not rev:  # (a commit: the chat's branch if it has it, else the first checkout or branch that does)
+        picked = [r for r in picked or () if r]
+        if then and not picked:  # (a commit: the chat's branch if it has it, else the first checkout or one with it)
             has = set((_git(top, "for-each-ref", "--contains", then, "--format=%(refname:short)", "refs/heads")
                        or "").split())
             pick = next((c for c in ([mine] if mine else []) + checkouts if c and c["name"] in has), None)
-            rev = pick["rev"] if pick else None
-        if follow or not rev or not any(c["rev"] == rev for c in checkouts) and \
-                not _git(top, "rev-parse", "--verify", "--quiet", rev):
-            rev = (mine or (checkouts[0] if checkouts else {"rev": "HEAD"}))["rev"]
-        b = next((c for c in checkouts if c["rev"] == rev), None)
-        if b is None and rev != "HEAD":  # (a remote branch, from a link: listed too while it's shown)
-            b = {"rev": rev, "name": rev, "sha": None, "upstream": None, "ahead": 0, "behind": 0, "gone": False,
-                 "worktree": None, "label": rev}
-            checkouts = checkouts + [b]
+            picked = [pick["rev"]] if pick else []
+        known = {e["rev"] for e in entries}
+        picked = [] if follow else [r for r in picked if r in known or _git(top, "rev-parse", "--verify", "--quiet", r)]
+        if not picked:
+            picked = [(mine or (checkouts[0] if checkouts else {"rev": "HEAD"}))["rev"]]
+        for r in picked:  # (a branch from a link, a tag: listed too while it's shown)
+            if r not in known and r != "HEAD":
+                entries.append({"rev": r, "name": r, "sha": None, "upstream": None, "ahead": 0, "behind": 0,
+                                "gone": False, "worktree": None, "label": r})
+        rev = picked[0]
+        b = next((e for e in entries if e["rev"] == rev), None) if len(picked) == 1 else None
         upstream = b["upstream"] if b else None
         parent = git_parent_branch(top, rev, upstream) if b and b["name"] else None
-        revs = ["--branches", "--remotes", "--tags"] if every else [rev] + ([parent["name"]] if parent else [])
+        revs = ["--branches", "--remotes", "--tags"] if every else \
+            picked if len(picked) > 1 else [rev] + ([parent["name"]] if parent else [])
         commits = git_log(top, revs, first_parent=not every)
         found = git_find(top, rev, then, revs, commits, every) if then else None
         own = theirs = None
@@ -1015,11 +1193,13 @@ class GitPage(Gtk.Stack):
             theirs = set((_git(top, "rev-list", "--max-count=5000", f"{rev}..{parent['name']}") or "").split())
         repo = github_repo(top)
         AVATARS.recall(commits, repo)
-        return {"top": top, "folder": folder, "checkouts": checkouts, "rev": rev, "branch": b, "parent": parent,
-                "commits": commits, "own": own, "theirs": theirs, "repo": repo, "gh_refresh": gh,
-                "pr": None, "every": every, "found": found,
-                "revs": revs, "chat": chat_git_events(transcript) if transcript else {}, "then": then,
-                "mine": mine["rev"] if mine else None}
+        chat = chat_git_events(transcript) if transcript else {}
+        branches = git_branch_list(top, entries, mine["rev"] if mine else None, chat,
+                                   {rev: parent["name"]} if b and parent else None)
+        return {"top": top, "folder": folder, "checkouts": checkouts, "branches": branches, "rev": rev,
+                "picked": picked, "branch": b, "parent": parent, "commits": commits, "own": own, "theirs": theirs,
+                "repo": repo, "gh_refresh": gh, "pr": None, "every": every, "found": found,
+                "revs": revs, "chat": chat, "then": then, "mine": mine["rev"] if mine else None}
 
     # ---- drawing (main loop)
     def loaded(self, token, res):
@@ -1041,19 +1221,17 @@ class GitPage(Gtk.Stack):
         self.picker.set_visible(True)
         self.hours.set_visible(True)
         self.where.set_label(pretty_path(self.top))
-        self.checkouts, self.rev, self.chat = res["checkouts"], res["rev"], res["chat"]
-        self.picker.handler_block(self.picker_handler)
-        self.picker.set_model(Gtk.StringList.new([c["label"] + ("  (this chat)" if c["rev"] == res["mine"] else "")
-                                                  for c in self.checkouts]))
-        i = next((i for i, c in enumerate(self.checkouts) if c["rev"] == self.rev), Gtk.INVALID_LIST_POSITION)
-        self.picker.set_selected(i)
-        self.picker.handler_unblock(self.picker_handler)
+        self.checkouts, self.revs, self.chat = res["checkouts"], res["picked"], res["chat"]
+        self.branches_later = (res["branches"], res["picked"])
+        if not self.branch_list.get_visible():  # (open, it's what you're choosing: read again once it's closed)
+            self.fill_branches(*self.branches_later)
         markup = self.info_markup(res)
         self.info.set_markup(markup)
         self.info.set_visible(bool(markup))
         self.commits = res["commits"]
-        if (res["rev"], res["every"]) != getattr(self, "opened_for", None):  # (another branch: its merges closed)
-            self.opened, self.opened_for = {}, (res["rev"], res["every"])
+        shown = (tuple(res["picked"]), res["every"])
+        if shown != getattr(self, "opened_for", None):  # (other branches: their merges closed)
+            self.opened, self.opened_for = {}, shown
         if res["gh_refresh"]:
             AVATARS.again()
         self.fill(self.commits)

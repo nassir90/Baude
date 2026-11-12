@@ -7595,6 +7595,17 @@ def local_host():
     return next((r for r in network().alive() if r.mine), None)
 
 
+def host_old():
+    """Is This Mac's host process there but older than Baude (its protocol behind: no adopt, draft or ephemeral)?"""
+    r = local_host()
+    return r is not None and (r.info.get("version") or 1) < baudelib.wire.VERSION
+
+
+def is_desktop(session_id):
+    """Is a chat Claude Desktop's (in its records: desktop_index)? Those stay outside the host process."""
+    return bool(session_id) and session_id in desktop_index()
+
+
 HERE_HOST = "here"  # (⋮ → Hosts: this machine's key; another's is its server's)
 THIS_MACHINE = "This Mac" if sys.platform == "darwin" else "This computer"
 
@@ -11679,10 +11690,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     # ---- process lifecycle
     def runs_here(self):
-        """Is the chat's claude this process's own (ClaudeProc)? Only a Claude Desktop chat's: every chat of Baude's,
-        new or on this machine already, runs in the host process (take_up), as a host's session does, so a restart or
-        an update of Baude's never stops it."""
-        return self.remote is None and self.desktop_chat
+        """Is the chat's claude this process's own (ClaudeProc)? A Claude Desktop chat's (desktop_chat, however it's
+        opened: is_desktop); and every chat's while This Mac's host process is older than Baude (it'd take adopt and
+        draft for a new conversation: check_host_version offers to restart it). Else every chat of Baude's, new or on
+        this machine already, runs in the host process (take_up), as a host's session does, so a restart or an update
+        of Baude's never stops it."""
+        return self.remote is None and (self.desktop_chat or is_desktop(self.session_id) or host_old())
 
     def start_proc(self):
         if self.remote is not None:
@@ -11730,7 +11743,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             try:
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.reach_where(), self.session_id,
                                        live=not self.resume_pending,  # (this machine's: as Baude's own claude would
-                                       env=claudelib.claude_env() if r.mine else None)  # have had it)
+                                       env=claudelib.claude_env() if r.mine else None,  # have had it)
+                                       always_allow=sorted(self.always_allow))
             except OSError as e:
                 self.note(f"couldn't reach {remote_name(r)}: {e}")
         if self.proc is not None:
@@ -11747,16 +11761,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         chat there (taken up first, if it isn't yet), that keeps nothing (--no-session-persistence), is listed nowhere,
         and goes when it's closed; a fresh one for a chat with nothing saved yet. (None, False) if it can't be had
         (an older host process: said)."""
-        if self.remote is None and self.session_id and find_session(self.session_id) and not self.take_up():
-            return None, False
         r = self.remote or local_host()
+        if self.remote is None and r is not None and self.session_id and find_session(self.session_id):
+            reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.run_cwd, "model": self.model,
+                            "mode": self.mode, "group": "", "env": claudelib.claude_env()}, timeout=10)
+            if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
+                self.note(f"the side question couldn't be asked: {reply.get('error')}")
+                return None, False
         if r is None or (r.info.get("version") or 1) < 2:
             self.note(f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
         params = {"op": "start", "ephemeral": True, "mode": "plan", "model": self.model, "prompt": ""}
         # (the chat's, forked, if it's the host's: a fresh, context-free one, if nothing's written in it yet, the host
         # says: started's forked)
-        params.update({"fork_from": self.session_id} if self.remote is not None and self.session_id else
+        params.update({"fork_from": self.session_id} if self.session_id and (self.remote is not None or
+                                                                              find_session(self.session_id)) else
                       {"cwd": self.run_cwd if r.mine else "~"})
         reply = r.call(params, timeout=10)
         if reply.get("op") != "started":
@@ -11786,12 +11805,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None
         reply = r.call({"op": "start", "draft": True, "prompt": "", "cwd": self.run_cwd, "model": self.model,
-                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env()}, timeout=10)
+                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env(), "group": ""}, timeout=10)
         if reply.get("op") != "started":
             self.note(f"{THIS_MACHINE}'s host process didn't start a chat: {reply.get('error')}")
             self.update_status()
             return
         self.remote, self.session_id, self.desktop_chat = r, reply["session"]["id"], False
+        r.sessions[self.session_id] = reply["session"]  # (listed before it next says what it has)
         self.resume_pending, self.view_path = False, None
         MarkdownView.base_dir = self.run_cwd
         self.start_remote_proc()
@@ -11816,7 +11836,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None
         params = {"op": "start", "cwd": self.run_cwd, "model": self.model, "effort": effort, "mode": self.mode,
-                  "env": claudelib.claude_env()}
+                  "env": claudelib.claude_env(), "group": ""}  # (Baude's own chats: in no group)
         if self.session_id and find_session(self.session_id):
             params["adopt"] = self.session_id
         else:
@@ -11841,7 +11861,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             p.kill()
             self.remember_own_writes()
         if not resume:
-            self.session_id = None
+            self.session_id, self.desktop_chat = None, False  # (a new conversation: Baude's, the host process's)
             if self.remote is not None:  # (a new conversation: the host process's draft, from start_proc)
                 self.remote, self.resume_pending, self.view_path = None, False, None
                 self.tail.stop()
@@ -12028,10 +12048,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.scroller.grab_focus()
 
     def on_exit(self, code):
-        if self.remote is not None and code == "deleted":  # (on its host: on_network goes on to a new chat)
+        if self.remote is not None and code == "deleted":  # (deleted on its host, by another head: a new chat)
             self.proc = None
             self.set_busy(False)
-            self.on_network()
+            toast(self.sidebar, f"That session was deleted on {remote_name(self.remote)}")
+            self.new_session()
             return
         if self.remote is not None:
             self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
@@ -12129,9 +12150,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         buf = self.input.get_buffer()
         if self.proc is None and self.remote is None and not self.runs_here():
             took = self.take_up()
-            if took is False:  # (This Mac's host process isn't there yet: started, and this sent once it is)
+            if took is False:  # (This Mac's host process isn't there yet: started, and this sent once it is, from the
+                buf.set_text(text)  # box it's kept in meanwhile, if it's still this chat's and still what's written)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
-                self.local_server(lambda _r: self.send_text(text))
+                sid = self.session_id
+
+                def ready(_r):
+                    if self.session_id == sid and self.remote is None and widgets.typed_text(self.input).strip() == text:
+                        buf.set_text("")
+                        self.send_text(text)
+                self.local_server(ready)
                 return
             if took is None:
                 buf.set_text(text)
@@ -12486,7 +12514,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
         if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)
-            self.update_status(f"{msg.get('model', '')}  ·  on {remote_name(self.remote)}")
+            self.update_status(f"{msg.get('model', '')}" + ("" if self.remote.mine else f"  ·  on {remote_name(self.remote)}"))
             return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
@@ -14235,7 +14263,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.view_session(path)
         self.show_title(info.get("title"))
         self.read_only_mode()
-        self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
+        if r.state == "alive" and (r.sessions.get(info["id"]) or {}).get("state") in ("working", "waiting") \
+                and not self.live_elsewhere():  # (at a turn: live, as it goes on, Stop and all; attached once, so
+            self.begin_resume()  # what it asks is answered through the one that's attached)
+            self.set_busy(True)
+        else:
+            self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
         self.apply_read_only()
         self.sidebar.fill()
 
@@ -14277,11 +14310,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
-        if listed is None and self.remote.state == "alive" and self.session_id and self.remote.info.get("id"):
-            # (deleted on its host, by another head, as it lists its sessions, archived ones too: nothing to carry on)
-            toast(self.sidebar, f"That session was deleted on {remote_name(self.remote)}")
-            self.new_session()
-            return
         if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
             self.show_title(listed["title"])
         if self.resume_pending and self.remote.local and self.remote.direct(self.session_id) and \
@@ -14585,11 +14613,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def resume_session(self, info):
         if info.get("remote") is not None:
             return self.open_remote(info)
-        self.remote, self.desktop_chat = None, bool(info.get("desktop"))
-        MarkdownView.base_dir = self.run_cwd  # (not a network session's folder, whatever's set below)
         self.remember_own_writes()  # before the view switches to the other session
         if self.busy and self.proc is not None:
-            self.detach_proc()  # (the turn goes on: detach_proc)
+            self.detach_proc()  # (the turn goes on: detach_proc; a host's chat's let go of, before it's not this one)
+        self.remote, self.desktop_chat = None, bool(info.get("desktop")) or is_desktop(info.get("id"))
+        MarkdownView.base_dir = self.run_cwd  # (not a network session's folder, whatever's set below)
         cwd = info.get("cwd")
         self.clear_transcript()
         self.switching_chat = True  # (its own switches come below: not the chat before's, in its folder)
@@ -14658,8 +14686,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         mid-turn, which writing here takes over (begin_resume), nor a host process's session (on the network, or this
         machine's), where several heads at once is how it's used: what's sent mid-turn waits for the turn's end, on its
         host."""
-        if self.remote is not None or not self.resume_pending:
+        if not self.resume_pending:
             return False
+        if self.remote is not None:  # (a terminal's claude --resume on one of its sessions, its own claude not running)
+            listed = self.remote.sessions.get(self.session_id) or {}
+            return self.remote.mine and listed.get("state") == "stopped" and self.tail.in_use()
         return self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
@@ -14791,7 +14822,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         """The chat's claude started again (signed in or out since): Baude's own, here (restart_proc); this machine's
         host process's, stopped there, so its next message starts it again, as it's signed in now."""
         if self.remote is not None and self.remote.mine and self.session_id:
-            self.remote.request({"op": "stop", "session": self.session_id})
+            self.remote.request({"op": "stop", "session": self.session_id, "restart": True})
         self.restart_proc(resume=True)
 
     def sign_out(self):
@@ -14852,6 +14883,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         def decide(_b, behavior, always=False):
             if always:
                 self.always_allow.add(name)
+                if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not)
+                    self.remote.request({"op": "always_allow", "session": self.session_id,
+                                         "tools": sorted(self.always_allow)})
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})

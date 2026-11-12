@@ -1642,8 +1642,9 @@ def publish_artifact(win, tool_id="art", title="Acme Fleet Ops", icon="chart", u
 def _(app):
     proj = os.path.join(T.TMP, "btw-proj")
     os.makedirs(proj, exist_ok=True)
-    T.write_session(proj, "fake-session-0001", title="Main chat")
     win = app.window(opts(cwd=proj))
+    # (its transcript, as claude would have it, so the side questions fork it: the host process's chat's id)
+    T.write_session(proj, win.session_id, title="Main chat")
     T.type_and_send(win, "list the files")
     T.wait_for(lambda: T.button(win, "Allow"), "main turn")
     first = win.ask_side_question("what does make do here?")

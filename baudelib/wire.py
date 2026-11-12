@@ -45,9 +45,13 @@ A client's requests (a "req" it picks comes back on the reply):
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
                                                        isn't running)
-    stop {session}                                  -> stopped {session} (its claude: the next message resumes it)
+    stop {session, restart?}                        -> stopped {session} (its claude: the next message resumes it;
+                                                       restart: those attached aren't told it went)
     set_cwd {session, cwd}                          -> cwd_set {session, cwd}: the folder its claude runs in, from its
                                                        next message on (not at a turn)
+    always_allow {session, tools}                   -> allowed {session}: tools allowed whenever its claude asks for
+                                                       them, a head attached or not (kept in memory; attach's
+                                                       always_allow too)
     archive {session}, unarchive {session}          -> archived / unarchived {session}: its claude stopped, and it's
                                                        listed only to those subscribed with archived (unarchive: to
                                                        all again)

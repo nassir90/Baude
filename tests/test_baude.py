@@ -268,8 +268,8 @@ class App:
         if getattr(self, "next_size", None):  # screenshots: size it before it is shown
             win.set_default_size(*self.next_size)
         win.present()
-        # (a new chat: in this machine's host process, a draft there, its claude the fake)
-        wait_for(lambda: win.session_id and win.proc is not None, "the chat's claude to start")
+        # (a new chat: in this machine's host process, a draft there, its claude the fake, ready: initialize answered)
+        wait_for(lambda: win.session_id and win.proc is not None and win.mode_dd.values, "the chat's claude to start")
         return win
 
 
@@ -3243,12 +3243,12 @@ def test_resume_is_read_only_and_tails(app):
         digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         win.resume_session(win.sidebar.find_info("f1f1f1f1-0000-4000-8000-000000000001"))
         pump(1.5)
-        start = [l for l in fake_log() if l.startswith("START")][-1]
-        assert "--resume" not in start, "only viewing: claude doesn't resume it"
+        assert not any("f1f1f1f1-0000-4000-8000-000000000001" in l for l in fake_log() if l.startswith("START")), \
+            "only viewing: no claude for it till it's written in"
         assert hashlib.sha256(open(path, "rb").read()).hexdigest() == digest, "the file is untouched"
         assert not win.banner.get_revealed() and win.composer.get_visible(), "quiet: no banner, you can write"
         assert "resumed" not in labels_text(win.transcript), "no '— resumed —' until you write"
-        assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the helper's own id doesn't replace it"
+        assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the chat's own id"
         # someone else (Desktop, a terminal) carries on: it shows up live
         with open(path, "a") as f:
             f.write(json.dumps({"type": "assistant", "message": {"content": [
@@ -3464,10 +3464,10 @@ def test_sidebar_worktrees(app):
         assert group(plain) == {"New session": [], "Plain chat": []}, "a plain folder is its own (this window's)"
         feature = next(r[3] for r in sidebar_rows(win) if r[0] == "session" and r[1]["title"] == "Feature chat")
         assert "Worktree repo-feature of" in feature.get_tooltip_text()
-        # opening the worktree's chat: claude runs in the worktree, the window's folder is the repository
+        # opening the worktree's chat: it runs in the worktree (no claude till it's written in), the window's folder
+        # is the repository
         win.sidebar.list.emit("row-activated", feature)
-        wait_for(lambda: win.session_id == ids["Feature chat"] and starts()[-1].startswith(f"START cwd={wt} "),
-                 lambda: f"a helper claude in the worktree: {starts()}")
+        wait_for(lambda: win.session_id == ids["Feature chat"] and win.run_cwd == wt, "opened in the worktree")
         assert win.cwd == repo and win.run_cwd == wt and baude.MarkdownView.base_dir == wt
         assert win.ref_checkout == wt, "Signal and the Git page look in the worktree (Signal's glossary: the repo's)"
         assert "(worktree repo-feature)" in win.status.get_text() and win.status.get_tooltip_text() == wt
@@ -3475,7 +3475,7 @@ def test_sidebar_worktrees(app):
         assert rows[0][0] == "folder" and rows[0][2] == repo, "the repository's group comes first"
         assert win.sidebar.list.get_selected_row().info["id"] == ids["Feature chat"], "and the chat is selected"
         assert win.restart_state()["cwd"] == wt, "a restart runs it in the worktree again"
-        win.begin_resume()  # (what the first message does)
+        type_and_send(win, "carry on")  # (the first message: the host process takes it up, and resumes it there)
         wait_for(lambda: f'"--resume", "{ids["Feature chat"]}"' in starts()[-1], "the first message resumes it")
         assert starts()[-1].startswith(f"START cwd={wt} ")
         # collapsing is the repository's
@@ -3487,8 +3487,7 @@ def test_sidebar_worktrees(app):
         # Claude Code's own worktree: the same
         otter_row = next(r[3] for r in sidebar_rows(win) if r[0] == "session" and r[1]["title"] == "Otter chat")
         win.sidebar.list.emit("row-activated", otter_row)
-        wait_for(lambda: win.session_id == ids["Otter chat"] and starts()[-1].startswith(f"START cwd={otter} "),
-                 "a helper claude in .claude/worktrees/brave-otter")
+        wait_for(lambda: win.session_id == ids["Otter chat"] and win.run_cwd == otter, "in .claude/worktrees/brave-otter")
         assert win.cwd == repo and win.ref_checkout == otter
         # + on the group: a new session in the main checkout
         plus = next(b for r in sidebar_rows(win) if r[0] == "folder" and r[2] == repo
@@ -3499,7 +3498,7 @@ def test_sidebar_worktrees(app):
         assert "--resume" not in starts()[-1] and win.run_cwd == win.cwd == repo and win.ref_checkout is None
         # a new session from a worktree's chat starts in the main checkout too
         win.switch_to(lambda: win.resume_session(win.sidebar.find_info(ids["Feature chat"])))
-        wait_for(lambda: starts()[-1].startswith(f"START cwd={wt} "), "back in the worktree")
+        wait_for(lambda: win.session_id == ids["Feature chat"] and win.run_cwd == wt, "back in the worktree")
         win.switch_to(win.new_session)
         wait_for(lambda: starts()[-1].startswith(f"START cwd={repo} "), "Ctrl+N: the main checkout")
         # a worktree picked with Open folder… runs there, listed under its repository

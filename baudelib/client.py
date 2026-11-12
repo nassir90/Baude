@@ -662,7 +662,7 @@ class RemoteProc(claude.ClaudeProc):
     only what it asks (a permission) and the answers to what's asked of it (initialize: its models and commands).
     kill() lets go of it: the session goes on, on its server. OSError if it can't be reached."""
 
-    def __init__(self, on_msg, on_exit, where, session_id, live=True, env=None):
+    def __init__(self, on_msg, on_exit, where, session_id, live=True, env=None, always_allow=None):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.session, self.live, self.code, self.killed = session_id, live, None, False
@@ -670,7 +670,8 @@ class RemoteProc(claude.ClaudeProc):
         self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
         # (env: this machine's head's environment, for its claude, as Baude's own would have had: a host here's only)
-        self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0, **({"env": env} if env else {})})
+        self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0, **({"env": env} if env else {}),
+                      **({"always_allow": list(always_allow)} if always_allow else {})})
         reply = self.ch.reply()
         if not reply or reply.get("op") != "attached":
             self.ch.close()

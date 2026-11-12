@@ -40,7 +40,7 @@ from widgets import (  # noqa: E402,F401
     RefreshButton, WorkerPool, discard, full_time, keep_times, on_label_link, pretty_path, ref_epoch, ref_pr_info,
     say_time, sel_label, themed_icon, toast,
 )
-from widgets import empty_label  # noqa: E402
+from widgets import ellipsize_dropdown, empty_label  # noqa: E402
 import pointers  # noqa: E402
 
 
@@ -887,6 +887,11 @@ class GitPage(Gtk.Stack):
         self.picker = Gtk.DropDown(model=Gtk.StringList(), margin_start=10, margin_end=10,
                                    css_classes=["choice", "git-branches"],
                                    tooltip_text="The branch shown: each checkout's (this chat's first), then the rest")
+        # (the branch shown is cut short with … to fit: a long branch or checkout name made the picker, and the panel
+        # it's in, as wide as the name. Its list still has every name whole, the one shown ticked, as GTK draws it)
+        ticked = self.picker.get_factory()
+        ellipsize_dropdown(self.picker)
+        self.picker.set_list_factory(ticked)
         self.picker_handler = self.picker.connect("notify::selected", self.on_pick)
         top.append(self.picker)
         self.info = Gtk.Label(xalign=0, wrap=True, margin_start=12, margin_end=10, wrap_mode=Pango.WrapMode.WORD_CHAR)

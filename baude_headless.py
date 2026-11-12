@@ -6,17 +6,28 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
     python3 baude_headless.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N]
                                       [--exit-after-hours N] [--advertise | --no-advertise] [--no-menu-bar]
     python3 baude_headless.py connect             # for ssh: stdin and stdout to this machine's host process
+    python3 baude_headless.py socket              # where this user's host process listens (or would), to connect to
     python3 baude_headless.py quit                # this machine's host process stopped (its sessions kept)
     python3 baude_headless.py hosts               # the hosts found: this machine's, and on the network's
-    python3 baude_headless.py list   [--host DEST [--host-command CMD]]   # a host's sessions
+    python3 baude_headless.py list   [--archived] [--host DEST [--host-command CMD]]   # a host's sessions
     python3 baude_headless.py models [--host DEST [--host-command CMD]]   # the models it can run
-    python3 baude_headless.py stop   SESSION [--host DEST [--host-command CMD]]   # a session's claude stopped
+    python3 baude_headless.py stop      SESSION [--host DEST [--host-command CMD]]   # its claude stopped
+    python3 baude_headless.py archive   SESSION [...]   # stopped, and listed only with --archived
+    python3 baude_headless.py unarchive SESSION [...]
+    python3 baude_headless.py delete    SESSION [...]   # stopped, gone, its transcript moved to the trash
 
 A session's prompt, folder, model and the rest come over the wire, in start: baude_oneshot.py starts one from the
 command line. The host process listens only on a Unix socket in a folder of its user's own (no port on the network):
 what runs as that user on the same machine may use it. Another machine reaches it over ssh, as
 `ssh DEST baude_headless.py connect`, so ssh's keys say who may: put baude_headless.py on that machine's PATH (or give
 Baude its path, per host). connect, and the commands here, start the host process if it isn't running.
+
+A client on the same machine that isn't Python asks `baude_headless.py socket` where to connect, rather than working
+it out: $BAUDE_RUNTIME_DIR/host.sock, else $XDG_RUNTIME_DIR/baude/host.sock, else $XDG_STATE_HOME/baude/run/host.sock
+(~/.local/state/baude/run), or /tmp/baude-<uid>/host.sock where that path's too long for a socket. XDG_RUNTIME_DIR
+can differ between a session at the screen and one over ssh, or be gone once a session ends: ask from the
+environment the client runs in. It prints the path whether or not the host process is running; `connect`
+starts it, and is the way for a client that would rather not find it at all.
 
 While nobody's attached it does nothing: no timers, a claude stopped once it's been idle --idle-minutes, and the
 process itself gone once nothing's run for --exit-after-hours (0: never), as a head starts it again. On macOS, at the
@@ -142,18 +153,24 @@ def main():
     serving(sub.add_parser("serve", help="the host process (the default)"))
     serving(p)
     sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")
+    sub.add_parser("socket", help="the path of this user's host process's socket, to connect to (running or not)")
     sub.add_parser("quit", help="this machine's host process stopped, its claudes too (their sessions kept)")
     sub.add_parser("hosts", help="the hosts found: this machine's, and those on the network")
-    client("list", "a host's sessions")
+    client("list", "a host's sessions").add_argument("--archived", action="store_true", help="archived ones too")
     client("models", "the models a host can run")
-    st = client("stop", "a session's claude stopped (it's resumed when it's next written to)")
-    st.add_argument("session")
+    for name, help_ in (("stop", "a session's claude stopped (it's resumed when it's next written to)"),
+                        ("archive", "a session's claude stopped, and the session listed only when archived ones are"),
+                        ("unarchive", "a session listed again"),
+                        ("delete", "a session's claude stopped, the session gone, its transcript moved to the trash")):
+        client(name, help_).add_argument("session")
     args = p.parse_args()
 
     if args.command in (None, "serve"):
         return serve(args)
     if args.command == "connect":
         return connect(args)
+    if args.command == "socket":
+        return print(wire.socket_path())
     if args.command == "quit":
         try:
             ch, _info = wire.connect_local(timeout=3)
@@ -168,16 +185,19 @@ def main():
             print(f"{s['name']}  {s['dest'] or '-'}  group={s['words'].get('group')}  id={s['words'].get('id')}")
         return
     if args.command == "list":
-        for s in ask(args, {"op": "subscribe"})["sessions"]:
+        for s in ask(args, {"op": "subscribe", "archived": args.archived})["sessions"]:
             print(f"{s['id']}  {s['state']:8}  {s.get('group') or '':12}  {s.get('model') or 'default':14}  "
-                  f"{s.get('title') or ''}  ({s.get('cwd')})")
+                  f"{s.get('title') or ''}  ({s.get('cwd')})" + ("  [archived]" if s.get("archived") else ""))
         return
     if args.command == "models":
         for m in ask(args, {"op": "subscribe"})["server"].get("models") or []:
             print(f"{m['value']:24}  {m['displayName']}")
         return
-    if args.command == "stop":
-        ask(args, {"op": "stop", "session": args.session})
+    if args.command in ("stop", "archive", "unarchive"):
+        ask(args, {"op": args.command, "session": args.session})
+    if args.command == "delete":
+        for path in ask(args, {"op": "delete", "session": args.session}).get("trashed") or []:
+            print(f"moved to the trash: {path}")
 
 
 if __name__ == "__main__":

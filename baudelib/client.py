@@ -143,7 +143,7 @@ class Remote:
         self.info, self.seen = info, time.time()
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
-        ch.send({"op": "subscribe"})
+        ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
         for msg in ch:
             self.seen = time.time()
             op = msg.get("op")
@@ -684,6 +684,9 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda m=msg["msg"]: self.on_msg(self, m))
             elif op == "exited" and msg.get("session") == self.session:
                 self.code = msg.get("code")
+                break
+            elif op == "deleted" and msg.get("session") == self.session:  # (gone from its host, for good)
+                self.code = "deleted"
                 break
             elif op == "error":  # (what was sent went nowhere: said, and the turn's over)
                 self.dispatch(lambda e=msg.get("error"): self.on_msg(self, {

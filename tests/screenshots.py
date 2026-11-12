@@ -1222,7 +1222,8 @@ def _(app):
 
 
 @scene("55c-network-session-asking", "A session on lab-mac, opened: its transcript, fetched; what it's asking, to "
-                                     "answer here; the banner says it's waiting on lab-mac, with Stop")
+                                     "answer here; written in at once, though it's at a turn there (a host's session "
+                                     "takes several heads)")
 def _(app):
     win = network_window(app)
     open_network_session(win, "List the files in the build folder")
@@ -1379,8 +1380,9 @@ def _(app):
     return win
 
 
-@scene("55g-network-session-menu", "Right-click a network session: Rename…, Archive, and Delete (it comes back if "
-                                   "it's used again); one at a turn: Stop")
+@scene("55g-network-session-menu", "Right-click a network session: Rename…, Archive and Move to Trash…, done on its "
+                                   "host; one at a turn: Stop; one whose host is gone: Delete (it comes back when it's "
+                                   "used again)")
 def _(app):
     win = network_window(app)
     win.sidebar.show_menu(sidebar_row(win, "Write the release notes for 2.4"), 120, 14)

@@ -12134,6 +12134,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.apply_chat_signal()  # (a new chat: the defaults for new chats)
         self.apply_read_only()
         self.sidebar.fill()
+        self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
 
     # ---- read-only sessions (☰ → Read-only session): no text box, for a chat you only watch (tailing one with
     # Signal on, say); the status line, with the context it uses, stays. Remembered per session. A session another
@@ -13087,6 +13088,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             ref.steer(next(iter(ref.runners)).ref_transcript())  # (its reader reads the chat that runs it now)
         if widgets.SIGNAL is ref:
             widgets.SIGNAL = None
+
+    def git_chat(self):
+        """The chat the Git page keeps its state for (GitPage.chat_check): its session."""
+        return self.session_id
 
     def ref_transcript(self):
         """The shown chat's transcript, if there is one yet."""

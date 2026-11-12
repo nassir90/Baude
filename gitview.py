@@ -109,6 +109,10 @@ GIT_MERGE_LIMIT = 200    # a merge's own commits shown when it's opened
 GIT_FIND_LIMIT = 5000    # commits read on, at most, to show one a link points at
 
 
+GIT_KEPT_CHATS = 50      # chats whose Git page is kept as it was left (GitPage.keep), at most: the one left longest ago
+                         # goes first
+
+
 GIT_LANES = ("#3584e4", "#2ec27e", "#e66100", "#9141ac", "#c88800", "#e01b24", "#2190a4", "#d56199")  # Adwaita's
 
 
@@ -1062,7 +1066,9 @@ class GitPage(Gtk.Stack):
     this chat touched first, all of them chosen at first; then the rest: git_branch_list), what the branch tracks and
     what it came from, GitHub's state, commits per hour, and the log, each row with its author's picture (GitAvatars).
     A commit opens its card: when it was made, its message, the lines it changed in all and per file (each opens its
-    diff), the branches that have it, its pull requests, and the turn of this chat that made it."""
+    diff), the branches that have it, its pull requests, and the turn of this chat that made it. Each chat has its
+    own: what it showed (the branches, the merges opened, the card, where the log was scrolled) is kept while another's
+    shown, and comes back with it (chat_check)."""
 
     def __init__(self, win):
         super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
@@ -1070,6 +1076,10 @@ class GitPage(Gtk.Stack):
         self.revs, self.follow, self.token, self.stale, self.state = None, True, 0, True, {}
         self.opened = {}  # merge sha -> its own commits, shown under it (None while they're read)
         self.loaded_for, self.current, self.chat_key, self.soon = None, None, None, None
+        self.pinned, self.checking = None, None
+        self.kept = {}  # chat -> (its folder, its page as it was left: keep), the one left longest ago first
+        self.view_wanted = None  # (a chat's page come back to, or new: its card and scroll, once its log is read)
+        self.scroll_wanted = None  # (where its log was scrolled: once the log's shown and laid out, scroll_back)
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=8, margin_top=8)
         self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, hexpand=True)  # (the repository)
@@ -1078,7 +1088,7 @@ class GitPage(Gtk.Stack):
         self.all_btn = Gtk.ToggleButton(icon_name=themed_icon("view-list-bullet-symbolic", "view-list-symbolic"),
                                         tooltip_text="Show every branch")
         self.all_btn.add_css_class("flat")
-        self.all_btn.connect("toggled", lambda *_: self.load())
+        self.all_toggled = self.all_btn.connect("toggled", lambda *_: self.load())
         head.append(self.all_btn)
         self.refresh_btn = RefreshButton(tooltip_text="Fetch, and read the history again (and ask GitHub)")
         self.refresh_btn.connect("clicked", lambda *_: self.load(gh=True))
@@ -1162,26 +1172,83 @@ class GitPage(Gtk.Stack):
 
     # ---- what to show
     def chat_folder(self):
-        return getattr(self, "pinned", None) or self.win.ref_checkout or self.win.cwd
+        return self.pinned or self.win.ref_checkout or self.win.cwd
+
+    def shown_here(self):
+        return self.win.panel.get_visible() and self.win.panel.stack.get_visible_child_name() == "git"
 
     def chat_changed(self):
-        """The chat changed or went on: read the history again (soon, if this page shows). Another chat, or the chat
-        moving to another checkout, shows the branches it touched again; a branch you picked stays while the chat only
-        goes on."""
-        key = (self.win.ref_checkout or self.win.cwd, self.win.ref_transcript())
-        if key != self.chat_key:
-            self.follow, self.chat_key, self.pinned = True, key, None
+        """The chat changed or went on: read the history again (soon, if this page shows). Once the window's done
+        switching (idle: chat_check), another chat's page is as it was left there, or a new one's; the chat moving to
+        another checkout shows the branches it touched again; a branch you picked stays while the chat only goes on."""
         self.stale = True
-        if self.soon is None and self.win.panel.get_visible() and self.win.panel.stack.get_visible_child_name() == "git":
+        if self.checking is None:
+            self.checking = GLib.idle_add(self._check_soon)
+
+    def _check_soon(self):
+        self.checking = None
+        if self.chat_check() and self.shown_here():
+            self.ensure()  # (another chat: its own history at once)
+        elif self.soon is None and self.shown_here():
             self.soon = GLib.timeout_add(800, self._changed_soon)
+        return False
 
     def _changed_soon(self):
         self.soon = None
         self.ensure()
         return False
 
+    def which_chat(self):
+        """The chat this page is for: (its checkout, which chat it is: its host's git_chat, Baude's session or Record's
+        notebook, else its transcript; None while it's unnamed)."""
+        chat = self.win.git_chat() if hasattr(self.win, "git_chat") else self.win.ref_transcript()
+        return (self.win.ref_checkout or self.win.cwd, chat)
+
+    def chat_check(self):
+        """Another chat shown since this page last looked: this one's page kept (keep; not an unnamed one's), and that
+        one's brought back (bring_back: as it was left there, or as new). The same chat in another checkout shows the
+        branches it touched there. True if it's another chat."""
+        key = self.which_chat()
+        if key == self.chat_key:
+            return False
+        (left, was), self.chat_key = self.chat_key or (None, None), key
+        if key[1] == was:
+            self.follow, self.pinned = True, None
+            return False
+        if was is not None:
+            self.kept.pop(was, None)
+            self.kept[was] = (left, self.keep())
+            while len(self.kept) > GIT_KEPT_CHATS:
+                self.kept.pop(next(iter(self.kept)))
+        folder, kept = self.kept.pop(key[1], (None, None)) if key[1] is not None else (None, None)
+        self.bring_back(kept if folder == key[0] else None)
+        return True
+
+    def keep(self):
+        """The page as it is now, to bring back when its chat's shown again (bring_back): the branches shown, every
+        branch or not, the merges opened, the card open and where the log's scrolled. Nothing's read for it."""
+        scroll = self.list_scroll.get_vadjustment().get_value() if self.scroll_wanted is None else self.scroll_wanted
+        view = self.view_wanted or {"card": self.current, "count": len(self.commits), "scroll": scroll}
+        return {"follow": self.follow, "revs": self.revs, "pinned": self.pinned, "every": self.all_btn.get_active(),
+                "opened": {sha: c for sha, c in self.opened.items() if c is not None},
+                "opened_for": getattr(self, "opened_for", None), "view": view}
+
+    def bring_back(self, kept):
+        """A chat's page as keep had it (None: a new chat's, the branches it touched, at the top of their log), read
+        again once it's shown: its card and where it was scrolled once its log's in (loaded)."""
+        kept = kept or {}
+        self.token += 1  # (what was being read for the chat before isn't shown)
+        self.follow, self.revs, self.pinned = kept.get("follow", True), kept.get("revs"), kept.get("pinned")
+        with self.all_btn.handler_block(self.all_toggled):
+            self.all_btn.set_active(kept.get("every", False))
+        self.opened, self.opened_for = dict(kept.get("opened") or {}), kept.get("opened_for")
+        self.view_wanted = kept.get("view") or {"card": None, "count": 0, "scroll": 0}
+        self.scroll_wanted = None
+        self.stale = True
+
     def ensure(self):
         """Shown: load, if something changed since."""
+        self.chat_check()
         if self.stale or self.loaded_for != (self.chat_folder(), self.win.ref_transcript()):
             self.load()
 
@@ -1189,7 +1256,9 @@ class GitPage(Gtk.Stack):
         """Show a branch (rev), or a commit (a link) in the history of a branch that has it, highlighted, the merge
         it came in by opened. folder: another repository's (a commit the chat made there), shown until the chat
         changes or one of its own is asked for."""
+        self.chat_check()
         self.follow, self.pinned = False, folder
+        self.view_wanted, self.scroll_wanted = {"card": None, "count": 0, "scroll": 0}, None  # (the log, from its top)
         if rev or sha:
             self.revs = [rev] if rev else None  # (a commit: the chat's branch if it has it, else one that does)
         self.load(then=sha)
@@ -1294,21 +1363,24 @@ class GitPage(Gtk.Stack):
         folder, transcript = self.chat_folder(), self.win.ref_transcript()
         self.token += 1
         token, rev, follow, every = self.token, self.revs, self.follow, self.all_btn.get_active()
+        count = (self.view_wanted or {}).get("count") or 0  # (a chat come back to: as many as it had read, in pages)
+        limit = max(1, -(-count // GIT_LOG_LIMIT)) * GIT_LOG_LIMIT
         self.stale, self.loaded_for = False, (folder, transcript)
         self.where.set_label("Reading the history…")
         if gh:  # (asked for: its button turns till it's read. The reads a chat going on brings aren't worth the motion)
             self.refresh_btn.set_loading(True)
 
         def work():
-            res = self.gather(folder, transcript, rev, follow, every, then, gh)
+            res = self.gather(folder, transcript, rev, follow, every, then, gh, limit)
             res["links"] = chat_pr_links(transcript) if transcript and res["top"] else []  # (its replies' #12s)
             GLib.idle_add(self.loaded, token, res)
         GIT_POOL.submit(work)
 
     @staticmethod
-    def gather(folder, transcript, picked, follow, every, then=None, gh=False):
+    def gather(folder, transcript, picked, follow, every, then=None, gh=False, limit=GIT_LOG_LIMIT):
         """picked: the branches to show (several: their histories together), else (or follow) the ones the chat
-        touched, those above the list's rule (git_branch_list's touched; none: the first checkout's)."""
+        touched, those above the list's rule (git_branch_list's touched; none: the first checkout's). limit: the log's
+        commits read."""
         top = (_git(folder, "rev-parse", "--show-toplevel") or "").strip() if folder else ""
         if not top:
             return {"top": None, "folder": folder}
@@ -1344,7 +1416,7 @@ class GitPage(Gtk.Stack):
         parent = git_parent_branch(top, rev, upstream) if b and b["name"] else None
         revs = ["--branches", "--remotes", "--tags"] if every else \
             picked if len(picked) > 1 else [rev] + ([parent["name"]] if parent else [])
-        commits = git_log(top, revs, first_parent=not every)
+        commits = git_log(top, revs, limit=limit, first_parent=not every)
         found = git_find(top, along if along in picked else rev, then, revs, commits, every) if then else None
         own = theirs = None
         if parent and not every:
@@ -1358,7 +1430,7 @@ class GitPage(Gtk.Stack):
         return {"top": top, "folder": folder, "checkouts": checkouts, "branches": branches, "rev": rev,
                 "picked": picked, "branch": b, "parent": parent, "commits": commits, "own": own, "theirs": theirs,
                 "repo": repo, "gh_refresh": gh, "fetched": fetched, "pr": None, "every": every, "found": found,
-                "revs": revs, "chat": chat, "then": then, "mine": mine["rev"] if mine else None}
+                "revs": revs, "chat": chat, "then": then, "mine": mine["rev"] if mine else None, "limit": limit}
 
     # ---- drawing (main loop)
     def loaded(self, token, res):
@@ -1376,6 +1448,8 @@ class GitPage(Gtk.Stack):
             self.pulls_box.set_visible(False)
             self.picker.set_visible(False)
             self.more.set_visible(False)
+            self.view_wanted = self.scroll_wanted = None
+            self.show_list()
             return False
         self.picker.set_visible(True)
         self.where.set_label(pretty_path(self.top))
@@ -1398,7 +1472,7 @@ class GitPage(Gtk.Stack):
         if res.get("fetched") is False:
             toast(self.win, "Couldn't fetch: the remotes' branches are as last fetched")
         self.fill(self.commits)
-        self.more.set_visible(len(self.commits) >= GIT_LOG_LIMIT)
+        self.more.set_visible(len(self.commits) >= res["limit"])
         if (found := res.get("found")) and found["merge"]:  # (in a merge: opened, then highlighted)
             self.highlight_after = found["sha"]
             if found["merge"] not in self.opened:
@@ -1409,6 +1483,13 @@ class GitPage(Gtk.Stack):
             self.highlight(found["sha"])
         elif res.get("then"):  # (not in this branch's history: its card)
             self.show_commit(res["then"])
+        elif (view := self.view_wanted) is not None:  # (a chat come back to: its card, where it was scrolled)
+            self.scroll_wanted = view["scroll"]
+            if view["card"]:
+                self.show_commit(view["card"])  # (the log scrolled once it's shown again: show_list)
+            else:
+                self.show_list()
+        self.view_wanted = None
         self.read_github(token, res)
         return False
 
@@ -1436,9 +1517,26 @@ class GitPage(Gtk.Stack):
                 return
             row = row.get_next_sibling()
 
+    def scroll_back(self):
+        """The log scrolled back to where its chat left it (scroll_wanted), once it's laid out that far: not if
+        another chat's shown by then."""
+        chat = self.chat_key
+
+        def scroll(tries=[0]):
+            tries[0] += 1
+            if self.chat_key != chat or self.scroll_wanted is None:
+                return False
+            adj = self.list_scroll.get_vadjustment()
+            if adj.get_upper() < self.scroll_wanted + adj.get_page_size() and tries[0] < 30:
+                return True  # (not laid out yet)
+            adj.set_value(self.scroll_wanted)
+            self.scroll_wanted = None
+            return False
+        GLib.timeout_add(16, scroll)
+
     def highlight(self, sha):
         """A commit's row picked out and scrolled into the middle of the view (a link to it was clicked)."""
-        self.highlight_after = None
+        self.highlight_after, self.scroll_wanted = None, None
         self.show_list()
         found = None
         row = self.list.get_first_child()
@@ -1730,6 +1828,8 @@ class GitPage(Gtk.Stack):
     def show_list(self):
         self.current = None
         self.set_visible_child_name("list")
+        if self.scroll_wanted is not None:
+            self.scroll_back()
 
     def show_commit(self, sha):
         """A commit's card: git's part at once (its message and files), then the branches that have it and GitHub's

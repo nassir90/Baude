@@ -5913,14 +5913,16 @@ def scale_setting(key):
 # ---- code's size beside the prose (Settings -> Code Size): "auto", the code font measured against the prose's
 # (matched_code_scale), or a share of the prose's size. What's drawn asks code_scale(); the CSS sizes follow it live
 CODE_SAMPLE = "The table's built in price_table and cached; check it with the tests, then push the branch."
+CODE_HEIGHT_WEIGHT = 2 / 3  # (the lowercase's height counts twice what the letters' width does: it's what size reads as)
 _code = {"scale": None, "css": None, "provider": None}
 
 
 def matched_code_scale():
     """The size the code font ("monospace": fontsetup's) looks the prose's size at, measured, as a share of the
     prose's: its lowercase as tall as the prose's (x-height), and its letters, which are all one width, as wide as the
-    prose's are on average, met halfway: the geometric mean of the two (a monospace font's letters are wider, so it's
-    under the first). Menlo's, beside macOS's system font, is about 0.78; Courier New's 0.90."""
+    prose's are on average, met between: a geometric mean of the two that weighs the height twice the width
+    (CODE_HEIGHT_WEIGHT), as size reads mostly by the lowercase's height. Menlo's, beside macOS's system font, is about
+    0.83; Courier New's 1.0."""
     ctx = Gtk.Label().get_pango_context()  # (the prose's: the app's font)
 
     def measure(desc):
@@ -5935,7 +5937,8 @@ def matched_code_scale():
     (px, pw), (mx, mw) = measure(ctx.get_font_description()), measure(Pango.FontDescription.from_string("monospace"))
     if not (px > 0 and pw > 0 and mx > 0 and mw > 0):
         return 1.0
-    return round(min(1.2, max(0.6, ((px / mx) * (pw / mw)) ** 0.5)), 3)
+    a = CODE_HEIGHT_WEIGHT
+    return round(min(1.2, max(0.6, (px / mx) ** a * (pw / mw) ** (1 - a))), 3)
 
 
 def code_size_setting():

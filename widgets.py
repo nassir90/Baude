@@ -1160,7 +1160,8 @@ def _inline_markup(text):
         return f"\x00{len(marks) - 1}\x00"
 
     def code(m):
-        markup = f'<span font_family="monospace" bgcolor="#7f7f7f" bgalpha="22%">{html.escape(m[1], quote=False)}</span>'
+        markup = (f'<span font_family="monospace" size="{code_markup_size()}" bgcolor="#7f7f7f" bgalpha="22%">'
+                  f'{html.escape(m[1], quote=False)}</span>')
         hit = resolve_path(m[1])
         return keep(f'<a href="{html.escape(file_href(*hit))}" title="{html.escape(hit[0])}">{markup}</a>' if hit
                     else ref_link(m[1], markup, True) or markup, markup)
@@ -2738,9 +2739,9 @@ class ComposerMarkdown:
         self.view, self.buf = view, view.get_buffer()
         t = self.buf.create_tag
         left = view.get_left_margin()
-        t("code", family="monospace", left_margin=left + 8)
-        t("fence", family="monospace", left_margin=left + 8)
-        t("inline", family="monospace")
+        t("code", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("fence", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("inline", family="monospace", scale=code_scale())
         t("bold", weight=Pango.Weight.BOLD)
         t("italic", style=Pango.Style.ITALIC)
         for level, scale in HEADING_SCALE.items():
@@ -5909,12 +5910,80 @@ def scale_setting(key):
     return round(min(SCALE_MAX, max(SCALE_MIN, float(load_settings().get(key) or 1.0))), 2)
 
 
+# ---- code's size beside the prose (Settings -> Code Size): "auto", the code font measured against the prose's
+# (matched_code_scale), or a share of the prose's size. What's drawn asks code_scale(); the CSS sizes follow it live
+CODE_SAMPLE = "The table's built in price_table and cached; check it with the tests, then push the branch."
+_code = {"scale": None, "css": None, "provider": None}
+
+
+def matched_code_scale():
+    """The size the code font ("monospace": fontsetup's) looks the prose's size at, measured, as a share of the
+    prose's: its lowercase as tall as the prose's (x-height), and its letters, which are all one width, as wide as the
+    prose's are on average, met halfway: the geometric mean of the two (a monospace font's letters are wider, so it's
+    under the first). Menlo's, beside macOS's system font, is about 0.78; Courier New's 0.90."""
+    ctx = Gtk.Label().get_pango_context()  # (the prose's: the app's font)
+
+    def measure(desc):
+        desc = desc.copy()
+        desc.set_size(100 * Pango.SCALE)
+        layout = Pango.Layout.new(ctx)
+        layout.set_font_description(desc)
+        layout.set_text("x", -1)
+        x = layout.get_extents()[0].height
+        layout.set_text(CODE_SAMPLE, -1)
+        return x, layout.get_extents()[1].width / len(CODE_SAMPLE)
+    (px, pw), (mx, mw) = measure(ctx.get_font_description()), measure(Pango.FontDescription.from_string("monospace"))
+    if not (px > 0 and pw > 0 and mx > 0 and mw > 0):
+        return 1.0
+    return round(min(1.2, max(0.6, ((px / mx) * (pw / mw)) ** 0.5)), 3)
+
+
+def code_size_setting():
+    """Settings -> Code Size: "auto", or a share of the prose's size."""
+    value = load_settings().get("code_size", "auto")
+    if value in (None, "auto"):
+        return "auto"
+    try:
+        return round(min(1.3, max(0.5, float(value))), 2)
+    except (TypeError, ValueError):
+        return "auto"
+
+
+def code_scale():
+    """What code is drawn at, beside the prose: Code Size's share, or the code font's matched one (measured once)."""
+    if _code["scale"] is None:
+        size = code_size_setting()
+        _code["scale"] = matched_code_scale() if size == "auto" else size
+    return _code["scale"]
+
+
+def code_markup_size():
+    """Code's size in markup, beside the text around it: a span's size="…%"."""
+    return f"{round(code_scale() * 100)}%"
+
+
+def apply_code_size(display):
+    """Code's sizes in the CSS (code blocks, the code viewer and its gutter, a member's chip a little under) as Code Size
+    says now; what's drawn from here on is at it, what's drawn already keeps its own till it's drawn again."""
+    _code["scale"] = None
+    s = code_scale()
+    css = (f".mono, .code-view, .code-gutter {{ font-size: {s:.3f}em; }}\n"
+           f".code-member {{ font-size: {s * 0.94:.3f}em; }}\n")
+    if _code["provider"] is None:
+        _code["provider"] = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(display, _code["provider"], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    if css != _code["css"]:
+        _code["css"] = css
+        _code["provider"].load_from_string(css)
+
+
 def apply_scales(display, also=()):
     """The text's size and the icons' (Settings → Size), app-wide. The text's is the display's font resolution, so all
     of it follows, libadwaita's headings, the panes' headers and its rem-sized labels too (a font size on a pane reaches
     none of those); the icons' is their usual 16px and libadwaita's 32px .large-icons. Only what changed is set: either
     restyles every window."""
     settings = Gtk.Settings.get_for_display(display)
+    apply_code_size(display)
     scale = scale_setting("text_scale")
     if scale != 1.0:
         if _scales["dpi"] is None:

@@ -75,31 +75,10 @@ from lookup import (  # (⌘K's engine: the names a folder has; see lookup.py)
 
 
 def macos_fonts():
-    """On macOS, text through FreeType rather than CoreText (before Pango is loaded). Pango's CoreText path puts
-    glyphs on whole pixels, so letters are spaced unevenly and look thin; FontConfig + FreeType2 places them as on
-    Linux (https://discourse.gnome.org/t/font-antialiasing-issue-on-gtk-in-macos/28071). FontConfig's own sans-serif
-    and monospace are Verdana and Andale Mono there: a config of baude's own (not yours) makes them the system's
-    font and Menlo. PANGOCAIRO_BACKEND or FONTCONFIG_FILE set already: left as they are."""
-    if sys.platform != "darwin" or "PANGOCAIRO_BACKEND" in os.environ or "FONTCONFIG_FILE" in os.environ:
-        return
-    main = next((p for p in ("/opt/homebrew/etc/fonts/fonts.conf", "/usr/local/etc/fonts/fonts.conf")
-                 if os.path.exists(p)), None)
-    if main is None:  # (no FontConfig: CoreText it is)
-        return
-    alias = '  <alias binding="strong"><family>{}</family><prefer><family>{}</family></prefer></alias>\n'
-    conf = ('<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig>\n'
-            f'  <include ignore_missing="yes">{main}</include>\n'
-            + alias.format("sans-serif", "System Font") + alias.format(".AppleSystemUIFont", "System Font")
-            + alias.format("monospace", "Menlo") + '</fontconfig>\n')
-    folder = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "baude")
-    path = os.path.join(folder, "fonts.conf")
-    try:
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "w") as f:
-            f.write(conf)
-    except OSError:
-        return
-    os.environ["PANGOCAIRO_BACKEND"], os.environ["FONTCONFIG_FILE"] = "fc", path
+    """The fonts set up before Pango's loaded: text through FontConfig and FreeType on macOS, the code font Settings ->
+    Code Font says, and the fonts bundled beside Baude (fontsetup)."""
+    import fontsetup  # (no GTK: beside this file)
+    fontsetup.setup()
 
 
 def macos_app_name():

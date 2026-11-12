@@ -110,6 +110,7 @@ class ClaudeProc:
     they're read, on the reading threads, unless a subclass says otherwise (Baude's, on the GTK main loop)."""
 
     dispatch = staticmethod(lambda fn: fn())
+    env_of = None  # (a subclass's own environment for claude, in place of claude_env's: Record's, its child_env)
 
     def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None):
         self.on_msg, self.on_exit = on_msg, on_exit
@@ -129,7 +130,8 @@ class ClaudeProc:
             args += ["--effort", effort]
         args += list(extra)
         self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1, env=claude_env() | (env or {}))
+                                  stderr=subprocess.PIPE, text=True, bufsize=1,
+                                  env=(self.env_of() if self.env_of is not None else claude_env()) | (env or {}))
         threading.Thread(target=self._read, args=(self.p.stdout, False), daemon=True).start()
         threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None})

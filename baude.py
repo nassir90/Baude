@@ -10260,7 +10260,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.apply_full_width(bool(self.settings.get("full_width")))
         self.follow = livefeed.FollowEnd(self.scroller)  # (the newest in view, once it's read to: on_layout)
         self.restore_scroll = None  # (distance from the bottom, until) after a restart
-        self.toggle_held = None  # (a toggle clicked in the chat, till it's done sliding: hold_toggle)
+        self.toggle_held = self.slack = None  # (a toggle clicked in the chat, till it's done sliding: hold_toggle)
         vadj = self.scroller.get_vadjustment()
         vadj.connect("value-changed", self.on_scrolled)
         wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
@@ -10719,6 +10719,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         """Right after each layout pass: what's being held in place first, else the newest content in view."""
         # (a zoom, or a restart's place put back: those hold the view themselves, this one would fight them)
         # (a chunk opened at, place_chunk: the view put in it; what's at its top is noted once it's laid out there)
+        self.trim_slack()
         placed = self.place_at is not None and self.put_place()
         if placed:
             self.view_anchor = None
@@ -10872,10 +10873,41 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         screen, what opens under it pushing what's below down (closing, pulling it up). The end isn't followed from
         then on, nor a restart's place kept: either would keep the bottom still and move the toggle. The message at
         the view's top holds the view (hold_view_anchor); scrolled back to the end, it's followed again, and so it is
-        if it's at the end once the toggle's done sliding (closed again where it was opened: toggle_settled)."""
-        if toggle.button.is_ancestor(self.transcript):
-            self.follow.stop_glide()
-            self.stick_bottom, self.restore_scroll, self.toggle_held = False, None, toggle
+        if it's at the end once the toggle's done sliding (closed again where it was opened: toggle_settled). Closed
+        with less below the view than closes, the end would come up past the view's bottom and GTK would move the view
+        down to it, the toggle with it: blank room is left under the last message instead (set_slack)."""
+        if not toggle.button.is_ancestor(self.transcript):
+            return
+        self.follow.stop_glide()
+        self.stick_bottom, self.restore_scroll, self.toggle_held = False, None, toggle
+        adj = self.scroller.get_vadjustment()
+        below = adj.get_upper() - adj.get_page_size() - adj.get_value()  # (what's below the view)
+        if toggle.expanded and toggle.revealer is not None and toggle.revealer.get_height() > below + 0.5:
+            self.set_slack(self.transcript.get_height() - below)
+
+    def set_slack(self, height):
+        """The chat kept at least height px tall (None: as tall as what's in it): what it's short of that is blank room
+        under its last message, for the view to sit past the end (hold_toggle) till it can go (trim_slack)."""
+        self.slack = None if height is None else (math.ceil(height), self.transcript.get_width())
+        self.transcript.set_size_request(-1, -1 if height is None else self.slack[0])
+
+    def trim_slack(self):
+        """After each layout pass, the slack that's below the view goes: scrolled up from it, it's gone, and scrolled
+        down again the view stops at what's left of it. Nothing on screen moves. It all goes once what comes into the
+        chat has filled it (the chat taller than it's kept), and with a reflow (another width, a zoom). With the view
+        at what's left of it, the end's in view and followed (FollowEnd decided before what was below went)."""
+        if self.slack is None:
+            return
+        height, width = self.slack
+        if self.transcript.get_height() > height or self.transcript.get_width() != width or self.zoom_job is not None:
+            self.set_slack(None)
+            return
+        adj = self.scroller.get_vadjustment()
+        below = adj.get_upper() - adj.get_page_size() - adj.get_value()
+        if below >= 1:
+            self.set_slack(height - below)
+        elif self.toggle_held is None:  # (not while one opens into it: that's held, not followed)
+            self.stick_bottom = True
 
     def toggle_settled(self):
         held = self.toggle_held
@@ -11457,6 +11489,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
+        self.set_slack(None)  # (the next chat's no room left under it)
+        self.toggle_held = None
         self.total_cost = 0.0
         self.ctx_label.set_text("context —")
         self.ctx_bar.set_value(0)

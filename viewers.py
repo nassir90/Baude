@@ -27,6 +27,7 @@ class ViewerHost:
     checkout or tool cards."""
 
     signal = ref_checkout = None
+    has_chat = False  # (the Git page lists the pull requests of the folder's checkout's branches: no chat's)
 
     def viewer_folder(self):
         """The folder the viewers show (None: none)."""

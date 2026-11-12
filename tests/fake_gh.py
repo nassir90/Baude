@@ -106,6 +106,9 @@ def run(state, args):
     elif what == ["issue", "list"]:
         print(json.dumps(state.get("issues_on", {}).get(opt(args, "--repo"), state["issues"])))
     elif what == ["pr", "list"]:
+        if os.environ.get("FAKE_GH_SIGNED_IN", "1") != "1":  # (signed out, as the real one: it asks no one, exits 4)
+            print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
+            return 4
         print(json.dumps(state["prs"]))
     elif what == ["issue", "comment"]:
         comment(state, args[2], sys.stdin.read())

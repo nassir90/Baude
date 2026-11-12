@@ -203,10 +203,10 @@ from schemaview import (  # noqa: E402,F401
 )
 from gitview import (  # noqa: E402,F401
     GH_POOL, GIT_CARDS, GIT_CARD_FRESH, GIT_CHAT, GIT_FIND_LIMIT, GIT_LANES,
-    GIT_LOG_LIMIT, GIT_MERGE_LIMIT, GIT_OFF_PEAK, GIT_POOL, GitDelta, GitHours,
+    GIT_LOG_LIMIT, GIT_MERGE_LIMIT, GIT_POOL, GitDelta,
     GitLane, GitPage, _CHAT_GIT, _GH_STATE, _GIT_COMMIT_OUT, _GIT_FMT,
     _GIT_PUSH_OUT, _gh_json, chat_git_events, gh_state, git_ahead_behind, git_chat_commit,
-    git_checkouts, git_commit_card, git_delta_markup, git_find, git_full_when, git_hours,
+    git_checkouts, git_commit_card, git_delta_markup, git_find, git_full_when,
     git_lanes, git_log, git_numstat, git_parent_branch, github_login,
     github_repo,
 )
@@ -13032,8 +13032,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     @staticmethod
     def _github_changed(win):
+        """GitHub's lists, or where its pull requests stand (lookup.PULLS), have changed: the replies naming one drawn
+        again (their pills: widgets.pr_pill), the Git page's list and pills too."""
         if win.signal is not None:
             win.signal.github_changed()
+        was = widgets.SIGNAL, MarkdownView.base_dir  # (drawn with this window's links, as it would itself: then
+        win.use_links()                                # the window that was being drawn's again)
+        MarkdownView.base_dir = win.run_cwd
+        try:
+            for view in win.assistant_views():
+                if "/pull/" in view.text or re.search(r"#\d", view.text):
+                    view.relink()
+        finally:
+            widgets.SIGNAL, MarkdownView.base_dir = was
+        win.panel.git_page.pulls_changed()
 
     def catalogue_signal(self):
         """The Signal whose names the glossary's search lists: this chat's, or, with Signal off for it, the folder's

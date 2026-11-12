@@ -102,6 +102,18 @@ REF_ICON_SVG = {
 REF_ICON_SVG.update(pr_open=REF_ICON_SVG["git"], pr_merged=REF_ICON_SVG["git"], pr_closed=REF_ICON_SVG["git"],
                     issue_closed=REF_ICON_SVG["issue"])
 REF_ICON_TINTS = {"pr_open": "#2da44e", "pr_merged": "#e8730c", "pr_closed": "#8a8f98", "issue_closed": "#8a8f98"}
+# git's merge (two branches' ends, one bending into the other): a pull request's pill has it before its number
+REF_ICON_SVG["merge"] = (f'<circle cx="4.6" cy="3.3" r="1.85" {_REF_STROKE}/><circle cx="4.6" cy="12.7" r="1.85" '
+                         f'{_REF_STROKE}/><circle cx="11.6" cy="9" r="1.85" {_REF_STROKE}/><path d="M4.6 5.2v5.6M4.6 '
+                         f'5.2c0 2.3 1.6 3.8 5.1 3.8" {_REF_STROKE}/>')
+# A pull request's pill, in a reply and on the Git page, is in the colour of where it stands (lookup.pull_state), the
+# same light or dark (each reads on either), its patch that colour faint: green while it's open, grey while it's a
+# draft, red once a review asks for changes (whatever else it is: it's held up), orange once merged; closed without
+# being merged, the same grey fainter and struck through. One not known yet is a plain link on a patch of the text's
+# colour, and only takes its own when it's known: nothing moves.
+PR_COLORS = {"open": "#2da44e", "draft": "#8a8f98", "changes": "#e5484d", "merged": "#e8730c", "closed": "#8a8f98"}
+PR_SAID = {"open": "Open", "draft": "Draft", "changes": "Changes requested", "merged": "Merged",
+           "closed": "Closed without being merged"}
 
 
 _REF_ICON_OPS = {}
@@ -890,10 +902,86 @@ def ref_icon_slot(icon):
     return f'<span font_family="baude-icon-{icon}">\u2063</span>' if icon else ""
 
 
+def pr_pill_markup(inner, href, title, state):
+    """inner (markup, no link in it) as a pull request's pill, linked to href: git's merge logo before it, on a rounded
+    patch (LinkLabel draws them), in the colour of where it stands (PR_COLORS; state None: not known yet, a link's).
+    Its places for the logo and the patch's ends are as wide whatever the state, so a state that comes later only
+    colours it."""
+    if color := PR_COLORS.get(state):
+        inner = f'<span foreground="{color}">{inner}</span>'
+    if state == "closed":
+        inner = f"<s>{inner}</s>"
+    return (f'<a href="{html.escape(href)}" title="{html.escape(title)}"><span underline="none">'
+            f'<span font_family="baude-pill-{state or "unknown"}">\u2063</span>{inner}'
+            f'<span font_family="baude-pill-end">\u2063</span></span></a>')
+
+
+def pr_title(p, repo, number):
+    """A pull request's pill's tooltip: its number, where it stands and its name."""
+    said = PR_SAID.get((p or {}).get("state"))
+    return " · ".join(x for x in (f"{repo}#{number}", said, (p or {}).get("title")) if x)
+
+
+def chat_repo():
+    """The GitHub repository (owner/name) the reply being drawn is in, what a bare #12 in it means: its Signal's (the
+    chat's checkout's origin), else its folder's as GITHUB has read it. None if there's none."""
+    return getattr(SIGNAL, "github", None) or \
+        lookup.GITHUB.own_repository(getattr(SIGNAL, "folder", None) or MarkdownView.base_dir)
+
+
+def pr_pill(repo, number, inner, href=None, known=False):
+    """A pull request of repo's as a pill (pr_pill_markup), linked to href (else its page); None if repo isn't the
+    chat's (chat_repo: another's keeps its link as it was), if nothing's been read of its pull requests (no gh, or
+    signed out), or (known) if number isn't one of them as far as is known: an issue, or nothing (a bare #12 may be
+    either, or a colour)."""
+    if not repo or repo.lower() != (chat_repo() or "").lower() or lookup.PULLS.states(repo) is None:
+        return None
+    p = lookup.PULLS.pull(repo, number)
+    if p is None and known:
+        return None
+    return pr_pill_markup(inner, href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
+                          pr_title(p, repo, number), (p or {}).get("state"))
+
+
+def pr_unbroken(markup):
+    """A pill's text (markup) with its spaces no place to end a line (PR #12 on one), its tags' own left alone."""
+    return re.sub(r" (?![^<]*>)", "\u00a0", markup)
+
+
+def pr_unremembered():
+    """The text being drawn names a pull request: _inline doesn't remember its markup (where it stands may change, and
+    its repository's pull requests may not be read yet). True."""
+    global _checked_since
+    _checked_since = float("-inf")
+    return True
+
+
+_PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?:[/?#]\S*)?")
+
+
+_BARE_PR = re.compile(r"(?<![\w&#/.-])#(\d{1,7})(?![\w-])")  # (#12; not &#12; nor owner/name#12)
+
+
+def pr_link_markup(url, markup=None):
+    """A link to one of the chat's repository's pull requests (chat_repo) as its pill: what the link says (markup), else
+    its #12. None for any other link, and with nothing read of the repository's pull requests."""
+    m = _PR_URL.fullmatch(url)
+    repo = pr_unremembered() and chat_repo() if m else None
+    if not repo or m[1].lower() != repo.lower():
+        return None
+    return pr_pill(repo, int(m[2]), markup or f"#{m[2]}", href=url)
+
+
 def ref_markup(ref, inner, icon=True):
     """inner (markup) as a Signal link, drawn by how far its lookup got: plain when found, a count
-    when there are several matches, faint while pending, grey when not found, amber and wavy when stale."""
+    when there are several matches, faint while pending, grey when not found, amber and wavy when stale. A pull
+    request found is its pill (pr_pill), if its repository's have been read."""
     href = html.escape(REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))
+    if icon and ref.kind == "pr" and ref.status == "resolved" and not ref.data.get("issue") and \
+            isinstance(ref.data.get("number"), int) and \
+            (pill := pr_pill(ref.data.get("repo"), ref.data["number"], pr_unbroken(inner),
+                             href=REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))) is not None:
+        return pill
     if ref.status == "pending":
         inner = f'<span alpha="55%">{inner}</span>'
     elif ref.status == "not_found":
@@ -972,8 +1060,14 @@ REF_ABSENT_WHY = {"proposed": "Proposed, not written yet", "external": "An outsi
 
 def ref_decision_markup(surface, dec, inner, icon=True):
     """inner linked to where the reader (or the evidence) placed this name in this reply; or, for one it says isn't
-    in the code, to what it is: an outside tool as a link, anything else grey, like a name not found."""
+    in the code, to what it is: an outside tool as a link, anything else grey, like a name not found. A pull request
+    it placed is its pill (pr_pill), if its repository's have been read."""
     href = html.escape(REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])
+    if icon and dec.get("kind") == "pr" and dec["verdict"] != "not_in_code" and \
+            (m := re.fullmatch(r"(?:(?:PR|pull request) )?(?:([\w.-]+/[\w.-]+))?#(\d+)", surface, re.I)) and \
+            (pill := pr_pill(m[1] or chat_repo(), int(m[2]), pr_unbroken(inner), known=True,
+                             href=REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])):
+        return pill
     if dec["verdict"] == "not_in_code":
         why = REF_ABSENT_WHY.get(dec.get("why"), REF_ABSENT_WHY["not_found"])
         title = html.escape(" · ".join(x for x in (why, dec.get("note")) if x))
@@ -1071,12 +1165,12 @@ def _inline_markup(text):
 
     def link(m):  # (its text as markup: code and bold in it, but no link inside a link)
         inner = _KEPT_LINK.sub(lambda k: bare[int(k[1])], _emphasis(html.escape(m[1], quote=False)))
-        return keep(link_markup(m[2], m[1], inner))
+        return keep(pr_link_markup(m[2], inner) or link_markup(m[2], m[1], inner))  # (a pull request's: its pill)
     p = _CODE_SPAN.sub(code, text) if "`" in text else text  # (each pattern only where it could match: most
     if "](" in p:                                             # lines have none of them)
         p = _MD_LINK.sub(link, p)
     if "://" in p:
-        p = _BARE_URL.sub(lambda m: keep(link_markup(m[1])), p)
+        p = _BARE_URL.sub(lambda m: keep(pr_link_markup(m[1]) or link_markup(m[1])), p)
     if SIGNAL is not None:  # names Signal found (commits, env vars, routes...) outside backticks
         p = _REF_PLAIN.sub(lambda m: keep(ref) if (ref := ref_link(m[0], html.escape(m[0], quote=False), False))
                            else m[0], p)
@@ -1090,6 +1184,9 @@ def _inline_markup(text):
         if (unexplained := getattr(SIGNAL, "unexplained", None)) is not None and \
                 (said := unexplained(REF_MESSAGE)) is not None:  # (Record's: the "the X"s nothing introduced, red)
             p = said.sub(lambda m: keep(unexplained_markup(m[0])), p)
+    if "#" in p and _BARE_PR.search(p) and pr_unremembered() and (repo := chat_repo()):  # (a bare #12: a pill if
+        # it's one of the repository's pull requests)
+        p = _BARE_PR.sub(lambda m: keep(pill) if (pill := pr_pill(repo, int(m[1]), m[0], known=True)) else m[0], p)
     if "--" in p:  # (the code spans are set aside by now: -- in them stays)
         p = EM_DASH.sub("\u2014", p)
     s = _emphasis(link_paths(html.escape(p, quote=False)))
@@ -1474,13 +1571,16 @@ class WrapLabel(Gtk.Label):
 class LinkLabel(WrapLabel):
     """A label whose Signal links each have their logo before them (ref_icon): git's, Kubernetes', a database's, a
     file's… The markup keeps a place for it (ref_icon_slot), which this makes the logo's width (a Pango shape) and
-    draws the logo in, at the text's size. Copied, the text has only invisible characters there."""
+    draws the logo in, at the text's size. Copied, the text has only invisible characters there. A pull request's
+    pill (pr_pill_markup) keeps a place at each end: its logo and a margin before its name, a margin after it, and this
+    draws the patch behind the lot, rounded, a piece on each line if it's broken across two."""
 
     GAP = 3  # px between a logo and its name
+    PILL_IN, PILL_OUT = 4, 5  # px: a pill's margin before its logo, and after its name
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.icons, self.icon_px = [], 0  # ([(byte index, logo)], its size)
+        self.icons, self.pills, self.icon_px = [], [], 0  # ([(byte index, logo)], [(start, end, state)], their size)
 
     def set_markup(self, markup):
         Gtk.Label.set_markup(self, markup)
@@ -1495,24 +1595,35 @@ class LinkLabel(WrapLabel):
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
     def place_icons(self):
-        """Find the places kept for logos, and make each the logo's width (again, when the text's size changed)."""
+        """Find the places kept for logos and pills' ends, and make each its width (again, when the text's size
+        changed)."""
         text = self.get_text()
         if "\u2063" not in text:
-            if self.icons:
-                self.icons = []
+            if self.icons or self.pills:
+                self.icons, self.pills = [], []
                 self.set_attributes(None)
             return False
-        names = re.findall(r'font_family="baude-icon-(\w+)">\u2063</span>', self.get_label())
+        names = re.findall(r'font_family="baude-(icon|pill)-(\w+)">\u2063</span>', self.get_label())
         spots = [len(text[:m.start()].encode()) for m in re.finditer("\u2063", text)]
         ascent, descent, px = self.text_px()
-        attrs = Pango.AttrList()
-        for at in spots[:len(names)]:
+        attrs, icons, pills, opened = Pango.AttrList(), [], [], None
+        for at, (kind, name) in zip(spots, names):
+            if kind == "icon":
+                width = px + self.GAP
+                icons.append((at, name))
+            elif name == "end":  # (a pill's end)
+                width = self.PILL_OUT
+                if opened is not None:
+                    pills.append((opened[0], at + 3, opened[1]))
+                opened = None
+            else:  # (a pill's start, its logo's place: name is where it stands)
+                width, opened = self.PILL_IN + px + self.GAP, (at, name)
             r = Pango.Rectangle()
-            r.x, r.y, r.width, r.height = 0, -ascent, (px + self.GAP) * Pango.SCALE, ascent + descent
+            r.x, r.y, r.width, r.height = 0, -ascent, width * Pango.SCALE, ascent + descent
             a = Pango.attr_shape_new(r, r)
             a.start_index, a.end_index = at, at + 3  # (U+2063: 3 bytes)
             attrs.insert(a)
-        self.icons, self.icon_px = list(zip(spots, names)), px
+        self.icons, self.pills, self.icon_px = icons, pills, px
         self.set_attributes(attrs)
         return False
 
@@ -1520,12 +1631,14 @@ class LinkLabel(WrapLabel):
         Gtk.Label.do_css_changed(self, change)
         # zoomed: the places take the text's new size as it's styled, before the frame's layout (resized once drawn,
         # the text came at its new size and the logos a frame later)
-        if self.icons and self.text_px()[2] != self.icon_px:
+        if (self.icons or self.pills) and self.text_px()[2] != self.icon_px:
             self.place_icons()
 
     def do_snapshot(self, snapshot):
+        if self.pills:
+            self.draw_pills(snapshot)
         Gtk.Label.do_snapshot(self, snapshot)
-        if not self.icons:
+        if not (self.icons or self.pills):
             return
         # in the text's colour, as vectors (a bitmap of it, shown at another scale than it was made at, or zoomed into,
         # went blocky), its corner on one of the screen's pixels so its straight lines stay sharp
@@ -1540,11 +1653,56 @@ class LinkLabel(WrapLabel):
 
         def pixel(v, base):
             return round((base + v) * scale) / scale - base
-        for at, icon in self.icons:
+        for at, icon, pad, color in [(at, icon, 0, fg) for at, icon in self.icons] + \
+                [(at, "merge", self.PILL_IN, pr_rgba(state, fg)) for at, _end, state in self.pills]:
             r = layout.index_to_pos(at)
-            x = pixel(ox + r.x / Pango.SCALE, bx)
+            x = pixel(ox + r.x / Pango.SCALE + pad, bx)
             y = pixel(oy + (r.y + r.height / 2) / Pango.SCALE - size / scale / 2, by)
-            draw_ref_icon(snapshot, icon, x, y, size / scale, fg)
+            draw_ref_icon(snapshot, icon, x, y, size / scale, color)
+
+    def draw_pills(self, snapshot):
+        """The pills' patches, behind the text: each its line's height less a little, rounded at the ends, in the
+        colour of where its pull request stands, faint."""
+        layout, (ox, oy) = self.get_layout(), self.get_layout_offsets()
+        ascent, descent, _px = self.text_px()
+        ascent, descent = ascent / Pango.SCALE, descent / Pango.SCALE
+        h = round((ascent + descent) * 0.86)
+        fg = self.get_color()
+        for start, end, state in self.pills:
+            color = pr_rgba(state, fg)
+            color.alpha = 0.09 if state in ("closed", "unknown") else 0.16
+            for x, baseline, w in layout_runs(layout, start, end):
+                top = oy + baseline - (ascent - descent) / 2 - h / 2
+                rect = Graphene.Rect().init(ox + x, top, w, h)
+                rr = Gsk.RoundedRect()
+                rr.init_from_rect(rect, h / 2)
+                snapshot.push_rounded_clip(rr)
+                snapshot.append_color(color, rect)
+                snapshot.pop()
+
+
+def pr_rgba(state, fg):
+    """A pill's colour (PR_COLORS), or fg (a copy) for one whose state isn't known."""
+    c = Gdk.RGBA()
+    if not c.parse(PR_COLORS.get(state) or ""):
+        c = fg.copy()
+    return c
+
+
+def layout_runs(layout, start, end):
+    """Where the text from byte start to end is on each line it's on: [(x, baseline, width)], px from the layout's
+    corner."""
+    out, it = [], layout.get_iter()
+    while True:
+        line = it.get_line_readonly()
+        a, b = max(start, line.start_index), min(end, line.start_index + line.length)
+        if a < b:
+            _ink, logical = it.get_line_extents()
+            x0, x1 = line.index_to_x(a, False), line.index_to_x(b, False)
+            out.append(((logical.x + min(x0, x1)) / Pango.SCALE, it.get_baseline() / Pango.SCALE,
+                        abs(x1 - x0) / Pango.SCALE))
+        if not it.next_line():
+            return out
 
 
 def sel_label(markup="", css=None, mono=False):
@@ -5270,6 +5428,13 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .git-own { font-weight: 500; }
 .git-log row.git-found { background: alpha(@accent_bg_color, 0.2); box-shadow: inset 3px 0 @accent_bg_color; }
 .git-log row.git-hover { background: alpha(@accent_bg_color, 0.14); }
+/* a pull request's pill (where it stands: PR_COLORS, set below), rounder than a branch's chip; the chat's list */
+.git-pr { font-size: 0.78em; font-weight: normal; padding: 0 6px 0 4px; min-height: 0; min-width: 0;
+          border-radius: 999px; background: alpha(currentColor, 0.16); box-shadow: none; }
+.git-pr:hover { background: alpha(currentColor, 0.26); }
+.git-pr.closed { background: alpha(currentColor, 0.09); }
+.git-pr.closed label { text-decoration-line: line-through; }
+.git-pulls > button { padding: 2px 4px; min-height: 0; font-weight: normal; }
 /* the branch picker: its button's names as a choice's are (not a button's bold); its list's rows 26px apart, as
    ⌘K's are, instead of libadwaita's 34, the rule between this chat's branches and the rest a faint one */
 menubutton.git-branches > button { font-weight: normal; }
@@ -5570,6 +5735,9 @@ def _warm_scenes(widget):
             textures, rounded_textures,
             lambda s: snapshot_faded(s, text, 30, 20, at_start=False),  # (a name cut short: FadeLabel)
             logo]
+
+
+CSS += "".join(f".git-pr.{state} {{ color: {color}; }}\n" for state, color in PR_COLORS.items())
 
 
 def load_css():
@@ -5889,9 +6057,11 @@ def window_shown(win):
 def watch_github(win, folders, changed=None):
     """While win's shown: GitHub's lists of the folders in use (folders(win): (attached, tops), lookup.GitHub.look)
     looked at when it's time, or the folders are others, and once they've changed, what's on show drawn afresh: ⌘K if
-    it's open and its first row is what's picked (changed(win), the rest). folders and changed are plain functions, as
-    this holds nothing of the window: it goes when the window does."""
+    it's open and its first row is what's picked (changed(win), the rest). Where the pull requests of those folders'
+    repositories stand (lookup.PULLS, once something's shown them) likewise. folders and changed are plain functions,
+    as this holds nothing of the window: it goes when the window does."""
     window, seen, looked, asked = weakref.ref(win), [lookup.GITHUB.generation], [-lookup.GITHUB_LOOK_S], [None]
+    pulls = [lookup.PULLS.generation]
 
     def tick():
         win = window()
@@ -5903,8 +6073,9 @@ def watch_github(win, folders, changed=None):
         if now - looked[0] >= lookup.GITHUB_LOOK_S or in_use != asked[0]:
             looked[0], asked[0] = now, in_use
             lookup.GITHUB.look(*in_use)
-        if seen[0] != lookup.GITHUB.generation:
-            seen[0] = lookup.GITHUB.generation
+        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in (*in_use[0], *in_use[1]))
+        if seen[0] != lookup.GITHUB.generation or pulls[0] != lookup.PULLS.generation:
+            seen[0], pulls[0] = lookup.GITHUB.generation, lookup.PULLS.generation
             dialog = win.get_visible_dialog()
             if isinstance(dialog, RefPalette) and dialog.selection.get_selected() in (0, Gtk.INVALID_LIST_POSITION):
                 dialog.fill()

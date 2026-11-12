@@ -4124,11 +4124,12 @@ class Reader(Gtk.Box):
         self._cite_again()
 
     def github_changed(self):
-        """GitHub's lists have changed: what can look different is a reply with a # in it."""
+        """GitHub's lists have changed, or where its pull requests stand: what can look different is a reply with a #
+        in it, or a pull request's link."""
         if self.names is not None:
             self.names.update()
-        self.as_mine(lambda: [row.prose.relink() for row in self.rows
-                              if row.item["role"] == "assistant" and "#" in row.item["text"]])
+        self.as_mine(lambda: [row.prose.relink() for row in self.rows if row.item["role"] == "assistant" and
+                              ("#" in row.item["text"] or "/pull/" in row.item["text"])])
         self._cite_again()
 
     def activate(self):
@@ -5277,6 +5278,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         for child in win.tabs.children():
             if isinstance(child, (DiaryEditor, Reader)):
                 child.github_changed()
+        win.git_page.pulls_changed()
 
     # sidebar
     def _row(self, t):

@@ -2126,6 +2126,206 @@ class GitHub:
 GITHUB = GitHub()
 
 
+# ---------------------------------------------------------------- where each pull request stands
+# The Git page's list of the pull requests a chat touches and its pills on the branches that have one, and the pills a
+# reply's #12s and pull request links are drawn as, are each in the colour of where the pull request stands: a draft,
+# open, changes asked for (a review's verdict, which holds it up), merged, or closed without being merged. GITHUB's
+# lists don't say a review's verdict, nor the branch a pull request is from, so this asks gh pr list for them: the
+# latest PULLS_LIMIT of a repository in one call, on a thread of its own, at most every PULLS_FRESH_S while something
+# shows them (never one call a pull request), and keeps the answer on disk for the next start. Without gh, or signed
+# out, it has nothing: no list, no pills.
+
+PULLS_FRESH_S = 120  # a repository's pull requests are read again after this, if they're still shown
+PULLS_LIMIT = 100  # the latest of them read (a number older than these: what GITHUB's lists say of it, if anything)
+PULLS_FIELDS = "number,title,state,isDraft,reviewDecision,headRefName,isCrossRepository,url"
+
+
+def pull_state(p):
+    """Where a pull request stands, from gh pr list --json: "merged", "closed" (without being merged), "changes" (a
+    review asked for changes: it can't go in till they're made, draft or not), "draft" or "open"."""
+    state = (p.get("state") or "").upper()
+    if state in ("MERGED", "CLOSED"):
+        return state.lower()
+    if (p.get("reviewDecision") or "").upper() == "CHANGES_REQUESTED":
+        return "changes"
+    return "draft" if p.get("isDraft") else "open"
+
+
+def pull_info(p):
+    """What's kept of a pull request gh pr list says: {number, title, state (pull_state), url, head}. head: the branch
+    it's from, None if that's a fork's (another repository's branch of that name isn't this one's)."""
+    return {"number": int(p["number"]), "title": re.sub(r"\s+", " ", p.get("title") or "").strip()[:300],
+            "state": pull_state(p), "url": p.get("url") or "",
+            "head": None if p.get("isCrossRepository") else (p.get("headRefName") or None)}
+
+
+class PullStates:
+    """Where the pull requests of each GitHub repository asked about stand (one for the app: PULLS). states(repo), from
+    the main loop, is what was read last (or kept from the last start), asking for a read if one's due and never
+    waiting for it; read(repo), on a worker thread, waits. generation goes up when what's known changes."""
+
+    def __init__(self):
+        self._cond, self._todo, self._thread = threading.Condition(), queue.SimpleQueue(), None
+        self.forget()
+
+    def forget(self):
+        """Nothing known (in memory: the copies on disk stay)."""
+        with self._cond:
+            self._repos, self.generation = {}, getattr(self, "generation", 0) + 1
+
+    def _entry(self, repo):  # (with _cond held)
+        r = self._repos.get(repo)
+        if r is None:
+            r = self._repos[repo] = {"prs": None, "at": 0.0, "paused": 0.0, "out": False, "busy": False,
+                                     "queued": False}
+            try:
+                with open(self._path(repo), encoding="utf-8") as f:
+                    kept = json.load(f)
+                r.update(prs={int(p["number"]): p for p in kept["prs"]}, at=float(kept["at"]),
+                         out=bool(kept.get("out")))  # (signed out last time: nothing, till gh says otherwise)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                pass  # (none kept, or not what's written here)
+        return r
+
+    @staticmethod
+    def _due(r, now):
+        return now >= r["paused"] and now - r["at"] >= PULLS_FRESH_S
+
+    # ---- main loop (it never waits for gh)
+    def states(self, repo, want=True):
+        """{number: pull_info} of a repository's pull requests as last read, or None: none read yet, no gh, or gh
+        signed out. want: and a read asked for if one's due."""
+        if not repo or gh_path() is None:
+            return None
+        with self._cond:
+            r = self._entry(repo)
+            prs = None if r["out"] else r["prs"]
+            want = want and not (r["queued"] or r["busy"]) and self._due(r, time.time())
+        if want:
+            self.want(repo)
+        return prs
+
+    def pull(self, repo, number):
+        """What's known of repo's pull request number: its pull_info; else, for one older than those read, what
+        GITHUB's lists say (where it stands, not a review's verdict, nor its branch); else None. None too for an issue,
+        and with nothing read of repo (states' None)."""
+        prs = self.states(repo)
+        if prs is None:
+            return None
+        if (p := prs.get(number)) is not None:
+            return p
+        k = GITHUB.known(repo, number)
+        if k is None or not k.get("pr"):
+            return None
+        state = "draft" if k["state"] == "open" and k.get("draft") else k["state"]
+        return {"number": number, "title": k.get("title", ""), "state": state,
+                "url": f"https://github.com/{repo}/pull/{number}", "head": None}
+
+    def want(self, repo, fresh=False):
+        """A read of repo's pull requests asked for, on this one's thread, if one's due (fresh: whether or not)."""
+        if not repo or gh_path() is None:
+            return
+        with self._cond:
+            r = self._entry(repo)
+            if r["queued"] or r["busy"] or not (fresh or self._due(r, time.time())):
+                return
+            r["queued"] = True
+        self._todo.put((repo, fresh))
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, daemon=True, name="lookup-pulls")
+            self._thread.start()
+
+    def look(self, repos):
+        """The repositories shown, of those asked about before: each read again if it's due (a window's tick)."""
+        for repo in repos:
+            if repo and repo in self._repos:
+                self.want(repo)
+
+    # ---- worker threads
+    def _run(self):
+        while True:
+            repo, fresh = self._todo.get()
+            with self._cond:
+                self._repos.get(repo, {})["queued"] = False
+            try:
+                self.read(repo, fresh)
+            except Exception as e:  # noqa: BLE001 (whatever it was: asked again when it's next due)
+                print(f"lookup: reading pull requests failed: {e!r}", file=sys.stderr)
+
+    def read(self, repo, fresh=False):
+        """(Not the main loop.) repo's pull requests, read now if it's due (fresh: whether or not), else as last read:
+        states' answer. A read already under way is waited for, not made twice."""
+        if not repo or gh_path() is None:
+            return None
+        with self._cond:
+            r = self._entry(repo)
+            while r["busy"]:
+                self._cond.wait(GITHUB_TIMEOUT_S + 5)
+            go = r["busy"] = fresh or self._due(r, time.time())  # (fresh: asked for, signed in again perhaps)
+        if go:
+            try:
+                self._fetch(repo, r)
+            finally:
+                with self._cond:
+                    r["busy"] = False
+                    self._cond.notify_all()
+        with self._cond:
+            return None if r["out"] else r["prs"]
+
+    def _fetch(self, repo, r):
+        exe, code, out, err = gh_path(), None, "", ""
+        try:
+            p = subprocess.run([exe, "pr", "list", "--repo", repo, "--state", "all", "--limit", str(PULLS_LIMIT),
+                                "--json", PULLS_FIELDS], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               timeout=GITHUB_TIMEOUT_S, errors="replace",
+                               env={**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})
+            code, out, err = p.returncode, p.stdout, p.stderr
+        except (OSError, subprocess.TimeoutExpired, TypeError, ValueError):
+            pass  # (no answer: as offline)
+        prs = None
+        if code == 0:
+            try:
+                prs = {(i := pull_info(p))["number"]: i for p in json.loads(out)}
+            except (ValueError, TypeError, KeyError, AttributeError):
+                prs = None
+        now = time.time()
+        with self._cond:
+            if prs is not None:
+                changed = r["out"] or prs != r["prs"]
+                r.update(prs=prs, at=now, paused=0.0, out=False)
+            elif code == 4 or "gh auth login" in err:  # (signed out: gh asked no one)
+                changed = not r["out"]
+                r.update(out=True, at=now, paused=now + GITHUB_OUT_S)
+                self._save(repo, now, {}, out=True)  # (what was read goes: the next start shows nothing either)
+            else:  # (offline, GitHub in trouble, or a repository it won't show: what was read stays)
+                changed = False
+                r["paused"] = now + (GITHUB_GONE_S if "Could not resolve" in err else GITHUB_LOOK_S * 5)
+            if changed:
+                self.generation += 1
+        if prs is not None:
+            self._save(repo, now, prs)
+
+    # ---- the copy on disk
+    @staticmethod
+    def _path(repo):
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+        return os.path.join(base, "baude", "github", urllib.parse.quote(repo, safe="") + ".pulls.json")
+
+    def _save(self, repo, at, prs, out=False):
+        path = self._path(repo)
+        new = f"{path}.{os.getpid()}.new"  # (Baude and Record may both be at it)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(new, "w", encoding="utf-8") as f:
+                json.dump({"at": at, "prs": list(prs.values()), "out": out}, f)
+            os.replace(new, path)
+        except OSError:
+            pass  # (only the next start's wait)
+
+
+PULLS = PullStates()
+
+
 # ---------------------------------------------------------------- what ⌘K lists, and searching it
 
 def items(source):

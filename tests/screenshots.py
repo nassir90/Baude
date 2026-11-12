@@ -1206,6 +1206,18 @@ def popup_choices(dropdown):
     next(w for w in T.walk(dropdown) if isinstance(w, Gtk.Popover)).popup()
 
 
+@scene("56-host-older", "This Mac's host process, which runs Baude's chats, older than Baude after an update: said, with "
+                       "Restart It (once nothing's at a turn there: its sessions resume as they're next written to)")
+def _(app):
+    win = app.window()
+    r = baude.local_host()
+    r.info = {**r.info, "version": baude.baudelib.wire.VERSION - 1}  # (as one started before the update says)
+    baude._HOST_SAID.clear()
+    win.check_host_version()
+    T.pump(0.5)
+    return win
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which hosts and groups are listed: This Mac "
                                 "(its own chats and its server's) and each host a server's on; each group their "
                                 "sessions are in. Here every host's, in Lab")

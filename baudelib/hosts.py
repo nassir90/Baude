@@ -21,6 +21,8 @@ def start_here(wait=20.0):
     path = wire.socket_path()
     if wire.wait_for_socket(path, 0.2):
         return True
+    if os.environ.get("BAUDE_HOST_IN_PROCESS") == "1":  # (the tests': one in this process, gone with it)
+        return _in_process(path, wait)
     if (pid := running_pid()) is not None:  # (running, but its socket's gone, its folder taken away: listening again)
         try:
             os.kill(pid, signal.SIGUSR1)
@@ -70,3 +72,21 @@ def find(wait=2.0):
     time.sleep(wait)
     browser.stop()
     return list(found.values())
+
+
+_HERE = []
+
+
+def _in_process(path, wait):
+    """(BAUDE_HOST_IN_PROCESS=1, the tests') This machine's host process in this one, on a thread: as one started
+    would be, its claudes this process's children, nothing said on the network."""
+    import threading
+    from baudelib.server import AlreadyRunning, Server
+    if not _HERE:
+        try:
+            server = Server(advertise=False, socket_path=path, log=lambda _text: None)
+        except AlreadyRunning:
+            return wire.wait_for_socket(path, wait)
+        _HERE.append(server)
+        threading.Thread(target=server.serve_forever, daemon=True, name="host-in-process").start()
+    return wire.wait_for_socket(path, wait)

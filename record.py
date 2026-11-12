@@ -2538,7 +2538,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             "pre": {"family": "monospace", "left_margin": 34, "right_margin": 34, "pixels_above_lines": 0},  # (a ``` block:
             #        its card's NotesView's, the text set MARGIN + 12 in)
             "quote": {"foreground": "#8a8a8a", "style": Pango.Style.ITALIC, "left_margin": 40},
-            "link": {"foreground": "#3584e4", "underline": Pango.Underline.SINGLE},
+            "link": {"underline": Pango.Underline.SINGLE},  # (in the accent: accent_changed)
             # (to a page with nothing in it yet: grey and italic, as the page list shows it)
             "newlink": {"foreground": "#8a8a8a", "underline": Pango.Underline.SINGLE, "style": Pango.Style.ITALIC},
             "hidden": {"invisible": True},  # (markup away from the caret's line; a link's [[ ]] always)
@@ -2602,6 +2602,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.view.restyled = self._heading_looks
         self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
+        self.accent_changed()
+        for what in ("notify::dark", "notify::accent-color"):  # (the theme's shade of it; the system's accent)
+            Adw.StyleManager.get_default().connect(what, lambda *_: self.accent_changed())
         tags = self.buf.get_tag_table()  # (the @'s unseen, though "ref" colours the rest of its @name)
         tags.lookup("logo-at").set_priority(tags.get_size() - 1)
         self.buf.connect("changed", self._changed)
@@ -2910,6 +2913,11 @@ class DiaryEditor(Gtk.Box, FindInText):
                 grey = ink.copy()
                 grey.alpha *= self.HEADING_INK[n]
                 tag.set_property("foreground-rgba", grey)
+
+    def accent_changed(self):
+        """Links, [[pages]] and [names](url), in the accent as Baude's are (Settings → Accent Colour), its shade for
+        text in the theme, light or dark (widgets.apply_accent asks again as it changes)."""
+        self.buf.get_tag_table().lookup("link").set_property("foreground-rgba", widgets.accent_text_rgba())
 
     def _highlight(self):
         """The page drawn as it reads, in Markdown as Self's editor draws it: headings, lists (a bullet, a box drawn

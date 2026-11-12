@@ -91,6 +91,10 @@ def launch(model, mode, effort, session_id=None, resumed=False):
         resume = session_id
     elif session_id:
         extra = (p["first"], session_id)
+    if p["name"] == "claude" and os.environ.get("BAUDE_CHROME", "1") != "0":  # (Claude in Chrome, as claude --chrome:
+        from baudelib.claude import claude_exe, has_flag  # browser use, in the browser you're signed in to; off with
+        if has_flag(claude_exe(), "--chrome"):             # BAUDE_CHROME=0, and for a claude too old to know it)
+            extra = (*extra, "--chrome")
     return {"program": p["name"], "exe": exe, "missing": bool(p["exe"]) and exe is None,
             "mode": mode if p["modes"] else "default",
             "effort": effort if p["effort"] else None, "resume": resume, "extra": extra}

@@ -34,6 +34,26 @@ EFFORT_LABELS = {"off": "No thinking", "low": "Low effort", "medium": "Medium ef
 MACOS_DESKTOP_CLAUDE = "~/Library/Application Support/Claude/claude-code"
 
 
+_FLAGS = {}  # (exe, its size and time) -> the flags looked for in it: has_flag
+
+
+def has_flag(exe, flag):
+    """Does this claude know flag (an option of a newer one: --chrome)? Its file is searched for it, never run, once
+    per version: a claude too old for it would refuse to start with it."""
+    import mmap
+    path = shutil.which(exe) or exe
+    try:
+        path = os.path.realpath(path)
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime_ns)
+        if (flag, key) not in _FLAGS:
+            with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                _FLAGS[(flag, key)] = m.find(flag.encode()) >= 0
+        return _FLAGS[(flag, key)]
+    except (OSError, ValueError):
+        return False
+
+
 def claude_exe():
     """The claude binary: BAUDE_CLAUDE, else claude on PATH, else (macOS) the newest one the Claude desktop app
     keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH."""

@@ -15001,6 +15001,8 @@ class BaudeApp(Adw.Application):
             update.restarted(win, restore, "Baude")
         if self.updater is None and not TRACE:
             self.updater = update.Updater("baude", self.idle, self.restart)
+        # (whether this claude knows --chrome, looked up now, off the main loop: a chat starts without waiting on it)
+        threading.Thread(target=lambda: claudelib.has_flag(claudelib.claude_exe(), "--chrome"), daemon=True).start()
 
     def windows(self):
         """Baude's windows, the one you were in last first."""

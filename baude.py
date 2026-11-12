@@ -5947,6 +5947,14 @@ class ThinkingView(Gtk.Box):
         return bool(self.md.text.strip())
 
 
+# Claude Code's whole result for an edit or a write that went through: the path and that it worked, and maybe that
+# the file is in its context. The card says all that already, in its name, its summary and its border. (Anything more,
+# a note that the file changed on disk, say, isn't matched: it's shown.)
+FILE_WRITTEN = re.compile(r"(?:The file (?:(?! \()[^\n])+ has been updated successfully\."
+                          r"|File created successfully at: (?:(?! \()[^\n])+)"
+                          r"(?:\s+\(file state is current in your context[^()\n]*\))?")
+
+
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
     when the CLI runs it as a background task (its result only says it started)."""
@@ -5972,8 +5980,10 @@ class ToolCard(Gtk.Box):
         grid.attach(self.line, 0, 0, 1, 1)
         self.append(grid)
         base = self.base = name.split("__")[-1]
+        # (a Write's is the whole file it wrote, not a change: Input)
         self.input_toggle = Disclosure(toggles, grid, 1, "Command" if base in ("Bash", "BashOutput", "PowerShell")
-                                       else "Prompt" if base in ("Task", "Agent") else "Input", button=True)
+                                       else "Prompt" if base in ("Task", "Agent")
+                                       else "Diff" if base in ("Edit", "MultiEdit") else "Input", button=True)
         self.output_toggle = Disclosure(toggles, grid, 2, "Output", button=True)
         self.output_toggle.set_visible(False)  # until there is output
         self.show_status()
@@ -6147,7 +6157,8 @@ class ToolCard(Gtk.Box):
                 self.report = text.strip()
                 self.result_box.append(MarkdownView(text))  # a finished agent's answer is markdown
                 self.show_output()
-        elif text:
+        elif text and not (not is_error and self.base in ("Edit", "MultiEdit", "Write")
+                           and FILE_WRITTEN.fullmatch(text.strip())):  # (it went through: no Output to open)
             self.add_output_text(text)
         for data in images:
             try:

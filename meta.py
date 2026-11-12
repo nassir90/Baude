@@ -1780,9 +1780,16 @@ class MetaChat(Gtk.Box):
             if any(form.values().get(k) != v for k, v in now.items() if k not in missed):
                 filling.append(True)
                 try:
-                    form.fill(now, partial=True)
+                    unmatched = form.fill(now, partial=True)
                 finally:
                     filling.clear()
+                # (what this card can't show, a host its list hasn't: kept as it's kept, as form_card has it)
+                kept.clear()
+                kept.update(spec.get("values") or {})
+                missed.clear()
+                missed.update(unmatched)
+                base.clear()
+                base.update(form.values())
             looks()
 
         def submit(*_):
@@ -1802,6 +1809,8 @@ class MetaChat(Gtk.Box):
             looks()
 
         def dismiss(*_):
+            if spec.get("state", "open") != "open":  # (submitted or cancelled already: in another window, say)
+                return looks()
             spec.update(state="cancelled", error=None)
             self.told().append(f"(The user cancelled the form {spec['id']}, {form.heading}.)")
             self._form_closed(spec)

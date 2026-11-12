@@ -7795,6 +7795,9 @@ class SessionSidebar(Gtk.Box):
         self.view_btn = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=view, tooltip_text="Group by",
                                        valign=Gtk.Align.CENTER)
         self.view_btn.add_css_class("flat")
+        # (opened, or the window come forward: the network looked at again now, for a server started a moment ago)
+        self.view_btn.connect("notify::active", lambda b, _p: b.get_active() and network().look())
+        win.connect("notify::is-active", lambda w, _p: w.is_active() and network().look())
         find_row.append(self.view_btn)
         top.append(find_row)
         self.append(top)

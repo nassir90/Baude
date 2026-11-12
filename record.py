@@ -3135,6 +3135,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         if self.loading or self.notebook is None:
             return
         self.notebook["pages"][self.page] = self.kept()
+        self.hot = None  # (the ✓ or ✗ shaded: wherever it is now, the pointer's next move says)
         self.notebook.pop("fresh", None)  # (written in: kept, Store.is_blank)
         self.win.pages.prune()
         self.win.store.save()
@@ -3400,9 +3401,15 @@ class DiaryEditor(Gtk.Box, FindInText):
 
     def show_proposal(self, p, scroll=False, draw=True, caret=False):
         """A proposed change (one of a reply's: RecordChat.propose), shown on the page; scroll: brought into view;
-        caret: the caret put in it, at its passage's end (Tab and Esc take it or leave it: Previous and Next)."""
+        caret: the caret put in it, just before its ✓ (Tab and Esc take it or leave it: Previous and Next)."""
         shown = next((e for e in self.proposals if e["p"]["id"] == p["id"]), None)
         if shown is None:
+            sel = self.buf.get_selection_bounds()  # (the passage selected, to ask: let go, the change in its place)
+            sel = [self.kept_offset(i.get_offset()) for i in sel] if sel else None
+            ins = self.kept_offset(self.buf.get_property("cursor-position"))
+            with self._quiet():
+                for e in self.proposals:  # (all of them laid in again, after this one's placed: in their order)
+                    self._take_green(e)
             text, start, old = self.kept(), p.get("start", 0), p["old"]
             if not old:
                 start = len(text)  # (one that adds: at the page's end, as it is now)
@@ -3412,24 +3419,25 @@ class DiaryEditor(Gtk.Box, FindInText):
                     old = p["old"] = found  # (as it's on the page now: its spaces either side gone, say)
             gone = start is None  # (what it changes isn't on the page any more: shown at its end)
             start = len(text) if gone else start
-            a = self.buf_offset(start)
-            b = a if gone or not old else self.buf_offset(start + len(old), past=False)
-            sel = self.buf.get_selection_bounds()
-            asked = bool(sel) and sel[0].get_offset() < b and a <= sel[1].get_offset()  # (the passage selected, to ask)
+            end = start if gone else start + len(old)
             # (marks, the text changing around them: one on the passage's start, kept there as text's typed before it;
-            # one on its end, kept there as text's typed after it; the green's, put in after that: _put_green)
-            shown = {"p": p, "a": self.buf.create_mark(None, self.buf.get_iter_at_offset(a), False),
-                     "b": self.buf.create_mark(None, self.buf.get_iter_at_offset(b), True), "g0": None, "g1": None,
+            # one on its end, kept there as text's typed after it; the green's, put in after that: _put_greens)
+            shown = {"p": p, "a": self.buf.create_mark(None, self.buf.get_iter_at_offset(start), False),
+                     "b": self.buf.create_mark(None, self.buf.get_iter_at_offset(end), True), "g0": None, "g1": None,
                      "gone": gone}
             self.proposals.append(shown)
+            was = self.buf.create_mark(None, self.buf.get_iter_at_offset(ins), True)  # (the caret: kept where it was)
             with self._quiet():
                 self._put_greens()
-            if asked:  # (let go, the change in its place)
+            if sel and sel[0] < end and start <= sel[1]:  # (let go, the change in its place)
                 self.buf.place_cursor(self.buf.get_iter_at_mark(shown["b"]))
+            else:
+                self.buf.place_cursor(self.buf.get_iter_at_mark(was))
+            self.buf.delete_mark(was)
             if draw:
                 self._highlight()
-        if caret:
-            self.buf.place_cursor(self.buf.get_iter_at_mark(shown["b"]))
+        if caret:  # (in its green, just before its ✓: Tab and Esc are its, whatever's beside it)
+            self.buf.place_cursor(self.buf.get_iter_at_offset(self._glyphs(shown)[0][0] + 1))
         if scroll:
             self._scroll_soon(shown)
 
@@ -3555,13 +3563,21 @@ class DiaryEditor(Gtk.Box, FindInText):
         return (yes, yes + len(self.YES)), (yes + len(self.YES), yes + len(self.YES) + len(self.NO))
 
     def _proposal_at(self, offset):
-        """The change shown whose passage, or green, a place in the buffer is in (from its passage's start to its green's
-        end), or None."""
-        for e in self.proposals:
-            if e["g0"] is not None and self.buf.get_iter_at_mark(e["a"]).get_offset() <= offset <= \
-                    self.buf.get_iter_at_mark(e["g1"]).get_offset():
-                return e
-        return None
+        """The change shown a place in the buffer is in (Tab and Esc's): the one whose green it's inside, else the
+        narrowest whose passage it's in (one change's inside another's), else one whose green it's at an edge of; or
+        None."""
+        shown = [e for e in self.proposals if e["g0"] is not None]
+        at = lambda e, k: self.buf.get_iter_at_mark(e[k]).get_offset()  # noqa: E731
+        if inside := next((e for e in shown if at(e, "g0") < offset < at(e, "g1")), None):
+            return inside
+        if passage := [e for e in shown if at(e, "a") <= offset <= at(e, "b")]:
+            return min(passage, key=lambda e: at(e, "b") - at(e, "a"))
+        return next((e for e in shown if offset in (at(e, "g0"), at(e, "g1"))), None)
+
+    def _green_at(self, offset):
+        """The change shown whose green the character at a place in the buffer is, or None."""
+        return next((e for e in self.proposals if e["g0"] is not None and self.buf.get_iter_at_mark(e["g0"]).get_offset()
+                     <= offset < self.buf.get_iter_at_mark(e["g1"]).get_offset()), None)
 
     def _edits_green(self, keyval, state):
         """Whether a key would change what's proposed (it's not the page's yet): a letter typed in it, a new line, a
@@ -3631,9 +3647,11 @@ class DiaryEditor(Gtk.Box, FindInText):
             with self._greens_out():
                 self._forget(e)
                 self.buf.begin_user_action()
-                self.buf.delete(self.buf.get_iter_at_offset(at), self.buf.get_iter_at_offset(at + len(old)))
-                self.buf.insert(self.buf.get_iter_at_offset(at), p["new"])
-                self.buf.end_user_action()
+                try:
+                    self.buf.delete(self.buf.get_iter_at_offset(at), self.buf.get_iter_at_offset(at + len(old)))
+                    self.buf.insert(self.buf.get_iter_at_offset(at), p["new"])
+                finally:
+                    self.buf.end_user_action()
             self.buf.place_cursor(self.buf.get_iter_at_offset(self.buf_offset(at + len(p["new"]), past=False)))
         else:
             self._drop_proposal(e)
@@ -4007,6 +4025,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         if self.buf.get_has_selection():
             return
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
+        start = ins.copy()
+        start.set_line_offset(0)
+        if self._green_at(start.get_offset()) is not None:
+            return  # (a line of what's proposed: its marker isn't the page's to type after)
         if (hit := self._item_at(ins.get_line())) is not None and ins.get_line_offset() < hit[1].end():
             to = hit[0].copy()
             to.forward_chars(hit[1].end())
@@ -4090,7 +4112,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         if not ok:
             return None
         off, text = it.get_offset(), self.text()
-        if (e := self._proposal_at(off)) is not None:
+        if (e := self._green_at(off)) is not None:
             yes, no = self._glyphs(e)
             if yes[0] <= off < yes[1] or no[0] <= off < no[1]:
                 return ("accept" if off < yes[1] else "reject"), e
@@ -4408,18 +4430,25 @@ class DiaryEditor(Gtk.Box, FindInText):
         return False
 
     def _moved_heading(self, keyval, shift):
-        """_heading_key, with what's proposed taken out first if it's on a heading's line it could move (or the
-        selection's): moved with what's proposed in it, that would be the page's."""
+        """_heading_key, with what's proposed taken out first wherever it could move lines (Up or Down: a heading's, a
+        list item's; Left or Right: on a heading's line): lines moved with what's proposed in them would make that the
+        page's. Nothing done: the caret and the selection where they were."""
         if not self._greens() or keyval not in (Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_Left, Gdk.KEY_Right):
             return self._heading_key(keyval, shift)
-        ins, sel = (self.buf.get_iter_at_mark(m).get_line() for m in (self.buf.get_insert(),
-                                                                       self.buf.get_selection_bound()))
-        lines = self.text().split("\n")
-        if not any(re.match(r"#{1,6}\s", lines[n]) for n in range(min(ins, sel), max(ins, sel) + 1)):
-            return self._heading_key(keyval, shift)
+        marks = (self.buf.get_insert(), self.buf.get_selection_bound())
+        if keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
+            ins, sel = (self.buf.get_iter_at_mark(m).get_line() for m in marks)
+            lines = self.text().split("\n")
+            if not any(re.match(r"#{1,6}\s", lines[n]) for n in range(min(ins, sel), max(ins, sel) + 1)):
+                return self._heading_key(keyval, shift)
+        ins, sel = (self.kept_offset(self.buf.get_iter_at_mark(m).get_offset()) for m in marks)
         with self._greens_out():
             done = self._heading_key(keyval, shift)
-        self._changed(self.buf) if done else self._highlight()
+        if done:
+            self._changed(self.buf)
+        else:
+            self.buf.select_range(*(self.buf.get_iter_at_offset(self.buf_offset(k, past=False)) for k in (ins, sel)))
+            self._highlight()
         return done
 
     def _heading_key(self, keyval, shift):
@@ -4612,6 +4641,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         return self._delete_span(b - 1, b) if last else self._delete_span(a, a + 1)
 
     def _delete_span(self, a, b):
+        if any(a < y and b > x for x, y in self._greens()):
+            return True  # (what's proposed, in a link or beside it: not the page's to delete)
         self.buf.begin_user_action()
         self.buf.delete(self.buf.get_iter_at_offset(a), self.buf.get_iter_at_offset(b))
         self.buf.end_user_action()
@@ -7265,10 +7296,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
             return
         self.tabs.show(editor.tab_key)
         buf = editor.buf
-        end = buf.get_end_iter()
         text = editor.kept()
-        buf.insert(end, ("" if not text or text.endswith("\n") else "\n") + f"- {ref_text(surface, label)}: ")
-        buf.place_cursor(buf.get_end_iter())
+        at = editor.buf_offset(len(text), past=False)  # (the page's end: before an addition proposed there)
+        written = ("" if not text or text.endswith("\n") else "\n") + f"- {ref_text(surface, label)}: "
+        buf.insert(buf.get_iter_at_offset(at), written)
+        buf.place_cursor(buf.get_iter_at_offset(at + len(written)))
         editor.view.grab_focus()
         editor.follow_soon()
 

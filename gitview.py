@@ -37,7 +37,7 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
     _git,
 )
 from widgets import (  # noqa: E402,F401
-    RefreshButton, WorkerPool, discard, full_time, keep_times, on_label_link, pretty_path, ref_epoch, ref_pr_info,
+    LinkLabel, RefreshButton, WorkerPool, chip_markup, discard, full_time, keep_times, on_label_link, pretty_path, ref_epoch, ref_pr_info,
     say_time, sel_label, themed_icon, toast,
 )
 from widgets import empty_label  # noqa: E402
@@ -99,6 +99,9 @@ GIT_LANES = ("#3584e4", "#2ec27e", "#e66100", "#9141ac", "#c88800", "#e01b24", "
 
 
 GIT_CHAT = "#7f77dd"     # a commit this chat made: its dot
+
+
+GIT_CHIP_CHARS = 24      # a branch's name in a log row's chip, at most (longer: its start … its end)
 
 
 GIT_OFF_PEAK = (8, 20)   # commits outside these hours (local time) are off-peak
@@ -829,6 +832,17 @@ def git_chat_commit(chat, sha):
     return next((e for short, e in chat.get("commits", {}).items() if sha.startswith(short)), None)
 
 
+def git_ref_chip(ref):
+    """A ref as git's log names it (HEAD -> main, origin/main, tag: v1) as a log row's chip (widgets.chip_markup): a
+    long name cut short in the middle (GIT_CHIP_CHARS), its start and its end what tell branches apart."""
+    name = ref.removeprefix("tag: ").replace("HEAD -> ", "")
+    kind = "tag" if ref.startswith("tag: ") else "head" if ref.startswith("HEAD") else \
+        "remote" if "/" in ref and ref.split("/")[0] in ("origin", "upstream") else "local"
+    if len(name) > GIT_CHIP_CHARS:
+        name = name[:GIT_CHIP_CHARS // 2 - 1] + "…" + name[-(GIT_CHIP_CHARS - GIT_CHIP_CHARS // 2):]
+    return chip_markup(name, kind)
+
+
 class GitLane(Gtk.Widget):
     """A row's slice of the commit graph (git_lanes): the lanes passing it, those ending at its dot and those its
     parents go on in; every commit a plain dot, a violet one if this chat made it."""
@@ -1406,24 +1420,16 @@ class GitPage(Gtk.Stack):
                                 custom_image=AVATARS.pictures.get(c["email"].lower()))
         box.append(row.avatar)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=4, margin_bottom=4)
-        first = Gtk.Box(spacing=4)
-        for ref in c["refs"]:
-            first.append(self.chip(ref))
-        if made:
-            chip = Gtk.Label(label="this chat")
-            chip.add_css_class("git-ref")
-            chip.add_css_class("chat")
-            first.append(chip)
-        for chip in iter(first):  # (with the subject's first line, however many lines it takes)
-            chip.set_valign(Gtk.Align.START)
-        # (two lines, then …: a pull request's name is often what a commit's called, and seldom fits on one. Its
-        # natural width one character, so a long one never widens the panel: it wraps in what the panel has)
-        subject = Gtk.Label(label=c["title"], xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
-                            lines=2, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1, valign=Gtk.Align.START)
+        # (one line of text, as a paragraph's: the branches' chips first, then the subject, its second line under the
+        # chips. Two lines, then …: a pull request's name is often what a commit's called, and seldom fits on one. Its
+        # natural width a character's, so a long one never widens the panel: it wraps in what the panel has)
+        chips = [git_ref_chip(ref) for ref in c["refs"]] + [chip_markup("this chat", "chat")] * bool(made)
+        row.line = LinkLabel(xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2,
+                             ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+        row.line.set_markup(" ".join(chips + [html.escape(c["title"], quote=False)]))
         if own:
-            subject.add_css_class("git-own")
-        first.append(subject)
-        text.append(first)
+            row.line.add_css_class("git-own")
+        text.append(row.line)
         meta = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         meta.add_css_class("caption")
         say_time(meta, c["at"], after=f" · {html.escape(c['author'])}" + git_delta_markup(c), markup=True)
@@ -1445,16 +1451,6 @@ class GitPage(Gtk.Stack):
                              (f"\n{c['subject']}" if c["title"] != c["subject"] else "") +  # (a pull request's name)
                              (f"\nMade by this chat: {made['subject']}" if made else ""))
         return row
-
-    @staticmethod
-    def chip(ref):
-        label = ref.removeprefix("tag: ").replace("HEAD -> ", "")
-        chip = Gtk.Label(label=label, ellipsize=Pango.EllipsizeMode.END, max_width_chars=22)
-        chip.add_css_class("git-ref")
-        chip.add_css_class("tag" if ref.startswith("tag: ") else "head" if ref.startswith("HEAD") else
-                           "remote" if "/" in ref and not ref.startswith("HEAD") and ref.split("/")[0] in ("origin", "upstream")
-                           else "local")
-        return chip
 
     def load_more(self):
         res, skip = self.state, len(self.commits)

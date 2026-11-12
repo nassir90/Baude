@@ -118,8 +118,9 @@ class Updater:
     """The app's look at git every CHECK_S (look, in a thread), and the restart once a new version's found and
     idle() says so: restart(note), note what the new one says it was updated by (restarted)."""
 
-    def __init__(self, module, idle, restart, root=HERE, every=CHECK_S):
+    def __init__(self, module, idle, restart, root=HERE, every=CHECK_S, blocked=None):
         self.module, self.idle, self.restart, self.root = module, idle, restart, root
+        self.blocked = blocked or (lambda _waiting: None)  # (told while a version found waits on idle: its bar)
         self.started = STARTED if root == HERE else git(root, "rev-parse", "HEAD", timeout=5)  # (this process's code)
         self.ready = None  # (a commit found to restart onto, waiting for idle)
         self.looking = False
@@ -144,8 +145,10 @@ class Updater:
         """A new version found: restarted onto it once the app's idle (and still meant to update)."""
         if self.ready is None or not enabled():
             self.ready = None
+            self.blocked(False)
             return False
         if not self.idle():
+            self.blocked(True)
             return True
         self.restart({"from": self.started, "to": self.ready, "commits": new_commits(self.started, self.ready, self.root)})
         return False

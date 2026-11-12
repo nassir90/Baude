@@ -5820,6 +5820,40 @@ def _card_status(state):
 
 TASK_ENDINGS = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
+# What a restart waits for: a command running (real work, a process of its own), not the model writing (a turn cut short
+# there is resumed from its transcript, and said so: show_cut). A call of one of these till its result (a subagent's
+# too), and a background task that isn't a subagent till its end.
+COMMAND_TOOLS = ("Bash", "PowerShell")
+CUT_CONTINUE = "Continue where you left off: a restart cut your last turn short."
+
+
+def command_what(inp):
+    """A command call's input, as a restart's wait says it: its description, else its command's first line."""
+    what = (inp or {}).get("description") or ((inp or {}).get("command") or "").strip().splitlines()[:1]
+    what = what if isinstance(what, str) else (what[0] if what else "a command")
+    return what if len(what) <= 80 else what[:79] + "…"
+
+
+def track_commands(commands, msg):
+    """commands ({id: what}) as claude's msg leaves them (track_commands of a Desktop chat's claude left mid-turn)."""
+    t, content = msg.get("type"), (msg.get("message") or {}).get("content")
+    if t == "assistant" and isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_use" and \
+                    str(b.get("name") or "").split("__")[-1] in COMMAND_TOOLS:
+                commands[b.get("id")] = command_what(b.get("input"))
+    elif t == "user" and isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                commands.pop(b.get("tool_use_id"), None)
+    elif t == "system" and msg.get("subtype") == "task_started" and msg.get("task_type") != "local_agent":
+        commands[f"task:{msg.get('task_id')}"] = msg.get("description") or "a background task"
+    elif t == "system" and msg.get("subtype") == "task_notification":
+        commands.pop(f"task:{msg.get('task_id')}", None)
+    elif t == "result":  # (a turn's calls are done by its end: what's left running is a background task)
+        for k in [k for k in commands if not str(k).startswith("task:")]:
+            commands.pop(k)
+
 
 def api_error_label(text):
     """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
@@ -8015,6 +8049,9 @@ class SessionSidebar(Gtk.Box):
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
+        # (at the foot, under a rule from the chats: Update Available, while a new version waits: show_update_bars)
+        self.update_bar = widgets.UpdateBar(lambda: win.get_application().update_now(win))
+        self.append(self.update_bar)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.list.add_controller(keys)
@@ -10852,6 +10889,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         fixes_page = self.tabs.get(("fixes",))
         return {
             "cwd": self.run_cwd, "session_id": self.session_id, "viewing": self.resume_pending,
+            "cut": bool(self.busy and self.remote is None and self.proc is not None),  # (Baude's claude: cut here)
             "remote": self.remote.key if self.remote is not None else None,  # (a network session's server)
             "at_bottom": self.stick_bottom,
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
@@ -10868,6 +10906,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         }
 
     def apply_restart_state(self, state):
+        if state.get("cut"):  # (a Desktop chat's turn this restart cut short: said once it's drawn, show_cut)
+            self.cut_pending = time.time()
         for sid, place in (state.get("places") or {}).items():
             self.PLACES.setdefault(sid, place)
         if state.get("size") and not state.get("maximized"):
@@ -10901,18 +10941,76 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.get_application().restart()
 
     def idle(self):
-        """Nothing a restart would cut short or take from under you (update.Updater): no turn running or waiting on
-        you (here, or in a chat left mid-turn; a host's chat's would go on, but isn't restarted under you), no task of its running, no side question being answered or with a follow-up written to it (those don't come
-        back; what's typed elsewhere does: restart_state), no dialog or capture open, and quiet (not the window you're in,
-        or nothing typed, clicked or scrolled in it for a minute)."""
+        """Nothing a restart would cut short or take from under you (update.Updater): restart_blockers."""
+        return not self.restart_blockers()
+
+    def restart_blockers(self):
+        """What a restart of Baude waits for in this window, said (the Update Available bar's tooltip), [] for none: a
+        command of Baude's own claude's running (a Desktop chat's; a host's chats go on through a restart, commands and
+        all), a side question's follow-up being written (that doesn't come back; what's typed elsewhere does:
+        restart_state), a dialog or a capture open, and you at it (the window you're in, something typed, clicked or
+        scrolled in it in the last minute). Not the model writing: a turn cut short there is resumed (show_cut)."""
+        why = [f"running: {w}" for w in self.own_commands()]
+        if any(sq.follow.get_text().strip() for sq in self.panel.side_questions()):
+            why.append("a side question's reply being written")
         bar = getattr(self, "capture_bar", None)
-        # (a host's chat's turn goes on there through a restart, but one isn't made under you while it runs)
-        return (not self.busy and not self.waiting_cards and not (self.proc is not None and self.running_tasks())
-                and not self.background  # (a Desktop chat left mid-turn, its claude Baude's: a restart would cut it short)
-                and self.get_visible_dialog() is None and not (bar is not None and bar.get_reveal_child())
-                and not any(getattr(sq, "busy", False) or sq.follow.get_text().strip()
-                            for sq in self.panel.side_questions())
-                and update.quiet(self))  # (the sidebar's dot, session_state, says the same of the first three)
+        if self.get_visible_dialog() is not None or (bar is not None and bar.get_reveal_child()):
+            why.append("a dialog open")
+        if not update.quiet(self):
+            why.append("you, using this window")
+        return why
+
+    def own_commands(self):
+        """The commands Baude's own claudes are running for this window (a Desktop chat's, here or left mid-turn): what a
+        restart of Baude would stop. A host's chats' aren't: they go on through it."""
+        out = []
+        if self.proc is not None and self.remote is None:
+            out += [command_what(c.input) for c in self.tool_cards.values()
+                    if c.base in COMMAND_TOOLS and c.state == "running"]
+            out += [t.get("description") or "a background task" for t in self.running_tasks()
+                    if t.get("task_type") != "local_agent"]
+        for p in self.background.values():
+            out += list((getattr(p, "commands", None) or {}).values())
+        return out
+
+    # ---- a turn cut short by a restart (this chat's host's, or this Baude's for a Desktop chat): said at the chat's
+    # end, with Continue, till something's sent to it
+    def cut_state(self):
+        """When a turn of this chat's was cut short by a restart, or None."""
+        if self.remote is not None:
+            return (self.remote.sessions.get(self.session_id) or {}).get("cut")
+        return getattr(self, "cut_pending", None)
+
+    def show_cut(self, cut=None):
+        """The line at the chat's end that says a restart cut its last turn short (cut: when, as cut_state; None, gone),
+        put last again if it's already there (what's drawn after it, a chunk of the chat, is above it)."""
+        row = getattr(self, "cut_row", None)
+        if row is not None and row.get_parent() is not None:
+            row.get_parent().remove(row)
+        self.cut_row = None
+        if not cut:
+            return
+        row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
+        row.add_css_class("cut-note")
+        said = Gtk.Label(label="Cut short by a restart", xalign=0)
+        said.add_css_class("dim-label")
+        go = Gtk.Button(label="Continue", tooltip_text=f"Send “{CUT_CONTINUE}”")
+        go.connect("clicked", lambda *_: self.continue_cut())
+        row.append(said)
+        row.append(go)
+        self.transcript.append(row)
+        self.cut_row = row
+
+    def continue_cut(self):
+        """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""
+        self.cut_pending = None
+        self.show_cut(None)
+        atts, self.attachments = self.attachments, []
+        if self.resume_pending:
+            self.begin_resume()
+        self.send_text(CUT_CONTINUE)
+        self.attachments = atts + self.attachments
+        self.refresh_attach_strip()
 
     # ---- helpers
     def short_cwd(self):
@@ -11900,12 +11998,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         p.owner, p.key, p.mode, p.model = self, self.session_id or f"new-{id(p)}", self.mode, self.model
         p.path = (find_session(self.session_id) or {}).get("path") if self.session_id else None
         p.on_msg, p.on_exit = self.on_background_msg, lambda _code, p=p: self.let_go_background(p)
+        p.commands = {f"c{i}": w for i, w in enumerate(self.own_commands())}  # (running as it's left: track_commands)
         self.background[p.key] = p
         self.waiting_cards.clear()
         self.set_busy(False)
 
     def on_background_msg(self, proc, msg):
         t, req = msg.get("type"), msg.get("request") or {}
+        track_commands(proc.commands, msg)
         if t != "stream_event":
             own_writes(proc)  # (what it writes to its transcript meanwhile is Baude's, not another program's)
         if t == "control_request" and req.get("subtype") != "can_use_tool":
@@ -11968,6 +12068,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
+        self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None
         self.total_cost = 0.0
@@ -12147,6 +12248,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def send_text(self, text):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
         by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's)."""
+        self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
+        self.show_cut(None)
         buf = self.input.get_buffer()
         if self.proc is None and self.remote is None and not self.runs_here():
             took = self.take_up()
@@ -14035,6 +14138,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     card.set_state("interrupted")
             if getattr(self, "history_final", False):  # (and its background tasks that never ended, as when it opened)
                 self.settle_tasks()
+                self.show_cut(self.cut_state())
         for w in [w for w in job.hidden if w.get_parent() is not job.slot]:  # (a call gone into a run's group: the
             w.set_visible(True)                                               # group's hidden instead)
             job.hidden.remove(w)
@@ -14202,6 +14306,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 card.set_state("interrupted")
         if final:
             self.settle_tasks()
+            self.show_cut(self.cut_state())
 
     def settle_tasks(self):
         """Background tasks (commands, subagents) a finished session's transcript never heard the end of: interrupted,
@@ -14307,6 +14412,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if getattr(self, "let_go_done", False):
             return
         self.check_host_version()
+        if (app := self.get_application()) is not None:
+            app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)
         if self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
@@ -14324,6 +14431,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.start_remote_proc()  # (its server's there again, or at last: what it asks, its models)
         self.update_banner()
         self.update_session_state()
+        if bool(self.cut_state()) != (getattr(self, "cut_row", None) is not None):
+            self.show_cut(self.cut_state())
 
     def remote_view(self):
         """A network session with nothing of its server's attached (gone, or not there): watched from its mirror again,
@@ -14989,7 +15098,7 @@ class BaudeApp(Adw.Application):
         if restore:
             update.restarted(win, restore, "Baude")
         if self.updater is None and not TRACE:
-            self.updater = update.Updater("baude", self.idle, self.restart)
+            self.updater = update.Updater("baude", self.idle, self.restart, blocked=self.update_waiting)
 
     def windows(self):
         """Baude's windows, the one you were in last first."""
@@ -14998,6 +15107,55 @@ class BaudeApp(Adw.Application):
     def idle(self):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
         return all(w.idle() for w in self.windows())
+
+    # ---- Update Available: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
+    # or This Mac's host process's (on its commands: info's update)
+    def update_waiting(self, waiting):
+        self.update_held = waiting
+        self.show_update_bars()
+
+    def update_reasons(self):
+        """What the updates waiting wait for, said; None if none is waiting."""
+        why, waiting = [], False
+        if getattr(self, "update_held", False) and self.updater is not None and self.updater.ready:
+            waiting = True
+            why += [w for win in self.windows() for w in win.restart_blockers()]
+        host = local_host()
+        held = (host.info.get("update") if host is not None else None) or None
+        if held:
+            waiting = True
+            why += [f"{THIS_MACHINE}'s host process: {c.get('what') or 'a command'}"
+                    for c in held.get("waiting") or []] or [f"{THIS_MACHINE}'s host process"]
+        return list(dict.fromkeys(why)) if waiting else None
+
+    def show_update_bars(self):
+        why = self.update_reasons()
+        for w in self.windows():
+            if (bar := getattr(w.sidebar, "update_bar", None)) is not None:
+                bar.say(why)
+
+    def update_now(self, win):
+        """The bar clicked: restarted now, what's running stopped (said first, and asked)."""
+        why = [w for w in (self.update_reasons() or []) if not w.startswith("you, using")]
+        dlg = Adw.AlertDialog(heading="Restart now?", default_response="cancel", close_response="cancel",
+                              body="The new version is picked up now. "
+                                   + ("These are stopped, and their chats can be continued after:\n"
+                                      + "\n".join(f"• {w}" for w in why) if why else "Nothing's running."))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("go", "Restart Now")
+        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE if why else Adw.ResponseAppearance.SUGGESTED)
+
+        def answered(_d, r):
+            if r != "go":
+                return
+            host = local_host()
+            if host is not None and host.info.get("update"):
+                host.request({"op": "quit"})  # (it comes back as a chat wants it: local_server)
+            if self.updater is not None and self.updater.ready:
+                u = self.updater
+                self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})
+        dlg.connect("response", answered)
+        dlg.present(win)
 
     def restart(self, updated=None):
         """This process replaced by a fresh baude (a new version picked up) that puts back every window as it was

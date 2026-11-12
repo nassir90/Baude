@@ -1185,7 +1185,7 @@ def models_server():
     env = {**os.environ, "BAUDE_APPLE_CLAUDE": os.path.join(d, "apple"), "BAUDE_PI_CLAUDE": os.path.join(d, "pi"),
            "BAUDE_PI": os.path.join(d, "agent"), "HF_HUB_CACHE": hub, "FAKE_CLAUDE_SESSION_IDS": "1",
            "FAKE_CLAUDE_TRANSCRIPTS": "1"}
-    proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(T.HERE), "baude_server.py"), "serve",
+    proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(T.HERE), "baude_headless.py"), "serve",
                              "--no-advertise", "--group", "Lab", "--name", "gpu-mac", "--state", os.path.join(d, "state"),
                              "--socket", os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "gpu-mac.sock")],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True)
@@ -1289,7 +1289,7 @@ def _(app):
     win = network_window(app)
     dest, command = win.ask_add_host()
     dest.set_text("lab@build-box.lan")
-    command.set_text("~/src/Baude/baude_server.py")
+    command.set_text("~/src/Baude/baude_headless.py")
     return win
 
 
@@ -1375,7 +1375,7 @@ def _(app):
 def _(app):
     win = network_window(app, None)
     r = studio(win)
-    win.ask_host_command(r.key).set_text("~/src/Baude/baude_server.py")
+    win.ask_host_command(r.key).set_text("~/src/Baude/baude_headless.py")
     return win
 
 

@@ -7577,7 +7577,7 @@ def remote_info(s):
     return {"id": s["id"], "path": r.mirror(s["id"]), "title": s.get("title"), "cwd": s.get("cwd"),
             "folder": s.get("cwd"), "worktree": None, "mtime": s.get("updated") or when, "said": when,
             "prompts": s.get("prompts") or 0, "source": f"{r.info.get('name') or r.host}, on the network", "copies": 0,
-            "remote": r, "remote_state": s.get("state"), "dead": r.state == "dead",
+            "remote": r, "remote_state": s.get("state"), "dead": r.state == "dead" and not r.mine,
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode")}
 
 
@@ -13983,6 +13983,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         r = info["remote"]
         self.opening_remote = info["id"]
         if r.state != "alive":
+            if r.mine:  # (this machine's host process, gone after a long idle: started again, and taken up then)
+                self.local_server(lambda _r: None)
             self.switch_to(lambda: self.resume_session(info))
             return
 
@@ -14100,7 +14102,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def ask_add_host(self):
         """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
         Tailscale), by where ssh goes: an alias in ~/.ssh/config, a host, or user@host; and its host process's command
-        there, if baude_server.py isn't on its PATH. Kept from then on, reached or not."""
+        there, if baude_headless.py isn't on its PATH. Kept from then on, reached or not."""
         dest = Gtk.Entry(placeholder_text="user@host, or an ssh alias", activates_default=True, width_chars=30)
         command = Gtk.Entry(placeholder_text=f"{baudelib.wire.SSH_COMMAND}, on its PATH", activates_default=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -14128,7 +14130,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def ask_host_command(self, key):
         """A host's right-click → Host Command…: the command its host process is started by there (ssh's
-        `<command> connect`), if baude_server.py isn't on its PATH or isn't the one; none: what it says, or PATH's."""
+        `<command> connect`), if baude_headless.py isn't on its PATH or isn't the one; none: what it says, or PATH's."""
         r = next((r for r in network().remotes() if host_key(r) == key), None)
         if r is None:
             return
@@ -14247,7 +14249,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def local_server(self, then, wait_s=20):
         """This machine's host process, for New Session Here on it: then(it), on the main loop, once it's there. The
-        one that's there, else one started: baude_server.py, in a process of its own that goes on after Baude does
+        one that's there, else one started: baude_headless.py, in a process of its own that goes on after Baude does
         (its output in the network folder's server.log; one that finds another already running just stops: there's
         one each). Waited for once, for every window that wants it."""
         net = network()
@@ -14261,7 +14263,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         try:
             os.makedirs(baudelib.client.network_home(), exist_ok=True)
             with open(os.path.join(baudelib.client.network_home(), "server.log"), "ab") as log:
-                subprocess.Popen([sys.executable, os.path.join(here, "baude_server.py"), "serve"],
+                subprocess.Popen([sys.executable, os.path.join(here, "baude_headless.py"), "serve"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
         except OSError as e:
             self.note(f"couldn't start {THIS_MACHINE}'s host process: {e}")

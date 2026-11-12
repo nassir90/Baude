@@ -76,6 +76,12 @@ class Remote:
         return wire.is_local(self.where)
 
     @property
+    def mine(self):
+        """Is it this machine's own host process (its socket, wire.socket_path()): started when it's wanted, so one
+        that isn't running is asleep, not gone?"""
+        return self.where.get("via") == "local"
+
+    @property
     def host(self):
         """Where it is, as people say it: user@host, or this machine."""
         return wire.said_where(self.where)

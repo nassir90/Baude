@@ -44,21 +44,51 @@ python3 record.py            # Record
 
 ## Sessions on the network
 
-`baude_server.py` runs Claude Code sessions headless on a machine, for Baude to start, watch and steer from that machine
-or another. It needs only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`,
-Apple's with `apple-claude` once built, and pi's with `pi-claude` (`baude_server.py models` lists them). There's one for
-each user on a machine, its host process. It listens only on a Unix socket in a folder of its user's own, with no port
-on the network. Baude on the same machine uses the socket; Baude on another reaches it over ssh, as
-`ssh HOST baude_server.py connect`, which carries the protocol between ssh and the socket and starts the host process if
-it isn't running. So ssh decides who may: Baude never asks for a password (`BatchMode`), and uses your keys or agent as
-`~/.ssh/config` has them, with the host already in `known_hosts`. Put `baude_server.py` on each host's `PATH`, or give
-Baude its path there (right-click the host → Host Command…).
+`baude_headless.py` is a machine's host process for Claude Code sessions: one for each user, which owns that user's
+sessions there and their claude processes, for Baude to start, watch and steer from that machine or another. It needs
+only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`, Apple's with
+`apple-claude` once built, and pi's with `pi-claude` (`baude_headless.py models` lists them). It listens only on a Unix
+socket in a folder of its user's own, with no port on the network. Baude on the same machine uses the socket, and reads
+its sessions' transcripts where they are; Baude on another reaches it over ssh, as `ssh HOST baude_headless.py
+connect`, which carries the protocol between ssh and the socket and starts the host process if it isn't running. So
+ssh decides who may: Baude never asks for a password (`BatchMode`), and uses your keys or agent as `~/.ssh/config` has
+them, with the host already in `known_hosts`. Put `baude_headless.py` on each host's `PATH`, or give Baude its path
+there (right-click the host → Host Command…).
+
+Heads start the host process when they need it, so there's nothing to run by hand. With no head attached it does
+nothing: no timers, a session's claude stopped once it's been idle half an hour, and the process itself gone after four
+hours with nothing running (`--idle-minutes`, `--exit-after-hours`). On macOS, at the screen, it's an item in the menu
+bar, with no Dock icon: how many sessions it has and which are running, and Quit. Quitting it (or `baude_headless.py
+quit`, or SIGTERM) stops its claudes, keeping their transcripts, so their sessions are resumed next time.
+
+`baude_oneshot.py` starts one session in a host process, attaches, and streams what its claude says to stdout as JSON
+lines, as `claude -p --output-format stream-json` does. The session goes on in the host process, so Baude lists it,
+under its host and group, and can be opened there.
 
 ```bash
-python3 baude_server.py --group Lab      # this machine's host process, its sessions in the group Lab
-python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --model opus --effort high
-python3 baude_server.py list --host lab@lab-mac.local
+python3 baude_oneshot.py --cwd ~/src/app --model opus --effort high "Run the benchmarks"
+python3 baude_oneshot.py --host lab@lab-mac.local --group Lab "Bisect the flaky login test"
+python3 baude_oneshot.py --resume SESSION "Now fix it"   # its id: the first line's session.id
+python3 baude_headless.py list --host lab@lab-mac.local
 ```
+
+Its first line is `{"type": "baude", "event": "started", "session": {...}}`, with the session's `id`; then claude's
+lines, till the turn's `result` (`--follow`: till claude exits). With `--input`, each line on stdin is a stream-json
+message for claude, a user message or a `control_response` answering a permission it asks for; without it, what it
+asks is denied. It takes claude's per-session options too: `--system`, `--add-dir`, `--allow`, `--deny`, `--fork-from`.
+
+Moving to them, from `baude_server.py`:
+
+- `baude_server.py serve` is `baude_headless.py` (or nothing: a head starts it). It no longer takes `--port` or
+  `--bind`, and wants no token.
+- `baude_server.py start --prompt TEXT …` is `baude_oneshot.py … TEXT`, with the same options. It waits for the turn
+  and prints it, rather than printing the session's id and leaving: `baude_oneshot.py … TEXT | head -1` gives the id.
+- `baude_server.py servers` is `baude_headless.py hosts`; `list`, `models` and `stop` are `baude_headless.py`'s, with
+  `--host DEST` (an ssh destination) instead of `--server HOST:PORT`.
+- A client of `baudelib/wire.py` connects with `wire.connect_local()` on the same machine, or `wire.connect_ssh(DEST)`
+  from another, instead of `wire.connect(host, port)`: the protocol's the same. `baudelib.hosts.reach(DEST)` starts
+  this machine's host process first if it isn't running. Or it runs `baude_oneshot.py` and reads its stdout.
+- On another machine, put `baude_headless.py` on `PATH` where `baude_server.py` was, for ssh to find.
 
 The sidebar lists every host's sessions: This Mac's own chats (Claude Code's and Claude Desktop's, and its host
 process's) with other hosts'. ⋮ beside its search → Hosts and Groups pick which are listed: a click lists only that one,

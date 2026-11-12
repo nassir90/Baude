@@ -13,7 +13,7 @@ from baudelib.wire import SERVICE
 MDNS_ADDR, MDNS_PORT = "224.0.0.251", 5353
 PTR, TXT, SRV, A, ANY = 12, 16, 33, 1, 255
 TTL = 120          # how long what's said holds
-ANNOUNCE_S = 60    # a server says it again this often
+ANNOUNCE_S = 300   # a server says it again this often (and else sleeps, but to answer who asks)
 QUERY_S = 30       # a browser asks again this often
 CHECK_S = 2        # what's said comes straight back (IP_MULTICAST_LOOP): nothing in this long, and the socket's deaf
 
@@ -176,13 +176,14 @@ class _Port:
         except OSError:
             self.heard = False  # (opened again before it next speaks)
 
-    def _receive(self):
-        """(packet, who sent it), or None: nothing within a second, or nothing open to hear it on."""
+    def _receive(self, timeout=1.0):
+        """(packet, who sent it), or None: nothing within timeout seconds, or nothing open to hear it on."""
         sock = self.sock
         if sock is None:
-            self.stopped.wait(1)
+            self.stopped.wait(timeout)
             return None
         try:
+            sock.settimeout(max(0.05, timeout))
             data, addr = sock.recvfrom(9000)
         except socket.timeout:
             return None
@@ -243,7 +244,9 @@ class Advertiser(_Port):
             elif self.deaf():
                 self._reopen()
                 self._say()
-            got = self._receive()
+            # (asleep till it's next to speak, or to see it's heard itself, but for a question: nothing done unasked)
+            due = min(next_say, self.spoke + CHECK_S + 0.1 if self.spoke is not None and not self.heard else next_say)
+            got = self._receive(due - time.monotonic())
             if got is None:
                 continue
             try:

@@ -28,6 +28,8 @@ from baudelib import claude, models, transcripts, wire
 from baudelib.discovery import Advertiser
 
 IDLE_S = 30 * 60
+EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
+CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
 RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
@@ -53,6 +55,29 @@ def _shown(value, depth=0):
 
 def state_home():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "server")
+
+
+def lock_path(state_dir=None):
+    """The lock a host process holds while it runs (one each): in its state folder, named for this machine."""
+    return os.path.join(state_dir or state_home(), f"host-{wire.safe_name(socket.gethostname().split('.')[0])}.lock")
+
+
+def running_pid(state_dir=None):
+    """The pid of the host process running here, by its lock (held: one is), else None."""
+    try:
+        fd = os.open(lock_path(state_dir), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            return None  # (not held: none's running)
+        except OSError:
+            pass
+        text = os.read(fd, 32).decode(errors="replace").strip()
+        return int(text) if text.isdigit() else None
+    finally:
+        os.close(fd)
 
 
 def _write_json(path, data):
@@ -179,21 +204,28 @@ class Server:
     (True, False, or None: as it was last told, else not; remembered in its state)."""
 
     def __init__(self, state_dir=None, group=None, name=None, socket_path=None, exe=None, advertise=None,
-                 idle_s=IDLE_S, log=None, env=None):
+                 idle_s=IDLE_S, log=None, env=None, exit_s=EXIT_S, on_change=None):
         self.state_dir = state_dir or state_home()
-        self.exe, self.idle_s, self.env = exe, idle_s, env  # (env: more for its claudes)
+        self.exe, self.idle_s, self.env, self.exit_s = exe, idle_s, env, exit_s  # (env: more for its claudes; exit_s 0: never)
+        self.on_change = on_change or (lambda: None)  # (what it lists changed: a menu bar's item, say; on its own thread)
+        self.woken = threading.Event()  # (_watch: someone's attached, a claude started or stopped)
         self.log = log or (lambda text: print(f"baude-server: {text}", file=sys.stderr, flush=True))
         # one each: a lock in its state folder held while it runs, taken before anything's read or written there
         # (one beside the socket would be lost with the socket's folder, which a session's end can take: logind's)
         os.makedirs(self.state_dir, mode=0o700, exist_ok=True)
         host = socket.gethostname().split(".")[0]
-        self.lock_file = os.open(os.path.join(self.state_dir, f"host-{wire.safe_name(host)}.lock"),
-                                 os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        try:
-            fcntl.flock(self.lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(self.lock_file)
-            raise AlreadyRunning(f"a host process is running here already ({self.state_dir})") from None
+        self.lock_file = os.open(lock_path(self.state_dir), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        for tries in range(4):  # (a head looking at it, running_pid, holds it for a moment: not one running)
+            try:
+                fcntl.flock(self.lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if tries == 3:
+                    os.close(self.lock_file)
+                    raise AlreadyRunning(f"a host process is running here already ({self.state_dir})") from None
+                time.sleep(0.05)
+        os.ftruncate(self.lock_file, 0)  # (who's running: running_pid's, for a head to tell it to listen again)
+        os.write(self.lock_file, str(os.getpid()).encode())
         self.lock = threading.RLock()
         self.rids = itertools.count(1)
         me = os.path.join(self.state_dir, "server.json")
@@ -337,11 +369,13 @@ class Server:
         self.listener.close()
 
     def shutdown(self):
-        """Goodbye on the network, every claude stopped, the socket let go. Once."""
+        """Goodbye on the network, every claude stopped (asked to end, then made to: what it's written is kept, and
+        resumed next time), the socket let go. Once."""
         with self.lock:
             if self.stopped.is_set():
                 return
             self.stopped.set()
+        self.woken.set()
         if self.advertiser is not None:
             self.advertiser.stop()
         with self.lock:
@@ -349,7 +383,14 @@ class Server:
             for c in list(self.conns):
                 c.close()
         for p in procs:
-            p.kill()
+            p.stopping = True
+            p.close_stdin()  # (claude, its stdin closed, ends as it would at the end of a pipe)
+        end = time.monotonic() + 5
+        for p in procs:
+            try:
+                p.p.wait(timeout=max(0.1, end - time.monotonic()))
+            except Exception:  # (one that doesn't, in time: made to)
+                p.kill()
         os.write(self.wake_w, b"x")  # (the accept loop sees it's stopped)
         try:
             if os.stat(self.socket_path).st_ino == self.bound:
@@ -365,6 +406,7 @@ class Server:
         conn = Conn(ch)
         with self.lock:
             self.conns.add(conn)
+        self.woken.set()  # (someone's here: watched for them)
         try:
             for msg in ch:
                 try:
@@ -391,7 +433,14 @@ class Server:
             return reply("hello", server=self.info())
         if op == "subscribe":
             conn.subscribed = True
+            with self.lock:  # (as they are now: nothing's been read while nobody was attached)
+                for s in self.sessions.values():
+                    self.rescan(s)
             return reply("sessions", sessions=self.listing(), server=self.info())
+        if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time)
+            reply("quitting")
+            threading.Thread(target=self.shutdown, daemon=True, name="quit").start()
+            return None
         if op == "start":
             return self.start(msg, conn, req)
         if op == "read_file":
@@ -523,6 +572,7 @@ class Server:
             exe=run["exe"] if run["program"] != "claude" else self.exe)
         made.append(s.proc)
         s.used = time.time()
+        self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
 
     def send_user(self, s, content):
@@ -761,15 +811,40 @@ class Server:
         write(False)
 
     def changed(self):
-        """(lock held) Every subscriber gets the sessions as they are now (soon: a burst of changes is one)."""
+        """(lock held) Every subscriber gets the sessions as they are now (soon: a burst of changes is one), and
+        on_change hears, whether anyone's attached or not."""
         self.dirty = True
+        self.woken.set()
 
     def _watch(self):
-        """Twice a second: transcripts that grew are read (what's listed comes from them), and their subagents' files
-        looked at; idle claudes are stopped, and subscribers hear what changed, or a ping."""
-        pinged, checked = 0.0, time.monotonic()
-        while not self.stopped.wait(0.5):
-            if time.monotonic() - checked > 10:
+        """While someone's attached, twice a second: transcripts that grew are read (what's listed comes from them),
+        their subagents' files looked at, and subscribers hear what changed, or a ping. Idle claudes are stopped. While
+        nobody is, it waits, and wakes only when someone comes, a claude starts or stops, the next idle claude's due to
+        stop, (nothing running, for exit_s) the host process is to go, or every CHECK_SOCKET_S, to see its socket's
+        still there (still_bound)."""
+        pinged, quiet, checked = 0.0, time.monotonic(), time.monotonic()
+        while not self.stopped.is_set():
+            with self.lock:
+                attached, running = bool(self.conns), [s for s in self.sessions.values() if s.proc is not None]
+            if attached:
+                quiet = time.monotonic()
+                self.stopped.wait(0.5)
+            else:
+                waits = [s.used + self.idle_s - time.time() for s in running if not s.busy and not s.asks]
+                waits.append(checked + CHECK_SOCKET_S - time.monotonic())
+                if not running and self.exit_s:
+                    waits.append(quiet + self.exit_s - time.monotonic())
+                elif running:
+                    quiet = time.monotonic()  # (something's running: not quiet yet)
+                self.woken.wait(max(1.0, min(waits)))
+                self.woken.clear()
+                if not running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns:
+                    self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
+                    threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
+                    return
+            if self.stopped.is_set():
+                return
+            if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()
             try:
@@ -801,6 +876,7 @@ class Server:
             for c in conns:
                 if c.subscribed:
                     c.send(msg)
+            self.on_change()
         if time.monotonic() - pinged >= wire.PING_S:  # (every connection: a client takes silence for gone)
             pinged = time.monotonic()
             for c in conns:

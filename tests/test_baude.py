@@ -53,6 +53,7 @@ os.environ["BAUDE_NETWORK"] = "0"  # (no servers looked for on the network: a te
 # nor this machine's host process, nor ssh's shared connections: a folder of the run's own (short: a socket's path is)
 os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="bd-", dir="/tmp")
 os.environ["BAUDE_SSH"] = "false"  # (nor anywhere over ssh: a host added by hand is never reached)
+os.environ["BAUDE_MENU_BAR"] = "0"  # (nor an item in the real menu bar, from a host process a test starts)
 # the stand-in claude, run by this Python: its #!/usr/bin/env python3 can find an older one first (macOS's 3.9)
 FAKE_CLAUDE = os.path.join(TMP, "fake-claude")
 with open(FAKE_CLAUDE, "w") as f:

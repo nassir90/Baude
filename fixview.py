@@ -14,7 +14,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 import feedback  # noqa: E402
 import fixes  # noqa: E402
@@ -27,6 +27,7 @@ from widgets import (  # noqa: E402
 POLL_S = 60  # (read again this often while it's shown)
 POLL_WORKING_S = 15  # (and this often while a round's running)
 LIST_WIDTH = 300
+NOTE_FILES = ("feedback.md", "issue.json", "resolution.md")  # (what a note is, of what's in its folder: feedback_items)
 
 
 def status_pill(status):
@@ -104,6 +105,7 @@ class FixesPage(Gtk.Box):
         self.loading, self.busy, self.poll, self.again = False, False, None, None
         self.wanted = None  # (an issue asked for, not read yet: its number, and its page on GitHub: show_issue)
         self.read_at, self.drawn, self.rows_drawn = 0.0, None, None
+        self.note_monitors, self.notes_due, self.notes_gen = {}, None, 0  # (the notes on disk, followed: watch_notes)
         split = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=LIST_WIDTH, shrink_start_child=False,
                                      shrink_end_child=False, resize_start_child=False, resize_end_child=True))
         split.set_start_child(self.make_list())  # (both there from the first: what's read comes into them)
@@ -518,6 +520,7 @@ class FixesPage(Gtk.Box):
         page.show_last_read()
         page.refresh()
         page.poll = GLib.timeout_add_seconds(POLL_WORKING_S, page.tick)
+        page.watch_notes()
 
     @staticmethod
     def _hidden(page):
@@ -527,6 +530,70 @@ class FixesPage(Gtk.Box):
         if page.again is not None:
             GLib.source_remove(page.again)
             page.again = None
+        if page.notes_due is not None:
+            GLib.source_remove(page.notes_due)
+            page.notes_due = None
+        for mon in page.note_monitors.values():
+            mon.cancel()
+        page.note_monitors.clear()
+
+    # ---- the notes saved here, followed as they change: whoever changes one (you, in an editor; a chat, fixing what's
+    # filed where), the list and the one shown change with it, as soon as it's written
+    def watch_notes(self):
+        """Monitors, while it's shown, on the notes' folder (a note added or taken away), each note's folder (a file of
+        it added, taken away or put in another's place) and each of its NOTE_FILES (written over where it is, as most
+        tools write: macOS's monitor of a folder doesn't say so)."""
+        root = feedback.feedback_dir()
+        want = {root: True}
+        try:
+            names = os.listdir(root)
+        except OSError:
+            names = []
+        for name in names:
+            folder = os.path.join(root, name)
+            if os.path.isdir(folder):
+                want[folder] = True
+                want.update((p, False) for f in NOTE_FILES if os.path.isfile(p := os.path.join(folder, f)))
+        for path in set(self.note_monitors) - set(want):
+            self.note_monitors.pop(path).cancel()
+        for path, folder in want.items():
+            if path in self.note_monitors:
+                continue
+            where = Gio.File.new_for_path(path)
+            try:
+                mon = where.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None) if folder else \
+                    where.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            except GLib.Error:
+                continue  # (not followed: read again with the rest, at the next refresh)
+            mon.connect("changed", self.note_touched)
+            self.note_monitors[path] = mon
+
+    def note_touched(self, _mon, what, other, event):
+        """Something of a note's changed: read again in a moment (a burst of writes is one read). A file made, taken away
+        or moved is a new one where it is: its monitor was of the one that was there (watch_notes makes another)."""
+        if event not in (Gio.FileMonitorEvent.CHANGED, Gio.FileMonitorEvent.ATTRIBUTE_CHANGED,
+                         Gio.FileMonitorEvent.CHANGES_DONE_HINT):
+            for path in (f.get_path() for f in (what, other) if f is not None):
+                if os.path.basename(path) in NOTE_FILES and path in self.note_monitors:
+                    self.note_monitors.pop(path).cancel()
+        if self.notes_due is None:
+            self.notes_due = GLib.timeout_add(150, self.notes_changed)
+
+    def notes_changed(self):
+        """The notes as they are now, with the issues as they were last read (nothing asked of GitHub)."""
+        self.notes_due = None
+        if self.get_root() is None:
+            return False
+        self.watch_notes()
+        self.notes_gen += 1
+        self.items = with_notes(self.issues, feedback.feedback_items(), self.repo)
+        if self.items:
+            self.stack.set_visible_child_name("main")
+        self.fill_list()
+        self.draw_detail()
+        self.sync_bar()
+        self.count_in_tab()
+        return False
 
     def tick(self):
         working = any(i["status"] == fixes.WORKING for i in self.items)
@@ -559,7 +626,7 @@ class FixesPage(Gtk.Box):
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self):
-        repo, data, error = None, None, None
+        repo, data, error, gen = None, None, None, self.notes_gen
         try:
             repo = feedback.issues_repo()
             if repo is not None:
@@ -567,9 +634,9 @@ class FixesPage(Gtk.Box):
                 fixes.save_list(repo, data)  # (for the next time it opens: show_last_read)
         except Exception as e:  # noqa: BLE001 (whatever it was: said, and read again next time)
             error = str(e) or type(e).__name__
-        GLib.idle_add(self.was_read, repo, data, feedback.feedback_items(), error)
+        GLib.idle_add(self.was_read, repo, data, feedback.feedback_items(), error, gen)
 
-    def was_read(self, repo, data, notes, error):
+    def was_read(self, repo, data, notes, error, gen=None):
         """What was read shown: with GitHub out of reach, the last issues read, or none if it isn't connected at all, and
         the notes saved here in any case."""
         self.loading = False
@@ -584,6 +651,8 @@ class FixesPage(Gtk.Box):
             self.issues, self.can_write = data["items"], data["can_write"]
         elif repo is None:
             self.issues, self.can_write = [], False
+        if gen is not None and gen != self.notes_gen:  # (a note's changed since they were read: as it is now)
+            notes = feedback.feedback_items()
         self.items = with_notes(self.issues, notes, repo)
         if self.wanted is not None:
             (number, url), self.wanted = self.wanted, None

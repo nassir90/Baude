@@ -178,7 +178,7 @@ class Network:
     def __init__(self, dispatch, home=None, discover=True, addresses=()):
         self.dispatch, self.home = dispatch, home or network_home()
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
-        self.saved_at, self.pending = 0.0, False
+        self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         try:
             with open(os.path.join(self.home, "servers.json"), encoding="utf-8") as f:
                 cache = json.load(f)
@@ -215,6 +215,20 @@ class Network:
                 self.changed()
             else:
                 r.address(service["host"], service["port"])
+
+    def look(self):
+        """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): who's there asked at
+        once, not at the next discovery.QUERY_S, and every server that's gone tried again, not at its next retry."""
+        if time.monotonic() - self.looked < 2:
+            return
+        self.looked = time.monotonic()
+        if self.browser is not None:
+            self.browser.ask_soon()
+        with self.lock:
+            servers = list(self.servers.values())
+        for r in servers:
+            if r.state != "alive":
+                r.wake.set()
 
     def rekey(self, remote, key):
         """A server given by address said who it is: known by its id from now on (one remembered by it, folded in)."""

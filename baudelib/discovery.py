@@ -15,6 +15,7 @@ PTR, TXT, SRV, A, ANY = 12, 16, 33, 1, 255
 TTL = 120          # how long what's said holds
 ANNOUNCE_S = 60    # a server says it again this often
 QUERY_S = 30       # a browser asks again this often
+CHECK_S = 2        # what's said comes straight back (IP_MULTICAST_LOOP): nothing in this long, and the socket's deaf
 
 
 def _name(name):
@@ -123,15 +124,95 @@ def _label(text):
     return "".join(c if c.isalnum() or c in "-" else "-" for c in text)[:60].strip("-") or "baude"
 
 
-class Advertiser:
+class _Port:
+    """mDNS's port, listened on, opened again whenever it may have gone deaf. A socket hears the network it was opened
+    on: one opened before the network was up, on a network the machine has since left (Wi-Fi changed, woken from sleep
+    elsewhere), or before macOS let it use the local network, hears nothing however long it's kept, as if nothing were
+    there till the app's restarted. So it's opened again (at the next time it speaks unasked) when the machine's address
+    has changed, a send failed, or nothing's come in since it last spoke: its own packets come back to it
+    (IP_MULTICAST_LOOP), so silence means it's deaf. Silence for CHECK_S after it speaks, and it's opened again then and
+    there (deaf). One that can't be opened yet is tried again the next time it speaks."""
+
+    def __init__(self):
+        self.sock, self.where, self.heard, self.spoke = None, None, False, None
+        self.stopped = threading.Event()
+        self.lock = threading.Lock()
+
+    def _reopen(self):
+        with self.lock:
+            if self.stopped.is_set():
+                return
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+            self.sock, self.where = None, local_address()
+            try:
+                self.sock = _socket()
+            except OSError:
+                pass  # (no multicast here yet: tried again the next time it speaks)
+
+    def _due(self):
+        """Before it speaks unasked: opened again if it may be deaf (or was never opened). True if it's open."""
+        if self.sock is None or not self.heard or local_address() != self.where:
+            self._reopen()
+        self.heard, self.spoke = False, time.monotonic()
+        return self.sock is not None
+
+    def deaf(self):
+        """Nothing back, not even what it said itself, in the CHECK_S since it last spoke unasked (said once a time)."""
+        if self.spoke is not None and not self.heard and time.monotonic() - self.spoke > CHECK_S:
+            self.spoke = None
+            return True
+        return False
+
+    def _send(self, packet):
+        sock = self.sock
+        if sock is None:
+            return
+        try:
+            sock.sendto(packet, (MDNS_ADDR, MDNS_PORT))
+        except OSError:
+            self.heard = False  # (opened again before it next speaks)
+
+    def _receive(self):
+        """(packet, who sent it), or None: nothing within a second, or nothing open to hear it on."""
+        sock = self.sock
+        if sock is None:
+            self.stopped.wait(1)
+            return None
+        try:
+            data, addr = sock.recvfrom(9000)
+        except socket.timeout:
+            return None
+        except OSError:  # (closed under it: stopped, or opened again)
+            if not self.stopped.is_set() and sock is self.sock:
+                self.heard = False
+                self.stopped.wait(1)
+            return None
+        self.heard = True
+        return data, addr[0]
+
+    def _close(self):
+        self.stopped.set()
+        with self.lock:
+            sock, self.sock = self.sock, None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+class Advertiser(_Port):
     """Says a server is on the network: on start, every ANNOUNCE_S, whenever asked, and goodbye (TTL 0) on stop."""
 
     def __init__(self, name, port, words):
+        super().__init__()
         self.instance = f"{_label(name)}.{SERVICE}"
         self.host = f"{_label(socket.gethostname().split('.')[0])}.local."
         self.port, self.words = port, dict(words)
-        self.stopped = threading.Event()
-        self.sock = None
 
     def packet(self, ttl=TTL):
         answers = [_record(SERVICE, PTR, ttl, _name(self.instance)),
@@ -141,36 +222,32 @@ class Advertiser:
         return struct.pack("!HHHHHH", 0, 0x8400, 0, len(answers), 0, 0) + b"".join(answers)
 
     def start(self):
-        self.sock = _socket()
         threading.Thread(target=self._run, daemon=True, name="mdns-advertise").start()
         return self
 
     def _say(self, ttl=TTL):
-        try:
-            self.sock.sendto(self.packet(ttl), (MDNS_ADDR, MDNS_PORT))
-        except OSError:
-            pass
+        self._send(self.packet(ttl))
 
     def _run(self):
-        self._say()
-        next_say = time.monotonic() + 1  # (said twice at first, a second apart, as RFC 6762 has it)
-        said = 1
+        next_say, said = 0.0, 0
         while not self.stopped.is_set():
             if time.monotonic() >= next_say:
-                self._say()
-                said += 1
+                where = self.where
+                if self._due():
+                    if self.where != where:
+                        said = 0  # (somewhere new: said twice again, as at first)
+                    self._say()
+                    said += 1
+                # (twice at first, a second apart, as RFC 6762 has it)
                 next_say = time.monotonic() + (1 if said < 2 else ANNOUNCE_S)
-            try:
-                data, _addr = self.sock.recvfrom(9000)
-            except socket.timeout:
-                continue
-            except OSError:
-                if self.stopped.is_set():
-                    break
-                time.sleep(1)
+            elif self.deaf():
+                self._reopen()
+                self._say()
+            got = self._receive()
+            if got is None:
                 continue
             try:
-                questions, _ = parse(data)
+                questions, _ = parse(got[0])
             except (ValueError, struct.error, IndexError):
                 continue
             mine = {SERVICE.lower(), self.instance.lower(), self.host.lower()}
@@ -178,61 +255,49 @@ class Advertiser:
                 self._say()
 
     def stop(self):
-        if self.sock is None:
-            return
-        self.stopped.set()
-        self._say(0)  # goodbye
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        if not self.stopped.is_set():
+            self._say(0)  # goodbye
+        self._close()
 
 
-class Browser:
+class Browser(_Port):
     """Finds servers: found({instance, host, port, words}) as one says it's there (again, whenever it does), lost(instance)
-    when one says goodbye. Asks every QUERY_S. Calls come on its own thread."""
+    when one says goodbye. Asks every QUERY_S, and at once when asked to (ask_soon). Calls come on its own thread."""
 
     def __init__(self, found, lost=None):
+        super().__init__()
         self.found, self.lost = found, lost or (lambda _i: None)
-        self.stopped = threading.Event()
-        self.sock = None
         self.parts = {}  # instance -> {"port", "target", "words"}; host name -> address
+        self.next_ask = 0.0
 
     def start(self):
-        try:
-            self.sock = _socket()
-        except OSError:
-            return None  # (no multicast here: servers can still be given by address)
         threading.Thread(target=self._run, daemon=True, name="mdns-browse").start()
         return self
 
     def ask(self):
-        q = struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + _name(SERVICE) + struct.pack("!HH", PTR, 1)
-        try:
-            self.sock.sendto(q, (MDNS_ADDR, MDNS_PORT))
-        except OSError:
-            pass
+        self._send(struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + _name(SERVICE) + struct.pack("!HH", PTR, 1))
+
+    def ask_soon(self):
+        """Ask who's there now, not at the next QUERY_S (within a second: on its own thread)."""
+        self.next_ask = 0.0
 
     def _run(self):
-        next_ask = 0.0
         while not self.stopped.is_set():
-            if time.monotonic() >= next_ask:
+            if time.monotonic() >= self.next_ask:
+                self.next_ask = time.monotonic() + QUERY_S
+                if self._due():
+                    self.ask()
+            elif self.deaf():
+                self._reopen()
                 self.ask()
-                next_ask = time.monotonic() + QUERY_S
-            try:
-                data, addr = self.sock.recvfrom(9000)
-            except socket.timeout:
-                continue
-            except OSError:
-                if self.stopped.is_set():
-                    break
-                time.sleep(1)
+            got = self._receive()
+            if got is None:
                 continue
             try:
-                _questions, records = parse(data)
+                _questions, records = parse(got[0])
             except (ValueError, struct.error, IndexError):
                 continue
-            self._take(records, addr[0])
+            self._take(records, got[1])
 
     def _take(self, records, sender):
         service = SERVICE.lower()
@@ -262,9 +327,4 @@ class Browser:
                         "port": p["port"], "words": p.get("words") or {}})
 
     def stop(self):
-        self.stopped.set()
-        if self.sock is not None:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
+        self._close()

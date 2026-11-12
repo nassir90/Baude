@@ -1,7 +1,8 @@
 """The headless server: Claude Code sessions started and steered over the network, each run headless (ClaudeProc) the
 way Baude runs a chat: Claude's models in claude, Apple's in apple-claude, those on this machine in pi-claude
-(baudelib.models says how each is started), whichever of them this machine has. A session is started with a prompt, a folder, a model,
-an effort, a permission mode, tags and a group, and gets a UUID that is its id from then on: claude's --session-id,
+(baudelib.models says how each is started), whichever of them this machine has. A session is started with a prompt, a
+folder, a model, an effort, a permission mode and a group, and gets a UUID that is its id from then on: claude's
+--session-id,
 and what it's resumed by. Its claude keeps going between turns, so whoever attaches next carries on with it, and stops
 once nobody's used it for a while (idle_s): the next message resumes it. Clients (Baude) list the sessions, read their
 transcripts, attach to one to see what it does and to talk to it, and answer what it asks. wire.py says how.
@@ -108,8 +109,7 @@ class Session:
         prompt = " ".join((self.meta.get("prompt") or "").split())
         return {"id": self.id, "title": self.meta.get("title") or info.get("title") or prompt[:90] or None,
                 "cwd": self.meta.get("cwd"), "model": self.meta.get("model"), "effort": self.meta.get("effort"),
-                "mode": self.meta.get("mode"), "tags": list(self.meta.get("tags") or []),
-                "group": self.meta.get("group"), "created": self.meta.get("created"),
+                "mode": self.meta.get("mode"), "group": self.meta.get("group"), "created": self.meta.get("created"),
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0}
@@ -143,6 +143,7 @@ class Server:
                 with open(os.path.join(folder, entry), encoding="utf-8") as f:
                     meta = json.load(f)
                 self.sessions[meta["id"]] = Session(self, meta)
+                meta.pop("tags", None)  # (an older server kept tags: not read, and gone at its next save)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         self.conns = set()
@@ -292,13 +293,11 @@ class Server:
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
         if not os.path.isdir(cwd):
             raise ValueError(f"not a folder here: {cwd}")
-        tags = params.get("tags") or []
         run = models.launch(params.get("model") or None, params.get("mode") or "default", params.get("effort") or None)
         if not self.can_run(params.get("model") or None):
             raise ValueError(f"{self.me['name']} can't run {params.get('model')}: it, or its program, isn't here")
         meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": params.get("model") or None,
                 "effort": run["effort"], "mode": run["mode"],
-                "tags": [str(t) for t in (tags if isinstance(tags, list) else [tags]) if str(t).strip()],
                 "group": params.get("group") or self.me["group"], "title": params.get("title") or None,
                 "prompt": params.get("prompt") or "", "created": time.time()}
         with self.lock:
@@ -370,7 +369,7 @@ class Server:
                 s.proc.send(msg)
             return
         rid, request = msg.get("request_id"), msg.get("request") or {}
-        sub = request.get("subtype")
+        sub, undo = request.get("subtype"), None
         answer = lambda response: conn.send({"op": "claude", "session": s.id, "msg": {  # noqa: E731
             "type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": response}}})
         if sub == "initialize":
@@ -390,7 +389,8 @@ class Server:
             s.proc.kill()                               # this one, pi's session going on: nothing's gone)
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
-            s.meta[key] = request.get(field) or s.meta.get(key)
+            undo = (key, s.meta.get(key), request.get(field) or s.meta.get(key))  # (put back if claude says no)
+            s.meta[key] = undo[2]
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         self.save(s)
@@ -400,7 +400,7 @@ class Server:
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             return answer({})
         on = f"srv_{next(self.rids)}"
-        s.routes[on] = (conn, rid)
+        s.routes[on] = (conn, rid, undo)
         self.ensure_proc(s).send({**msg, "request_id": on})
         self.changed()
 
@@ -424,7 +424,11 @@ class Server:
                                    "msg": {**msg, "response": {**r, "request_id": theirs}}})
                     s.waiting_init = []
                 elif rid in s.routes:
-                    conn, theirs = s.routes.pop(rid)
+                    conn, theirs, undo = s.routes.pop(rid)
+                    if undo and r.get("subtype") == "error" and s.meta.get(undo[0]) == undo[2]:
+                        s.meta[undo[0]] = undo[1]  # (refused, a mode it can't switch to say: kept as it still is)
+                        self.save(s)
+                        self.changed()
                     conn.send({"op": "claude", "session": s.id, "msg": {**msg, "response": {**r, "request_id": theirs}}})
                 return
             if kind == "control_request":

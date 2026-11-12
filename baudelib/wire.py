@@ -2,7 +2,12 @@
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
 A client's requests (a "req" it picks comes back on the reply):
-    hello {client}                                  -> hello {server: info}
+    hello {client}                                  -> hello {server: info} (info: its id, name, group, version,
+                                                       models, host, home, pid, groups, init; commit, the git commit
+                                                       its code was as it started (None: not a checkout); update,
+                                                       None or {to: a commit, waiting: [{session, what}]}: its own
+                                                       updater has a newer version ready, and waits for those
+                                                       commands to end before it restarts onto it)
     subscribe {archived?}                           -> sessions {sessions}, then again on every change, and ping;
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends. archived:
@@ -65,9 +70,12 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        what the server keeps. One whose files can't be moved stays:
                                                        error, saying why
     quit {if_idle?}                                 -> quitting: the host process stops, its claudes too (their
-                                                       sessions kept, resumed next time). if_idle: only if no
-                                                       session's at a turn or asking, else busy {sessions: [id]}
-                                                       and it goes on (a version 1 host quits whatever it's given)
+                                                       sessions kept, resumed next time; one at a turn or asking is
+                                                       marked cut). if_idle: only if no session's running a command
+                                                       (its commands), else busy {sessions: [id], commands:
+                                                       [{session, what}]} and it goes on (a version 1 host quits
+                                                       whatever it's given; one before commands, busy if a session's
+                                                       at a turn or asking)
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
     subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
                                                        data (base64)}], more} (its subagents' files, in the folder
@@ -83,13 +91,20 @@ A client's requests (a "req" it picks comes back on the reply):
 Anything wrong: error {error}, with the request's "req".
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id}: its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working"
+subagents, asks, cli_id, commands, cut}: its id a UUID the server made as it started it (claude's --session-id;
+what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
 is checked against), asks what
 it's asking, not answered yet: [{request_id, tool, input}] (long strings in input cut short), cli_id the id claude
 has for it where that's another (a fork's: its transcript's named so), else None. An ask is answered with
-input: a control_response for its request_id, as claude's stream-json has it.
+input: a control_response for its request_id, as claude's stream-json has it. commands: what its claude is running,
+[{id, what (80 characters at most), since (epoch seconds), background}]: its Bash and PowerShell calls, its subagents'
+too, from the call to its result (one waiting on its permission ask isn't running yet; a turn's result ends any left,
+but those in a subagent running in the background), and its background tasks but subagents (a Bash run in the
+background: background true) from their start to their notification; none once its claude's gone. cut: when (epoch
+seconds) the host process stopped its claude at a turn or asking (shutting down, a quit, a restart; not a turn that
+ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input).
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.

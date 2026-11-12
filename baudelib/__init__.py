@@ -6,4 +6,5 @@
 - discovery: servers found on the local network (DNS-SD over multicast DNS, _baude._tcp)
 - server: the headless server: Claude Code sessions started and steered over the network
 - client: a server as Baude sees it: its sessions, a transcript mirrored, a session steered (RemoteProc)
+- selfupdate: kept up to date from git (Baude's and Record's updater's, and the host process's own)
 """

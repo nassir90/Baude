@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 
 SESSION = "fake-session-0001"
 COMMANDS = [
@@ -43,6 +44,34 @@ state = {"model": "opus", "effort": None, "messages": 0}
 
 def arg(flag):
     return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else None
+
+
+if os.environ.get("FAKE_CLAUDE_SESSION_IDS"):  # (opt in: the id it's given, as claude has it; baude-server's)
+    SESSION = arg("--session-id") or arg("--resume") or SESSION
+SAID = {"text": "", "thinking": ""}  # (streamed since the last message: keep() writes it with the next)
+
+
+def keep(kind, message):
+    """FAKE_CLAUDE_TRANSCRIPTS=1: a transcript kept as claude keeps one, in $CLAUDE_CONFIG_DIR (only there: never the
+    real ~/.claude)."""
+    root = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not (os.environ.get("FAKE_CLAUDE_TRANSCRIPTS") and root):
+        return
+    if kind == "assistant":
+        content = list(message.get("content") or [])
+        if SAID["text"] and not any(c.get("type") == "text" for c in content):
+            content.insert(0, {"type": "text", "text": SAID["text"]})
+        if SAID["thinking"] and not any(c.get("type") == "thinking" for c in content):
+            content.insert(0, {"type": "thinking", "thinking": SAID["thinking"], "signature": ""})
+        message = {**message, "content": content}
+        SAID.update(text="", thinking="")
+    folder = os.path.join(root, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()))
+    os.makedirs(folder, exist_ok=True)
+    rec = {"parentUuid": None, "isSidechain": False, "type": kind, "uuid": str(uuid.uuid4()),
+           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "sessionId": SESSION,
+           "cwd": os.getcwd(), "entrypoint": "sdk-cli", "message": message}
+    with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
 
 
 def system_prompt():
@@ -97,6 +126,15 @@ OUT_LOCK = threading.Lock()  # background tasks write from timer threads
 def out(obj, delay=0.005):
     with OUT_LOCK:
         print(json.dumps(obj), flush=True)
+        kind, ev = obj.get("type"), obj.get("event") or {}
+        if kind == "stream_event" and ev.get("type") == "content_block_delta":
+            d = ev.get("delta") or {}
+            SAID["text"] += d.get("text") or ""
+            SAID["thinking"] += d.get("thinking") or ""
+        elif kind in ("assistant", "user") and not obj.get("parent_tool_use_id"):
+            keep(kind, obj["message"])
+        elif kind == "result" and SAID["text"]:
+            keep("assistant", {"role": "assistant", "model": "fake", "content": []})
     time.sleep(delay)
 
 
@@ -439,6 +477,7 @@ def main():
                 out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
                      "model": "fake-model", "tools": ["Bash", "Read"]})
         elif msg.get("type") == "user":
+            keep("user", msg["message"])
             turns += 1
             state["messages"] += 1
             text = msg["message"]["content"] if isinstance(msg["message"]["content"], str) else ""

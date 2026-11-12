@@ -49,6 +49,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(TMP, "xdg-cache")
 os.environ["BAUDE_GH"] = ""  # (no issue filed on GitHub for the feedback saved here)
 os.environ["BAUDE_KEEP_FILING"] = "0"  # (nor a note going up by itself, to a stand-in gh, mid-test)
 os.environ["BAUDE_UPDATE"] = "0"  # (no git fetched, no restart onto a new version)
+os.environ["BAUDE_NETWORK"] = "0"  # (no servers looked for on the network: a test gives its own, by address)
 # the stand-in claude, run by this Python: its #!/usr/bin/env python3 can find an older one first (macOS's 3.9)
 FAKE_CLAUDE = os.path.join(TMP, "fake-claude")
 with open(FAKE_CLAUDE, "w") as f:
@@ -93,6 +94,8 @@ os.environ["BAUDE_CLAUDE"] = FAKE_CLAUDE
 os.environ["FAKE_CLAUDE_LOG"] = os.path.join(TMP, "fake.log")
 
 import baude as _baude  # noqa: E402
+import baudelib.claude  # noqa: E402
+import baudelib.transcripts  # noqa: E402
 import codeview  # noqa: E402
 import feedback  # noqa: E402
 import fixes  # noqa: E402
@@ -107,7 +110,8 @@ import update  # noqa: E402
 import widgets  # noqa: E402
 from baude import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
 
-_MOVED = (widgets, codeview, kubeview, schemaview, gitview, feedback)  # (what was in baude.py: the viewers, what they share)
+_MOVED = (widgets, codeview, kubeview, schemaview, gitview, feedback,  # (what was in baude.py: the viewers, what they
+          baudelib.claude, baudelib.transcripts)                         # share, and Claude Code's process and transcripts)
 
 
 class _Baude:

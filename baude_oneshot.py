@@ -10,13 +10,17 @@ Baude lists it under its host and group. No GTK needed.
                              [--partial] [--ask-timeout S [--ask-default allow]] PROMPT
 
 Its first line is {"type": "baude", "event": "started", "session": {...}}, the session as the host lists it: its "id"
-is what --resume takes. Then claude's own lines, till its turn's result (--follow: till claude exits, or stdin closes).
-With --input, each line on stdin is a stream-json message for claude: another user message, or a control_response
-answering what it asks (a permission, as claude's control_request has it); without it, what it asks is answered with a
-deny, unless --ask-timeout leaves it to the host process to answer after that long. Exit: 0, or 1 if the turn's
-result was an error, 2 if the host couldn't be reached or the session started.
+is what --resume takes. Then claude's own lines, till the result of its turn (--resume of a session at a turn: the
+turn after it, its own); with --input, the result of the last turn stdin's started (--follow, with --input: till
+stdin closes, or claude exits). With --input, each line on stdin is a stream-json message for claude: another user
+message, or a control_response answering what it asks (a permission, as claude's control_request has it); without it,
+what it asks is answered with a deny, unless --ask-timeout leaves it to the host process to answer after that long.
+Once nobody reads its stdout (| head -1), it says no more, and still sees the turn to its end. Exit: 0; 1 if the
+turn's result was an error, or claude ended before it; 2 if the host couldn't be reached, or the session started, or
+it refused what was sent; 3 if the host process went before the turn's end.
 """
 import argparse
+import itertools
 import json
 import os
 import sys
@@ -29,8 +33,21 @@ from baudelib.claude import MODES  # noqa: E402
 
 
 def out(obj):
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    """A line out; once nobody reads them (| head -1, say), none, but the turn's still seen to its end."""
+    if out.closed:
+        return
+    try:
+        sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+    except (BrokenPipeError, ValueError):
+        out.closed = True
+        try:  # (and nothing more to flush as it exits)
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except OSError:
+            pass
+
+
+out.closed = False
 
 
 def main():
@@ -60,6 +77,10 @@ def main():
     args = p.parse_args()
     if not args.prompt and not args.input:
         p.error("a prompt, or --input")
+    if args.follow and not args.input:
+        p.error("--follow needs --input: claude goes on while it's followed, and only stdin's end can end it")
+    if args.resume and (args.ask_timeout is not None or args.ask_default):
+        p.error("--ask-timeout and --ask-default are a new session's: a resumed one keeps what it was started with")
     try:
         ch, info = hosts.reach(args.host, args.host_command)
     except OSError as e:
@@ -67,22 +88,27 @@ def main():
         return 2
     ch.sock.settimeout(None)
     ch.keep_alive()
-    prompt = args.prompt
+    answers = args.input  # (asks left to the host's timeout, or to stdin; else denied here)
+    left_to_host = args.ask_timeout is not None and not args.input
+    prompt, reqs, owed = args.prompt, itertools.count(2), [0]
     if args.resume:
-        ch.send({"op": "attach", "session": args.resume, "live": True, "req": 1})
+        ch.send({"op": "attach", "session": args.resume, "live": True, "answers": answers, "req": 1})
     else:
         cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) or args.host else os.path.abspath(args.cwd)
         ch.send({"op": "start", "prompt": prompt or "", "cwd": cwd, "model": args.model, "effort": args.effort,
                  "mode": args.mode, "group": args.group, "title": args.title, "system": args.system,
                  "add_dirs": [os.path.abspath(os.path.expanduser(d)) if not args.host else d for d in args.add_dir],
                  "allowed_tools": args.allow, "disallowed_tools": args.deny, "fork_from": args.fork_from,
-                 "ask_timeout": args.ask_timeout, "ask_default": args.ask_default, "attach": True, "req": 1})
+                 "ask_timeout": args.ask_timeout, "ask_default": args.ask_default, "attach": True,
+                 "answers": answers, "req": 1})
+        owed[0] += bool((prompt or "").strip())
         prompt = None  # (sent with it)
-    sid = args.resume
-    code = 0
+    sid, code = args.resume, None
 
     def to_claude(msg):
-        ch.send({"op": "input", "session": sid, "msg": msg})
+        if msg.get("type") == "user":
+            owed[0] += 1  # (a turn of its own, whose result's waited for)
+        ch.send({"op": "input", "session": sid, "msg": msg, "req": next(reqs)})
 
     def deny(request_id):
         to_claude({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": {
@@ -103,16 +129,19 @@ def main():
             ch.close()  # (stdin's done: so's following it)
     for msg in ch:
         op = msg.get("op")
-        if op == "error" and msg.get("req") == 1:
+        if op == "error" and msg.get("req") is not None:  # (the start, the attach, or something sent: it went nowhere)
             print(f"baude-oneshot: {msg.get('error')}", file=sys.stderr)
-            return 2
+            code = 2
+            break
         if op in ("started", "attached") and msg.get("req") == 1:
             listed = msg.get("session") or {}
             sid = sid or listed.get("id")
+            if op == "attached" and listed.get("state") in ("working", "waiting"):
+                owed[0] += 1  # (a turn going on as it's attached: its result's not this one's)
             out({"type": "baude", "event": op, "session": {**listed, "id": sid},
                  "host": info.get("name"), "host_id": info.get("id")})
             for ask in msg.get("asks") or []:  # (asked before this attached: answered as below)
-                if not args.input and args.ask_timeout is None:
+                if not answers and not left_to_host:
                     deny(ask.get("request_id"))
             if prompt:  # (--resume: what to say, now it's attached)
                 to_claude({"type": "user", "message": {"role": "user", "content": prompt}, "parent_tool_use_id": None,
@@ -122,6 +151,8 @@ def main():
             continue
         if op == "exited" and msg.get("session") == sid:
             out({"type": "baude", "event": "exited", "code": msg.get("code")})
+            if code is None:  # (claude went before its turn's end: stopped, or it crashed)
+                code = 1
             break
         if op != "claude" or msg.get("session") != sid:
             continue
@@ -129,16 +160,21 @@ def main():
         if m.get("type") != "stream_event" or args.partial:
             out(m)
         if m.get("type") == "control_request" and (m.get("request") or {}).get("subtype") == "can_use_tool" \
-                and not args.input and args.ask_timeout is None:
+                and not answers and not left_to_host:
             deny(m.get("request_id"))
         if m.get("type") == "result":
-            code = 1 if m.get("is_error") else 0
-            if not args.follow:
-                break
+            owed[0] = max(0, owed[0] - 1)
+            if owed[0] == 0:
+                code = 1 if m.get("is_error") else 0
+                if not args.follow:
+                    break
+    else:
+        if code is None and not (args.follow and args.input):  # (the host went before the turn's end)
+            print("baude-oneshot: the host process went before the turn ended", file=sys.stderr)
+            code = 3
     ch.send({"op": "detach", "session": sid})
     ch.close()
-    return code
-
+    return code or 0
 
 if __name__ == "__main__":
     sys.exit(main())

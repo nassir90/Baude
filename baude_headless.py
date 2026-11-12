@@ -41,12 +41,8 @@ from baudelib.server import AlreadyRunning, Server  # noqa: E402
 
 
 def serve(args):
-    bar = None
-    if not args.no_menu_bar:
-        from baudelib import menubar
-        if menubar.can_show():  # (its signals taken by a thread of their own: AppKit's run loop has the main thread)
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGUSR1})
-            bar = menubar
+    # (SIGUSR1, a head's "listen again": ignored till it's listening, as it would end a process that isn't ready)
+    signal.signal(signal.SIGUSR1, signal.SIG_IGN)
     try:
         server = Server(state_dir=args.state, group=args.group, name=args.name, advertise=args.advertise,
                         idle_s=args.idle_minutes * 60, socket_path=args.socket,  # (--advertise, --no-advertise: kept)
@@ -56,16 +52,32 @@ def serve(args):
     except AlreadyRunning as e:
         sys.exit(f"baude-headless: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
+    item = None
+    if not args.no_menu_bar:
+        from baudelib import menubar
+        if menubar.can_show():
+            try:
+                item = menubar.MenuBar(lambda: server.listing(), lambda: threading.Thread(
+                    target=server.shutdown, daemon=True, name="quit").start())
+            except Exception as e:  # (no window server after all, say: served without it)
+                print(f"baude-headless: no menu bar item: {e}", file=sys.stderr)
+    # signals, from the C handler, through a pipe read on a thread of its own: AppKit's run loop may have the main
+    # thread, where Python's own handlers wait to run, and nothing's blocked that claude's children would inherit
+    sigs_r, sigs_w = os.pipe()
+    os.set_blocking(sigs_w, False)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGUSR1):
+        signal.signal(sig, lambda *_: None)
+    signal.set_wakeup_fd(sigs_w)
 
-    def quit_(*_):
-        threading.Thread(target=server.shutdown, daemon=True, name="quit").start()
-
-    def rebind(*_):  # (SIGUSR1, from a head that found it running but its socket gone: start_here)
-        threading.Thread(target=server.still_bound, daemon=True, name="rebind").start()
-    if bar is None:
-        signal.signal(signal.SIGTERM, quit_)
-        signal.signal(signal.SIGINT, quit_)
-        signal.signal(signal.SIGUSR1, rebind)
+    def signals():
+        while True:
+            for n in os.read(sigs_r, 64):
+                if n == signal.SIGUSR1:  # (a head found it running and its socket gone: hosts.start_here)
+                    server.still_bound()
+                elif n in (signal.SIGTERM, signal.SIGINT):
+                    server.shutdown()
+    threading.Thread(target=signals, daemon=True, name="signals").start()
+    if item is None:
         server.serve_forever()
         server.closed.wait(10)  # (serving's stopped: shutdown, on its thread, lets go of the socket before this exits)
         return
@@ -73,14 +85,8 @@ def serve(args):
     def ended():  # (shut down, by Quit, a signal, quit or a long idle: the process goes, AppKit's loop with it)
         server.closed.wait()
         os._exit(0)
-
-    def signals():
-        while signal.sigwait({signal.SIGTERM, signal.SIGINT, signal.SIGUSR1}) == signal.SIGUSR1:
-            server.still_bound()
-        server.shutdown()
-    item = bar.MenuBar(lambda: server.listing(), quit_)
     server.on_change = item.changed
-    for fn in (server.serve_forever, ended, signals):
+    for fn in (server.serve_forever, ended):
         threading.Thread(target=fn, daemon=True, name=fn.__name__).start()
     item.run()
 

@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from macos import ns_string, objc_send  # noqa: E402
 
 NS_VARIABLE_LENGTH = -1.0
+USER_INITIATED_ALLOWING_SLEEP = 0x00FFFFFF  # (NSActivityUserInitiatedAllowingIdleSystemSleep: no App Nap)
+TERMINATE_CANCEL = 0
 ACCESSORY = 1  # (NSApplicationActivationPolicyAccessory: a menu bar item's, no Dock icon)
 
 
@@ -55,6 +57,15 @@ class MenuBar:
         self.app = objc_send(b"NSApplication", b"sharedApplication")
         objc_send(self.app, b"setActivationPolicy:", ACCESSORY, types=(ctypes.c_long,), ret=ctypes.c_bool)
         self.target = objc_send(objc_send(_target_class(self), b"alloc"), b"init")
+        # (AppKit's own quit, at logout say, asked of it: its Quit's, so its claudes end as they should)
+        objc_send(self.app, b"setDelegate:", self.target, types=(ctypes.c_void_p,))
+        # (no windows brought back after a crash: AppKit would ask in an alert, at the screen, and wait)
+        objc_send(objc_send(b"NSUserDefaults", b"standardUserDefaults"), b"registerDefaults:",
+                  objc_send(b"NSDictionary", b"dictionaryWithObject:forKey:",
+                            objc_send(b"NSNumber", b"numberWithBool:", True, types=(ctypes.c_bool,)),
+                            ns_string("ApplePersistenceIgnoreState"), types=(ctypes.c_void_p, ctypes.c_void_p)),
+                  types=(ctypes.c_void_p,))
+        self.activity = None  # (while sessions run: macOS not to nap it, which would hold up what claude says)
         bar = objc_send(b"NSStatusBar", b"systemStatusBar")
         self.item = objc_send(objc_send(bar, b"statusItemWithLength:", NS_VARIABLE_LENGTH, types=(ctypes.c_double,)),
                               b"retain")
@@ -75,7 +86,9 @@ class MenuBar:
             objc_send(pool, b"drain")
 
     def _refresh(self):
-        title, lines, sessions = say(self.listing())
+        listing = self.listing()
+        self.awake(any(s.get("state") in ("working", "waiting", "idle") for s in listing))
+        title, lines, sessions = say(listing)
         objc_send(self.button, b"setTitle:", ns_string(title), types=(ctypes.c_void_p,))
         menu = objc_send(objc_send(b"NSMenu", b"alloc"), b"init")
         objc_send(menu, b"setAutoenablesItems:", False, types=(ctypes.c_bool,))
@@ -87,6 +100,19 @@ class MenuBar:
         self._add(menu, "Quit Baude's Host Process", action=b"quit:", key="q")
         objc_send(self.item, b"setMenu:", menu, types=(ctypes.c_void_p,))
         objc_send(menu, b"release")
+
+    def awake(self, running):
+        """(main thread) macOS's App Nap held off while a session's running (an activity), let be when none is."""
+        if running and self.activity is None:
+            self.activity = objc_send(objc_send(objc_send(b"NSProcessInfo", b"processInfo"),
+                                                b"beginActivityWithOptions:reason:", USER_INITIATED_ALLOWING_SLEEP,
+                                                ns_string("Claude sessions running"),
+                                                types=(ctypes.c_ulonglong, ctypes.c_void_p)), b"retain")
+        elif not running and self.activity is not None:
+            objc_send(objc_send(b"NSProcessInfo", b"processInfo"), b"endActivity:", self.activity,
+                      types=(ctypes.c_void_p,))
+            objc_send(self.activity, b"release")
+            self.activity = None
 
     def _add(self, menu, text, action=None, key="", indent=0):
         item = objc_send(menu, b"addItemWithTitle:action:keyEquivalent:", ns_string(text),
@@ -120,12 +146,15 @@ def _target_class(bar):
     refresh call (kept, with what it calls, for as long as the process runs)."""
     rt = bar.rt
     imp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
-    _target_class.imps = [imp(lambda _s, _c, _o: bar.refresh()), imp(lambda _s, _c, _o: bar.quit())]
+    asked = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+    _target_class.imps = [imp(lambda _s, _c, _o: bar.refresh()), imp(lambda _s, _c, _o: bar.quit()),
+                          asked(lambda _s, _c, _o: (bar.quit(), TERMINATE_CANCEL)[1])]  # (it goes once it's done)
     name = b"BaudeHostMenuTarget%d" % os.getpid()
     cls = rt.objc_allocateClassPair(rt.objc_getClass(b"NSObject"), name, 0)
     if not cls:  # (made already, in this process: a second bar's, say)
         return rt.objc_getClass(name)
-    for sel, fn in zip((b"refresh:", b"quit:"), _target_class.imps):
-        rt.class_addMethod(cls, rt.sel_registerName(sel), ctypes.cast(fn, ctypes.c_void_p), b"v@:@")
+    for sel, fn, kinds in zip((b"refresh:", b"quit:", b"applicationShouldTerminate:"), _target_class.imps,
+                              (b"v@:@", b"v@:@", b"Q@:@")):
+        rt.class_addMethod(cls, rt.sel_registerName(sel), ctypes.cast(fn, ctypes.c_void_p), kinds)
     rt.objc_registerClassPair(cls)
     return cls

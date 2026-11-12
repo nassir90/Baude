@@ -73,16 +73,20 @@ python3 baude_headless.py list --host lab@lab-mac.local
 ```
 
 Its first line is `{"type": "baude", "event": "started", "session": {...}}`, with the session's `id`; then claude's
-lines, till the turn's `result` (`--follow`: till claude exits). With `--input`, each line on stdin is a stream-json
-message for claude, a user message or a `control_response` answering a permission it asks for; without it, what it
-asks is denied. It takes claude's per-session options too: `--system`, `--add-dir`, `--allow`, `--deny`, `--fork-from`.
+lines, till its turn's `result`. With `--input`, each line on stdin is a stream-json message for claude, a user message
+or a `control_response` answering a permission it asks for, and `--follow` keeps it going till stdin closes; without
+`--input`, what it asks is denied, or, with `--ask-timeout`, left to the host process to answer then. It takes
+claude's per-session options too: `--system`, `--add-dir`, `--allow`, `--deny`, `--fork-from`. It exits 0, 1 if the
+turn ended in an error or claude ended before it did, 2 if the host or the session couldn't be had, and 3 if the host
+process went mid-turn.
 
 Moving to them, from `baude_server.py`:
 
 - `baude_server.py serve` is `baude_headless.py` (or nothing: a head starts it). It no longer takes `--port` or
   `--bind`, and wants no token.
-- `baude_server.py start --prompt TEXT …` is `baude_oneshot.py … TEXT`, with the same options. It waits for the turn
-  and prints it, rather than printing the session's id and leaving: `baude_oneshot.py … TEXT | head -1` gives the id.
+- `baude_server.py start --prompt TEXT …` is `baude_oneshot.py … TEXT`, with the same options (`--ask-timeout` and
+  `--ask-default` for a new session only). It waits for the turn and prints it, rather than printing the session's id
+  and leaving: `baude_oneshot.py … TEXT | head -1` gives the id, and the turn's still seen to its end.
 - `baude_server.py servers` is `baude_headless.py hosts`; `list`, `models` and `stop` are `baude_headless.py`'s, with
   `--host DEST` (an ssh destination) instead of `--server HOST:PORT`.
 - A client of `baudelib/wire.py` connects with `wire.connect_local()` on the same machine, or `wire.connect_ssh(DEST)`

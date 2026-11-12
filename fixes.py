@@ -49,9 +49,7 @@ STALE_S = ROUND_TIMEOUT_S + 5 * 60  # (a round said to be running for longer tha
 # (all it has: nothing that runs anything or goes out. None pre-approved, as a bare rule would approve every path: edits
 # in its folder are acceptEdits', and asking for anything outside it, with nobody to ask, is refused)
 TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
-HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID",
-                    "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-                    "CLAUDE_PID", "CLAUDE_CODE_DESKTOP_APP_VERSION", "CLAUDE_CODE_SESSION_ATTENDED")
+from baudelib.claude import HOST_SESSION_ENV  # noqa: E402  (what claude_env leaves out: baudelib's, and so ours)
 # (no prompt: no terminal, no password asked of a terminal or a window; as update.py's)
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
 MARK = re.compile(r"<!-- baude-fix (\{.*?\}) -->", re.S)

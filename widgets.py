@@ -42,6 +42,7 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: E402,F401
 import pointers  # noqa: E402
+from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
 
 
 # the sizes for what's drawn here: the text's, and an icon's in px (16 at 1.0); Baude's Settings → Size sets them
@@ -719,45 +720,7 @@ def ref_pr_info(p):
             "created": p.get("created_at"), "merged": p.get("merged_at"), "closed": p.get("closed_at")}
 
 
-def ref_epoch(iso):
-    if not iso:
-        return None
-    import datetime
-    try:
-        return datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
-_NOT_TYPED = ("<task-notification>", "<ci-monitor-event>", "<side-sessions-event>", "<local-command-stdout>",
-              "<local-command-stderr>")
-
-
-def typed_at(rec):
-    """When a transcript record is something the person typed, its ISO time: a prompt, or one sent while a turn ran
-    (a queued_command); None for the rest: tool results, what claude or the app put in (a task's ending, a CI event, a
-    scheduled run, another session's message). A chat's last one says when it was last used (Baude's sidebar and
-    Record's lists go by it): the file's own time moves with every reply, rename and record claude keeps."""
-    kind = rec.get("type")
-    if kind == "attachment":
-        a = rec.get("attachment") or {}
-        if a.get("type") == "queued_command" and a.get("commandMode", "prompt") == "prompt" \
-                and (a.get("origin") or {}).get("kind", "human") == "human":
-            return a.get("timestamp") or rec.get("timestamp")
-        return None
-    if kind != "user" or rec.get("isMeta") or rec.get("isSidechain") or rec.get("isCompactSummary") \
-            or rec.get("turnOrigin") in ("task_notification", "scheduled", "peer"):
-        return None
-    content = (rec.get("message") or {}).get("content")
-    if isinstance(content, list):
-        if any(isinstance(c, dict) and c.get("type") == "tool_result" for c in content):
-            return None
-        if any(isinstance(c, dict) and c.get("type") == "image" for c in content):
-            return rec.get("timestamp")
-        content = " ".join(c.get("text") or "" for c in content if isinstance(c, dict) and c.get("type") == "text")
-    if not isinstance(content, str) or not content.strip() or content.lstrip().startswith(_NOT_TYPED):
-        return None
-    return rec.get("timestamp")
+# (ref_epoch and typed_at: baudelib.transcripts, as the headless server reads transcripts too)
 
 
 def last_typed(path, chunk=262144, limit=32 << 20):

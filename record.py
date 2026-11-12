@@ -57,6 +57,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pang
 import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside this file)
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+from baudelib.transcripts import task_notification  # noqa: E402  (a background task's ending, as said)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
@@ -589,7 +590,9 @@ def _is_noise(text):
 
 def parse_records(lines, items):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
-    message written as several records (one per block) becomes one item."""
+    message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
+    writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
+    "failed", "summary"}, as Baude's chat says it."""
     for line in lines:
         try:
             d = json.loads(line)
@@ -602,6 +605,11 @@ def parse_records(lines, items):
         text = _text_of(msg.get("content")).strip()
         if kind == "user":
             if _is_noise(text) or d.get("toolUseResult") is not None:
+                continue
+            if (note := task_notification(text)) is not None:
+                markup, plain, failed = widgets.task_note_line(note)
+                items.append({"role": "note", "text": plain, "markup": markup, "failed": failed,
+                              "summary": note.get("summary"), "id": d.get("uuid")})
                 continue
             items.append({"role": "user", "text": text, "id": d.get("uuid")})
         elif text:
@@ -1303,7 +1311,8 @@ def chat_text(path, title, cwd):
     with open(path, encoding="utf-8", errors="replace") as f:
         parse_records(f, items)
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
-    return "\n\n".join([head] + [f"**{'You' if it['role'] == 'user' else 'Claude'}:**\n\n{it['text']}" for it in items])
+    return "\n\n".join([head] + [f"**{'You' if it['role'] == 'user' else 'Claude'}:**\n\n{it['text']}" for it in items
+                                  if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
 def chats_of(notebook, transcripts):
@@ -4181,6 +4190,17 @@ class Reader(Gtk.Box):
 
     def _add(self, it):
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        if it["role"] == "note":  # (a background task's ending: one quiet line, as Baude's chat has it)
+            prose = Gtk.Label(xalign=0, wrap=True, selectable=True)
+            prose.set_markup(it["markup"])
+            prose.add_css_class("error" if it["failed"] else "dim-label")
+            prose.set_tooltip_text(it.get("summary") or None)
+            row.add_css_class("reader-note")
+            row.append(prose)
+            row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
         if it["role"] == "user":
             # (Baude's markdown, as a reply's and as Baude's chat draws what you wrote)
             prose = widgets.MarkdownView(it["text"] if len(it["text"]) < 1200 else it["text"][:1200] + "…")

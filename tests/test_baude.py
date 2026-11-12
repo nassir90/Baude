@@ -13138,7 +13138,7 @@ def test_code_view(app):
         assert win.show_code(path, 14)  # inside def claim
         page, code = win.code_page, win.code_page.code
         assert win.tabs.current() is page, "a code tab, shown"
-        assert page.title.get_label() == "jobs_mod.py:14"
+        assert page.line == 14
         assert "class Job" in page.crumbs.get_label() and "def claim" in page.crumbs.get_label()
         assert page.cls.get_visible() and "Job" in labels_text(page.cls) and "(Base)" in labels_text(page.cls)
         assert "A queued build job." in page.cls_doc.get_label() and "More words" not in page.cls_doc.get_label()
@@ -13156,7 +13156,7 @@ def test_code_view(app):
         except ImportError:
             pass
         [b for b in find(page.members, Gtk.Button) if b.get_label() == "job_id"][0].emit("clicked")
-        assert code.marked_line() == 10 and page.title.get_label() == "jobs_mod.py:10"
+        assert code.marked_line() == 10 and page.line == 10
         # a plain function: the class its signature names
         win.show_code(path, 18)
         assert "Related class" in labels_text(page.cls) and "Job" in labels_text(page.cls)
@@ -13495,9 +13495,8 @@ def test_relative_times_say_when(app):
 
 def test_code_zoom(app):
     """The code on the Code page has a text size of its own, apart from the chat's: Ctrl+scroll over the page (a
-    touchpad's small deltas adding up to steps), Ctrl +/−/0 with the focus on it, or the header's −, 100% and +.
-    It's remembered, the line at the top stays there, and the line numbers stay beside their lines, wrapped ones
-    too."""
+    touchpad's small deltas adding up to steps), or Ctrl +/−/0 with the focus on it. It's remembered, the line at the
+    top stays there, and the line numbers stay beside their lines, wrapped ones too."""
     baude.save_settings(code_viewer=True, code_wrap=True, code_zoom=None, zoom=1.0)
     path = os.path.join(TMP, "zoom_mod.py")
     with open(path, "w") as f:
@@ -13511,7 +13510,7 @@ def test_code_zoom(app):
         page, code = win.code_page, win.code_page.code
         view, gutter = code.view, code.gutter
         assert view.get_wrap_mode() == Gtk.WrapMode.WORD_CHAR
-        assert baude.CodeView.zoom == 1.0 and page.zoom_btn.get_label() == "1.0"
+        assert baude.CodeView.zoom == 1.0
         base, chat_base, gutter_w = font_px(view), font_px(win.input), gutter.get_width()
         # in the middle of the file (line 600 a third of the way down), a few pixels into the top line
         top_line = lambda: view.get_line_at_y(view.get_visible_rect().y)[0].get_line()  # noqa: E731
@@ -13534,7 +13533,7 @@ def test_code_zoom(app):
         x.ctrl(wheel=2)
         settled(1.2)
         assert baude.CodeView.zoom == 1.2 and win.zoom == 1.0 and abs(font_px(win.input) - chat_base) < 0.5
-        assert page.zoom_btn.get_label() == "1.2" and baude.load_settings().get("code_zoom") == 1.2
+        assert baude.load_settings().get("code_zoom") == 1.2
         assert tops and set(tops) == {top}, f"the line at the top stays there, every frame: {sorted(set(tops))}"
         assert gutter.get_width() > gutter_w, "wider numbers"
         # the numbers sit beside their lines (a wrapped line's on its first row)
@@ -13546,9 +13545,9 @@ def test_code_zoom(app):
             assert wy == view.buffer_to_window_coords(Gtk.TextWindowType.LEFT, 0, y)[1], f"line {n}'s number"
         rows = lambda n: view.get_line_yrange(line_at(n))[1] / view.get_iter_location(line_at(n)).height  # noqa: E731
         assert any(rows(n) > 2 for n in drawn), "some of them are wrapped lines"
-        # Ctrl+scroll anywhere on the page (its header), smaller; over the chat, the chat's
+        # Ctrl+scroll anywhere on the page (its bar), smaller; over the chat, the chat's
         tops.clear()
-        x.point_at(page.title)
+        x.point_at(page.find_btn)
         x.ctrl(wheel=-3)
         settled(0.9)
         assert baude.CodeView.zoom == 0.9 and win.zoom == 1.0 and set(tops) == {top}, sorted(set(tops))
@@ -13590,18 +13589,8 @@ def test_code_zoom(app):
         win.on_ctrl_scroll(pad, 0, -12)
         assert baude.CodeView.zoom == 1.1, "60"
         assert win.zoom == 1.0
-        # the header's buttons; the size between them puts it back to 100%
-        page.zoom_in_btn.emit("clicked")
-        assert baude.CodeView.zoom == 1.2 and page.zoom_btn.get_label() == "1.2"
+        baude.CodeView.set_zoom(1.2)
         snapshot(win, "code_zoom")
-        page.zoom_out_btn.emit("clicked")
-        page.zoom_out_btn.emit("clicked")
-        assert baude.CodeView.zoom == 1.0
-        page.zoom_out_btn.emit("clicked")
-        page.zoom_btn.emit("clicked")
-        assert baude.CodeView.zoom == 1.0 and page.zoom_btn.get_label() == "1.0"
-        baude.CodeView.set_zoom(baude.ZOOM_MAX)
-        assert not page.zoom_in_btn.get_sensitive() and page.zoom_out_btn.get_sensitive()
         baude.CodeView.set_zoom(1.3)
         # Ctrl +/−/0 with the focus on the Code page size the code; with it in the input box, the chat
         view.grab_focus()
@@ -13609,10 +13598,11 @@ def test_code_zoom(app):
         assert baude.CodeView.zoom == 1.0 and win.zoom == 1.0
         x.ctrl(key="equal")
         assert baude.CodeView.zoom == 1.1 and win.zoom == 1.0
-        page.zoom_out_btn.grab_focus()  # (anywhere on the page)
+        page.find_btn.grab_focus()  # (anywhere on the page)
         x.ctrl(key="minus")
         x.ctrl(key="minus")
         assert baude.CodeView.zoom == 0.9 and win.zoom == 1.0
+        win.tabs.show("chat")
         win.input.grab_focus()
         x.ctrl(key="equal")
         assert win.zoom == 1.1 and baude.CodeView.zoom == 0.9
@@ -13631,7 +13621,7 @@ def test_code_zoom(app):
     try:
         win.show_code(path, 10)
         page = win.code_page
-        assert baude.CodeView.zoom == 1.4 and page.zoom_btn.get_label() == "1.4"
+        assert baude.CodeView.zoom == 1.4
         wait_for(lambda: abs(font_px(page.code.view) / base - 1.4) < 0.06, "the new window's code at 140%")
     finally:
         close(win)

@@ -6021,10 +6021,13 @@ list.filter-list > row:focus-visible { outline-offset: -2px; }
 /* swapping what a view shows (the chat, a cluster, a database): it goes lighter until the new one is in (Fade) */
 .switchable { transition: opacity 120ms ease-out, filter 120ms ease-out; }
 .switchable.switching { opacity: 0.45; filter: grayscale(0.6); }
+/* code on the inside's background, as the chat and the notes are, its line numbers' column too; its page's bar on the
+   frame's, as the window's bars are */
+.baude-inside .code-view, .baude-inside .code-view > border { background: none; }
 .code-view { font-family: monospace; font-size: 0.9em; }
 .code-view text { background: transparent; }
 .code-gutter { font-family: monospace; font-size: 0.9em; }
-.code-zoom { padding: 0 2px; min-width: 0; font-size: 0.85em; font-feature-settings: "tnum"; }
+.code-bar { background-color: @baude_frame; box-shadow: inset 0 -1px @baude_rule; padding: 3px 8px 3px 10px; }
 .code-member { padding: 1px 6px; min-height: 22px; font-family: monospace; font-size: 0.85em; font-weight: normal; }
 .code-member.current { background: alpha(@accent_bg_color, 0.18); }
 .code-class { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 8px; }

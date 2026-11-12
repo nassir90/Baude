@@ -38,7 +38,7 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from widgets import (  # noqa: E402,F401
     IMAGE_POOL, FindBar, LineGutter, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP,
-    code_spans, code_style, discard, fmt_scale, load_settings, open_code,
+    code_spans, code_style, discard, load_settings, open_code,
     open_in_editor, pretty_path, save_settings, themed_icon, toast,
 )
 from widgets import empty_label  # noqa: E402
@@ -265,7 +265,6 @@ class CodeView(Gtk.Box, FindInText):
     zoom, zoom_css = 1.0, None  # the code's text size (remembered as "code_zoom"), and the CSS that sets it
     scrolled = 0.0, 0  # Ctrl+scroll that hasn't made a whole step yet, and when it came (ms)
     live = weakref.WeakSet()
-    __gsignals__ = {"zoomed": (GObject.SignalFlags.RUN_FIRST, None, ())}
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -455,7 +454,6 @@ class CodeView(Gtk.Box, FindInText):
             view.scroll.remove_css_class("code-view-scroll")
             view.scroll.add_css_class("code-view-scroll")
             view.gutter.queue_resize()  # (wider or narrower digits)
-            view.emit("zoomed")
 
     @classmethod
     def zoom_scroll(cls, dy, pixels, time):
@@ -479,16 +477,12 @@ class CodePage(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.path, self.text, self.line = win, None, "", None
-        head = Gtk.Box(spacing=6, margin_start=10, margin_end=8, margin_top=8, margin_bottom=4)
-        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-        self.title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START)
-        self.title.add_css_class("heading")
-        self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START)
+        head = Gtk.Box(spacing=6)
+        head.add_css_class("code-bar")  # (on the frame's colour, as the window's bars are: widgets.CSS)
+        self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, hexpand=True)  # (the folder it's in)
         self.where.add_css_class("dim-label")
         self.where.add_css_class("caption")
-        titles.append(self.title)
-        titles.append(self.where)
-        head.append(titles)
+        head.append(self.where)
         self.find_btn = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text="Find (Ctrl+F)")
         self.find_btn.add_css_class("flat")
         self.find_btn.connect("clicked", lambda *_: self.code.open_search())
@@ -499,20 +493,6 @@ class CodePage(Gtk.Box):
         self.wrap_btn.connect("toggled", lambda b: (self.code.set_wrap(b.get_active()),
                                                     save_settings(code_wrap=b.get_active())))
         head.append(self.wrap_btn)
-        # the code's text size, apart from the chat's: smaller, the size (click: 1.0 again), larger
-        sizes = Gtk.Box()
-        self.zoom_out_btn, self.zoom_btn, self.zoom_in_btn = (
-            Gtk.Button(icon_name="value-decrease-symbolic", tooltip_text="Smaller text (Ctrl+−, or Ctrl+scroll)"),
-            Gtk.Button(label="1.0", tooltip_text="Back to 1.0 (Ctrl+0)"),
-            Gtk.Button(icon_name="value-increase-symbolic", tooltip_text="Larger text (Ctrl+plus, or Ctrl+scroll)"))
-        for btn, size in ((self.zoom_out_btn, lambda: CodeView.zoom - ZOOM_STEP), (self.zoom_btn, lambda: 1.0),
-                          (self.zoom_in_btn, lambda: CodeView.zoom + ZOOM_STEP)):
-            btn.add_css_class("flat")
-            btn.connect("clicked", lambda *_, size=size: CodeView.set_zoom(size()))
-            sizes.append(btn)
-        self.zoom_btn.add_css_class("code-zoom")
-        self.zoom_btn.get_child().set_width_chars(4)  # (the buttons don't shift as it goes from 90% to 100%)
-        head.append(sizes)
         files_btn = Gtk.Button(icon_name="folder-symbolic", tooltip_text="Show in Files")
         files_btn.add_css_class("flat")
         files_btn.connect("clicked", lambda *_: self.path and os.path.exists(self.path) and
@@ -523,7 +503,8 @@ class CodePage(Gtk.Box):
         self.editor_btn.connect("clicked", lambda *_: self.path and open_in_editor(self.path, self.line, self))
         head.append(self.editor_btn)
         self.append(head)
-        self.crumbs = Gtk.Label(xalign=0, wrap=True, margin_start=10, margin_end=10, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.crumbs = Gtk.Label(xalign=0, wrap=True, margin_start=10, margin_end=10, margin_top=6,
+                                wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.crumbs.add_css_class("caption")
         self.crumbs.connect("activate-link", self.on_crumb)
         self.append(self.crumbs)
@@ -545,8 +526,6 @@ class CodePage(Gtk.Box):
         self.code = CodeView()
         self.code.set_margin_top(6)
         self.code.set_wrap(self.wrap_btn.get_active())
-        self.code.connect("zoomed", lambda *_: self.show_zoom())
-        self.show_zoom()
         self.append(self.code)
         self.empty = empty_label("Click a file, function or class in a reply to see its code here.")
         self.append(self.empty)
@@ -559,11 +538,6 @@ class CodePage(Gtk.Box):
             return None
         return f"{os.path.abspath(self.path)}:{self.line}" if self.line else os.path.abspath(self.path)
 
-    def show_zoom(self):
-        self.zoom_btn.set_label(fmt_scale(CodeView.zoom))
-        self.zoom_out_btn.set_sensitive(CodeView.zoom > ZOOM_MIN)
-        self.zoom_in_btn.set_sensitive(CodeView.zoom < ZOOM_MAX)
-
     def show(self, path, text, line=None, note=None):
         """Show path's text at line; for Python, the class around the line (or the one its signature names)."""
         self.path, self.text, self.line = path, text, line
@@ -571,8 +545,7 @@ class CodePage(Gtk.Box):
         self.code.set_visible(True)
         root = self.win.signal.root if self.win.signal else self.win.run_cwd
         rel = os.path.relpath(path, root) if root and path.startswith(root + os.sep) else pretty_path(path)
-        self.title.set_label(os.path.basename(path) + (f":{line}" if line else ""))
-        self.where.set_label(os.path.dirname(rel) or ".")
+        self.where.set_label(os.path.dirname(rel))
         self.note.set_label(note or "")
         self.note.set_visible(bool(note))
         crumbs, cls = python_context(text, line) if path.endswith((".py", ".pyi")) and line else ([], None)
@@ -607,7 +580,6 @@ class CodePage(Gtk.Box):
     def go(self, line):
         """Jump to a line of the file shown (a member, a breadcrumb)."""
         self.line = line
-        self.title.set_label(os.path.basename(self.path) + f":{line}")
         self.code.mark(line, self.code_shade())
         return True
 
@@ -619,6 +591,14 @@ class CodePage(Gtk.Box):
         if uri.startswith("line:"):
             self.go(int(uri[5:]))
         return True
+
+
+def in_code(widget):
+    """Whether a widget is on a Code page (its bar too) or in another CodeView (the Kubernetes view's YAML): where
+    Ctrl +/−/0 (and Baude's Ctrl+scroll) size the code rather than the chat or the notes."""
+    while widget is not None and not isinstance(widget, (CodePage, CodeView)):
+        widget = widget.get_parent()
+    return widget is not None
 
 
 class FileNode(GObject.Object):

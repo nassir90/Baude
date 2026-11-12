@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
-from codeview import CODE_LIMIT, CodePage, FilesPage  # noqa: E402
+from codeview import CODE_LIMIT, CodePage, CodeView, FilesPage, in_code  # noqa: E402
 from gitview import GitPage  # noqa: E402
 from kubeview import KubeView  # noqa: E402
 from schemaview import SchemaView  # noqa: E402
@@ -97,6 +97,14 @@ class ViewerHost:
             return True
         return False
 
+    def zoom_code(self, steps):
+        """⌘ + − 0 (Ctrl elsewhere) on the Code page, or with the focus on code (the Kubernetes view's YAML): the
+        code's size, steps up or down (0: 1.0 again). False if neither."""
+        if self.stack.get_visible_child_name() != "code" and not in_code(self.get_focus()):
+            return False
+        CodeView.set_zoom(CodeView.zoom + steps * widgets.ZOOM_STEP if steps else 1.0)
+        return True
+
     # ---- what the viewers ask of their window (Baude's names for them)
     def ref_transcript(self):
         return None  # (no chat)
@@ -119,6 +127,7 @@ class ViewerHost:
                 return False
             text = data.decode("utf-8", "replace")
         self.code_page.show(path, text, line, note)
+        self.stack.get_page(self.code_page).set_title(os.path.basename(path))  # (its name at the top, as a tab's)
         self.stack.set_visible_child_name("code")
         self.present()
         return True
@@ -204,6 +213,14 @@ class ViewerWindow(Adw.Window, ViewerHost):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._key)
         self.add_controller(keys)
+        sizes = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (the code's size: Baude's and Record's keys)
+        for triggers, steps in ((widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"), +1),
+                                (widgets.zoom_keys("minus", "underscore", "KP_Subtract"), -1),
+                                (widgets.zoom_keys("0", "KP_0"), 0)):
+            for trigger in triggers.split():
+                act = Gtk.CallbackAction.new(lambda *_, steps=steps: self.zoom_code(steps))
+                sizes.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trigger), act))
+        self.add_controller(sizes)
         self.connect("close-request", ViewerWindow._closing)
 
     def viewer_folder(self):

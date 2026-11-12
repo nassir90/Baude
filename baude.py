@@ -5870,38 +5870,42 @@ def api_error_label(text):
 
 
 def task_note_widget(note, card=None, on_jump=None):
-    """A background task ending, as one quiet line: ✓ Bash · <its description> — finished (exit 0).
-    The description links back to the task's card (on_jump(card)); never the raw command or XML."""
+    """A background task's ending whose card isn't in the chat (it started before what's drawn of it), as one quiet
+    line: Bash · <its description> — finished (exit 0), with no mark before it; a failure all in the colour a failed
+    tool call's border is. Never the raw command or XML. Its card drawn after all (an earlier part of the chat, drawn
+    later): row.link_card(card, on_jump) names it as its card does, the description a link back to it (on_jump(card))."""
     status = note.get("status") or "completed"
-    row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
+    row = Gtk.Box(halign=Gtk.Align.START)
     row.add_css_class("task-note")
-    row.append(_status_icon("error" if status in ("failed", "killed", "error") else "done"))
     summary = html.unescape(note.get("summary") or "")
-    inp = card.input if card is not None else {}
-    if card is not None:
-        what = card.base
-    else:
-        what = "Agent" if note.get("task_type") == "local_agent" or summary.startswith(("Agent", "Subagent")) \
-            else "Background command"
-    desc = inp.get("description") or note.get("description")
-    if not desc:  # no description: the command's first line, or what the summary quotes
-        quoted = re.match(r'[^"]*"(.*)"', summary, re.S)
-        desc = (inp.get("command") or (quoted.group(1) if quoted else summary)).strip().splitlines()[0:1]
-        desc = desc[0] if desc else "a background task"
-    if len(desc) > 80:
-        desc = desc[:79] + "…"
     ending = TASK_ENDINGS.get(status, status)
     if (code := re.search(r"exit code (\d+)", summary)) is not None:
         ending += f" (exit {code.group(1)})"
-    text = html.escape(desc)
-    if card is not None and on_jump is not None:
-        text = f'<a href="card">{text}</a>'
     label = Gtk.Label(xalign=0, wrap=True, selectable=True)
-    label.set_markup(f"<b>{html.escape(what)}</b> · {text} — {html.escape(ending)}")
-    label.add_css_class("dim-label")
+    label.add_css_class("error" if status in ("failed", "killed", "error") else "dim-label")
     label.set_tooltip_text(summary or None)
-    if card is not None and on_jump is not None:
-        label.connect("activate-link", lambda *_: (on_jump(card), True)[1])
+
+    def link_card(card, on_jump=None):
+        inp = card.input if card is not None else {}
+        if card is not None:
+            what = card.base
+        else:
+            what = "Agent" if note.get("task_type") == "local_agent" or summary.startswith(("Agent", "Subagent")) \
+                else "Background command"
+        desc = inp.get("description") or note.get("description")
+        if not desc:  # no description: the command's first line, or what the summary quotes
+            quoted = re.match(r'[^"]*"(.*)"', summary, re.S)
+            desc = (inp.get("command") or (quoted.group(1) if quoted else summary)).strip().splitlines()[0:1]
+            desc = desc[0] if desc else "a background task"
+        if len(desc) > 80:
+            desc = desc[:79] + "…"
+        text = html.escape(desc)
+        if card is not None and on_jump is not None:
+            text = f'<a href="card">{text}</a>'
+            label.connect("activate-link", lambda *_: (on_jump(card), True)[1])
+        label.set_markup(f"<b>{html.escape(what)}</b> · {text} — {html.escape(ending)}")
+    link_card(card, on_jump)
+    row.link_card = link_card
     row.append(label)
     return row
 
@@ -10586,6 +10590,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.blocks = {}         # stream index -> widget for current message
         self.tool_cards = {}     # tool_use_id -> ToolCard
         self.tool_parent = {}    # tool_use_id -> the subagent's call it ran inside (nested agents)
+        self.task_lines = {}     # task id -> the line its ending got while its card wasn't drawn (task_note)
         self.streamed_ids = set()  # message ids we already rendered via stream events
 
     def add(self, widget, parent_tool=None):
@@ -10627,7 +10632,25 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return widget
 
     def task_note(self, note):
-        return task_note_widget(note, self.tool_cards.get(note.get("tool_use_id")), self.jump_to_card)
+        """The line a background task's ending gets: none while its card's in the chat, which says it ended itself
+        (ToolCard.finish_task); else task_note_widget's, which links to its card if that's drawn later (card_task)."""
+        task = self.tasks.get(note.get("task_id")) or {}
+        if self.tool_cards.get(note.get("tool_use_id") or task.get("tool_use_id")) is not None:
+            return None
+        line = task_note_widget(note)
+        if note.get("task_id"):
+            self.task_lines[note["task_id"]] = line
+        return line
+
+    def card_task(self, card):
+        """A card drawn after its background task's ending was (that's in a later part of the chat, drawn first): it
+        says how the task ended, as a card that saw it end does, and the ending's line links back to it."""
+        task = next((t for t in self.tasks.values() if t.get("tool_use_id") == card.tool_id), None)
+        if task is None or task.get("status") in (None, "running", "interrupted"):
+            return
+        card.finish_task(task)
+        if (line := self.task_lines.pop(task["task_id"], None)) is not None:
+            line.link_card(card, self.jump_to_card)
 
     def jump_to_card(self, card):
         """Scroll the chat back to a card (opening the group it's folded into) and flash it."""
@@ -12013,13 +12036,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 card.bind_task(task)
                 if task.get("task_type") == "local_agent":
                     self.panel.link_card(card, task)
-            elif kind == "task_notification" and card.state in ("running", "background"):
-                # not on task_updated: it comes first, without the summary and output file
+            elif kind == "task_notification" and (card.state in ("running", "background", "interrupted")
+                                                  or card.task is None):
+                # not on task_updated: it comes first, without the summary and output file. One settled as
+                # interrupted (a chat opened as finished, settle_tasks) or never told of its task ended after all.
                 card.finish_task(task)
-        if kind == "task_notification" and not task.get("noted") \
-                and task.get("tool_use_id") not in self.tool_parent:  # (a nested agent's card says so)
+        if kind == "task_notification" and not task.get("noted"):
             task["noted"] = True
-            self.add(self.task_note(task))
+            if (line := self.task_note(task)) is not None:  # (none while its card's in the chat: it says so)
+                self.add(line)
         self.panel.update_task(task)
         self.update_tasks_indicator()
 
@@ -12159,6 +12184,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 if from_file:
                     self.task_from_result(card, c.get("content"))  # before: the card waits on it
                 card.set_result(c.get("content"), c.get("is_error", False))
+                if card.task is None and self.task_lines:  # (its task's ending drawn before it: a later part)
+                    self.card_task(card)
                 if card.artifact:
                     self.register_artifact(card.artifact)
 
@@ -13115,7 +13142,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                                                 "task_type": kind, "description": note.get("summary")})
             task = self.tasks[tid]
             task["from_file"] = True
-        task["noted"] = True  # the transcript already shows its own note for this ending
+        task["noted"] = True  # (its line, if it gets one, is drawn from the transcript's own note: render_history)
         self.on_task_event("task_notification", {
             "task_id": tid, "tool_use_id": note.get("tool_use_id") or task.get("tool_use_id"),
             # the card shows what the task produced: a subagent's report, else the one-line summary
@@ -13587,8 +13614,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     info = self.register_artifact(content)
                     self.add(sel_label("Published " + link_markup(info["url"]), css="sysnote"))
             elif kind == "task_note":
-                self.add(self.task_note(content))
-                self.task_from_note(content)
+                self.task_from_note(content)  # (its card, if it's drawn, says it ended)
+                if (line := self.task_note(content)) is not None:
+                    self.add(line)
             elif kind == "compact_summary":  # (what the CLI wrote for itself on compacting: folded)
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))
                 fold.add_css_class("sysnote")

@@ -1085,13 +1085,13 @@ def network_fixture():
         servers[name] = (s, net.add("127.0.0.1", s.port))
     started = {}
     for name, params, answer in [
-            ("build-box", {"prompt": "Run the nightly benchmarks", "cwd": parser, "tags": ["bench"]}, True),
-            ("build-box", {"prompt": "Bisect the flaky login test", "cwd": site, "tags": ["ci"]}, True),
+            ("build-box", {"prompt": "Run the nightly benchmarks", "cwd": parser}, True),
+            ("build-box", {"prompt": "Bisect the flaky login test", "cwd": site}, True),
             ("lab-mac", {"prompt": "Plan the Q1 roadmap", "cwd": site, "group": "Planning"}, True),
-            ("lab-mac", {"prompt": "Write the release notes for 2.4", "cwd": site, "tags": ["docs"]}, True),
-            ("lab-mac", {"prompt": "Speed up the tokenizer's hot loop", "cwd": parser, "tags": ["perf", "parser"],
-                         "model": "opus", "effort": "high"}, True),
-            ("lab-mac", {"prompt": "List the files in the build folder", "cwd": parser, "tags": ["ci"]}, False)]:
+            ("lab-mac", {"prompt": "Write the release notes for 2.4", "cwd": site}, True),
+            ("lab-mac", {"prompt": "Speed up the tokenizer's hot loop", "cwd": parser, "model": "opus",
+                         "effort": "high"}, True),
+            ("lab-mac", {"prompt": "List the files in the build folder", "cwd": parser}, False)]:
         server = servers[name][0]
         s = server.start(params)
         started[params["prompt"]] = s.id
@@ -1144,7 +1144,7 @@ def subagent_session():
     network_fixture()
     server = NET["lab"][0]
     s = server.start({"prompt": "Have a SUBAGENT count the test functions", "title": "Count the test functions",
-                      "cwd": NET["folders"][0], "group": "Planning", "tags": ["tests"]})
+                      "cwd": NET["folders"][0], "group": "Planning"})
     T.wait_for(lambda: s.transcript() and "subagent counted" in open(s.transcript()).read(), "its subagent done", 15)
     NET["agent"] = s.id
     return s.id
@@ -1187,8 +1187,8 @@ def models_server():
     r = baude.network().add("127.0.0.1", json.loads(proc.stdout.readline())["port"])
     T.wait_for(lambda: r.state == "alive", "gpu-mac there")
     got = []
-    r.request({"op": "start", "prompt": "Sketch the release checklist", "cwd": NET["folders"][1], "model": "opus",
-               "tags": ["release"]}, got.append)
+    r.request({"op": "start", "prompt": "Sketch the release checklist", "cwd": NET["folders"][1], "model": "opus"},
+              got.append)
     T.wait_for(lambda: got and (r.sessions.get(got[0]["session"]["id"]) or {}).get("state") == "waiting", "its session")
     NET["gpu"] = (proc, r, got[0]["session"]["id"])
     return NET["gpu"]
@@ -1207,8 +1207,8 @@ def _(app):
     return win
 
 
-@scene("55b-network-group", "A group on the network: its sessions from every server that has some, by folder, their "
-                            "tags beside them; those of a server that's gone (build-box) kept, marked dead")
+@scene("55b-network-group", "A group on the network: its sessions from every server that has some, by folder; those "
+                            "of a server that's gone (build-box) kept, marked dead")
 def _(app):
     return network_window(app)
 
@@ -1249,15 +1249,14 @@ def _(app):
     return win
 
 
-@scene("55f-network-new-session", "New session, while a group on the network is shown: a prompt, a folder, a group and "
-                                  "tags, on a server that's there, with the top bar's model, effort and mode")
+@scene("55f-network-new-session", "New session, while a group on the network is shown: a prompt, a folder and a group, "
+                                  "on a server that's there, with the top bar's model, effort and mode")
 def _(app):
     win = network_window(app)
     win.sidebar.new_chat()
     T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
     f = win.remote_fields
     f["folder"].set_text(NET["folders"][1])
-    f["tags"].set_text("docs, release")
     f["prompt"].get_buffer().set_text("Check every link in the docs still resolves, and fix the ones that don't.")
     return win
 

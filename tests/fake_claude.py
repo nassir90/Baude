@@ -150,6 +150,12 @@ def start_mode():
     return "default" if m == "manual" else m
 
 
+def can_bypass():
+    """As claude: Bypass permissions is switched to later only if it was started in it, or with it on offer."""
+    return start_mode() == "bypassPermissions" or any(
+        f in sys.argv for f in ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions"))
+
+
 def record(line):
     log.write(line.rstrip("\n") + "\n")
     log.flush()
@@ -500,6 +506,11 @@ def main():
         msg = json.loads(line)
         if msg.get("type") == "control_request":
             sub = msg["request"].get("subtype")
+            if sub == "set_permission_mode" and msg["request"].get("mode") == "bypassPermissions" and not can_bypass():
+                out({"type": "control_response", "response": {
+                    "subtype": "error", "request_id": msg["request_id"], "error": "Cannot set permission mode to "
+                    "bypassPermissions because the session was not launched with --dangerously-skip-permissions"}})
+                continue
             resp = control_reply(msg["request"])
             out({"type": "control_response",
                  "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})

@@ -143,7 +143,7 @@ class Remote:
         self.info, self.seen = info, time.time()
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
-        ch.send({"op": "subscribe"})
+        ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
         for msg in ch:
             self.seen = time.time()
             op = msg.get("op")

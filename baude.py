@@ -7528,6 +7528,17 @@ def own_writes(proc, exiting=False):
             w.own_mtimes[proc.path] = max(mtime, time.time() + 2) if exiting else mtime
 
 
+def baude_runs(session_id, but=None):
+    """Does Baude run a session's claude: a window of it (not but) talking to it, or keeping it at a turn for a chat left
+    mid-turn (background_proc)?"""
+    app = Gio.Application.get_default()
+    for w in app.get_windows() if app is not None and session_id else []:
+        if isinstance(w, BaudeWindow) and w is not but and w.session_id == session_id and w.proc is not None \
+                and not w.resume_pending and w.remote is None:
+            return True
+    return background_proc(session_id) is not None
+
+
 def background_proc(session_id):
     """The claude a Baude window keeps at a turn for a chat left mid-turn (BaudeWindow.detach_proc), if any."""
     app = Gio.Application.get_default()
@@ -7581,7 +7592,8 @@ def remote_info(s):
             # (this machine's host process, asleep: its sessions' claudes went with it, whatever was last listed)
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),
             "dead": r.state == "dead" and not r.mine,
-            "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode")}
+            "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
+            "archived": bool(s.get("archived"))}
 
 
 def remote_name(r):
@@ -8195,7 +8207,7 @@ class SessionSidebar(Gtk.Box):
         ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"), s.get("said"),
-                       s.get("group")) for s in network().sessions() if self.shows(s, hosts, groups))
+                       s.get("group"), bool(s.get("archived"))) for s in network().sessions() if self.shows(s, hosts, groups))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8278,7 +8290,7 @@ class SessionSidebar(Gtk.Box):
             r = info["remote"]
             if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r)]).lower():
                 continue
-            if info["id"] in archived:
+            if info.get("archived") or info["id"] in archived:  # (archived on its host; or here, before hosts did)
                 gone.append(info)
                 continue
             if info["id"] in hidden:
@@ -8503,10 +8515,13 @@ class SessionSidebar(Gtk.Box):
                  ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
                   "unarchive" if info["id"] in self.archived_ids() else "archive"),
                  ("Move to Trash…", "trash")]
-        if info.get("remote") is not None:  # (on a server: renamed or stopped there while it's there, or deleted here,
-            active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")  # never trashed)
-            items = items[:1 if not info.get("dead") else 0] + items[1:2] + \
-                ([("Stop", "stop")] if active else [("Delete", "hide")])
+        if info.get("remote") is not None:  # (on a host: renamed, archived, stopped or trashed there while it's there;
+            # while it's gone, only not listed here till it shows up again)
+            active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")
+            archived = bool(info.get("archived"))
+            items = [("Delete", "hide")] if info.get("dead") or info["remote"].state != "alive" else \
+                [("Rename…", "rename"), ("Unarchive" if archived else "Archive", "unarchive" if archived else "archive")] \
+                + ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]
         for label, action in items:
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", sid)
@@ -8578,6 +8593,9 @@ class SessionSidebar(Gtk.Box):
         self.fill()
 
     def archive(self, info):
+        if info and info.get("remote") is not None:  # (a host's: archived there, for every head)
+            self.ask_remote(info, "archive")
+            return
         if info:
             st = load_settings()
             save_settings(archived=sorted(set(st.get("archived", [])) | {info["id"]}),
@@ -8585,6 +8603,9 @@ class SessionSidebar(Gtk.Box):
             self.fill()
 
     def unarchive(self, info):
+        if info and info.get("remote") is not None:
+            self.ask_remote(info, "unarchive")
+            return
         if info:
             st = load_settings()  # (archived in Claude Desktop: shown here anyway from now on)
             save_settings(archived=sorted(set(st.get("archived", [])) - {info["id"]}),
@@ -8595,10 +8616,12 @@ class SessionSidebar(Gtk.Box):
         if info is None:
             return
         n = info.get("copies", 0)
+        r = info.get("remote")
+        where = "your trash" if r is None or host_key(r) == HERE_HOST else f"the trash on {remote_name(r)}"
         dlg = Adw.AlertDialog(heading=f"Move “{info.get('title') or 'this session'}” to the trash?",
                               body="Its transcript" + (f" and its {n} earlier cop{'y' if n == 1 else 'ies'}"
                                                        if n else "") +
-                                   " will be moved to your trash, where you can restore it.",
+                                   f" will be moved to {where}, where you can restore it.",
                               default_response="cancel", close_response="cancel")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("trash", "Move to Trash")
@@ -8607,7 +8630,28 @@ class SessionSidebar(Gtk.Box):
         self.dialog = dlg
         dlg.present(self.win)
 
+    def ask_remote(self, info, op):
+        """A host's session archived, unarchived or deleted there (wire's archive, unarchive, delete): as it says it's
+        done, listed so here; the open chat, if it's the one deleted, left for a new one."""
+        r = info["remote"]
+
+        def done(reply):
+            if reply.get("op") == "error":
+                toast(self, f"{remote_name(r)} didn't {op} it: {reply.get('error')}")
+                return
+            if op == "delete":
+                r.sessions.pop(info["id"], None)
+                if info["id"] == self.win.session_id:
+                    self.win.new_session()
+            elif info["id"] in r.sessions:
+                r.sessions[info["id"]] = {**r.sessions[info["id"]], "archived": op == "archive"}
+            self.fill()
+        r.request({"op": op, "session": info["id"]}, done)
+
     def trash(self, info):
+        if info.get("remote") is not None:  # (a host's: moved to the trash there, by its host process)
+            self.ask_remote(info, "delete")
+            return
         for path in [info["path"], *info.get("copy_paths", [])]:
             try:
                 Gio.File.new_for_path(path).trash(None)
@@ -10614,7 +10658,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.tabs.open("chat", lambda: root, "Chat", icon="baude-claude-symbolic", pinned=True)  # (Claude's logo)
         widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         self.banner = Adw.Banner(revealed=False)
-        self.banner.connect("button-clicked", lambda *_: self.stop_remote_turn())  # (a network session's: Stop)
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
@@ -14104,12 +14147,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.tail.start(path, 0)
         self.update_banner()
 
-    def stop_remote_turn(self):
-        """The banner's Stop: a network session at a turn on its server, interrupted there."""
-        if self.remote is not None and self.proc is not None:
-            self.proc.control({"subtype": "interrupt"})
-            self.note("interrupt requested")
-
     def ask_add_host(self):
         """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
         Tailscale), by where ssh goes: an alias in ~/.ssh/config, a host, or user@host; and its host process's command
@@ -14412,35 +14449,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 pass
 
     def live_elsewhere(self):
-        """Is the viewed session in use by another program (Claude Desktop, a terminal)? Not Baude's own claude, at a turn
-        in it for a chat left mid-turn: written to here, that's the one that goes on with it (begin_resume). A network
-        session: at a turn on its server, or its server gone."""
-        if self.remote is not None:
-            listed = self.remote.sessions.get(self.session_id) or {}
-            return self.resume_pending and (self.remote.state != "alive" or listed.get("state") in ("working", "waiting"))
-        return self.resume_pending and self.tail.in_use() and background_proc(self.session_id) is None
+        """Is the viewed session in use by a program that isn't Baude: Claude Desktop, which runs its chats itself, or a
+        terminal's claude? That one's kept from a second writer here, which would interleave two conversations in its
+        transcript (update_banner). A chat Baude runs isn't: in another of its windows, left mid-turn (background_proc),
+        or a host process's (on the network, or this machine's), where several heads at once is how it's used: what's
+        sent mid-turn waits for the turn's end, on its host."""
+        if self.remote is not None or not self.resume_pending:
+            return False
+        return self.tail.in_use() and not baude_runs(self.session_id, but=self)
 
     def update_banner(self):
-        """While another program has the session, say so, with no text box (show_composer): two writers would
-        interleave two conversations in one transcript."""
+        """While another program (not Baude: live_elsewhere) has the session, or a host's session's host isn't there,
+        say so, with no text box (show_composer): two writers would interleave two conversations in one transcript, and
+        a host that's gone has no one to send to."""
         live = self.live_elsewhere()
-        stop = None
-        if live and self.remote is not None:
+        gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
+        if gone:
             name = remote_name(self.remote)
-            if self.remote.state == "dead":
-                self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen")
-            elif self.remote.state != "alive":
-                self.banner.set_title(f"Looking for {name} on the network…")
-            else:
-                listed = self.remote.sessions.get(self.session_id) or {}
-                waiting = listed.get("state") == "waiting"
-                self.banner.set_title(f"Waiting for an answer on {name}" if waiting else f"Working on {name}")
-                stop = "Stop"
+            self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen"
+                                  if self.remote.state == "dead" else f"Looking for {name} on the network…")
         elif live:
             self.banner.set_title("This session is currently active elsewhere")
-        self.banner.set_button_label(stop)
-        self.banner.set_revealed(live)
-        self.locked = live
+        self.banner.set_button_label(None)
+        self.banner.set_revealed(live or gone)
+        self.locked = live or gone
         self.show_composer()
 
     def tail_lines(self, lines):

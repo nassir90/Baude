@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 
 from baudelib import claude, models, transcripts, wire
@@ -87,6 +88,33 @@ def running_pid(state_dir=None):
     return int(text) if "baude_headless.py" in ran else None
 
 
+def trash(path):
+    """Move a file or folder to the trash, as Baude's Move to Trash does: on macOS its user's ~/.Trash; else (and
+    wherever XDG_DATA_HOME's set) the freedesktop one, $XDG_DATA_HOME/Trash, with what it was. Where it went."""
+    import datetime
+    import shutil
+    name = os.path.basename(path.rstrip("/"))
+    data = os.environ.get("XDG_DATA_HOME")
+    if sys.platform == "darwin" and not data:
+        folder, info = os.path.expanduser("~/.Trash"), None
+    else:
+        base = os.path.join(data or os.path.expanduser("~/.local/share"), "Trash")
+        folder, info = os.path.join(base, "files"), os.path.join(base, "info")
+        os.makedirs(info, mode=0o700, exist_ok=True)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    target, n = os.path.join(folder, name), 1
+    while os.path.lexists(target) or info and os.path.lexists(os.path.join(info, os.path.basename(target) + ".trashinfo")):
+        n += 1
+        stem, ext = os.path.splitext(name)
+        target = os.path.join(folder, f"{stem} {n}{ext}")
+    if info:
+        with open(os.path.join(info, os.path.basename(target) + ".trashinfo"), "w", encoding="utf-8") as f:
+            f.write(f"[Trash Info]\nPath={urllib.parse.quote(os.path.abspath(path))}\n"
+                    f"DeletionDate={datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}\n")
+    shutil.move(path, target)
+    return target
+
+
 def _write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -101,6 +129,7 @@ class Conn:
     def __init__(self, channel):
         self.channel, self.out = channel, queue.Queue()
         self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
+        self.archived = False  # (subscribed to archived sessions too)
         threading.Thread(target=self._write, daemon=True, name="client-out").start()
 
     def send(self, msg):
@@ -196,6 +225,7 @@ class Session:
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),
                 "transcript": self.found_transcript(),
+                "archived": bool(self.meta.get("archived")),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -353,12 +383,41 @@ class Server:
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]})}
 
+    def delete(self, s):
+        """(lock held) A session gone: its claude stopped, it's no longer listed or kept, and its transcript (claude's,
+        or the one kept here) and its subagents' files moved to the trash, where they can be got back, as Baude's
+        Move to Trash does with a chat of its own. [Where each went]."""
+        if s.proc is not None:
+            s.proc.stopping = True
+            s.proc.kill()
+        self.sessions.pop(s.id, None)
+        for c in list(s.viewers):  # (attached to it: it's gone)
+            c.send({"op": "exited", "session": s.id, "code": None})
+        try:
+            os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
+        except OSError:
+            pass
+        path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
+        went = []
+        folder = path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None  # (claude's beside it: subagents')
+        for p in (path, folder):
+            if p and os.path.exists(p):
+                try:
+                    went.append(trash(p))
+                except OSError as e:
+                    self.log(f"{s.id}: {p} not moved to the trash: {e}")
+        self.log(f"deleted {s.id}")
+        self.changed()
+        return went
+
     def save(self, s):
         _write_json(os.path.join(self.state_dir, "sessions", f"{s.id}.json"), s.meta)
 
-    def listing(self):
+    def listing(self, archived=False):
+        """Its sessions, newest first; those archived only if asked for (archived)."""
         with self.lock:
-            return sorted((s.listing() for s in self.sessions.values()), key=lambda i: -(i["said"] or 0))
+            return sorted((s.listing() for s in self.sessions.values() if archived or not s.meta.get("archived")),
+                          key=lambda i: -(i["said"] or 0))
 
     # ---- running
     def serve_forever(self):
@@ -467,11 +526,11 @@ class Server:
         if op == "hello":
             return reply("hello", server=self.info())
         if op == "subscribe":
-            conn.subscribed = True
+            conn.subscribed, conn.archived = True, bool(msg.get("archived"))
             with self.lock:  # (as they are now: nothing's been read while nobody was attached)
                 for s in self.sessions.values():
                     self.rescan(s)
-            return reply("sessions", sessions=self.listing(), server=self.info())
+            return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time)
             reply("quitting")
             threading.Thread(target=self.shutdown, daemon=True, name="quit").start()
@@ -502,6 +561,16 @@ class Server:
                     s.proc.stopping = True
                     s.proc.kill()
                 return reply("stopped", session=s.id)
+            if op in ("archive", "unarchive"):  # (archived: its claude stopped, and listed only if asked for)
+                if op == "archive" and s.proc is not None:
+                    s.proc.stopping = True
+                    s.proc.kill()
+                s.meta["archived"] = op == "archive"
+                self.save(s)
+                self.changed()
+                return reply(op + "d", session=s.id)
+            if op == "delete":
+                return reply("deleted", session=s.id, trashed=self.delete(s))
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))
@@ -919,10 +988,11 @@ class Server:
             send, self.dirty = self.dirty, False
             conns = list(self.conns)
         if send:
-            msg = {"op": "sessions", "sessions": self.listing(), "server": self.info()}
+            every, info = self.listing(archived=True), self.info()
+            shown = [x for x in every if not x["archived"]]
             for c in conns:
                 if c.subscribed:
-                    c.send(msg)
+                    c.send({"op": "sessions", "sessions": every if c.archived else shown, "server": info})
             self.on_change()
         if time.monotonic() - pinged >= wire.PING_S:  # (every connection: a client takes silence for gone)
             pinged = time.monotonic()

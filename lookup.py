@@ -819,7 +819,7 @@ REF_ICON_KINDS = {"commit": "git", "branch": "git", "pr": "git", "k8s": "k8s", "
 
 
 def github_icon(issue, state):
-    """A pull request's logo (the branch's, green while it's open, orange once merged, grey if it was closed without
+    """A pull request's logo (the branch's, green while it's open, purple once merged, grey if it was closed without
     being merged) or an issue's (a #, grey once closed): REF_ICON_SVG."""
     if issue:
         return "issue_closed" if state == "closed" else "issue"

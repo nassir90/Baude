@@ -992,7 +992,13 @@ class GitGutter(Gtk.Widget):
     def do_size_allocate(self, width, height, baseline):
         w = self.child.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
         h = min(height, self.child.measure(Gtk.Orientation.VERTICAL, w)[1])
-        y = 0 if self.child.get_valign() == Gtk.Align.START else (height - h) / 2  # (with a name's first line)
+        y = (height - h) / 2
+        if self.child.get_valign() == Gtk.Align.START:  # (centred on the first line of the name beside it: beside)
+            line = height
+            if (beside := getattr(self, "beside", None)) is not None:
+                m = beside.get_pango_context().get_metrics(None, None)
+                line = (m.get_ascent() + m.get_descent()) / Pango.SCALE
+            y = max(0.0, (min(line, height) - h) / 2)
         self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, y)))
 
     def do_dispose(self):
@@ -1511,12 +1517,14 @@ class GitPage(Gtk.Stack):
             row = Gtk.ListBoxRow(activatable=p is not None)
             row.url = p and p["url"]
             line = Gtk.Box(spacing=GIT_ROW_GAP)
-            line.append(GitGutter(git_pull_pill(p) if p else Gtk.Box(), self.gutter_px()))
+            gutter = GitGutter(git_pull_pill(p) if p else Gtk.Box(), self.gutter_px())
+            line.append(gutter)
             # (two lines, then …, as a commit's subject; its natural width a character's: a long name never widens the
             # panel, it wraps in what the panel has)
             title = Gtk.Label(label=p["title"] if p else f"{more} more", xalign=0, hexpand=True, wrap=True,
                               wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2, ellipsize=Pango.EllipsizeMode.END,
                               max_width_chars=1, valign=Gtk.Align.START)
+            gutter.beside = title  # (its pill centred on the name's first line)
             line.append(title)
             row.set_child(line)
             if p:

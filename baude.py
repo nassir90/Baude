@@ -6078,8 +6078,10 @@ class ToolCard(Gtk.Box):
         self.header.set_markup(f"{src}{html.escape(s)}{tail}")
 
     def show_output(self):
-        self.output_toggle.set_visible(True)
         self.toggles.set_visible(True)
+        if getattr(self, "view_btn", None) is not None and self.state != "error":
+            return  # (a subagent's: View opens it in the side panel, in place of an Output to fold open; an Error stays)
+        self.output_toggle.set_visible(True)
 
     def set_input(self, inp):
         self.input = inp if isinstance(inp, dict) else {}
@@ -9107,14 +9109,20 @@ class SidePanel(Gtk.Box):
         return self.agent_boxes.get(tool_use_id)
 
     def link_card(self, card, task):
-        """A subagent's tool card points at its transcript here."""
-        btn = Gtk.Button(label="View subagent in side panel", halign=Gtk.Align.START)
-        btn.add_css_class("flat")
-        btn.add_css_class("link-button")
-        btn.connect("clicked", lambda *_: (self.win.show_panel(True, "agents"),
-                                           self.open_agent(task.get("tool_use_id"))))
-        card.result_box.append(btn)
-        card.show_output()
+        """A subagent's tool card: View, beside its Prompt where its Output was, opens its transcript here (the side
+        panel's Subagents, on it) rather than folding open what it said. Its Output's kept only for an Error."""
+        if getattr(card, "view_btn", None) is None:
+            tid = task.get("tool_use_id") or card.tool_id
+            btn = Gtk.ToggleButton(label="View", valign=Gtk.Align.CENTER, focus_on_click=False,
+                                   tooltip_text="Open this subagent in the side panel")
+            btn.add_css_class("tool-toggle")  # (as Prompt is, beside it)
+            btn.connect("toggled", lambda b: b.get_active() and (b.set_active(False), self.win.show_panel(True, "agents"),
+                                                                self.open_agent(tid)))
+            card.toggles.append(btn)
+            card.view_btn = btn
+        if card.state != "error":
+            card.output_toggle.set_visible(False)
+        card.toggles.set_visible(True)
 
     def update_task(self, task):
         if task.get("task_type") == "local_agent":

@@ -7457,7 +7457,7 @@ def session_group(cwd):
 
 
 def short_group_label(key, label):
-    """A group's name as a header (or a row, by date) shows it: a folder's last part, the rest as they are."""
+    """A group's name as its header shows it: a folder's last part, the rest as they are."""
     if key in ("scratch", "?", "archived") or key.startswith("date:"):
         return label
     return os.path.basename(label.rstrip("/")) or label
@@ -8318,7 +8318,7 @@ class SessionSidebar(Gtk.Box):
                 continue
             listed.append((info, key, label, folder))
         # a chat Desktop started from another (a side session, a fork) is in that one's group, under it, whatever its
-        # own folder (with its folder on its row)
+        # own folder
         by_id = {info["id"]: (info, key, label, folder) for info, key, label, folder in listed}
         for info, key, label, folder in listed:
             top, seen = info["id"], set()
@@ -8454,9 +8454,7 @@ class SessionSidebar(Gtk.Box):
             shown = rows if limit is None or len(tops) <= limit else rows[:tops[limit]]
             placed = {}
             for info, depth, last in shown:
-                # (its folder: by day, and on a chat from another folder under one of this folder's)
-                elsewhere = depth and session_group(info.get("folder", info.get("cwd")))[0] != key
-                row = self.session_row(info, depth, last, where=by_date or elsewhere)
+                row = self.session_row(info, depth, last)
                 row.tree_parent = placed.get(info.get("fork_parent"))
                 if info["id"]:  # (not the open session before its first message: a root's fork_parent is None too)
                     placed[info["id"]] = row
@@ -8499,10 +8497,10 @@ class SessionSidebar(Gtk.Box):
         row.folder, row.key = folder, key
         return row
 
-    def session_row(self, info, depth=0, last=True, where=False):
-        """Title ··· [folder] [worktree] [dot] — one line; the folder when grouped by day (where), the worktree's
-        name for a worktree's chat, the dot only when something's happening (working, waiting for an answer,
-        finished and waiting for input). Forks sit under their session like files in a tree."""
+    def session_row(self, info, depth=0, last=True):
+        """Title ··· [worktree] [dot] — one line; the worktree's name for a worktree's chat, the dot only when
+        something's happening (working, waiting for an answer, finished and waiting for input). Forks sit under their
+        session like files in a tree."""
         box = Gtk.Box(spacing=6, margin_start=6 + depth * TreeList.INDENT, margin_end=4)
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
@@ -8512,11 +8510,6 @@ class SessionSidebar(Gtk.Box):
         if depth:
             title.add_css_class("fork-title")
         box.append(title)
-        if where:  # (grouped by day: the folder it's in)
-            place = widgets.FadeLabel(label=short_group_label(*session_group(info.get("folder", info.get("cwd")))),
-                                      max_chars=12, valign=Gtk.Align.CENTER)
-            place.add_css_class("session-place")
-            box.append(place)
         if tree := info.get("worktree"):  # (a worktree's chat, listed under its repository)
             tag = Gtk.Label(label=os.path.basename(tree), ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=14,
                             valign=Gtk.Align.CENTER)

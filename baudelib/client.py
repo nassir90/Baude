@@ -1,15 +1,19 @@
-"""Servers as Baude sees them: each one found on the network (discovery.Browser), given by address, or remembered from
-before; the sessions each lists; a session's transcript mirrored here, and its subagents' beside it, so what reads a
-transcript reads it as it reads a local one; and a session's claude, talked to as Baude talks to its own (RemoteProc).
+"""Hosts as Baude sees them: this machine's host process (its socket), another machine's over ssh, found on the network
+(discovery.Browser: a host that says Baude is on it, and its ssh user), among Tailscale's peers, given by hand, or
+remembered from before; the sessions each lists; a session's transcript, read where it is on this machine, else mirrored
+here, its subagents' beside it, so what reads a transcript reads it as it reads a local one; and a session's claude,
+talked to as Baude talks to its own (RemoteProc). wire.py says how each is reached.
 
-A server that goes (its connection drops, or it says nothing for wire.SILENT_S) isn't forgotten: it's "dead", its
+A host that goes (its connection drops, or it says nothing for wire.SILENT_S) isn't forgotten: it's "dead", its
 sessions still listed as they were, until it's back or it's been gone for FORGET_S. Calls to what's given (on_change,
 a request's callback, RemoteProc's on_msg and on_exit) come through dispatch, as ClaudeProc's do."""
 import base64
 import itertools
 import json
 import os
+import shutil
 import socket
+import subprocess
 import threading
 import time
 
@@ -17,7 +21,9 @@ from baudelib import claude, wire
 from baudelib.discovery import Browser
 
 FORGET_S = 7 * 86400
-RETRY_S = (1, 2, 5, 10, 30)  # a dead server is tried again after these, then every last one
+RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
+PEERS_S = 5 * 60  # Tailscale's peers looked at again, and those Baude wasn't on tried again, at most this often
+TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"  # (macOS's, where tailscale isn't on PATH)
 
 
 def network_home():
@@ -36,58 +42,85 @@ def is_here(info):
 
 
 class Remote:
-    """One server: its info (as hello says), its sessions (as it lists them), and whether it's there."""
+    """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
+    whether it's there. found_by: "local" (this machine's socket), "network" (multicast DNS), "tailscale", "hand";
+    probe: one not reached yet that may not be one (a Tailscale peer): tried when the network's looked at, not again
+    and again. command: its host process's command, as given here (what it's said to be otherwise)."""
 
-    def __init__(self, network, key, host, port, cached=None):
+    def __init__(self, network, key, where, cached=None, found_by="hand", probe=False):
         cached = cached or {}
-        self.network, self.key, self.host, self.port = network, key, host, port
+        self.network, self.key, self.where = network, key, dict(where)
         self.info = cached.get("info") or {}
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and s.get("id")}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
         self.seen = cached.get("seen") or 0.0  # when it last said anything
-        self.by_hand = bool(cached.get("by_hand"))  # (given by address: kept, whether it's been reached or not)
+        self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
+        self.found_by = cached.get("found_by") or found_by
+        self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
+        self.probe, self.tried, self.error = probe and not self.info, 0.0, None
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
         self.wake, self.stopped = threading.Event(), False
         self.lock = threading.Lock()
 
+    @property
+    def local(self):
+        """Is it on this machine, reached by its socket (its transcripts read where they are, not mirrored)?"""
+        return wire.is_local(self.where)
+
+    @property
+    def host(self):
+        """Where it is, as people say it: user@host, or this machine."""
+        return wire.said_where(self.where)
+
+    def reach_where(self):
+        return {**self.where, "command": self.command} if self.command and self.where.get("via") == "ssh" else self.where
+
     def start(self):
         threading.Thread(target=self._run, daemon=True, name=f"remote-{self.key}").start()
         return self
 
-    def address(self, host, port):
+    def address(self, where):
         """Where it is now (found again, maybe elsewhere): tried at once if it's dead."""
-        moved = (host, port) != (self.host, self.port)
-        self.host, self.port = host, port
+        moved = dict(where) != self.where
+        self.where = dict(where)
         if moved or self.state != "alive":
             self.wake.set()
 
     def _run(self):
         tries = 0
         while not self.stopped:
+            self.tried = time.monotonic()
             try:
-                ch, info = wire.connect(self.host, self.port, timeout=5)
-            except OSError:
-                ch = None
+                ch, info = wire.reach(self.reach_where(), timeout=5)
+                self.error = None
+            except OSError as e:
+                ch, self.error = None, str(e)
             if ch is not None:
-                tries = 0
+                tries, self.probe = 0, False
                 self._serve(ch, info)
             if self.stopped:
                 break
             if self.state != "dead":
                 self.state = "dead"
                 self.network.changed()
-            self.wake.wait(RETRY_S[min(tries, len(RETRY_S) - 1)])
+            if self.probe:  # (not one, or not yet: tried again when the network's next looked at, not before)
+                self.wake.wait()
+            else:
+                self.wake.wait(RETRY_S[min(tries, len(RETRY_S) - 1)])
             self.wake.clear()
             tries += 1
 
     def _serve(self, ch, info):
         with self.lock:
             self.ch = ch
-        if info.get("id") and info["id"] != self.key:
-            self.network.rekey(self, info["id"])
+        if info.get("id") and info["id"] != self.key and not self.network.rekey(self, info["id"]):
+            with self.lock:  # (this machine's, reached by its socket already: not twice)
+                self.ch = None
+            ch.close()
+            return
         self.info, self.seen = info, time.time()
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
@@ -139,7 +172,17 @@ class Remote:
         return got[0]
 
     def mirror(self, session_id):
+        """Where a session's transcript is read here: on this machine (local), its own file, as the host lists it (none
+        before it's there: no copy of what's here is ever made); else its copy here, fetched as it grows (sync)."""
+        if self.local:
+            path = (self.sessions.get(session_id) or {}).get("transcript")
+            if isinstance(path, str) and path.endswith(".jsonl") and os.path.isfile(path):
+                return path
         return os.path.join(self.network.home, self.key, f"{session_id}.jsonl")
+
+    def direct(self, session_id):
+        """Is a session's transcript read where it is (mirror), not copied?"""
+        return not self.mirror(session_id).startswith(os.path.join(self.network.home, ""))
 
     def mirrored(self, session_id):
         """How much of a session's transcript its mirror has (it's the transcript's first bytes, as they are)."""
@@ -152,6 +195,8 @@ class Remote:
         """Bring a session's mirror up to what the server has, then its subagents' if they're behind (one sync of a
         session's transcript at a time, whichever window asks, and of its subagents'; timeout: what each request's
         waited for). True if its transcript's is."""
+        if self.local:
+            return True  # (on this machine: read where it is, once it's there; nothing to fetch)
         path = self.mirror(session_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with self.lock:
@@ -173,7 +218,10 @@ class Remote:
 
     def subagents_mirror(self, session_id):
         """Where a session's subagents' files are mirrored: beside its mirror, as claude keeps them beside its
-        transcript (what reads a transcript's subagents finds them there)."""
+        transcript (what reads a transcript's subagents finds them there); read where they are, for a transcript
+        that is."""
+        if self.direct(session_id):
+            return self.mirror(session_id)[:-len(".jsonl")] + os.sep + "subagents"
         return os.path.join(self.network.home, self.key, session_id, "subagents")
 
     def subagents_had(self, session_id):
@@ -194,8 +242,8 @@ class Remote:
         """Has the server changed a session's subagents' files since they were mirrored (as it last listed it)? Checked
         against the stamp the mirror last caught up with, else (before one, this run) its files' mtimes, the server's."""
         listed = (self.sessions.get(session_id) or {}).get("subagents")
-        if not isinstance(listed, int):
-            return False  # (a server that doesn't say)
+        if not isinstance(listed, int) or self.local:
+            return False  # (a host that doesn't say; or they're read where they are)
         synced = self.agents_synced.get(session_id)
         if synced is None:
             synced = max((m for _size, m in self.subagents_had(session_id).values()), default=0)
@@ -259,119 +307,178 @@ class Remote:
             ch.close()
 
     def cached(self):
-        return {"host": self.host, "port": self.port, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
-                "sessions": list(self.sessions.values())}
+        return {"where": self.where, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
+                "found_by": self.found_by, "command": self.command, "sessions": list(self.sessions.values())}
 
 
 class Network:
-    """Every server Baude knows, and the sessions they list. listen(fn): fn() (through dispatch) when they change."""
+    """Every host Baude knows, and the sessions they list. listen(fn): fn() (through dispatch) when they change.
+    discover: look on the network (multicast DNS) and among Tailscale's peers; hosts: ssh destinations to know too."""
 
-    def __init__(self, dispatch, home=None, discover=True, addresses=()):
+    def __init__(self, dispatch, home=None, discover=True, hosts=()):
         self.dispatch, self.home = dispatch, home or network_home()
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
-        self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
+        self.saved_at, self.pending, self.looked, self.peered = 0.0, False, float("-inf"), float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
         for key, c in self.saved().items():
             if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand"):
-                self.servers[key] = Remote(self, key, c["host"], c.get("port"), c)
+                self.servers[key] = Remote(self, key, c["where"], c)
             else:
                 self.forgotten.add(key)
-        for address in addresses:
-            host, _, port = address.strip().rpartition(":")
-            if host and port.isdigit() and not any((r.host, r.port) == (host, int(port)) for r in self.servers.values()):
-                self.servers[f"{host}:{port}"] = Remote(self, f"{host}:{port}", host, int(port))
+        for dest in hosts:
+            if wire.is_dest(dest := dest.strip()) and not any(r.where.get("dest") == dest for r in self.servers.values()):
+                self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest})
         for r in list(self.servers.values()):
             r.start()
+        self.discover = discover
         self.browser = Browser(self.found).start() if discover else None
         self.here()
+        if discover:
+            threading.Thread(target=self.peers, daemon=True, name="tailscale-peers").start()
         threading.Thread(target=self._tick, daemon=True, name="network-tick").start()
 
     def saved(self):
-        """servers.json as it is on disk now: {key: what was kept of the server}."""
+        """servers.json as it is on disk now: {key: what was kept of the host} (one from before hosts were reached by
+        ssh or their socket, at a port: none)."""
         try:
             with open(os.path.join(self.home, "servers.json"), encoding="utf-8") as f:
                 cache = json.load(f)
         except (OSError, ValueError):
             return {}
-        return {k: c for k, c in (cache.get("servers") or {}).items()
-                if isinstance(c, dict) and c.get("host") and isinstance(c.get("port"), int)}
+        return {k: c for k, c in (cache.get("servers") or {}).items() if isinstance(c, dict) and _where(c.get("where"))}
 
     def _tick(self):
-        """Every few seconds: this machine's servers looked for (here), and servers.json taken up as it's edited."""
+        """Every few seconds: this machine's host process looked for (here), and servers.json taken up as it's edited."""
         while not self.stopped.wait(5):
             self.here()
             self.take_saved()
 
     def here(self):
-        """The servers on this machine, from their files (wire.local_servers): one bound to it only, which multicast DNS
-        doesn't say, is found too, at 127.0.0.1 (its token's read from its file as it's reached)."""
-        for e in wire.local_servers():
-            key = e.get("id")
-            if not key:
-                continue
-            host = e["host"] if wire.is_loopback(e["host"]) and e["host"] != "localhost" else "127.0.0.1"
-            with self.lock:  # (by its id; else one given by its address and not reached yet, so with no id of its own)
-                r = self.servers.get(key) or next((r for r in self.servers.values() if r.key == f"{r.host}:{r.port}"
-                                                   and (r.host, r.port) == (host, e["port"])), None)
-                if r is None:
-                    self.servers[key] = Remote(self, key, host, e["port"]).start()
-                    self.changed()
-                elif r.state != "alive" and (wire.is_loopback(r.host) or r.port != e["port"]):
-                    r.address(host, e["port"])
+        """This machine's host process, once its socket's there: known, by its id once it's said it."""
+        if not os.path.exists(wire.socket_path()):
+            return
+        with self.lock:
+            if any(r.where.get("via") == "local" for r in self.servers.values()):
+                return
+            self.servers["local"] = Remote(self, "local", {"via": "local"}, found_by="local").start()
+        self.changed()
 
     def take_saved(self):
-        """servers.json's servers that aren't known here (put in it while Baude runs): known, and tried."""
+        """servers.json's hosts that aren't known here (put in it while Baude runs): known, and tried."""
         for key, c in self.saved().items():
             with self.lock:
                 if key in self.servers or key in self.forgotten or \
-                        any((r.host, r.port) == (c["host"], c["port"]) for r in self.servers.values()):
+                        any(r.where == c["where"] for r in self.servers.values()):
                     continue
-                self.servers[key] = Remote(self, key, c["host"], c["port"], c).start()
+                self.servers[key] = Remote(self, key, c["where"], c).start()
             self.changed()
 
     def listen(self, fn):
         self.listeners.append(fn)
 
-    def add(self, host, port, by_hand=False):
-        """A server given by address (not found on the network): known by its id once it's said who it is. by_hand:
-        kept in servers.json from now on, reached or not (Baude's Add server…)."""
+    def add(self, where, by_hand=False, command=None):
+        """A host given by where it is (wire.reach's where: an ssh destination, mostly), known by its id once it's said
+        who it is. by_hand: kept in servers.json from now on, reached or not (Baude's Add host…); command: its host
+        process's, there."""
         with self.lock:
-            r = next((r for r in self.servers.values() if (r.host, r.port) == (host, port)), None)
+            r = next((r for r in self.servers.values() if r.where == dict(where)), None)
             if r is None:
-                r = self.servers[f"{host}:{port}"] = Remote(self, f"{host}:{port}", host, port).start()
+                key = f"ssh:{where['dest']}" if where.get("via") == "ssh" else f"unix:{where.get('path')}"
+                r = self.servers[key] = Remote(self, key, where, found_by="hand")
+                r.command = command or r.command
+                r.start()
+            elif command is not None:
+                r.command = command or None
+                r.wake.set()
             r.by_hand = r.by_hand or by_hand
-        if by_hand:
+        if by_hand or command is not None:
             self.save()
             self.changed()
         return r
 
+    def set_command(self, r, command):
+        """A host's process's command there, as given here (None: what it says, or SSH_COMMAND): tried again with it."""
+        r.command = command or None
+        r.wake.set()
+        self.save()
+
     def found(self, service):
-        key = service["words"].get("id") or f"{service['host']}:{service['port']}"
+        """A host on the network said Baude is on it: reached over ssh, as its user, by its name (its key must be known
+        already: anyone can say they're anyone on the network), with the command it says, if it's one of Baude's."""
+        words = service["words"]
+        key, user = words.get("id"), words.get("user")
+        target = (service.get("target") or "").rstrip(".") or service["host"]
+        if not isinstance(key, str) or not key or user is not None and not wire._NAME.fullmatch(str(user)):
+            return
+        where = {"via": "ssh", "dest": f"{user}@{target}" if user else target, "strict": True}
+        if not wire.is_dest(where["dest"]):
+            return
+        if command := wire.discovered_command(words.get("path")):
+            where["command"] = command
         with self.lock:
             r = self.servers.get(key)
             if r is None:
-                r = self.servers[key] = Remote(self, key, service["host"], service["port"]).start()
+                r = self.servers[key] = Remote(self, key, where, found_by="network").start()
                 self.changed()
-            else:
-                r.address(service["host"], service["port"])
+            elif r.found_by == "network":  # (one here, given by hand or on Tailscale, is reached as it was)
+                r.address(where)
+
+    def peers(self):
+        """Tailscale's peers (`tailscale status --json`, where it's installed), as multicast DNS doesn't cross a tailnet:
+        each one online that isn't a phone, tried over ssh by its name there (its key must be known already), and a host
+        once it's answered as one. Again at most every PEERS_S (look), those Baude wasn't on tried again then."""
+        self.peered = time.monotonic()
+        exe = os.environ.get("BAUDE_TAILSCALE") or shutil.which("tailscale") or \
+            (TAILSCALE_APP if os.path.exists(TAILSCALE_APP) else None)
+        if not exe:
+            return
+        try:
+            out = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=10)
+            peers = (json.loads(out.stdout).get("Peer") or {}).values()
+        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+            return
+        for p in peers:
+            if not isinstance(p, dict) or not p.get("Online") or str(p.get("OS") or "").lower() in ("ios", "android"):
+                continue
+            dest = str(p.get("DNSName") or "").rstrip(".") or str(p.get("HostName") or "")
+            if not wire.is_dest(dest):
+                continue
+            with self.lock:
+                r = next((r for r in self.servers.values() if r.where.get("dest") == dest), None)
+                if r is None:
+                    self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest, "strict": True},
+                                                         found_by="tailscale", probe=True).start()
+                elif r.probe and r.state != "alive":
+                    r.wake.set()
 
     def look(self):
         """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): who's there asked at
-        once, not at the next discovery.QUERY_S, and every server that's gone tried again, not at its next retry."""
+        once, not at the next discovery.QUERY_S, every host that's gone tried again, not at its next retry, and
+        Tailscale's peers, if it's been PEERS_S."""
         if time.monotonic() - self.looked < 2:
             return
         self.looked = time.monotonic()
         if self.browser is not None:
             self.browser.ask_soon()
+        if self.discover and time.monotonic() - self.peered > PEERS_S:
+            threading.Thread(target=self.peers, daemon=True, name="tailscale-peers").start()
         with self.lock:
             servers = list(self.servers.values())
         for r in servers:
-            if r.state != "alive":
+            if r.state != "alive" and not r.probe:
                 r.wake.set()
 
     def rekey(self, remote, key):
-        """A server given by address said who it is: known by its id from now on (one remembered by it, folded in)."""
+        """A host given by where it is said who it is: known by its id from now on (one remembered by it, folded in).
+        This machine's, by its socket, stays so: the same one reached over ssh too (by hand, say) is let go."""
         with self.lock:
+            old = self.servers.get(key)
+            if old is not None and old is not remote and old.local and not remote.local and old.state == "alive":
+                remote.stop()
+                if self.servers.get(remote.key) is remote:
+                    del self.servers[remote.key]
+                self.forgotten.add(remote.key)  # (not kept in servers.json either)
+                return False
             if self.servers.get(remote.key) is remote:
                 del self.servers[remote.key]
             old = self.servers.pop(key, None)
@@ -379,11 +486,13 @@ class Network:
                 old.stop()
                 remote.sessions = remote.sessions or old.sessions
                 remote.by_hand = remote.by_hand or old.by_hand
+                remote.command = remote.command or old.command
             if remote.key != key:
-                self.forgotten.add(remote.key)  # (the address it was known by: not a server of its own in servers.json)
+                self.forgotten.add(remote.key)  # (where it was known by: not a host of its own in servers.json)
                 remote.was = getattr(remote, "was", set()) | {remote.key}  # (what Baude may still know it by)
             remote.key = key
             self.servers[key] = remote
+        return True
 
     def changed(self):
         """Its listeners hear soon (a burst of changes is one call), and what's known is saved."""
@@ -395,22 +504,22 @@ class Network:
         def tell():
             with self.lock:
                 self.pending = False
-            if time.time() - self.saved_at > 5:  # (a server says something changed every time a transcript grows)
+            if time.time() - self.saved_at > 5:  # (a host says something changed every time a transcript grows)
                 self.save()
             for fn in list(self.listeners):
                 fn()
         self.dispatch(tell)
 
     def save(self):
-        """servers.json: every server reached or given by hand, and what's in it that isn't known here (put there
+        """servers.json: every host reached or given by hand, and what's in it that isn't known here (put there
         meanwhile: take_saved takes it up), not written over."""
         self.saved_at = time.time()
         on_disk = self.saved()
         with self.lock:
             servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
             for key, c in on_disk.items():
-                if key not in self.servers and key not in self.forgotten and not any((r.host, r.port) == (c["host"], c["port"])
-                                                       for r in self.servers.values()):
+                if key not in self.servers and key not in self.forgotten and \
+                        not any(r.where == c["where"] for r in self.servers.values()):
                     servers[key] = c
             data = {"servers": servers}
         target = os.path.join(self.home, "servers.json")
@@ -423,7 +532,7 @@ class Network:
             pass
 
     def groups(self):
-        """The groups the network has: those its servers' sessions were started in, and each server's own."""
+        """The groups the network has: those its hosts' sessions were started in, and each host's own."""
         out = set()
         with self.lock:
             for r in self.servers.values():
@@ -433,22 +542,23 @@ class Network:
         return sorted(out, key=str.lower)
 
     def sessions(self, group=None):
-        """Every server's sessions (of a group, if given), each with "server": the Remote it's on."""
+        """Every host's sessions (of a group, if given), each with "server": the Remote it's on."""
         with self.lock:
             return [{**s, "server": r} for r in self.servers.values() for s in r.sessions.values()
                     if group is None or s.get("group") == group]
 
     def remotes(self):
-        """Every server known, there or not."""
+        """Every host known, there or not: those reached once, or given by hand (not a Tailscale peer that's never
+        answered as one)."""
         with self.lock:
-            return list(self.servers.values())
+            return [r for r in self.servers.values() if r.info.get("id") or r.by_hand]
 
     def find(self, session_id):
         with self.lock:
             return next((r for r in self.servers.values() if session_id in r.sessions), None)
 
     def alive(self, group=None):
-        """The servers that are there (those whose group is group, or with sessions in it, first)."""
+        """The hosts that are there (those whose group is group, or with sessions in it, first)."""
         with self.lock:
             alive = [r for r in self.servers.values() if r.state == "alive"]
         return sorted(alive, key=lambda r: (group is not None and r.info.get("group") != group and not any(
@@ -464,6 +574,15 @@ class Network:
             r.stop()
 
 
+def _where(where):
+    """Is it somewhere wire.reach can go?"""
+    if not isinstance(where, dict):
+        return False
+    via = where.get("via")
+    return via == "local" or via == "unix" and isinstance(where.get("path"), str) or \
+        via == "ssh" and wire.is_dest(where.get("dest")) and isinstance(where.get("command") or "", str)
+
+
 class _Remote:
     """What stands for a RemoteProc's process (Baude's debug report asks after its pid)."""
 
@@ -475,17 +594,17 @@ class _Remote:
 
 
 class RemoteProc(claude.ClaudeProc):
-    """A session on a server, talked to as ClaudeProc talks to a local claude: what's sent goes to its claude (started
+    """A session on a host (where: wire.reach's), talked to as ClaudeProc talks to a local claude: what's sent goes to its claude (started
     on the server if it isn't running), what it says comes to on_msg. live: everything it says, as it says it; else
     only what it asks (a permission) and the answers to what's asked of it (initialize: its models and commands).
     kill() lets go of it: the session goes on, on its server. OSError if it can't be reached."""
 
-    def __init__(self, on_msg, on_exit, host, port, session_id, live=True):
+    def __init__(self, on_msg, on_exit, where, session_id, live=True):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.session, self.live, self.code, self.killed = session_id, live, None, False
-        self.ch, self.server = wire.connect(host, port, timeout=3)
-        self.p = _Remote(self, [f"{host}:{port}", session_id])
+        self.ch, self.server = wire.reach(where, timeout=3)
+        self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
         self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0})
         reply = self.ch.read()

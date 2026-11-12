@@ -44,27 +44,33 @@ python3 record.py            # Record
 
 ## Sessions on the network
 
-`baude_server.py` runs Claude Code sessions headless on a machine, for Baude to start, watch and steer from another
-(or the same) one. It needs only Python, not GTK, and runs any model Baude can that its machine has: Claude's with
-`claude`, Apple's with `apple-claude` once built, and pi's with `pi-claude` (`baude_server.py models` lists them).
-Baude finds servers on the local network by multicast DNS (`_baude._tcp`). The sidebar lists every host's sessions:
-This Mac's own chats (Claude Code's and Claude Desktop's, and a server's on this machine) with the network's. ⋮ beside
-its search → Hosts and Groups pick which are listed: a click lists only that one, and Shift or Ctrl (⌘) and a click
-adds or takes away one, as the Git page's branch list does. A group is the label a session was started with. Right-click
-a host → New Session Here starts a session there with the top bar's model, effort and mode, and a prompt and folder; on
-This Mac, a server's started first if there isn't one.
+`baude_server.py` runs Claude Code sessions headless on a machine, for Baude to start, watch and steer from that machine
+or another. It needs only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`,
+Apple's with `apple-claude` once built, and pi's with `pi-claude` (`baude_server.py models` lists them). There's one for
+each user on a machine, its host process. It listens only on a Unix socket in a folder of its user's own, with no port
+on the network. Baude on the same machine uses the socket; Baude on another reaches it over ssh, as
+`ssh HOST baude_server.py connect`, which carries the protocol between ssh and the socket and starts the host process if
+it isn't running. So ssh decides who may: Baude never asks for a password (`BatchMode`), and uses your keys or agent as
+`~/.ssh/config` has them, with the host already in `known_hosts`. Put `baude_server.py` on each host's `PATH`, or give
+Baude its path there (right-click the host → Host Command…).
 
 ```bash
-python3 baude_server.py --group Lab      # serve, in the group Lab
+python3 baude_server.py --group Lab      # this machine's host process, its sessions in the group Lab
 python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --model opus --effort high
-python3 baude_server.py list
+python3 baude_server.py list --host lab@lab-mac.local
 ```
 
-⋮ → Hosts → Add server… (or `BAUDE_SERVERS=host:port`) gives Baude a server it can't find by itself;
-`BAUDE_NETWORK=0` stops it looking. A server bound to this machine only (`--bind 127.0.0.1`) isn't said on the network,
-and wants the token in its file in `~/.local/share/baude/local-servers`, which only its owner can read: Baude, and
-`baude_server.py`'s own commands, on the same machine find it, and its token, there. There's no sign-in yet for one on
-the network: anyone who can reach its port can start sessions on it and read files in its sessions' folders.
+The sidebar lists every host's sessions: This Mac's own chats (Claude Code's and Claude Desktop's, and its host
+process's) with other hosts'. ⋮ beside its search → Hosts and Groups pick which are listed: a click lists only that one,
+and Shift or Ctrl (⌘) and a click adds or takes away one, as the Git page's branch list does. A group is the label a
+session was started with. Right-click a host → New Session Here starts a session there with the top bar's model, effort
+and mode, and a prompt and folder; on This Mac, its host process is started first if it isn't running.
+
+Baude finds hosts three ways. A host process says on the local network, by multicast DNS (`_baude._tcp`), that Baude is
+on its host, and which user ssh would log in as. Tailscale's peers are tried too (`tailscale status --json`, where
+Tailscale's installed), since multicast DNS doesn't cross a tailnet; one is listed once Baude answers there. And ⋮ →
+Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or `user@host`. A host found on the network or on
+Tailscale must already be in `known_hosts`. `BAUDE_NETWORK=0` stops Baude looking.
 
 ## License
 

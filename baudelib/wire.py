@@ -2,9 +2,7 @@
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
 A client's requests (a "req" it picks comes back on the reply):
-    hello {client, token?}                          -> hello {server: info} (a server bound to this machine only
-                                                       wants the token in its file, local_servers: nothing else till
-                                                       it's had it)
+    hello {client}                                  -> hello {server: info}
     subscribe                                       -> sessions {sessions}, then again on every change, and ping;
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends
@@ -50,15 +48,31 @@ it's asking, not answered yet: [{request_id, tool, input}] (long strings in inpu
 has for it where that's another (a fork's: its transcript's named so), else None. An ask is answered with
 input: a control_response for its request_id, as claude's stream-json has it.
 
-A server on this machine leaves a file in local_dir() (its owner's to read, no one else's) with its address and,
-bound to this machine only, the token hello wants: how Baude here finds it, whether multicast DNS can or not.
+A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
+on the same machine reads it there rather than fetching a copy.
+
+Where a server is: a host process (baude_server.py) listens on a Unix socket only (socket_path(), in a folder that's
+its user's alone: that folder is all the say there is in who may use it), with no port on the network. What's on the
+same machine connects to the socket (connect_local); another machine reaches it over ssh (connect_ssh), as
+`ssh <host> baude_server.py connect`, which carries these lines between ssh's stdin and stdout and the socket (bridge),
+starting the host process if it isn't running. So ssh says who may, and keeps what's said private: the keys in
+authorized_keys and known_hosts, never a password asked for. reach(where) connects to any of them:
+    {"via": "local"}                                this machine's host process (socket_path())
+    {"via": "unix", "path": P}                      one listening on another socket
+    {"via": "ssh", "dest": D, "command"?, "strict"?}  ssh D (an alias in ~/.ssh/config, a host, user@host): command,
+                                                    the host process on D (default baude_server.py, found on its PATH);
+                                                    strict: a host found on the network, whose key must be known
 """
-import hmac
-import ipaddress
 import json
 import os
+import re
+import select
+import shlex
 import socket
+import subprocess
+import tempfile
 import threading
+import time
 
 VERSION = 1
 SERVICE = "_baude._tcp.local."  # (DNS-SD: discovery.py)
@@ -81,7 +95,8 @@ class Channel:
 
     @classmethod
     def over(cls, sock):
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return cls(sock.makefile("rb"), sock.makefile("wb"), sock)
 
     def send(self, msg):
@@ -143,83 +158,186 @@ class Channel:
                 f is not None and f.close()
             except OSError:
                 pass
+        if (proc := getattr(self, "proc", None)) is not None:  # (ssh's: it goes with it)
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                proc.kill()
 
 
-def connect(host, port, timeout=5.0, token=None):
-    """A Channel to a server (OSError if it can't be reached), past hello: (channel, the server's info). token: the one
-    a server bound to this machine only wants; else the one its file in local_dir() says, if it's one of those."""
-    sock = socket.create_connection((host, port), timeout=timeout)
-    ch = Channel.over(sock)
-    token = token or token_for(host, port)
-    ch.send({"op": "hello", "client": "baude", "version": VERSION, **({"token": token} if token else {})})
+SSH_COMMAND = "baude_server.py"  # (the host process on another machine, found on its PATH)
+_DEST = re.compile(r"[A-Za-z0-9_.@%:\[\]+-]+")
+_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+
+
+def runtime_dir():
+    """Where this machine's host process listens, and ssh keeps its connections to other machines' to share: its
+    user's own folder ($BAUDE_RUNTIME_DIR; else $XDG_RUNTIME_DIR/baude; else baude-<uid> in the temporary folder, which
+    on macOS is its user's own too). Short, as a socket's path must be."""
+    if os.environ.get("BAUDE_RUNTIME_DIR"):
+        return os.environ["BAUDE_RUNTIME_DIR"]
+    if os.environ.get("XDG_RUNTIME_DIR"):
+        return os.path.join(os.environ["XDG_RUNTIME_DIR"], "baude")
+    return os.path.join(tempfile.gettempdir(), f"baude-{os.getuid()}")
+
+
+def socket_path():
+    return os.path.join(runtime_dir(), "host.sock")
+
+
+def own_dir(path):
+    """A folder that's this user's alone (made, if it isn't there): not a link, theirs, no one else let in. OSError
+    if it can't be (another user's, or something else there)."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    st = os.lstat(path)
+    if not os.path.isdir(path) or os.path.islink(path) or st.st_uid != os.getuid():
+        raise OSError(f"{path} isn't a folder of this user's own")
+    if st.st_mode & 0o077:
+        os.chmod(path, 0o700)
+    return path
+
+
+def _hello(ch, timeout, what):
+    """(channel, the server's info) past hello, or OSError: what didn't answer."""
+    ch.sock.settimeout(timeout)
+    ch.send({"op": "hello", "client": "baude", "version": VERSION})
     reply = ch.read()
     if not reply or reply.get("op") != "hello":
         ch.close()
-        raise OSError((reply or {}).get("error") or f"{host}:{port} isn't a Baude server")
-    sock.settimeout(None)
+        raise OSError((reply or {}).get("error") or f"{what} isn't a Baude host")
+    ch.sock.settimeout(None)
     return ch, reply.get("server") or {}
 
 
-def is_loopback(host):
-    """Is host one of this machine's own addresses only (127.0.0.0/8, ::1; "localhost", as a server's bound to it)? A
-    name besides localhost isn't: what it means isn't the server's to say."""
-    if host == "localhost":
-        return True
+def connect_local(path=None, timeout=5.0):
+    """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given)."""
+    path = path or socket_path()
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
     try:
-        return ipaddress.ip_address(str(host).strip("[]")).is_loopback
-    except ValueError:
-        return False
-
-
-def _same_address(a, b):
-    try:
-        return ipaddress.ip_address(str(a).strip("[]")) == ipaddress.ip_address(str(b).strip("[]"))
-    except ValueError:
-        return False
-
-
-def local_dir():
-    """Where servers on this machine leave their files (local_servers): its owner's only."""
-    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude",
-                        "local-servers")
-
-
-def local_servers():
-    """The servers on this machine, as their files say: [{id, name, group, host (the address it's bound to, or one
-    that reaches it), port, token (None: not wanted), pid}]. A file whose server's gone (killed, or the machine
-    restarted: its pid's no process of ours) is removed."""
-    out = []
-    try:
-        names = os.listdir(local_dir())
+        sock.connect(path)
     except OSError:
-        return out
-    for name in names:
-        if not name.endswith(".json"):
-            continue
-        path = os.path.join(local_dir(), name)
+        sock.close()
+        raise
+    return _hello(Channel.over(sock), timeout, path)
+
+
+def is_dest(dest):
+    """Can this be given to ssh as where to go: a name, user@host or an address, not an option?"""
+    return isinstance(dest, str) and bool(_DEST.fullmatch(dest)) and not dest.startswith("-")
+
+
+def ssh_args(dest, command=None, strict=False):
+    """ssh's command line for a host's process: no password or passphrase ever asked (BatchMode: its keys and agent,
+    as ~/.ssh/config has them), a connection to each host kept for a minute and shared (ControlMaster), so a
+    session's own connection doesn't wait for another handshake. strict: the host's key must be in known_hosts
+    already (a host found on the network, which anyone can say they are). command: the host's process, a command line
+    (default SSH_COMMAND, on its PATH)."""
+    if not is_dest(dest):
+        raise OSError(f"not somewhere ssh can go: {dest!r}")
+    control = os.path.join(own_dir(runtime_dir()), "ssh-%C")
+    return [os.environ.get("BAUDE_SSH") or "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ControlMaster=auto",
+            "-o", f"ControlPath={control}", "-o", "ControlPersist=60",
+            *(["-o", "StrictHostKeyChecking=yes"] if strict else []), "--", dest,
+            f"{command or SSH_COMMAND} connect"]
+
+
+def connect_ssh(dest, command=None, strict=False, timeout=25.0):
+    """A Channel to another machine's host process, over ssh (ssh_args): its stdin and stdout one end of a socket
+    pair, this the other, so a Channel takes it as it takes a socket. OSError, with what ssh said, if it can't."""
+    mine, theirs = socket.socketpair()
+    try:
+        proc = subprocess.Popen(ssh_args(dest, command, strict), stdin=theirs, stdout=theirs, stderr=subprocess.PIPE,
+                                start_new_session=True)
+    except OSError:
+        mine.close()
+        raise
+    finally:
+        theirs.close()
+    said = []
+
+    def errors():  # (what ssh says goes wrong: the last of it, for the error)
+        for line in proc.stderr:
+            said[:] = (said + [line.decode("utf-8", "replace").strip()])[-3:]
+    threading.Thread(target=errors, daemon=True, name="ssh-stderr").start()
+    ch = Channel.over(mine)
+    ch.proc = proc
+    try:
+        return _hello(ch, timeout, dest)
+    except OSError as e:
         try:
-            with open(path, encoding="utf-8") as f:
-                entry = json.load(f)
-            os.kill(int(entry["pid"]), 0)  # (a process of ours: else another user's, or none, since the server went)
-        except (OSError, ValueError, KeyError, TypeError):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-            continue
-        if isinstance(entry, dict) and entry.get("port") and entry.get("host"):
-            out.append(entry)
-    return out
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        raise OSError("; ".join(s for s in said if s) or str(e)) from None
 
 
-def token_for(host, port):
-    """The token a server at host:port wants: only for the very address its file says it's bound to (an address, not a
-    name, which could lead elsewhere: ::1 for 127.0.0.1's port, say, where anyone can listen); else None."""
-    if not is_loopback(host) or host == "localhost":
+def reach(where, timeout=5.0):
+    """(channel, info) for a host process wherever it is (where: see this module's docstring)."""
+    via = (where or {}).get("via")
+    if via == "local":
+        return connect_local(None, timeout)
+    if via == "unix":
+        return connect_local(where["path"], timeout)
+    if via == "ssh":
+        return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")))
+    raise OSError(f"nowhere to reach: {where!r}")
+
+
+def is_local(where):
+    """Is it on this machine (reached by its socket, not over ssh)?"""
+    return (where or {}).get("via") in ("local", "unix")
+
+
+def said_where(where):
+    """Where a host process is, as people say it: user@host, or this machine."""
+    return where.get("dest") if (where or {}).get("via") == "ssh" else "this machine"
+
+
+def discovered_command(path):
+    """A host's process as a host on the network says it's started (its TXT record's path): only a file of Baude's,
+    named so, at an absolute path, quoted. Anything else (what anyone on the network can say) is no command of ours."""
+    if not isinstance(path, str) or not re.fullmatch(r"/[A-Za-z0-9_./-]+", path) or "/../" in path or \
+            os.path.basename(path) not in ("baude_server.py",):
         return None
-    return next((e.get("token") for e in local_servers()
-                 if e.get("port") == port and e.get("token") and _same_address(e.get("host"), host)), None)
+    return shlex.quote(path)
 
 
-def same_token(given, wanted):
-    return isinstance(given, str) and hmac.compare_digest(given.encode(), wanted.encode())
+def bridge(sock, rfd=0, wfd=1):
+    """What comes in on rfd to the socket, and what the socket says out on wfd, as it comes, till either end's done
+    (`baude_server.py connect`: ssh's stdin and stdout, and the host process's socket)."""
+    sock.setblocking(True)
+    open_in = True
+    while True:
+        ready, _, _ = select.select([sock] + ([rfd] if open_in else []), [], [])
+        if sock in ready:
+            data = sock.recv(65536)
+            if not data:
+                return
+            while data:
+                data = data[os.write(wfd, data):]
+        if open_in and rfd in ready:
+            data = os.read(rfd, 65536)
+            if not data:  # (the other end's said all it will: the socket's told, and what's still to come comes)
+                open_in = False
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    return
+                continue
+            sock.sendall(data)
+
+
+def wait_for_socket(path, seconds):
+    """Has a host process started listening at path within seconds?"""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            ch, _info = connect_local(path, timeout=2)
+            ch.close()
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False

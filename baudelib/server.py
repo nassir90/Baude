@@ -11,11 +11,12 @@ asks. wire.py says how.
 What it keeps (state_dir: the server's id, each session's settings) is its own; a claude session's transcript is Claude
 Code's, and the server keeps one in the same form for a session whose program keeps none (apple-claude, pi-claude)."""
 import base64
+import fcntl
+import getpass
 import itertools
 import json
 import os
 import queue
-import secrets
 import socket
 import socketserver
 import sys
@@ -68,7 +69,6 @@ class Conn:
     def __init__(self, channel):
         self.channel, self.out = channel, queue.Queue()
         self.subscribed = False
-        self.authed = False  # (it's said hello with the token, where one's wanted)
         threading.Thread(target=self._write, daemon=True, name="client-out").start()
 
     def send(self, msg):
@@ -124,6 +124,14 @@ class Session:
             self.server.save(self)
         return path
 
+    def found_transcript(self):
+        """Its transcript's path as it's been found (transcript, which the watch calls, finds it), without looking."""
+        if self.kept():
+            path = os.path.join(self.server.state_dir, "transcripts", f"{self.id}.jsonl")
+        else:
+            path = self.meta.get("path")
+        return path if path and os.path.isfile(path) else None
+
     def subagents_dir(self, path=None):
         """The folder claude keeps its subagents' transcripts in, beside its own (path: that, if it's known); None for
         one the server keeps (its program has no subagents)."""
@@ -155,18 +163,26 @@ class Session:
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),
+                "transcript": self.found_transcript(),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
 
-class Server:
-    """Serve sessions on host:port (0: any free port), and say so on the network (advertise)."""
+class AlreadyRunning(OSError):
+    """This machine's user has a host process already (its socket's taken): there's one each."""
 
-    def __init__(self, state_dir=None, group=None, name=None, host="0.0.0.0", port=0, exe=None, advertise=True,
-                 idle_s=IDLE_S, log=None, env=None):
+
+class Server:
+    """Serve sessions on a Unix socket (socket_path: wire.socket_path(), this user's one on this machine, unless
+    another's given), and say on the network that Baude is on this host (advertise), with the ssh user who'd reach it
+    and the command it's started by there (command: this program's path)."""
+
+    def __init__(self, state_dir=None, group=None, name=None, socket_path=None, exe=None, advertise=True,
+                 idle_s=IDLE_S, log=None, env=None, command=None):
         self.state_dir = state_dir or state_home()
         self.exe, self.idle_s, self.advertise, self.env = exe, idle_s, advertise, env  # (env: more for its claudes)
+        self.command = command
         self.log = log or (lambda text: print(f"baude-server: {text}", file=sys.stderr, flush=True))
         self.lock = threading.RLock()
         self.rids = itertools.count(1)
@@ -199,25 +215,29 @@ class Server:
             def handle(self):
                 server.serve(self.request)
 
-        class TCP(socketserver.ThreadingTCPServer):
-            allow_reuse_address, daemon_threads = True, True
+        class Unix(socketserver.ThreadingUnixStreamServer):
+            daemon_threads = True
 
-        self.tcp = TCP((host, port), Handler)
-        self.port = self.tcp.server_address[1]
-        # bound to this machine only: no one else's to use, so it wants a token only its owner can read (its file),
-        # there before anyone's told its port
-        bound = self.tcp.server_address[0]
-        self.local = wire.is_loopback(bound)
-        self.token = secrets.token_urlsafe(32) if self.local else None
-        self.file = os.path.join(wire.local_dir(), f"{self.me['id']}.json")
+        # one each: the lock beside the socket held while it runs (a socket left by one that's gone is taken over)
+        self.socket_path = socket_path or wire.socket_path()
+        if len(self.socket_path.encode()) > 100:
+            raise OSError(f"{self.socket_path}: too long a path for a socket")
+        wire.own_dir(os.path.dirname(self.socket_path))
+        self.lock_file = os.open(self.socket_path + ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                                 0o600)
         try:
-            self.say_here("127.0.0.1" if bound in ("0.0.0.0", "::") else bound)
-        except OSError as e:
-            if self.local:
-                raise
-            self.log(f"not said on this machine: {e}")  # (a server on the network is found without it)
+            fcntl.flock(self.lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self.lock_file)
+            raise AlreadyRunning(f"a host process is running here already ({self.socket_path})") from None
+        try:
+            os.unlink(self.socket_path)
+        except FileNotFoundError:
+            pass
+        self.unix = Unix(self.socket_path, Handler)
+        os.chmod(self.socket_path, 0o600)  # (its folder's its user's alone already: the socket's theirs too)
         self.advertiser = None
-        self.stopped = threading.Event()
+        self.stopped, self.closed = threading.Event(), threading.Event()  # (closed: shutdown's done, socket and all)
 
     # ---- what it is
     def info(self):
@@ -263,42 +283,17 @@ class Server:
     # ---- running
     def serve_forever(self):
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
-        if self.advertise and self.local:
-            self.log("bound to this machine only: not said on the network")
-        elif self.advertise:
-            self.advertiser = Advertiser(self.me["name"], self.port, {
-                "id": self.me["id"], "group": self.me["group"], "v": wire.VERSION}).start()
-        self.log(f"serving {len(self.sessions)} sessions on port {self.port}, group {self.me['group']!r}")
-        self.tcp.serve_forever(poll_interval=0.25)
-
-    def say_here(self, host):
-        """Its file in wire.local_dir(): where it is (host: the address it's bound to, or one that reaches it), and
-        the token it wants, for its owner's programs on this machine, and theirs only: the folder must be theirs and
-        theirs alone, and the file's made new, not through a link someone left."""
-        folder = os.path.dirname(self.file)
-        os.makedirs(folder, mode=0o700, exist_ok=True)
-        st = os.lstat(folder)
-        if not os.path.isdir(folder) or os.path.islink(folder) or st.st_uid != os.getuid():
-            raise OSError(f"{folder} isn't a folder of this user's own")
-        os.chmod(folder, 0o700)
-        tmp = f"{self.file}.{os.getpid()}.tmp"
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "host": host,
-                       "port": self.port, "token": self.token, "pid": os.getpid()}, f)
-        os.replace(tmp, self.file)
+        if self.advertise:  # (its port's ssh's: what's said is who'd reach it, and how)
+            words = {"id": self.me["id"], "group": self.me["group"], "v": wire.VERSION, "user": getpass.getuser()}
+            if self.command:
+                words["path"] = self.command
+            self.advertiser = Advertiser(self.me["name"], 22, words).start()
+        self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}")
+        self.unix.serve_forever(poll_interval=0.25)
 
     def shutdown(self):
-        """Goodbye on the network, every claude stopped, the port let go."""
+        """Goodbye on the network, every claude stopped, the socket let go."""
         self.stopped.set()
-        try:
-            os.remove(self.file)
-        except OSError:
-            pass
         if self.advertiser is not None:
             self.advertiser.stop()
         with self.lock:
@@ -307,8 +302,14 @@ class Server:
                 c.close()
         for p in procs:
             p.kill()
-        self.tcp.shutdown()
-        self.tcp.server_close()
+        self.unix.shutdown()
+        self.unix.server_close()
+        try:
+            os.unlink(self.socket_path)
+        except OSError:
+            pass
+        os.close(self.lock_file)
+        self.closed.set()
 
     def serve(self, sock):
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
@@ -339,12 +340,7 @@ class Server:
         if op == "ping":
             return None
         if op == "hello":
-            if self.token and not wire.same_token(msg.get("token"), self.token):
-                return reply("error", error="this server is this machine's only: hello needs the token in its file")
-            conn.authed = True
             return reply("hello", server=self.info())
-        if self.token and not conn.authed:
-            return reply("error", error="hello first, with the token in its file")
         if op == "subscribe":
             conn.subscribed = True
             return reply("sessions", sessions=self.listing(), server=self.info())

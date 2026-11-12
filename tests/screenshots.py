@@ -1083,11 +1083,12 @@ def network_fixture():
     for d in (parser, site):
         os.makedirs(d, exist_ok=True)
     servers = {}
-    for name in ("lab-mac", "build-box"):
-        s = Server(state_dir=os.path.join(T.TMP, "servers", name), group="Lab", name=name, host="127.0.0.1",
-                   advertise=False, log=lambda _text: None, env=env)
+    for name in ("lab-mac", "build-box"):  # (each on a socket of its own: reached as another host's is)
+        s = Server(state_dir=os.path.join(T.TMP, "servers", name), group="Lab", name=name, advertise=False,
+                   socket_path=os.path.join(os.environ["BAUDE_RUNTIME_DIR"], f"{name}.sock"), log=lambda _text: None,
+                   env=env)
         threading.Thread(target=s.serve_forever, daemon=True).start()
-        servers[name] = (s, net.add("127.0.0.1", s.port))
+        servers[name] = (s, net.add({"via": "unix", "path": s.socket_path}))
     started = {}
     for name, params, answer in [
             ("build-box", {"prompt": "Run the nightly benchmarks", "cwd": parser}, True),
@@ -1185,12 +1186,12 @@ def models_server():
            "BAUDE_PI": os.path.join(d, "agent"), "HF_HUB_CACHE": hub, "FAKE_CLAUDE_SESSION_IDS": "1",
            "FAKE_CLAUDE_TRANSCRIPTS": "1"}
     proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(T.HERE), "baude_server.py"), "serve",
-                             "--bind", "127.0.0.1", "--no-advertise", "--group", "Lab", "--name", "gpu-mac",
-                             "--state", os.path.join(d, "state")], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            env=env, text=True)
+                             "--no-advertise", "--group", "Lab", "--name", "gpu-mac", "--state", os.path.join(d, "state"),
+                             "--socket", os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "gpu-mac.sock")],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True)
     import atexit
     atexit.register(proc.terminate)  # (it goes with this run, its claudes with it)
-    r = baude.network().add("127.0.0.1", json.loads(proc.stdout.readline())["port"])
+    r = baude.network().add({"via": "unix", "path": json.loads(proc.stdout.readline())["socket"]})
     T.wait_for(lambda: r.state == "alive", "gpu-mac there")
     got = []
     r.request({"op": "start", "prompt": "Sketch the release checklist", "cwd": NET["folders"][1], "model": "opus"},
@@ -1281,11 +1282,14 @@ def _(app):
     return win
 
 
-@scene("55k-network-add-server", "⋮ → Hosts → Add server…: a server by its address, for one Baude doesn't find by "
-                                 "itself; kept from then on, reached or not")
+@scene("55k-network-add-server", "⋮ → Hosts → Add Host…: one Baude doesn't find by itself, by where ssh goes (an "
+                                 "alias, or user@host), and its host process's command there if it isn't on PATH; "
+                                 "kept from then on, reached or not")
 def _(app):
     win = network_window(app)
-    win.ask_add_server().set_text("build-box.lan:47100")
+    dest, command = win.ask_add_host()
+    dest.set_text("lab@build-box.lan")
+    command.set_text("~/src/Baude/baude_server.py")
     return win
 
 
@@ -1328,6 +1332,35 @@ def _(app):
     f = win.remote_fields
     f["folder"].set_text(NET["folders"][0])
     f["prompt"].get_buffer().set_text("Profile the parser on the large fixtures and write up where the time goes.")
+    return win
+
+
+def studio(win):
+    """A host added by hand, over ssh (never reached: the tests' ssh is false): studio, its row in ⋮ → Hosts."""
+    r = baude.network().add({"via": "ssh", "dest": "lab@studio.lan"}, by_hand=True)
+    T.wait_for(lambda: r.state == "dead", "studio tried")
+    win.sidebar.fill_filters()
+    return r
+
+
+@scene("55p-network-host-menu", "Right-click a host reached over ssh: New Session Here (not while it's gone), and "
+                                "Host Command…, for its host process there if it isn't on its PATH")
+def _(app):
+    win = network_window(app, None)
+    r = studio(win)
+    win.sidebar.view_btn.popup()
+    T.pump(0.2)
+    row = next(x for x in win.sidebar.host_list.rows() if x.key == r.key)
+    ok, rect = row.compute_bounds(win.sidebar.host_list)
+    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
+    return win
+
+
+@scene("55q-network-host-command", "Host Command…: the command ssh runs on the host, with connect after it")
+def _(app):
+    win = network_window(app, None)
+    r = studio(win)
+    win.ask_host_command(r.key).set_text("~/src/Baude/baude_server.py")
     return win
 
 

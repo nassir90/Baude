@@ -960,9 +960,12 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .changes-bar {{ background: alpha(@accent_bg_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }}
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
+button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
+button.meta-clear {{ min-height: 22px; min-width: 22px; padding: 0; }}
 """
 _CSS = []
-MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4"}  # (highlight: the accent's)
+MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a"}  # (highlight:
+# the accent's)
 MARK_ALPHA, LIT_ALPHA = 0.28, 0.6  # (a mark's highlight; lit, its card under the pointer: MetaChat.light)
 
 
@@ -975,6 +978,27 @@ def install_css(display):
         _CSS.append(provider)
 
 
+def mark_rgba(how, lit=False):
+    """A mark's highlight (MARK_COLORS; highlight: the accent's), as bright as it is (lit: its change's box under the
+    pointer: MetaChat.light), the same in the left bar, Meta's boxes and a page's text."""
+    rgba = widgets.accent_rgba().copy() if how == "highlight" else Gdk.RGBA()
+    if how != "highlight":
+        rgba.parse(MARK_COLORS[how])
+    rgba.alpha = LIT_ALPHA if lit else MARK_ALPHA
+    return rgba
+
+
+def paint_label(lb, how, lit=False):
+    """A label's text highlighted as a mark is (mark_rgba), square, behind its text only; struck through if gone."""
+    rgba = mark_rgba(how, lit)
+    attrs = Pango.AttrList()
+    attrs.insert(Pango.attr_background_new(*(round(c * 65535) for c in (rgba.red, rgba.green, rgba.blue))))
+    attrs.insert(Pango.attr_background_alpha_new(round(rgba.alpha * 65535)))
+    if how == "removed":
+        attrs.insert(Pango.attr_strikethrough_new(True))
+    lb.set_attributes(attrs)
+
+
 def mark_row(row, key, mark, chat, name_label, inline=True):
     """A row of a left bar's (key: (kind, its key): a chat, a page) as Meta's changed it (mark: (how, note, action)):
     its name highlighted, square, behind its text only (green added, red removed and struck through, blue moved;
@@ -984,18 +1008,9 @@ def mark_row(row, key, mark, chat, name_label, inline=True):
     how, note, action = mark
 
     def paint(lit=False):
-        rgba = widgets.accent_rgba() if how == "highlight" else Gdk.RGBA()
-        if how != "highlight":
-            rgba.parse(MARK_COLORS[how])
-        attrs = Pango.AttrList()
-        attrs.insert(Pango.attr_background_new(*(round(c * 65535) for c in (rgba.red, rgba.green, rgba.blue))))
-        attrs.insert(Pango.attr_background_alpha_new(round((LIT_ALPHA if lit else MARK_ALPHA) * 65535)))
-        if how == "removed":
-            attrs.insert(Pango.attr_strikethrough_new(True))
-        name_label.set_attributes(attrs)
+        paint_label(name_label, how, lit)
     paint()
-    row.meta_paint = paint
-    chat.painted[key] = row
+    chat.painted.setdefault(key, {})["row"] = paint
     if note or action is not None:
         said = f"{NAME}: {action['label'] if action else 'highlighted'}" + (f" ({note})" if note else "")
         row.set_tooltip_text("\n".join(filter(None, [row.get_tooltip_text(), said])))
@@ -1211,10 +1226,12 @@ class MetaChat(Gtk.Box):
         self.win, self.ask, self.agent = win, None, None
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)
-        self.painted = {}  # ((kind, key): the left bar's row marked for it, as last made: mark_row, light)
-        head = Gtk.Box(spacing=6, halign=Gtk.Align.END, margin_end=8, margin_top=10, margin_bottom=6)
-        clear = Gtk.Button(icon_name="edit-clear-all-symbolic", tooltip_text="Clear conversation")
+        self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
+        head = Gtk.Box(spacing=6, halign=Gtk.Align.START, margin_start=8, margin_top=6, margin_bottom=4)
+        clear = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Clear conversation")
         clear.add_css_class("flat")
+        clear.add_css_class("circular")
+        clear.add_css_class("meta-clear")
         clear.connect("clicked", lambda *_: self._clear())
         head.append(clear)
         self.head = head
@@ -1449,8 +1466,11 @@ class MetaChat(Gtk.Box):
         if m.get("error"):
             for it in items or ():
                 if it["kind"] == "tool":
-                    reply.append(self.tool_card(it))
-                    self.add_shown(reply, it.get("shown") or ())
+                    widget, holds = self.call_widget(it)
+                    if widget is not None:
+                        reply.append(widget)
+                    if not holds:
+                        self.add_shown(reply, it.get("shown") or ())
             reply.prose = label(m.get("text") or "", css=("error",), select=True)
             reply.append(reply.prose)
             return reply
@@ -1462,8 +1482,11 @@ class MetaChat(Gtk.Box):
                     reply.prose = self.prose(text)
                     reply.append(reply.prose)
             else:
-                reply.append(self.tool_card(it))
-                self.add_shown(reply, it.get("shown") or ())
+                widget, holds = self.call_widget(it)
+                if widget is not None:
+                    reply.append(widget)
+                if not holds:
+                    self.add_shown(reply, it.get("shown") or ())
                 reply.prose = None  # (what grows is the part after it, if one comes)
         if m.get("items") is None:
             self.add_work(reply, m)
@@ -1492,6 +1515,91 @@ class MetaChat(Gtk.Box):
             box.append(self.tool_card({"kind": "tool", "name": "", "input": {}, "state": "done",
                                        "actions": [a["id"] for a in mine]}))
         self.add_shown(box, m.get("shown") or ())
+
+    # ---- a call that changed things: a box with the tool card's outline, what it changed inside
+    def call_widget(self, it):
+        """What a tool's call shows in the reply: a setting changed, the setting's own row in an outlined box
+        (setting_box); pages or chats changed, a box listing them (change_box); show's UI alone (add_shown); else a
+        tool card. Returns (the widget or None, whether it holds what the call showed)."""
+        base = (it.get("name") or "").removeprefix("mcp__meta__")
+        acts = {a["id"]: a for a in self.actions()}
+        batch = [acts[i] for i in it.get("actions") or () if i in acts]
+        if it.get("state") != "error":
+            if base == "set_setting" and it.get("shown"):
+                return self.setting_box(it, batch), True
+            if base == "show":
+                return None, False
+            if any(a.get("marks") for a in batch):
+                return self.change_box(batch), False
+        return self.tool_card(it), False
+
+    def outline(self, batch, caption):
+        """A box with a tool card's outline (widgets.CSS's .tool-card): what was done, in a line, with the batch's Keep
+        and Undo (or Redo) at its end; the pointer over it lights what it changed (light)."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.add_css_class("tool-card")
+        line = Gtk.Box(spacing=8)
+        said = Gtk.Label(label=caption, xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        if batch and all(a["state"] != "done" for a in batch):
+            said.add_css_class("dim-label")
+            said.set_label(caption + " · undone")
+        line.append(said)
+        if batch:
+            line.append(self.batch_controls(batch))
+            hover = Gtk.EventControllerMotion()
+            hover.connect("enter", lambda *_: self.light(batch, True))
+            hover.connect("leave", lambda *_: self.light(batch, False))
+            box.add_controller(hover)
+        box.append(line)
+        return box
+
+    def setting_box(self, it, batch):
+        """set_setting's: the change in a line, and the setting's own row under it, to go on adjusting."""
+        spec = it["shown"][0]
+        s = self.settings.get(spec["name"])
+        box = self.outline(batch, batch[0]["label"] if batch else s.title if s else spec["name"])
+        for spec in it.get("shown") or ():
+            if (w := self.shown_widget(spec)) is not None:
+                box.append(w)
+        return box
+
+    def change_box(self, batch):
+        """Pages or chats a call changed: what it did, and each one it changed, highlighted as the left bar has it
+        (green added, red deleted, yellow archived, blue moved), clicked to open (open_mark)."""
+        box = self.outline(batch, "; ".join(a["label"] for a in batch))
+        items = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        for a in batch:
+            live = a["state"] == "done" and not a.get("kept")
+            for kind, key, how, *note in a.get("marks") or ():
+                line = Gtk.Box(spacing=6)
+                name = Gtk.Label(label=self.mark_name(kind, key, a), xalign=0, ellipsize=Pango.EllipsizeMode.END)
+                line.append(name)
+                if note and note[0]:
+                    said = Gtk.Label(label=note[0], xalign=0)
+                    said.add_css_class("meta-note")
+                    line.append(said)
+                item = Gtk.Button(child=line, halign=Gtk.Align.START, tooltip_text=f"Open {name.get_label()}")
+                item.add_css_class("flat")
+                item.add_css_class("meta-item")
+                item.connect("clicked", lambda *_, k=kind, key=key, how=how, a=a: self.open_mark(k, key, how, a))
+                if live:
+                    paint = lambda lit=False, n=name, how=how: paint_label(n, how, lit)  # noqa: E731
+                    paint()
+                    self.painted.setdefault((kind, key), {})[f"meta:{a['id']}"] = paint
+                items.append(item)
+        box.append(items)
+        return box
+
+    def mark_name(self, kind, key, action):
+        """What a changed chat or page is called, in a change's box."""
+        if kind == "chat":
+            chat = self.find_chat(key)
+            ghost = next((i for i in (action.get("redo") or {}).get("infos") or () if i.get("id") == key), None)
+            return chat["title"] if chat else (ghost or {}).get("title") or key[:8]
+        return str(key).rpartition("\n")[2]
+
+    def open_mark(self, kind, key, how, action):
+        """A changed chat or page clicked, in a change's box: opened (each app's own)."""
 
     # ---- a tool call, as Baude's chat shows one
     def tool_title(self, name):
@@ -1599,8 +1707,8 @@ class MetaChat(Gtk.Box):
             if a["state"] != "done" or a.get("kept"):
                 continue
             for kind, key, *_rest in a.get("marks") or ():
-                if (row := self.painted.get((kind, key))) is not None and hasattr(row, "meta_paint"):
-                    row.meta_paint(on)
+                for paint in list(self.painted.get((kind, key), {}).values()):
+                    paint(on)
 
     def shown_widget(self, spec):
         """What show put under a reply, made from what's kept of it: a setting's row, rows of chats or pages, the

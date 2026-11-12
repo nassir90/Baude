@@ -9227,6 +9227,13 @@ class BaudeMeta(meta.MetaChat):
     def rename_chat_to(self, chat, title):
         self.win.sidebar.rename({**chat["info"], "title": None}, title)  # (its title as listed may be one behind)
 
+    def open_mark(self, kind, key, how, action):
+        """A chat in a change's box clicked: opened, as the sidebar opens one; one deleted is in Baude's trash."""
+        if (chat := self.find_chat(key)) is not None:
+            self.open_chat(chat["info"])
+        elif how == "removed":
+            toast(self, "It's in Baude's trash: undo brings it back")
+
     def chat_text(self, chat):
         path = chat.get("path")
         return meta.transcript_text(path) if path and os.path.exists(path) else "(its transcript isn't here)"
@@ -9344,7 +9351,7 @@ class BaudeMeta(meta.MetaChat):
         a = self.act(turn, f"{'Archived' if archive else 'Unarchived'} {self.said(infos)}", "archive",
                      {"ids": ids, "archived": not archive, "lists": lists, "expect": archive},
                      {"ids": ids, "archived": archive, "expect": not archive},
-                     [("chat", i, "removed" if archive else "added", "archived" if archive else "back") for i in ids])
+                     [("chat", i, "archived" if archive else "added", "archived" if archive else "back") for i in ids])
         return {"text": f"{'Archived' if archive else 'Unarchived'} (action {a['id']})."}
 
     def delete_chats(self, turn, args):

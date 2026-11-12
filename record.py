@@ -3063,6 +3063,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.view.queue_draw()
         self._mark_token()  # (@'s search, if it's on: its colour over what was just drawn)
         self._mark_proposals()  # (and a proposed change's)
+        if (chat := getattr(self.win, "chat", None)) is not None:
+            chat.tint(self)  # (and Meta's, a page it added: all green)
         self._find_again()
 
 
@@ -5383,8 +5385,67 @@ class RecordChat(meta.MetaChat):
         getattr(agent, "notebook", self.notebook)["messages"].append(m)
 
     def marks_changed(self):
-        if self.notebook is not None and self.win.pages.notebook is self.notebook:
+        """What Meta's marked changed: the pages' list, the pages open (tint), and a deleted one's tab gone once it's
+        kept or undone."""
+        if self.notebook is None:
+            return
+        if self.win.pages.notebook is self.notebook:
             self.win.pages.fill()
+        for child in self.win.tabs.children():
+            if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
+                self.tint(child)
+        gone = {key for key, (how, *_r) in self.marks("page").items() if how == "removed"}
+        for key in [k for k in list(self.win.tabs.pages) if k[0] == "gone" and k[1] not in gone]:
+            self.win.tabs.close(key)
+
+    def tint(self, editor):
+        """A page open as Meta's marks have it: one it added, all its text green (meta.mark_rgba, lit as its change's
+        box is under the pointer: light); else as it is."""
+        key = page_key(editor.notebook, editor.page)
+        mark = self.marks("page").get(key) if editor.notebook is self.notebook else None
+        buf = editor.buf
+        tag = buf.get_tag_table().lookup("meta-tint") or buf.create_tag("meta-tint")
+        buf.remove_tag(tag, *buf.get_bounds())
+        slots = self.painted.setdefault(("page", key), {})
+        if mark is None or mark[0] != "added":
+            slots.pop("text", None)
+            return
+
+        def paint(lit=False):
+            tag.set_property("background-rgba", meta.mark_rgba("added", lit))
+            buf.apply_tag(tag, *buf.get_bounds())
+        paint()
+        slots["text"] = paint
+
+    def open_mark(self, kind, key, how, action):
+        """A page in a change's box clicked: opened (in its notebook); one deleted, its text as it was, all red, in a
+        tab that can't be written in (open_gone)."""
+        book_id, _, page = key.partition("\n")
+        nb = next((t for t in self.win.store.notebooks if t.get("id") == book_id), None)
+        if kind != "page" or nb is None:
+            return
+        if how == "removed" and action["state"] == "done" and page not in nb["pages"]:
+            return self.open_gone(key, page, (action["undo"]["books"].get(book_id) or {}).get(page) or "")
+        if page in nb["pages"]:
+            self.open_page(nb, page)
+
+    def open_gone(self, key, page, text):
+        def make():
+            view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=24,
+                                right_margin=24, top_margin=16, bottom_margin=16)
+            view.add_css_class("diary")
+            buf = view.get_buffer()
+            buf.set_text(text)
+            tag = buf.create_tag("meta-tint", strikethrough=True)
+
+            def paint(lit=False):
+                tag.set_property("background-rgba", meta.mark_rgba("removed", lit))
+                buf.apply_tag(tag, *buf.get_bounds())
+            paint()
+            self.painted.setdefault(("page", key), {})["text"] = paint
+            return Gtk.ScrolledWindow(child=view, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.win.tabs.open(("gone", key), make, f"{short_page(page)} (deleted)", icon="user-trash-symbolic",
+                           tooltip=f"{page}: deleted by {meta.NAME}; undo brings it back")
 
     def tool_summary(self, name, inp):
         short = name.removeprefix("mcp__meta__")

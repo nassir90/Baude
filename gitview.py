@@ -1099,6 +1099,11 @@ class GitPage(Gtk.Stack):
         self.branches.set_header_func(GitPage.branch_rule)
         self.branches.connect("selected-rows-changed", lambda *_: self.tick_branches())
         self.branches.connect("row-activated", lambda *_: self.branch_list.popdown())  # (Enter, a double click)
+        # (Shift and a click picks one more, or one fewer, as Ctrl (⌘) and a click does: not the run from the last one
+        # picked to it, as GTK's list has it. Ahead of the list's own click, which then never sees it)
+        shift = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY, propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        shift.connect("pressed", self.shift_click)
+        self.branches.add_controller(shift)
         self.branch_list = Gtk.Popover(css_classes=["git-branches"], child=Gtk.ScrolledWindow(
             child=self.branches, hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_width=True,
             propagate_natural_height=True, max_content_height=420))
@@ -1217,6 +1222,21 @@ class GitPage(Gtk.Stack):
                 self.branches.unselect_row(row)
         for row in reversed([r for r in rows if r.rev in revs]):
             self.branches.select_row(row)
+
+    def shift_click(self, gesture, _n, _x, y):
+        """A Shift-click on a branch (Ctrl (⌘) not held too): it's picked if it wasn't, and put back if it was."""
+        mods = gesture.get_current_event_state()
+        if not mods & Gdk.ModifierType.SHIFT_MASK or mods & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
+            return
+        row = self.branches.get_row_at_y(int(y))
+        if row is None or not row.get_selectable():
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        if row.is_selected():
+            self.branches.unselect_row(row)
+        else:
+            self.branches.select_row(row)
+        row.grab_focus()  # (the keys go on from it, as they would from a Ctrl-click)
 
     def branch_rows(self):
         row = self.branches.get_first_child()

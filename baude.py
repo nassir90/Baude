@@ -8994,7 +8994,10 @@ class SidePanel(Gtk.Box):
         self.detail_info.add_css_class("dim-label")
         self.detail_info.add_css_class("caption")
         detail.append(self.detail_info)
-        self.detail_holder = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
+        # button, title and caption above it on the panel's own background
+        self.detail_holder = widgets.inside(Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                                               margin_top=6))
         detail.append(self.detail_holder)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_stack, "agents", "Subagents")
@@ -9156,7 +9159,7 @@ class SidePanel(Gtk.Box):
                 row.add_css_class("nested-agent")
             self.agent_rows[tid] = row
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
-                          margin_top=6, margin_bottom=12)
+                          margin_top=12, margin_bottom=12)  # (in its cutout, as far in from the top as the chat's)
             box.add_css_class("zoomable")
             if task.get("prompt"):
                 box.append(self.win.user_bubble(task["prompt"], []))

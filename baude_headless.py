@@ -23,9 +23,10 @@ what runs as that user on the same machine may use it. Another machine reaches i
 Baude its path, per host). connect, and the commands here, start the host process if it isn't running.
 
 A client on the same machine that isn't Python asks `baude_headless.py socket` where to connect, rather than working
-it out: $BAUDE_RUNTIME_DIR/host.sock, else $XDG_RUNTIME_DIR/baude/host.sock, else ~/.local/state/baude/run/host.sock
-(XDG_RUNTIME_DIR can differ between a session at the screen and one over ssh, or be gone once a session ends: ask
-from the environment the client runs in). It prints the path whether or not the host process is running; `connect`
+it out: $BAUDE_RUNTIME_DIR/host.sock, else $XDG_RUNTIME_DIR/baude/host.sock, else $XDG_STATE_HOME/baude/run/host.sock
+(~/.local/state/baude/run), or /tmp/baude-<uid>/host.sock where that path's too long for a socket. XDG_RUNTIME_DIR
+can differ between a session at the screen and one over ssh, or be gone once a session ends: ask from the
+environment the client runs in. It prints the path whether or not the host process is running; `connect`
 starts it, and is the way for a client that would rather not find it at all.
 
 While nobody's attached it does nothing: no timers, a claude stopped once it's been idle --idle-minutes, and the

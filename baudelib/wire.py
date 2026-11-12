@@ -6,7 +6,8 @@ A client's requests (a "req" it picks comes back on the reply):
     subscribe {archived?}                           -> sessions {sessions}, then again on every change, and ping;
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends. archived:
-                                                       those archived listed too (default: not)
+                                                       those archived listed too, and their turns' ends (default:
+                                                       not)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?}
                                                     -> started {session}, before the prompt's sent: attach, and this
@@ -21,11 +22,13 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        waits while nobody who answers is attached, then ask_default
                                                        ("deny", or "allow") answers it. answers: as attach's
     attach {session, live, answers?}                -> attached {session, asks}; live: claude {session, msg} as it
-                                                       speaks, exited {session, code} when it stops (code None: it
-                                                       was deleted). answers (default true): false for a head that
-                                                       won't answer what the session asks (a permission): it isn't
-                                                       counted as there to answer, so ask_timeout's wait still runs
-                                                       out and ask_default answers, as if nobody were attached
+                                                       speaks, exited {session, code} when it stops; deleted
+                                                       {session} when it's deleted (nothing to carry on). answers
+                                                       (default true; kept for the connection, its last attach's or
+                                                       start's): false for a head that won't answer what the session
+                                                       asks (a permission): it isn't counted as there to answer, so
+                                                       ask_timeout's wait still runs out and ask_default answers, as
+                                                       if nobody were attached
     detach {session}
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
@@ -34,11 +37,13 @@ A client's requests (a "req" it picks comes back on the reply):
     archive {session}, unarchive {session}          -> archived / unarchived {session}: its claude stopped, and it's
                                                        listed only to those subscribed with archived (unarchive: to
                                                        all again)
-    delete {session}                                -> deleted {session, trashed: [paths]}: its claude stopped, it's
-                                                       gone from the list and from what the server keeps, and its
-                                                       transcript and the folder beside it (its subagents') moved to
-                                                       the trash, where they can be got back, as Baude's Move to
-                                                       Trash does with a chat of its own
+    delete {session}                                -> deleted {session, trashed: [paths]}: its claude stopped and
+                                                       waited for, its transcript and the folder beside it (its
+                                                       subagents'), and pi's own copy of it, moved to the trash,
+                                                       where they can be got back, as Baude's Move to Trash does
+                                                       with a chat of its own; then it's gone from the list and from
+                                                       what the server keeps. One whose files can't be moved stays:
+                                                       error, saying why
     quit                                            -> quitting: the host process stops, its claudes too (their
                                                        sessions kept, resumed next time)
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
@@ -73,9 +78,11 @@ same machine connects to the socket (connect_local); another machine reaches it 
 `ssh <host> baude_headless.py connect`, which carries these lines between ssh's stdin and stdout and the socket (bridge),
 starting the host process if it isn't running. So ssh says who may, and keeps what's said private: the keys in
 authorized_keys and known_hosts, never a password asked for. A client that isn't Python asks `baude_headless.py
-socket` where this user's socket is (runtime_dir's rules: BAUDE_RUNTIME_DIR, else XDG_RUNTIME_DIR, which a session
-over ssh and one at the screen may have differently, else ~/.local/state; never the temporary folder, as macOS gives
-ssh's sessions another), or runs `baude_headless.py connect` and talks to its stdin and stdout. reach(where)
+socket` where this user's socket is, rather than copying runtime_dir's rules: $BAUDE_RUNTIME_DIR, else
+$XDG_RUNTIME_DIR/baude (which a session over ssh and one at the screen may have differently, or lose as a session
+ends), else $XDG_STATE_HOME/baude/run (~/.local/state/baude/run), or /tmp/baude-<uid> where that's too long a path for
+a socket; never $TMPDIR, which macOS gives ssh's sessions another of. Or it runs `baude_headless.py connect` and talks
+to its stdin and stdout. reach(where)
 connects to any of them:
     {"via": "local"}                                this machine's host process (socket_path())
     {"via": "unix", "path": P}                      one listening on another socket

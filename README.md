@@ -94,13 +94,14 @@ Moving to them, from `baude_server.py`:
   from another, instead of `wire.connect(host, port)`: the protocol's the same. `baudelib.hosts.reach(DEST)` starts
   this machine's host process first if it isn't running. Or it runs `baude_oneshot.py` and reads its stdout.
 - A client that isn't Python asks `baude_headless.py socket` where the socket is, rather than copying its rules
-  (`XDG_RUNTIME_DIR`, which comes first, can differ between a session at the screen and one over ssh: ask from where
-  the client runs), or talks to `baude_headless.py connect`'s stdin and stdout.
+  (`$BAUDE_RUNTIME_DIR`, `$XDG_RUNTIME_DIR`, `$XDG_STATE_HOME` or `~/.local/state`, or `/tmp/baude-<uid>` for a path
+  too long for a socket; `XDG_RUNTIME_DIR`, which comes first, can differ between a session at the screen and one over
+  ssh: ask from where the client runs), or talks to `baude_headless.py connect`'s stdin and stdout.
 - A client that attaches to a session but won't answer what it asks says so (`answers: false` on `attach` or
   `start`): the host's `ask_timeout` then runs out and `ask_default` answers, as if nobody were attached.
 - `archive`, `unarchive` and `delete` clean up a client's sessions: archived ones are listed only to a subscriber
-  that asks for them (`subscribe {archived: true}`); a deleted one's transcript goes to the trash, as Baude's Move to
-  Trash does with its own.
+  that asks for them (`subscribe {archived: true}`); a deleted one's transcript goes to the trash once its claude has
+  ended, as Baude's Move to Trash does with its own, and heads attached to it hear `deleted`.
 - On another machine, put `baude_headless.py` on `PATH` where `baude_server.py` was, for ssh to find.
 
 The sidebar lists every host's sessions: This Mac's own chats (Claude Code's and Claude Desktop's, and its host

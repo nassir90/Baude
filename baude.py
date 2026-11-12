@@ -7528,17 +7528,6 @@ def own_writes(proc, exiting=False):
             w.own_mtimes[proc.path] = max(mtime, time.time() + 2) if exiting else mtime
 
 
-def baude_runs(session_id, but=None):
-    """Does Baude run a session's claude: a window of it (not but) talking to it, or keeping it at a turn for a chat left
-    mid-turn (background_proc)?"""
-    app = Gio.Application.get_default()
-    for w in app.get_windows() if app is not None and session_id else []:
-        if isinstance(w, BaudeWindow) and w is not but and w.session_id == session_id and w.proc is not None \
-                and not w.resume_pending and w.remote is None:
-            return True
-    return background_proc(session_id) is not None
-
-
 def background_proc(session_id):
     """The claude a Baude window keeps at a turn for a chat left mid-turn (BaudeWindow.detach_proc), if any."""
     app = Gio.Application.get_default()
@@ -8518,10 +8507,11 @@ class SessionSidebar(Gtk.Box):
         if info.get("remote") is not None:  # (on a host: renamed, archived, stopped or trashed there while it's there;
             # while it's gone, only not listed here till it shows up again)
             active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")
-            archived = bool(info.get("archived"))
+            archived = bool(info.get("archived")) or info["id"] in self.archived_ids()  # (here too: from before)
             items = [("Delete", "hide")] if info.get("dead") or info["remote"].state != "alive" else \
-                [("Rename…", "rename"), ("Unarchive" if archived else "Archive", "unarchive" if archived else "archive")] \
-                + ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]
+                [("Rename…", "rename")] + ([("Unarchive", "unarchive")] if archived else [] if active else
+                                           [("Archive", "archive")]) + \
+                ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]  # (Archive stops it: not at a turn)
         for label, action in items:
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", sid)
@@ -8603,8 +8593,14 @@ class SessionSidebar(Gtk.Box):
             self.fill()
 
     def unarchive(self, info):
-        if info and info.get("remote") is not None:
-            self.ask_remote(info, "unarchive")
+        if info and info.get("remote") is not None:  # (archived here, before hosts did, too: not any more)
+            st = load_settings()
+            if info["id"] in st.get("archived", []):
+                save_settings(archived=sorted(set(st.get("archived", [])) - {info["id"]}))
+            if info.get("archived"):
+                self.ask_remote(info, "unarchive")
+            else:
+                self.fill()
             return
         if info:
             st = load_settings()  # (archived in Claude Desktop: shown here anyway from now on)
@@ -8636,6 +8632,16 @@ class SessionSidebar(Gtk.Box):
         r = info["remote"]
 
         def done(reply):
+            if reply.get("op") == "error" and str(reply.get("error") or "").startswith("unknown op"):
+                # (an older host process, without them: archived, or deleted, here only, as Baude did before)
+                if op == "delete":
+                    self.hide_remote(info)
+                else:
+                    st = load_settings()
+                    ids = set(st.get("archived", []))
+                    save_settings(archived=sorted(ids | {info["id"]} if op == "archive" else ids - {info["id"]}))
+                    self.fill()
+                return
             if reply.get("op") == "error":
                 toast(self, f"{remote_name(r)} didn't {op} it: {reply.get('error')}")
                 return
@@ -11896,6 +11902,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.scroller.grab_focus()
 
     def on_exit(self, code):
+        if self.remote is not None and code == "deleted":  # (on its host: on_network goes on to a new chat)
+            self.proc = None
+            self.set_busy(False)
+            self.on_network()
+            return
         if self.remote is not None:
             self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
                                                          f"claude exited ({code})") + ". Send a message to carry on.")
@@ -14118,6 +14129,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if getattr(self, "let_go_done", False) or self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
+        if listed is None and self.remote.state == "alive" and self.session_id and self.remote.info.get("id"):
+            # (deleted on its host, by another head, as it lists its sessions, archived ones too: nothing to carry on)
+            toast(self.sidebar, f"That session was deleted on {remote_name(self.remote)}")
+            self.new_session()
+            return
         if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
             self.show_title(listed["title"])
         if self.resume_pending and self.remote.local and self.remote.direct(self.session_id) and \
@@ -14449,14 +14465,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 pass
 
     def live_elsewhere(self):
-        """Is the viewed session in use by a program that isn't Baude: Claude Desktop, which runs its chats itself, or a
-        terminal's claude? That one's kept from a second writer here, which would interleave two conversations in its
-        transcript (update_banner). A chat Baude runs isn't: in another of its windows, left mid-turn (background_proc),
-        or a host process's (on the network, or this machine's), where several heads at once is how it's used: what's
-        sent mid-turn waits for the turn's end, on its host."""
+        """Is the viewed session in use by another program: Claude Desktop, which runs its chats itself, a terminal's
+        claude, or another window of Baude's own claude? That one's kept from a second writer here, which would
+        interleave two conversations in its transcript (update_banner). Not Baude's claude at a turn in a chat left
+        mid-turn, which writing here takes over (begin_resume), nor a host process's session (on the network, or this
+        machine's), where several heads at once is how it's used: what's sent mid-turn waits for the turn's end, on its
+        host."""
         if self.remote is not None or not self.resume_pending:
             return False
-        return self.tail.in_use() and not baude_runs(self.session_id, but=self)
+        return self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
         """While another program (not Baude: live_elsewhere) has the session, or a host's session's host isn't there,

@@ -685,6 +685,9 @@ class RemoteProc(claude.ClaudeProc):
             elif op == "exited" and msg.get("session") == self.session:
                 self.code = msg.get("code")
                 break
+            elif op == "deleted" and msg.get("session") == self.session:  # (gone from its host, for good)
+                self.code = "deleted"
+                break
             elif op == "error":  # (what was sent went nowhere: said, and the turn's over)
                 self.dispatch(lambda e=msg.get("error"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": f"the server: {e}"}))

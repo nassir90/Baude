@@ -157,6 +157,7 @@ class Session:
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
         self.agents = None        # its subagents' files, as last looked at: {name: (size, mtime_ns)}
         self.used = time.time()
+        self.deleting = self.deleted = False  # (Server.delete's: nothing more taken for it; nothing more kept of it)
 
     @property
     def id(self):
@@ -383,35 +384,60 @@ class Server:
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]})}
 
-    def delete(self, s):
-        """(lock held) A session gone: its claude stopped, it's no longer listed or kept, and its transcript (claude's,
-        or the one kept here) and its subagents' files moved to the trash, where they can be got back, as Baude's
-        Move to Trash does with a chat of its own. [Where each went]."""
-        if s.proc is not None:
-            s.proc.stopping = True
-            s.proc.kill()
-        self.sessions.pop(s.id, None)
-        for c in list(s.viewers):  # (attached to it: it's gone)
-            c.send({"op": "exited", "session": s.id, "code": None})
-        try:
-            os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
-        except OSError:
-            pass
-        path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
+    def delete(self, s, reply):
+        """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,
+        as what it writes as it ends is its transcript's; then its transcript (claude's, or the one kept here), the
+        folder claude keeps beside it (its subagents'), and pi's own copy of it, moved to the trash, where they can be
+        got back, as Baude's Move to Trash does with a chat of its own; only then is it no longer listed or kept, and
+        those attached to it told (deleted). One whose files can't be moved stays, and the error says why."""
+        with self.lock:
+            proc = s.proc
+            if proc is not None:
+                proc.stopping = True
+                proc.close_stdin()  # (claude, its stdin closed, ends as it would at the end of a pipe)
+        if proc is not None:
+            try:
+                proc.p.wait(timeout=5)
+            except Exception:  # (one that doesn't, in time: made to)
+                proc.kill()
+                try:
+                    proc.p.wait(timeout=2)
+                except Exception:
+                    pass
+        with self.lock:
+            path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
+            program = models.program(s.meta.get("model"))["name"]
+            names = {s.meta.get("cli_id") or s.id, s.id}
+        paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None]
+        pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, by its id)
+        if program == "pi" and os.path.isdir(pi):
+            paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(n.startswith(i) for i in names)]
         went = []
-        folder = path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None  # (claude's beside it: subagents')
-        for p in (path, folder):
+        for p in paths:
             if p and os.path.exists(p):
                 try:
                     went.append(trash(p))
                 except OSError as e:
-                    self.log(f"{s.id}: {p} not moved to the trash: {e}")
-        self.log(f"deleted {s.id}")
-        self.changed()
-        return went
+                    with self.lock:
+                        s.deleting = False
+                    moved = f" ({', '.join(went)} moved already)" if went else ""
+                    return reply("error", error=f"{p} couldn't be moved to the trash: {e}{moved}")
+        with self.lock:
+            s.deleted = True
+            self.sessions.pop(s.id, None)
+            try:
+                os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
+            except OSError:
+                pass
+            for c in list(s.viewers):  # (attached to it: it's gone, for good)
+                c.send({"op": "deleted", "session": s.id})
+            self.log(f"deleted {s.id}")
+            self.changed()
+        reply("deleted", session=s.id, trashed=went)
 
     def save(self, s):
-        _write_json(os.path.join(self.state_dir, "sessions", f"{s.id}.json"), s.meta)
+        if not s.deleted:  # (one deleted isn't kept, whatever its claude's last words would have had saved)
+            _write_json(os.path.join(self.state_dir, "sessions", f"{s.id}.json"), s.meta)
 
     def listing(self, archived=False):
         """Its sessions, newest first; those archived only if asked for (archived)."""
@@ -543,6 +569,8 @@ class Server:
             s = self.sessions.get(msg.get("session"))
             if s is None:
                 return reply("error", error=f"no session {msg.get('session')}")
+            if s.deleting:
+                return reply("error", error=f"session {s.id} is being deleted")
             if op == "attach":
                 conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
                 s.viewers.add(conn)
@@ -569,8 +597,10 @@ class Server:
                 self.save(s)
                 self.changed()
                 return reply(op + "d", session=s.id)
-            if op == "delete":
-                return reply("deleted", session=s.id, trashed=self.delete(s))
+            if op == "delete":  # (on a thread of its own: its claude's waited for, its files moved, not under the lock)
+                s.deleting = True
+                threading.Thread(target=self.delete, args=(s, reply), daemon=True, name="delete").start()
+                return None
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))
@@ -814,8 +844,9 @@ class Server:
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
-                for conn in self.conns:
-                    if conn.subscribed:  # (as it happens: a turn too short for a sessions listing to see isn't missed)
+                for conn in self.conns:  # (as it happens: a turn too short for a sessions listing to see isn't missed;
+                    # an archived session's to those who see archived ones)
+                    if conn.subscribed and (conn.archived or not s.meta.get("archived")):
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
@@ -844,7 +875,7 @@ class Server:
     def keep(self, s, kind, message):
         """(lock held) A message of a session whose program keeps no transcript, kept in the server's, as Claude Code
         keeps one (what's listed, and what clients mirror, come from it)."""
-        if not s.kept():
+        if not s.kept() or s.deleted or s.deleting:
             return
         path = os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
         os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -127,7 +127,7 @@ from feedback import (  # noqa: E402,F401
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
-from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView  # noqa: E402,F401
+from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
@@ -232,11 +232,6 @@ trace("imported")
 
 
 # (MODES and EFFORT_LABELS: baudelib.claude)
-
-
-def fmt_tokens(n):
-    return f"{n / 1_000_000:.1f}M".replace(".0M", "M") if n >= 1_000_000 else \
-        f"{n / 1000:.1f}k".replace(".0k", "k") if n >= 1000 else str(n)
 
 
 # The app's own sizes (Settings → Size), the same in every window and pane: the text's and the icons'. 1.0 is the usual.
@@ -7582,19 +7577,6 @@ def remote_path(path, r):
 
 # ------------------------------------------------------- sessions dialog --
 
-class ContextMeter(Gtk.LevelBar):
-    """The status bar's context bar: WIDTH wide given the room, narrower as the chat is (a width_request held it open)."""
-
-    WIDTH = 90  # px
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.set_layout_manager(widgets.WidthLayout())
-
-    def width_of(self, least, natural):
-        return least, max(natural, self.WIDTH)
-
-
 class WorkingDots(Gtk.Label):
     """A turn running, at the start of the status bar: •, ••, •••, and again; otherwise it isn't there, nor the room it takes.
     All three are laid out, the rest see-through, so what's after it doesn't move with each dot. In a window you aren't
@@ -11356,14 +11338,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.set_send_button(busy=False)
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
-        self.ctx_label = Gtk.Label(label="context —", xalign=1, ellipsize=Pango.EllipsizeMode.END)
-        self.ctx_bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
-        self.ctx_bar.add_offset_value("ctx-mid", 0.6)
-        self.ctx_bar.add_offset_value("ctx-high", 0.85)
-        ctx = Gtk.Box(spacing=8, tooltip_text="Context window usage")
-        ctx.append(self.ctx_label)
-        ctx.append(self.ctx_bar)
-        self.ctx_box = ctx
+        ctx = self.ctx_box = widgets.ContextUsage()  # (Meta's too)
+        self.ctx_label, self.ctx_bar = ctx.label, ctx.bar
         statusbar = Gtk.Box(spacing=12)
         statusbar.add_css_class("statusbar")
         self.working_dots = WorkingDots()
@@ -12328,15 +12304,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return False
 
     def show_context(self, usage):
-        used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
-        if not total:
-            return
-        frac = min(1.0, used / total)
-        self.ctx_label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {frac:.0%}")
-        self.ctx_bar.set_value(frac)
-        lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
-                 if c.get("tokens") and c.get("kind") != "deferred"]
-        self.ctx_box.set_tooltip_text("Context window usage\n" + "\n".join(lines))
+        self.ctx_box.set_usage(usage)
 
     def refresh_effort(self):
         self.request({"subtype": "get_settings"},
@@ -12742,8 +12710,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None
         self.total_cost = 0.0
-        self.ctx_label.set_text("context —")
-        self.ctx_bar.set_value(0)
+        self.ctx_box.reset()
         self.show_title(None)
         self.tasks.clear()
         self.sub_tails.clear()

@@ -808,6 +808,7 @@ class Agent:
         self.chat, self.key, self.model = chat, key, model
         self.roots = [os.path.realpath(r) for r in roots if r]
         self.turn, self.fresh, self.stderr, self.closed = None, True, [], False
+        self.answers = {}  # (the control requests it's made, by id: what to do with their answers)
         self.allowed = set()  # (paths the user referenced: read when it asks)
         self.token = uuid.uuid4().hex
         self.cwd = cwd
@@ -829,6 +830,10 @@ class Agent:
         """A message (turn: what the reply's made of, as it comes: its text, actions, what it shows)."""
         self.turn, self.fresh = turn, False
         self.proc.user(text)
+
+    def usage(self, then):
+        """then(usage): how much of its context window the session's used (Claude Code's get_context_usage)."""
+        self.answers[self.proc.control({"subtype": "get_context_usage"})] = then
 
     def stop(self):
         """The turn interrupted (Esc, the stop button): what's been said kept; the session too, unless it won't stop."""
@@ -896,6 +901,11 @@ class Agent:
                 proc.send({"type": "control_response", "response": {
                     "subtype": "error", "request_id": msg.get("request_id"),
                     "error": f"meta: unsupported {(msg.get('request') or {}).get('subtype')}"}})
+        elif t == "control_response":
+            r = msg.get("response") or {}
+            then = self.answers.pop(r.get("request_id"), None)
+            if then is not None and r.get("subtype") == "success":
+                then(r.get("response") or {})
         elif turn is None or msg.get("parent_tool_use_id"):
             pass
         elif t == "stream_event":
@@ -964,6 +974,9 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .tool-card button.meta-batch {{ min-height: 0; min-width: 0; padding: 1px 5px; }}
 .changes-bar {{ background: alpha(@accent_bg_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }}
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
+.meta-foot {{ font-size: 0.85em; }}  /* (under the box, as Baude's status line is under a chat's) */
+.meta-foot > * {{ opacity: 0.75; }}
+.meta-foot button {{ min-height: 22px; padding: 0 6px; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
 """
@@ -1217,8 +1230,9 @@ def rows_group(rows, title=None, limit=None):
 class MetaChat(Gtk.Box):
     """Your conversation with Meta, in the right bar: replies, each with the actions it took (undo, redo) and what it
     shows (rows of settings, chats, pages; the changelog; a button); @ in the box lists what's to reference
-    (RefCompleter); over the box, while changes in the left bar wait to be kept, how many, Keep and Undo. Each app's
-    is a subclass of its own (APP, WHAT, LISTED; the hooks below)."""
+    (RefCompleter); over the box, while changes in the left bar wait to be kept, how many, Keep and Undo; under it,
+    Clear at the left and how much of its context window the session's used at the right. Each app's is a subclass of
+    its own (APP, WHAT, LISTED; the hooks below)."""
 
     APP, WHAT, LISTED, PAGES = "the app", "", "what the left bar lists", False
     CHAT_ROWS = False  # (whether its left bar lists chats: what rename_chat changes is marked there)
@@ -1239,7 +1253,7 @@ class MetaChat(Gtk.Box):
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
         talk.append(self.scroll)
         self.append(talk)
-        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=10)
+        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=6)
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # (an app's own, over the box)
         comp.append(self.bars)
         self.changes_box = self._changes_bar()
@@ -1252,6 +1266,16 @@ class MetaChat(Gtk.Box):
         self.composer.add_controller(keys)
         self.send.connect("clicked", lambda *_: self.ask.stop() if self.ask else self.submit())
         comp.append(self.writing)
+        foot = Gtk.Box(spacing=12)
+        foot.add_css_class("meta-foot")
+        clear = Gtk.Button(label="Clear", tooltip_text="Clear the conversation (or ask clear, /clear)")
+        clear.add_css_class("flat")
+        clear.connect("clicked", lambda *_: self._clear())
+        foot.append(clear)
+        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
+        self.context_soon_id = None
+        foot.append(self.ctx)
+        comp.append(foot)
         talk.append(comp)
         self.settings = {}  # (made once the window is: make_settings)
         self.model_changed()
@@ -1370,12 +1394,28 @@ class MetaChat(Gtk.Box):
         if self.agent is not None:
             self.agent.close()
         self.agent = self.ask = None
+        self.ctx.reset()
 
     def agent_gone(self, agent):
         if agent is self.agent:
             self.agent = self.ask = None
+            self.ctx.reset()
             self.writing.set_busy(False)
             self._drop_asking()
+
+    CONTEXT_EVERY_MS = 1000
+
+    def context_soon(self, agent):
+        """The context shown asked for again a moment after each step of a turn (the message sent, a tool's result,
+        the reply), at most once a second, as Baude's chat's is."""
+        if agent is self.agent and self.context_soon_id is None:
+            self.context_soon_id = GLib.timeout_add(self.CONTEXT_EVERY_MS, self._context_now)
+
+    def _context_now(self):
+        self.context_soon_id = None
+        if (agent := self.agent) is not None and not agent.closed:
+            agent.usage(lambda usage: agent is self.agent and self.ctx.set_usage(usage))
+        return False
 
     def _clear(self):
         self.close_agent()
@@ -1836,6 +1876,7 @@ class MetaChat(Gtk.Box):
             self.save(now=True)
             return self.render()
         self.ask = self.agent
+        self.context_soon(self.agent)
         self.live_widget = self._live(turn)
         self.render()
         self.writing.set_busy(True)
@@ -1931,6 +1972,7 @@ class MetaChat(Gtk.Box):
         text = content if isinstance(content, str) else "\n".join(
             b.get("text") or "" for b in content or () if isinstance(b, dict) and b.get("type") == "text")
         item["result"], item["state"] = trimmed(text, 4000), "error" if c.get("is_error") else "done"
+        self.context_soon(agent)
         if agent is self.ask:
             self._refresh_live(turn)
 
@@ -2008,6 +2050,7 @@ class MetaChat(Gtk.Box):
         return any(it["kind"] == "tool" for it in turn.get("items") or ())
 
     def _done(self, agent, text, error, turn):
+        self.context_soon(agent)
         if agent is self.ask:
             self.ask, self.live_widget = None, None
             self.writing.set_busy(False)

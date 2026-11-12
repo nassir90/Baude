@@ -1582,6 +1582,56 @@ class WidthLayout(Gtk.BinLayout):
         return least, natural, -1, -1
 
 
+def fmt_tokens(n):
+    return f"{n / 1_000_000:.1f}M".replace(".0M", "M") if n >= 1_000_000 else \
+        f"{n / 1000:.1f}k".replace(".0k", "k") if n >= 1000 else str(n)
+
+
+class ContextMeter(Gtk.LevelBar):
+    """The context bar: WIDTH wide given the room, narrower as its column is (a width_request held it open)."""
+
+    WIDTH = 90  # px
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.set_layout_manager(WidthLayout())
+
+    def width_of(self, least, natural):
+        return least, max(natural, self.WIDTH)
+
+
+class ContextUsage(Gtk.Box):
+    """How much of its context window a session's used, Baude's chat's and Meta's alike: "context 24k / 200k · 12%" and
+    a bar, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's answer)."""
+
+    def __init__(self, **kw):
+        super().__init__(spacing=8, tooltip_text="Context window usage", **kw)
+        self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
+        self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
+        self.bar.add_offset_value("ctx-mid", 0.6)
+        self.bar.add_offset_value("ctx-high", 0.85)
+        self.append(self.label)
+        self.append(self.bar)
+        self.reset()
+
+    def set_usage(self, usage):
+        used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
+        if not total:
+            return
+        frac = min(1.0, used / total)
+        self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {frac:.0%}")
+        self.bar.set_value(frac)
+        lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
+                 if c.get("tokens") and c.get("kind") != "deferred"]
+        self.set_tooltip_text("Context window usage\n" + "\n".join(lines))
+
+    def reset(self):
+        """No session's: nothing used yet."""
+        self.label.set_text("context —")
+        self.bar.set_value(0)
+        self.set_tooltip_text("Context window usage")
+
+
 class FindBar(Gtk.SearchBar):
     """A search bar that, closed, is no width, as ShutBar."""
 

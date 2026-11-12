@@ -5804,6 +5804,85 @@ class RecordChat(meta.MetaChat):
                          "open": lambda nb=nb, page=page: self.open_page(nb, page)})
         return rows
 
+    def forms(self):
+        return {"new_page": (f"make a page in the {book().lower()} open (its name, the page it goes under, its text)",
+                             self.page_form),
+                "new_notebook": (f"make a {book().lower()}", self.notebook_form)}
+
+    def page_form(self):
+        """New page's fields, as the pages' + asks (PagesList.new_page), with where it goes and what it says: for
+        Meta's new_page form."""
+        nb = self.notebook
+        if nb is None:
+            raise ValueError(f"No {book().lower()} is open.")
+        name = Gtk.Entry(activates_default=True, placeholder_text="Its name")
+        tops = "(the top)"
+        under = Gtk.DropDown.new_from_strings([tops, *sorted(nb["pages"], key=lambda p: (p != HOME, p.lower()))])
+        text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=6, bottom_margin=6, left_margin=8,
+                            right_margin=8)
+        frame = Gtk.ScrolledWindow(child=text, min_content_height=72, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        frame.add_css_class("card")
+        line = Gtk.Box(spacing=8)
+        said = Gtk.Label(label="Under")
+        said.add_css_class("dim-label")
+        line.append(said)
+        under.set_hexpand(True)
+        line.append(under)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        for w in (name, line, frame):
+            box.append(w)
+
+        def full():
+            parent = meta.Form.get(under)
+            return f"{parent}:{page_name(name.get_text())}" if parent != tops else page_name(name.get_text())
+
+        def check():
+            if not page_name(name.get_text()):
+                return "A page needs a name"
+            if nb["pages"].get(full(), "").strip():
+                return f"There's a page {full()} already"
+            return None
+
+        def submit():
+            if (problem := check()) is not None:
+                raise ValueError(problem)
+            page = full()
+            nb["pages"][page] = meta.Form.get(text)
+            self.win.store.save()
+            if nb is self.win.current:
+                self.win.open_note(page, select=False)
+                self.win.pages.fill()
+            return f"made {page}"
+        return meta.Form("New page", box, [("name", "the page's own name", name),
+                                           ("under", "the page it goes under, or (the top)", under),
+                                           ("text", "what it says, in Markdown (or empty)", text)],
+                         check, submit, verb="Add")
+
+    def notebook_form(self):
+        """New Notebook's field (Window.new_notebook asks for its name), for Meta's new_notebook form: made, and
+        listed, not opened (this conversation is the notebook open's)."""
+        store = self.win.store
+        entry = Gtk.Entry(activates_default=True, placeholder_text="Its name")
+
+        def check():
+            if not base_name(entry.get_text()):
+                return f"A {book().lower()} needs a name"
+            if base_name(entry.get_text()).lower() in {full_name(t).lower() for t in store.notebooks}:
+                return f"There's a {book().lower()} called {base_name(entry.get_text())} already"
+            return None
+
+        def submit():
+            if (problem := check()) is not None:
+                raise ValueError(problem)
+            made = store.new(base_name(entry.get_text()))
+            made.pop("fresh", None)  # (named: kept, Store.is_blank)
+            store.save_now()
+            self.win.notebook_list.prepend(self.win._row(made))  # (first, as Store.new puts it; the one open stays)
+            return f"made {full_name(made)}, in the {book(plural=True).lower()}' list"
+        return meta.Form(f"New {book()}", entry, [("name", f"the {book().lower()}'s name", entry)], check, submit,
+                         verb="Create", body=f"A {book().lower()} is your notes on a subject, and {meta.NAME}'s "
+                                         "conversation about them")
+
     def open_page(self, notebook, page):
         if notebook is not self.win.current:
             self.win.select(notebook["id"])

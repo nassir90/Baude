@@ -35,7 +35,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
+gi.require_version("Graphene", "1.0")
+from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
 
 import fontsetup  # noqa: E402
 import lookup  # noqa: E402
@@ -578,6 +579,9 @@ with undo and redo, and a change to {listed} is marked in the left bar (green ad
 keep or undo it. undo and redo take one back or put it again. You're told when the user undoes something. Never do \
 what can't be undone: say so plainly, and show its button (show button:<action>) for the user to press themselves.
 
+Forms: asked to help the user add or make something the app has a form for (app_index forms), bring it up with \
+open_form, fill in what you know (fill_form), and leave the rest and the submitting to them.
+
 Settings: set_setting changes one at once, and its row shows under your reply, where the user can go on adjusting it; \
 you're told the value they settle on. Asked about a setting without being asked to change it, show its row (show \
 setting:<name>). show also lists chats{and_pages} as rows the user can click, and shows the changelog.
@@ -617,6 +621,18 @@ SHARED_TOOLS = [
          "action": {"type": "string"}, "turn": {"type": "boolean"}}}},
     {"name": "redo", "description": "Do again an action of yours that was undone: its id.",
      "inputSchema": {"type": "object", "required": ["action"], "properties": {"action": {"type": "string"}}}},
+]
+
+SHARED_TOOLS += [
+    {"name": "open_form", "description": "Bring up one of the app's forms in your pane (app_index forms: their names), "
+     "filled with values if you know them ({field: value}), for the user to finish and submit; you never submit one. "
+     "Returns its id, its fields (with their choices) and what's still wrong.",
+     "inputSchema": {"type": "object", "required": ["form"], "properties": {
+         "form": {"type": "string"}, "values": {"type": "object"}}}},
+    {"name": "fill_form", "description": "Fill fields of a form you brought up (its id): values {field: value}. "
+     "Returns what's still wrong, if anything.",
+     "inputSchema": {"type": "object", "required": ["id", "values"], "properties": {
+         "id": {"type": "string"}, "values": {"type": "object"}}}},
 ]
 
 RUN_PYTHON = {"name": "run_python", "description": "Run up to 10 lines of Python with app (its functions: your "
@@ -978,6 +994,10 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .meta-foot > * {{ opacity: 0.75; }}
 .meta-foot button {{ min-height: 22px; padding: 0 6px; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
+/* a form (MetaChat.form_card): hollow, in a tool card's outline, as Meta's rows are; pinned over the conversation,
+   on the pane's own background, a shadow under it */
+.meta-form {{ border: 1px solid @baude_rule; border-radius: 8px; padding: 10px 12px; }}
+.meta-form.meta-pinned {{ background: @baude_inside; box-shadow: 0 3px 10px alpha(black, 0.25); }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
 """
 _CSS = []
@@ -1225,6 +1245,85 @@ def rows_group(rows, title=None, limit=None):
     return group
 
 
+# ---------------------------------------------------------------- forms
+# A form Meta brings up in its pane (open_form): an app's own dialog's contents (its heading, what it says, its fields,
+# its button) inline, in Meta's look; filled by the user, by pasting or typing, or by Meta (fill_form); checked as it's
+# filled; submitted only by the user's click. One not yet submitted is pinned: scrolled past, it stops at the top of the
+# pane and hovers there (MetaChat._pin_forms); right-click it: Unpin, or Pin.
+
+class Form:
+    """A form of an app's (MetaChat.forms: its name -> what makes one): heading, body (what it says, as its dialog's
+    body), child (its fields, as its dialog has them), fields [(name, what it takes, widget: an entry, a text view, a
+    drop-down)], verb (its button's word), check() -> what's wrong (to say), or None; submit() -> what was done (said),
+    or ValueError saying why not."""
+
+    def __init__(self, heading, child, fields, check, submit, verb="Submit", body=""):
+        self.heading, self.child, self.fields, self.verb, self.body = heading, child, fields, verb, body
+        self.check, self.submit = check, submit
+
+    @staticmethod
+    def get(widget):
+        if isinstance(widget, Gtk.TextView):
+            buf = widget.get_buffer()
+            return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        if isinstance(widget, Gtk.DropDown):
+            item = widget.get_selected_item()
+            return item.get_string() if item is not None else ""
+        return widget.get_text()
+
+    @staticmethod
+    def choices(widget):
+        model = widget.get_model() if isinstance(widget, Gtk.DropDown) else None
+        return [model.get_string(i) for i in range(model.get_n_items())] if model is not None else None
+
+    @classmethod
+    def put(cls, widget, value):
+        """A field filled: a drop-down's choice the one named (any case; else the one that starts so, or has it)."""
+        value = "" if value is None else str(value)
+        if isinstance(widget, Gtk.TextView):
+            widget.get_buffer().set_text(value)
+        elif isinstance(widget, Gtk.DropDown):
+            names, want = cls.choices(widget), value.strip().lower()
+            for test in (lambda n: n.lower() == want, lambda n: n.lower().startswith(want), lambda n: want in n.lower()):
+                if (found := next((i for i, n in enumerate(names) if test(n)), None)) is not None:
+                    widget.set_selected(found)
+                    return
+            raise ValueError(f"{value!r} isn't one of: {', '.join(names)}.")
+        else:
+            widget.set_text(value)
+
+    def values(self):
+        return {name: self.get(w) for name, _takes, w in self.fields}
+
+    def fill(self, values):
+        known = {name: w for name, _takes, w in self.fields}
+        if unknown := [k for k in values if k not in known]:
+            raise ValueError(f"No field {unknown[0]!r}: its fields are {', '.join(known)}.")
+        for name, _takes, w in self.fields:  # (in the form's order: a host picked before what it offers)
+            if name in values:
+                self.put(w, values[name])
+
+    def changed(self, fn):
+        """fn() as any field changes."""
+        for _name, _takes, w in self.fields:
+            if isinstance(w, Gtk.TextView):
+                w.get_buffer().connect("changed", lambda *_: fn())
+            elif isinstance(w, Gtk.DropDown):
+                w.connect("notify::selected", lambda *_: fn())
+            else:
+                w.connect("changed", lambda *_: fn())
+
+    def described(self):
+        """Its fields as Meta's told them: each one's name, what it takes, what it has, and its choices."""
+        out = []
+        for name, takes, w in self.fields:
+            d = {"field": name, "takes": takes, "value": self.get(w)}
+            if (choices := self.choices(w)) is not None:
+                d["choices"] = choices
+            out.append(d)
+        return out
+
+
 # ---------------------------------------------------------------- the column
 
 class MetaChat(Gtk.Box):
@@ -1251,7 +1350,15 @@ class MetaChat(Gtk.Box):
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
         # widgets.inside), all of the column's height theirs (clear, or /clear, asked: cleared, submit)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
-        talk.append(self.scroll)
+        # (a form not yet submitted, scrolled past: pinned over the conversation's top, _pin_forms)
+        self.pins = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.START, margin_top=self.PIN_MARGIN,
+                            margin_start=12, margin_end=12)
+        self.forms_open = {}  # (each form's id: {spec, form, widget (its card), slot (its place in its reply)})
+        over = Gtk.Overlay(child=self.scroll, vexpand=True)
+        over.add_overlay(self.pins)
+        for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
+            self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_forms())
+        talk.append(over)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=6)
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # (an app's own, over the box)
@@ -1551,6 +1658,228 @@ class MetaChat(Gtk.Box):
                                        "actions": [a["id"] for a in mine]}))
         self.add_shown(box, m.get("shown") or ())
 
+    # ---- forms (open_form, fill_form): inline, pinned till they're submitted
+    def forms(self):
+        """The app's forms: {name: (what it's for, make() -> a Form, or ValueError: it can't be had now)}."""
+        return {}
+
+    def _form_spec(self, fid, turn=None):
+        """A form's spec as it's kept (under the reply that brought it up), by its id."""
+        specs = [s for m in self.messages() for it in m.get("items") or () for s in it.get("shown") or ()]
+        specs += list((turn or {}).get("shown") or ())
+        return next((s for s in specs if s.get("kind") == "form" and s.get("id") == fid), None)
+
+    def form_slot(self, spec):
+        """Where a form goes in its reply: its card (made once, kept as the conversation's drawn again: what's typed
+        in it stays), or, while it's pinned over the conversation, a gap its height."""
+        entry = self.forms_open.get(spec["id"])
+        if entry is None:
+            entry = self.forms_open[spec["id"]] = {"spec": spec, "slot": None}
+            entry["form"], entry["widget"] = self.form_card(spec)
+        entry["spec"] = spec
+        slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        slot.add_css_class("meta-ui")
+        widget = entry["widget"]
+        if widget.get_parent() is self.pins:
+            slot.set_size_request(-1, widget.get_height())
+        else:
+            if (parent := widget.get_parent()) is not None:
+                parent.remove(widget)
+            slot.append(widget)
+        entry["slot"] = slot
+        GLib.idle_add(self._pin_forms)
+        return slot
+
+    def form_card(self, spec):
+        """A form's card: its dialog's heading, what it says, its fields, what's wrong with them, and its buttons
+        (Cancel, and its own: Add, Create, Start); submitted or cancelled, what came of it. Right-click: Pin, Unpin."""
+        name = spec["form"]
+        try:
+            form = self.forms()[name][1]()
+        except (KeyError, ValueError) as e:
+            return None, label(f"({e})", css=("dim-label", "caption"))
+        try:
+            form.fill({k: v for k, v in (spec.get("values") or {}).items() if v not in (None, "")})
+        except ValueError:
+            pass  # (what was filled before, not to be had now: as the form has it)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class("meta-form")
+        title = Gtk.Label(label=form.heading, xalign=0, wrap=True)
+        title.add_css_class("heading")
+        card.append(title)
+        if form.body:
+            body = Gtk.Label(label=form.body, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+            body.add_css_class("dim-label")
+            body.add_css_class("caption")
+            card.append(body)
+        card.append(form.child)
+        wrong = label("", css=("error", "caption"))
+        card.append(wrong)
+        said = label("", css=("dim-label", "caption"))
+        card.append(said)
+        row = Gtk.Box(spacing=6, halign=Gtk.Align.END)
+        cancel = Gtk.Button(label="Cancel")
+        go = Gtk.Button(label=form.verb)
+        go.add_css_class("suggested-action")
+        row.append(cancel)
+        row.append(go)
+        card.append(row)
+
+        def looks():
+            open_ = spec.get("state", "open") == "open"
+            form.child.set_sensitive(open_)
+            row.set_visible(open_)
+            problem = form.check() if open_ else None
+            go.set_sensitive(problem is None)
+            filled = any(str(v).strip() for v in form.values().values())
+            wrong.set_text((spec.get("error") or problem or "") if open_ and (filled or spec.get("error")) else "")
+            wrong.set_visible(bool(wrong.get_text()))
+            said.set_text({"submitted": f"Done: {spec.get('said') or form.verb}", "cancelled": "Cancelled"}.get(
+                spec.get("state"), ""))
+            said.set_visible(not open_)
+            card.set_tooltip_text("Right-click: Unpin" if open_ and spec.get("pinned", True) else
+                                  "Right-click: Pin" if open_ else None)
+
+        def edited():
+            spec["values"], spec["error"] = form.values(), None
+            looks()
+            self.save()
+
+        def submit(*_):
+            if (problem := form.check()) is not None:
+                spec["error"] = problem
+                return looks()
+            try:
+                done = form.submit()
+            except ValueError as e:
+                spec["error"] = str(e)
+                return looks()
+            spec.update(state="submitted", said=done, error=None)
+            self.told().append(f"(The user submitted the form {spec['id']}, {form.heading}: {done})")
+            self._form_closed(spec)
+            looks()
+
+        def dismiss(*_):
+            spec.update(state="cancelled", error=None)
+            self.told().append(f"(The user cancelled the form {spec['id']}, {form.heading}.)")
+            self._form_closed(spec)
+            looks()
+        form.changed(edited)
+        go.connect("clicked", submit)
+        cancel.connect("clicked", dismiss)
+        menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        menu.connect("pressed", lambda _g, _n, x, y: self._form_menu(card, spec, x, y))
+        card.add_controller(menu)
+        card.looks = looks
+        looks()
+        return form, card
+
+    def _form_menu(self, card, spec, x, y):
+        """A form's menu (right-click): Unpin, while it's pinned (it scrolls away with the conversation); else Pin."""
+        if spec.get("state", "open") != "open":
+            return
+        pinned = spec.get("pinned", True)
+        pop = Gtk.Popover(has_arrow=False)
+        btn = Gtk.Button(label="Unpin" if pinned else "Pin")
+        btn.add_css_class("flat")
+
+        def toggle(*_):
+            pop.popdown()
+            spec["pinned"] = not pinned
+            card.looks()
+            self.save()
+            self._pin_forms()
+        btn.connect("clicked", toggle)
+        pop.set_child(btn)
+        pop.set_parent(card)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        pop.set_pointing_to(rect)
+        pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        self.form_menu = pop
+        pop.popup()
+
+    def _form_closed(self, spec):
+        """A form submitted or cancelled: kept so, and in its place in the conversation, pinned no more."""
+        self.save(now=True)
+        entry = self.forms_open.get(spec["id"])
+        if entry is not None and entry["widget"].get_parent() is self.pins:
+            self._unpin(entry)
+
+    PIN_MARGIN = 8  # px: a pinned form hovers this far from the pane's top
+
+    def _pin_forms(self):
+        """The form pinned over the conversation's top: the last one not yet submitted, and pinned, whose place has
+        gone up past the pane's top (its place kept as a gap its height); none once its place is back in view."""
+        pinned = next((e for e in self.forms_open.values() if e["widget"].get_parent() is self.pins), None)
+        want = None
+        for e in self.forms_open.values():
+            slot, spec = e["slot"], e["spec"]
+            if slot is None or slot.get_root() is None or not slot.get_mapped() or slot.get_width() <= 0 or \
+                    spec.get("state", "open") != "open" or not spec.get("pinned", True) or e["form"] is None:
+                continue  # (one not laid out yet is looked at again once it is: the scroll's range changes then)
+            ok, at = slot.compute_point(self.scroll, Graphene.Point().init(0, 0))
+            if ok and at.y < self.PIN_MARGIN:
+                want = e
+        if want is not pinned:
+            if pinned is not None:
+                self._unpin(pinned)
+            if want is not None:
+                self._pin(want)
+        return False
+
+    def _pin(self, entry):
+        widget, slot = entry["widget"], entry["slot"]
+        slot.set_size_request(-1, widget.get_height())
+        slot.remove(widget)
+        widget.add_css_class("meta-pinned")
+        self.pins.append(widget)
+
+    def _unpin(self, entry):
+        widget, slot = entry["widget"], entry["slot"]
+        self.pins.remove(widget)
+        widget.remove_css_class("meta-pinned")
+        if slot is not None:
+            slot.set_size_request(-1, -1)
+            if slot.get_root() is not None:
+                slot.append(widget)
+
+    def open_form(self, turn, args):
+        name = str(args.get("form") or "").strip()
+        forms = self.forms()
+        if name not in forms:
+            raise ValueError(f"No form {name!r}: they're {', '.join(forms) or 'none'} (app_index forms).")
+        form = forms[name][1]()
+        values = args.get("values") or {}
+        if values:
+            form.fill(values)
+        spec = {"kind": "form", "form": name, "id": uuid.uuid4().hex[:6], "values": form.values(), "state": "open",
+                "pinned": True}
+        self._show(turn, spec)
+        problem = form.check()
+        return {"text": f"Form {spec['id']} ({form.heading}) is up for the user to finish and submit; you don't "
+                        f"submit it. Its fields: {json.dumps(form.described(), ensure_ascii=False)}. " +
+                        (f"Still wrong: {problem}" if problem else "It's ready to submit.")}
+
+    def fill_form(self, turn, args):
+        fid = str(args.get("id") or "").strip()
+        spec = self._form_spec(fid, turn)
+        if spec is None:
+            raise ValueError(f"No form {fid!r} of yours: open_form gives a form's id.")
+        if spec.get("state", "open") != "open":
+            raise ValueError(f"That form is {spec['state']} already.")
+        values = args.get("values") or {}
+        entry = self.forms_open.get(fid)
+        if entry is not None and entry["form"] is not None:
+            form = entry["form"]
+            form.fill(values)  # (its card says so as it's filled: Form.changed)
+        else:
+            form = self.forms()[spec["form"]][1]()
+            form.fill({**(spec.get("values") or {}), **values})
+            spec["values"] = form.values()
+        problem = form.check()
+        return {"text": ("Filled. Still wrong: " + problem) if problem else "Filled: it's ready for the user to submit."}
+
     # ---- a call that changed things: a box with the tool card's outline, what it changed inside
     def call_widget(self, it):
         """What a tool's call shows in the reply: a setting changed, the setting's own row in an outlined box
@@ -1562,7 +1891,7 @@ class MetaChat(Gtk.Box):
         if it.get("state") != "error":
             if base == "set_setting" and it.get("shown"):
                 return self.setting_box(it, batch), True
-            if base == "show":
+            if base in ("show", "open_form", "fill_form"):  # (what they bring up speaks for itself)
                 return None, False
             if any(a.get("marks") for a in batch):
                 return self.change_box(batch), False
@@ -1752,6 +2081,8 @@ class MetaChat(Gtk.Box):
         """What show put under a reply, made from what's kept of it: a setting's row, rows of chats or pages, the
         changelog, a button."""
         kind = spec.get("kind")
+        if kind == "form":
+            return self.form_slot(spec)
         if kind == "setting":
             s = self.settings[spec["name"]]
             group = Adw.PreferencesGroup()
@@ -2100,7 +2431,8 @@ class MetaChat(Gtk.Box):
     def handlers(self):
         return {"app_index": self.app_index, "set_setting": self.set_setting, "show": self.show_ui,
                 "read_chat": self.read_chat, "rename_chat": self.rename_chat, "undo": self.undo_tool,
-                "redo": self.redo_tool, **self.app_handlers()}
+                "redo": self.redo_tool, "open_form": self.open_form, "fill_form": self.fill_form,
+                **self.app_handlers()}
 
     def run_tool(self, turn, tool, args):
         """One of Meta's tools, in a turn (turn: what its reply's made of, the actions it takes among it)."""
@@ -2293,12 +2625,16 @@ class MetaChat(Gtk.Box):
 
         def buttons_rows(_f):
             return [{"action": k, "does": v} for k, v in self.buttons().items()]
+
+        def forms_rows(_f):
+            return [{"form": k, "for": what} for k, (what, _make) in self.forms().items()]
         return {
             "settings": (settings_rows, lambda r: f"{r['name']} = {said_value(r['value'])} ({r['takes']}) · "
                                                f"{r['title']}" + (f" · {r['note']}" if r["note"] else "")),
             "runtime": (runtime_rows, lambda r: process_said(r) if r["what"] == "process" else r["said"]),
             "changelog": (changelog_rows, lambda r: f"{r['commit']} {r['when']} · {r['subject']}"),
             "buttons": (buttons_rows, lambda r: f"button:{r['action']} · {r['does']}"),
+            "forms": (forms_rows, lambda r: f"{r['form']} · {r['for']}"),
         }
 
     def all_sections(self):

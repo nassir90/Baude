@@ -9209,6 +9209,17 @@ class BaudeMeta(meta.MetaChat):
     def rename_chat_to(self, chat, title):
         self.win.sidebar.rename({**chat["info"], "title": None}, title)  # (its title as listed may be one behind)
 
+    def forms(self):
+        win = self.win
+
+        def spawn():  # (this machine's host first; none there: it, started as the agent's started)
+            return win.remote_start_form(sorted(network().alive(), key=lambda r: host_key(r) != HERE_HOST) or [None],
+                                         agents=True)
+        return {"add_host": ("add a host Baude reaches over ssh", win.host_form),
+                "new_group": ("make a group of chats", win.group_form),
+                "spawn_agent": ("start an agent (a session) on a host: the host, then what it offers to run, the "
+                                "folder, group and prompt", spawn)}
+
     def open_mark(self, kind, key, how, action):
         """A chat in a change's box clicked: opened, as the sidebar opens one; one deleted is in Baude's trash."""
         if (chat := self.find_chat(key)) is not None:
@@ -15093,30 +15104,43 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.tail.start(path, 0)
         self.update_banner()
 
-    def ask_add_host(self):
-        """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
-        Tailscale), by where ssh goes: an alias in ~/.ssh/config, a host, or user@host; and its host process's command
-        there, if baude_headless.py isn't on its PATH. Kept from then on, reached or not."""
+    def host_form(self):
+        """Add a host's fields and what they do, Add a host…'s (ask_add_host) and Meta's add_host form's: where ssh goes
+        (an alias in ~/.ssh/config, a host, or user@host), and its host process's command there, if
+        baude_headless.py isn't on its PATH. Kept from then on, reached or not."""
         dest = Gtk.Entry(placeholder_text="user@host, or an ssh alias", activates_default=True, width_chars=30)
         command = Gtk.Entry(placeholder_text=f"{baudelib.wire.SSH_COMMAND}, on its PATH", activates_default=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.append(dest)
         box.append(command)
-        dlg = Adw.AlertDialog(heading="Add a host", extra_child=box, default_response="add", close_response="cancel",
-                              body="Reached over ssh with your keys, never a password: the host must be in "
-                                   "known_hosts, and your key in its authorized_keys")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("add", "Add")
-        dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
         where = lambda: dest.get_text().strip() if baudelib.wire.is_dest(dest.get_text().strip()) else None  # noqa: E731
-        dest.connect("changed", lambda *_: dlg.set_response_enabled("add", where() is not None))
-        dlg.set_response_enabled("add", False)
 
-        def respond(_dlg, response):
-            if response == "add" and (to := where()) is not None:
-                network().add({"via": "ssh", "dest": to}, by_hand=True, command=command.get_text().strip() or None)
-                toast(self.sidebar, f"Looking for Baude on {to}")
-        dlg.connect("response", respond)
+        def submit():
+            if (to := where()) is None:
+                raise ValueError("Where ssh goes: user@host, or an alias in ~/.ssh/config")
+            network().add({"via": "ssh", "dest": to}, by_hand=True, command=command.get_text().strip() or None)
+            toast(self.sidebar, f"Looking for Baude on {to}")
+            return f"looking for Baude on {to}"
+        return meta.Form("Add a host", box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
+                                             ("command", "its host process's command there, if baude_headless.py "
+                                                         "isn't on its PATH (or empty)", command)],
+                         lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
+                         submit, verb="Add", body="Reached over ssh with your keys, never a password: the host must be "
+                                                  "in known_hosts, and your key in its authorized_keys")
+
+    def ask_add_host(self):
+        """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
+        Tailscale), as host_form has it."""
+        form = self.host_form()
+        dest, command = (w for _name, _takes, w in form.fields)
+        dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="add",
+                              close_response="cancel", body=form.body)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("add", form.verb)
+        dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+        dest.connect("changed", lambda *_: dlg.set_response_enabled("add", form.check() is None))
+        dlg.set_response_enabled("add", False)
+        dlg.connect("response", lambda _dlg, response: response == "add" and form.check() is None and form.submit())
         self.dialog = self.add_server_dialog = dlg
         dlg.present(self)
         dest.grab_focus()
@@ -15155,7 +15179,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         """New session through a server: the sidebar's New session while only other hosts are listed (hosts: their
         keys), a server's folder's +, or New Session Here (fixed: on server only; here: this machine's, one started
         there if there's none, local_server). A prompt, a folder and a group (the one group picked in ⋮, if one is);
-        the model, effort and permission mode the top bar has. Opened once its server's started it (remote_started)."""
+        the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
+        (remote_started)."""
         picked = self.sidebar.group_filter()
         group = next(iter(picked)) if picked is not None and len(picked) == 1 else None
         if here:
@@ -15172,74 +15197,132 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             if not servers:
                 toast(self.sidebar, "None of those hosts is there")
                 return
-        grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
+        form = self.remote_start_form(servers or [None], folder, group, said=here or fixed)
+        dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="start",
+                              close_response="cancel", body=form.body)
+        if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
+            dlg.set_prefer_wide_layout(True)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("start", form.verb)
+        dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", lambda _dlg, response: response == "start" and form.submit())
+        self.dialog = self.remote_dialog = dlg
+        self.remote_fields = form.parts
+        dlg.present(self)
+        form.parts["prompt"].grab_focus()
 
-        def field(n, label, widget):
-            name = Gtk.Label(label=label, xalign=1, valign=Gtk.Align.START if n == 3 else Gtk.Align.CENTER)
+    def remote_start_form(self, servers, folder=None, group=None, said=False, agents=False):
+        """A new session's fields and what they do, New session…'s (ask_remote_start) and Meta's spawn_agent form's:
+        the host (servers: those to pick from; None, this machine's host process, started as it's needed; said: the
+        one, said, not picked), with agents what runs on it (the models it offers: its own, or the top bar's), the
+        folder (the one last used on that host, else its home), the group and the prompt; the effort and mode the top
+        bar has, and its model unless an agent's picked. Started, it's opened (remote_started)."""
+        grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
+        rows = []
+
+        def field(label, widget, top=False):
+            name = Gtk.Label(label=label, xalign=1, valign=Gtk.Align.START if top else Gtk.Align.CENTER)
             name.add_css_class("dim-label")
             widget.set_hexpand(True)
-            grid.attach(name, 0, n, 1, 1)
-            grid.attach(widget, 1, n, 1, 1)
-        named = lambda r: THIS_MACHINE if host_key(r) == HERE_HOST else f"{remote_name(r)} ({r.host})"  # noqa: E731
-        servers_dd = None
-        if here or fixed:  # (the host it's to be on: said, not picked)
-            field(0, "Host", Gtk.Label(label=THIS_MACHINE if here else named(server), xalign=0))
+            grid.attach(name, 0, len(rows), 1, 1)
+            grid.attach(widget, 1, len(rows), 1, 1)
+            rows.append(widget)
+        named = lambda r: THIS_MACHINE if r is None or host_key(r) == HERE_HOST else \
+            f"{remote_name(r)} ({r.host})"  # noqa: E731
+        offered = lambda r: [(m["value"], m.get("displayName") or m["value"])  # noqa: E731
+                             for m in (r.info.get("models") or [] if r is not None else [])] or MODELS
+        servers_dd = agent_dd = None
+        if said:  # (the host it's to be on: said, not picked)
+            field("Host", Gtk.Label(label=named(servers[0]), xalign=0))
         else:
             servers_dd = Gtk.DropDown.new_from_strings([named(r) for r in servers])
-            field(0, "Host", servers_dd)
+            field("Host", servers_dd)
+        server = lambda: servers[servers_dd.get_selected()] if servers_dd is not None else servers[0]  # noqa: E731
+        if agents:
+            agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
+            field("Agent", agent_dd)
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
-        first = servers[0] if servers else None
-        home = self.cwd if first is None or place(first) == HERE_HOST else first.info.get("home")
-        where = Gtk.Entry(text=folder or last.get(place(first)) or home or "~")
-        field(1, "Folder", where)
-        group_entry = Gtk.Entry(text=group or (first.info.get("group") if first else None) or "")
-        field(2, "Group", group_entry)
+        home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
+        where = Gtk.Entry(text=folder or last.get(place(servers[0])) or home(servers[0]) or "~")
+        field("Folder", where)
+        group_entry = Gtk.Entry(text=group or (servers[0].info.get("group") if servers[0] is not None else None) or "")
+        field("Group", group_entry)
         prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False, top_margin=6, bottom_margin=6,
                               left_margin=8, right_margin=8)
         frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
         frame.add_css_class("card")
-        field(3, "Prompt", frame)
+        field("Prompt", frame, top=True)
         effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None
-        runs = " · ".join(x for x in (self.model_dd.label(), self.effort_dd.label() if effort else "",
-                                      self.mode_dd.label()) if x)
-        heading = f"New session on {THIS_MACHINE if here else remote_name(server)}" if here or fixed else \
-            "New session on the network"
-        dlg = Adw.AlertDialog(heading=heading, extra_child=grid, default_response="start",
-                              close_response="cancel", body=f"With the top bar's {runs}" if runs else "")
-        if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
-            dlg.set_prefer_wide_layout(True)
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("start", "Start")
-        dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
+        runs = " · ".join(x for x in (None if agents else self.model_dd.label(),
+                                      self.effort_dd.label() if effort else "", self.mode_dd.label()) if x)
 
-        def picked_server(*_):  # (another server: the folder last used on it, else its home)
-            r = servers[servers_dd.get_selected()]
+        def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)
+            r = server()
             if not folder:
-                where.set_text(last.get(place(r)) or (self.cwd if place(r) == HERE_HOST else r.info.get("home")) or "~")
+                where.set_text(last.get(place(r)) or home(r) or "~")
+            if agent_dd is not None:
+                agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
         if servers_dd is not None:
             servers_dd.connect("notify::selected", picked_server)
 
-        def respond(_dlg, response):
-            if response != "start":
-                return
+        def check():
+            if not where.get_text().strip():
+                return "A folder to start it in is needed"
+            if agent_dd is not None and agent_dd.get_selected_item() is None:
+                return f"{named(server())} offers no agent"
+            return None
+
+        def submit():
+            if (problem := check()) is not None:
+                raise ValueError(problem)
             buf = prompt.get_buffer()
+            r = server()
+            model = offered(r)[agent_dd.get_selected()][0] if agent_dd is not None else self.model
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
-                      "cwd": where.get_text().strip() or "~", "model": self.model, "effort": effort, "mode": self.mode,
+                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort, "mode": self.mode,
                       "group": group_entry.get_text().strip() or None}
-            r = servers[servers_dd.get_selected()] if servers_dd is not None else first
             save_settings(remote_folders={**last, place(r): params["cwd"]})
             start = lambda r: r.request(params, lambda reply: self.remote_started(r, reply))  # noqa: E731
             if r is None:
                 self.local_server(start)
             else:
                 start(r)
-        dlg.connect("response", respond)
-        self.dialog = self.remote_dialog = dlg
-        self.remote_fields = {"servers": servers_dd, "folder": where, "group": group_entry, "prompt": prompt}
-        dlg.present(self)
-        prompt.grab_focus()
+            return f"starting it on {named(r)}"
+        on = THIS_MACHINE if servers[0] is None or place(servers[0]) == HERE_HOST else remote_name(servers[0])
+        heading = "Spawn an agent" if agents else f"New session on {on}" if said else "New session on the network"
+        fields = ([("host", "the host it runs on", servers_dd)] if servers_dd is not None else []) + \
+            ([("agent", "what runs it: one of the host's", agent_dd)] if agent_dd is not None else []) + \
+            [("folder", "the folder it starts in, on that host", where), ("group", "its group (or empty)", group_entry),
+             ("prompt", "what it's asked first", prompt)]
+        form = meta.Form(heading, grid, fields, check, submit, verb="Start",
+                         body=f"With the top bar's {runs}" if runs else "")
+        form.parts = {"servers": servers_dd, "agent": agent_dd, "folder": where, "group": group_entry, "prompt": prompt}
+        return form
+
+    def group_form(self):
+        """New Group's field and what it does, as the sidebar asks for one (ask_group_name), for Meta's new_group
+        form."""
+        sidebar = self.sidebar
+        entry = Gtk.Entry(activates_default=True, placeholder_text="Its name")
+        name = lambda: " ".join(entry.get_text().split())  # noqa: E731
+
+        def check():
+            if not name():
+                return "A group needs a name"
+            if name() in {k for k, *_ in sidebar.known_groups()}:
+                return f"There's a group {name()} already"
+            return None
+
+        def submit():
+            if (problem := check()) is not None:
+                raise ValueError(problem)
+            sidebar.make_group(name())
+            return f"made group {name()}"
+        return meta.Form("New group", entry, [("name", "the group's name", entry)], check, submit, verb="Create",
+                         body="A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group "
+                              "puts it there")
 
     def check_host_version(self):
         """This Mac's host process older than Baude (an update since it started: its protocol, wire.VERSION, behind):

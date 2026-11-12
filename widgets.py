@@ -1748,8 +1748,7 @@ def pr_rgba(state, fg):
     link's, the accent's, as its number is (a link), so it's all one colour, logo, patch and number."""
     c = Gdk.RGBA()
     if not c.parse(PR_COLORS.get(state) or ""):
-        style = Adw.StyleManager.get_default()
-        c = Adw.AccentColor.to_standalone_rgba(style.get_accent_color(), style.get_dark())  # (@accent_color: a link's)
+        c = accent_text_rgba()  # (@accent_color: a link's)
     return c
 
 
@@ -1768,9 +1767,7 @@ def chip_colors(kind, fg):
         text, patch = fg.copy(), fg.copy()
         text.alpha, patch.alpha = fg.alpha * 0.7, fg.alpha * 0.08
     else:
-        style = Adw.StyleManager.get_default()
-        text = Adw.AccentColor.to_standalone_rgba(style.get_accent_color(), style.get_dark())  # (@accent_color)
-        patch = style.get_accent_color_rgba()  # (@accent_bg_color)
+        text, patch = accent_text_rgba(), accent_rgba()  # (@accent_color, @accent_bg_color)
         patch.alpha = 0.14
     return text, patch
 
@@ -4854,7 +4851,7 @@ class ChatSelection:
         self._collect()
         ok, at = self.area.compute_point(self.root, Graphene.Point().init(0, 0))
         top, bottom = (at.y, at.y + self.area.get_height()) if ok else (-math.inf, math.inf)
-        fill = Adw.StyleManager.get_default().get_accent_color_rgba()
+        fill = accent_rgba()
         fill.alpha = 0.3
         for label, start, end in self.parts():
             i = self.index.get(label)
@@ -6442,6 +6439,107 @@ def apply_scales(display, also=()):
         _scales["icon_px"] = round(16 * icons)
         for widget in [*also, *RefIcon.live]:  # (sized in Python, not by the CSS: told)
             widget.queue_resize()
+
+
+# The accent (Settings → Accent Colour), Baude's and Record's, the one setting: one of libadwaita's, or the system's.
+# The CSS follows it (@accent_bg_color, the system's otherwise, and what libadwaita makes of it: --accent-bg-color,
+# @accent_color); what's drawn here asks accent_rgba and accent_text_rgba.
+ACCENTS = {"blue": Adw.AccentColor.BLUE, "teal": Adw.AccentColor.TEAL, "green": Adw.AccentColor.GREEN,
+           "yellow": Adw.AccentColor.YELLOW, "orange": Adw.AccentColor.ORANGE, "red": Adw.AccentColor.RED,
+           "pink": Adw.AccentColor.PINK, "purple": Adw.AccentColor.PURPLE, "slate": Adw.AccentColor.SLATE}
+_accent = {"name": None, "provider": None, "css": None}  # (the one picked, None for the system's, and its CSS)
+
+
+def accent():
+    """The accent, an Adw.AccentColor: the one picked, or the system's."""
+    name = _accent["name"]
+    return ACCENTS[name] if name in ACCENTS else Adw.StyleManager.get_default().get_accent_color()
+
+
+def accent_rgba():
+    """The accent's colour as @accent_bg_color has it: a patch's, a selection's."""
+    return Adw.AccentColor.to_rgba(accent())
+
+
+def accent_text_rgba():
+    """The accent's colour as @accent_color has it, for text on the window's background: light or dark, as it's now."""
+    return Adw.AccentColor.to_standalone_rgba(accent(), Adw.StyleManager.get_default().get_dark())
+
+
+def apply_accent(display):
+    """The accent settings.json has, in every window. Changed, what's drawn here is drawn again, a chip's name
+    recoloured, as the CSS is restyled."""
+    name = load_settings().get("accent")
+    name = name if name in ACCENTS else None
+    rgba = Adw.AccentColor.to_rgba(ACCENTS[name]).to_string() if name else None
+    css = f"@define-color accent_bg_color {rgba};\n:root {{ --accent-bg-color: {rgba}; }}" if name else ""
+    if _accent["provider"] is None:
+        _accent["provider"] = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(display, _accent["provider"], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    if css == _accent["css"]:
+        return
+    again = _accent["css"] is not None
+    _accent["name"], _accent["css"] = name, css
+    _accent["provider"].load_from_string(css)
+    for win in Gtk.Window.list_toplevels() if again else ():
+        for widget in walk(win):
+            if isinstance(widget, LinkLabel) and widget.chips:
+                widget.place_icons()
+            widget.queue_draw()
+
+
+class AccentDot(Gtk.Widget):
+    """A round patch of a colour (rgba, a Gdk.RGBA): Settings → Accent Colour's, before each one's name."""
+
+    def __init__(self):
+        super().__init__(valign=Gtk.Align.CENTER)
+        self.rgba = None
+
+    def do_measure(self, orientation, for_size):
+        return 12, 12, -1, -1
+
+    def do_snapshot(self, snapshot):
+        if self.rgba is not None:
+            rect = Graphene.Rect().init(0, 0, self.get_width(), self.get_height())
+            round_rect = Gsk.RoundedRect()
+            round_rect.init_from_rect(rect, min(self.get_width(), self.get_height()) / 2)
+            snapshot.push_rounded_clip(round_rect)
+            snapshot.append_color(self.rgba, rect)
+            snapshot.pop()
+
+
+def settings_accent():
+    """Settings → Accent Colour: the system's, or one of libadwaita's (ACCENTS), each with its colour. Taken in every
+    window as it's picked (apply_accent) and kept in settings.json."""
+    names = ["system", *ACCENTS]
+    picked = load_settings().get("accent")
+    row = Adw.ComboRow(title="Accent Colour", model=Gtk.StringList.new(names),
+                       selected=names.index(picked) if picked in ACCENTS else 0)
+
+    def setup(_f, item):
+        line = Gtk.Box(spacing=8)
+        line.append(AccentDot())
+        line.append(Gtk.Label(xalign=0))
+        item.set_child(line)
+
+    def bind(_f, item):
+        name = item.get_item().get_string()
+        dot, label = item.get_child().get_first_child(), item.get_child().get_last_child()
+        dot.rgba = Adw.AccentColor.to_rgba(ACCENTS.get(name, Adw.StyleManager.get_default().get_accent_color()))
+        dot.queue_draw()
+        label.set_text(name.capitalize())
+
+    factory = Gtk.SignalListItemFactory()
+    factory.connect("setup", setup)
+    factory.connect("bind", bind)
+    row.set_factory(factory)
+
+    def changed(r, _p):
+        name = names[r.get_selected()]
+        save_settings(accent=name if name in ACCENTS else None)
+        apply_accent(r.get_display())
+    row.connect("notify::selected", changed)
+    return row
 
 
 def put_back(win, frame, maximized):

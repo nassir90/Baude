@@ -5149,7 +5149,7 @@ class Picks(Gtk.Widget):
         cited = [q for q in self.reader.cited if self.reader._there(q)]
         if not picks and not cited:
             return
-        accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+        accent = widgets.accent_rgba()
         fill = accent.copy()
         fill.alpha = 0.3
         for q in cited:  # (a citation followed to here: Reader.show_passage; a message far off, hidden for now: not yet)
@@ -6451,8 +6451,8 @@ class RecordChat(Gtk.Box):
 
 class Settings(Adw.PreferencesDialog):
     """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Intelligence (the model the Record's agent runs on,
-    Haiku unless another's chosen), Full-width text, Code Font, Show in Applications, and the sizes, 1.0 the usual: the
-    text's and the icons' (Baude's settings: the same in both, Code Font too), and the zoom Ctrl/⌘ 0 goes back to;
+    Haiku unless another's chosen), Full-width text, Code Font, Accent Colour, Show in Applications, and the sizes, 1.0 the usual: the
+    text's and the icons' (Baude's settings: the same in both, Code Font and Accent Colour too), and the zoom Ctrl/⌘ 0 goes back to;
     Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback… and the feedback sent. Each
     takes at once (Code Font from the next start) and is kept."""
 
@@ -6476,6 +6476,7 @@ class Settings(Adw.PreferencesDialog):
         formatting.connect("notify::selected", lambda r, _p: win.set_markup(modes[r.get_selected()]))
         group.add(formatting)
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
+        group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
         self.version_row = update.version_row(self)  # (and the version, its changelog: Baude's too)
         group.add(self.version_row)
@@ -8121,6 +8122,7 @@ class App(Adw.Application):
     def do_activate(self):
         widgets.load_css()  # (Baude's: its compact lists, its viewers; its classes aren't Record's)
         widgets.apply_scales(Gdk.Display.get_default())  # (Settings → Size: the text's and the icons', Baude's)
+        widgets.apply_accent(Gdk.Display.get_default())  # (Settings → Accent Colour, Baude's)
         css = Gtk.CssProvider()
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,

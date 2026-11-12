@@ -10431,12 +10431,11 @@ def _num(path):
 
 
 class SettingsDialog(Adw.PreferencesDialog):
-    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): full-width text, the code font, Baude in the platform's list
-    of apps, feedback, and the sizes, 1.0 the usual: the text's and the icons', all of them in every window
-    (apply_scales), and the chat's zoom that ⌘0 / Ctrl+0 goes back to. Each takes as it's changed (the code font from
-    the next start) and is kept in settings.json. (The
-    switches are the window's actions, full-width's the menu's too, so the two agree; the handlers are given the row,
-    never a closure over this dialog: see discard)"""
+    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): full-width text, the code font, the accent colour, Baude in
+    the platform's list of apps, feedback, and the sizes, 1.0 the usual: the text's and the icons', all of them in every
+    window (apply_scales), and the chat's zoom that ⌘0 / Ctrl+0 goes back to. Each takes as it's changed (the code font
+    from the next start) and is kept in settings.json. (The switches are the window's actions, full-width's the menu's
+    too, so the two agree; the handlers are given the row, never a closure over this dialog: see discard)"""
 
     def __init__(self, win):
         super().__init__(title="Settings")
@@ -10444,6 +10443,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group = Adw.PreferencesGroup()
         group.add(self.switch("Full-width text", None, "win.fullwidth"))
         group.add(widgets.settings_code_font(win, "Baude"))
+        group.add(widgets.settings_accent())
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
@@ -10837,6 +10837,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.add_controller(drop)
         self.apply_zoom()
         apply_scales(self.get_display())
+        widgets.apply_accent(self.get_display())  # (Settings → Accent Colour)
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],

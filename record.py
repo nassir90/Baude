@@ -7229,6 +7229,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         folders = self.read_folders()
         return self.viewer_at if self.viewer_at in folders else folders[0] if folders else None
 
+    def git_chat(self):
+        """The chat the Git page keeps its state for (GitPage.chat_check): the notebook's."""
+        return (self.current or {}).get("id")
+
     def viewers(self, folder=None):
         """The viewers on a folder in a window of their own (viewers.ViewerWindow), not Record's: for when they're
         wanted apart. None, said, if there's no folder."""

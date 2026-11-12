@@ -15191,7 +15191,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             if not servers:
                 toast(self.sidebar, "None of those hosts is there")
                 return
-        form = self.remote_start_form(servers or [None], folder, group, said=here or fixed)
+        form = self.remote_start_form(servers or [None], folder, group, said=here or fixed, here=here)
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="start",
                               close_response="cancel", body=form.body)
         if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
@@ -15199,17 +15199,25 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("start", form.verb)
         dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _dlg, response: response == "start" and form.submit())
+        dlg.connect("response", lambda _dlg, response: response == "start" and self.submit_form(form))
         self.dialog = self.remote_dialog = dlg
         self.remote_fields = form.parts
         dlg.present(self)
         form.parts["prompt"].grab_focus()
 
-    def remote_start_form(self, servers, folder=None, group=None, said=False, agents=False):
+    def submit_form(self, form):
+        """A dialog's form submitted (its own button): what stops it said, as a toast, not raised in the handler."""
+        try:
+            form.submit()
+        except ValueError as e:
+            toast(self.sidebar, str(e))
+
+    def remote_start_form(self, servers, folder=None, group=None, said=False, agents=False, here=False):
         """A new session's fields and what they do, New session…'s (ask_remote_start) and Meta's spawn_agent form's:
         the host (servers: those to pick from; None, this machine's host process, started as it's needed; said: the
-        one, said, not picked), with agents what runs on it (the models it offers: its own, or the top bar's), the
-        folder (the one last used on that host, else its home), the group and the prompt; the effort and mode the top
+        one, said, not picked; here: this machine's, as New Session Here has it), with agents what runs on it (the
+        models it offers: its own, or the top bar's), the folder (the one last used on that host, else its home; empty:
+        its home, ~), the group and the prompt; the effort and mode the top
         bar has, and its model unless an agent's picked. Started, it's opened (remote_started)."""
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
         rows = []
@@ -15247,23 +15255,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
         frame.add_css_class("card")
         field("Prompt", frame, top=True)
-        effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
-            if self.effort_dd.get_sensitive() else None
+        effort = lambda: (self.local_effort if model_program(self.model) == "pi" else self.effort) \
+            if self.effort_dd.get_sensitive() else None  # noqa: E731  (the top bar's as it's started)
         runs = " · ".join(x for x in (None if agents else self.model_dd.label(),
-                                      self.effort_dd.label() if effort else "", self.mode_dd.label()) if x)
+                                      self.effort_dd.label() if effort() else "", self.mode_dd.label()) if x)
 
         def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)
             r = server()
             if not folder:
-                where.set_text(last.get(place(r)) or home(r) or "~")
+                where.set_text((load_settings().get("remote_folders") or {}).get(place(r)) or home(r) or "~")
             if agent_dd is not None:
                 agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
         if servers_dd is not None:
             servers_dd.connect("notify::selected", picked_server)
 
         def check():
-            if not where.get_text().strip():
-                return "A folder to start it in is needed"
             if agent_dd is not None and agent_dd.get_selected_item() is None:
                 return f"{named(server())} offers no agent"
             return None
@@ -15275,16 +15281,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             r = server()
             model = offered(r)[agent_dd.get_selected()][0] if agent_dd is not None else self.model
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
-                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort, "mode": self.mode,
+                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(), "mode": self.mode,
                       "group": group_entry.get_text().strip() or None}
-            save_settings(remote_folders={**last, place(r): params["cwd"]})
+            save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), place(r): params["cwd"]})
             start = lambda r: r.request(params, lambda reply: self.remote_started(r, reply))  # noqa: E731
             if r is None:
                 self.local_server(start)
             else:
                 start(r)
             return f"starting it on {named(r)}"
-        on = THIS_MACHINE if servers[0] is None or place(servers[0]) == HERE_HOST else remote_name(servers[0])
+        on = THIS_MACHINE if here or servers[0] is None else remote_name(servers[0])
         heading = "Spawn an agent" if agents else f"New session on {on}" if said else "New session on the network"
         fields = ([("host", "the host it runs on", servers_dd)] if servers_dd is not None else []) + \
             ([("agent", "what runs it: one of the host's", agent_dd)] if agent_dd is not None else []) + \
@@ -15298,21 +15304,25 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def group_form(self):
         """New Group's field and what it does, as the sidebar asks for one (ask_group_name), for Meta's new_group
         form."""
-        sidebar = self.sidebar
         entry = Gtk.Entry(activates_default=True, placeholder_text="Its name")
         name = lambda: " ".join(entry.get_text().split())  # noqa: E731
+
+        def known():  # (the sidebar's, once the window has one: a form's drawn as the side panel is made, first)
+            if (sidebar := getattr(self, "sidebar", None)) is not None:
+                return {k for k, *_ in sidebar.known_groups()}
+            return {*made_groups(), *chat_groups().values()} - {""}
 
         def check():
             if not name():
                 return "A group needs a name"
-            if name() in {k for k, *_ in sidebar.known_groups()}:
+            if name() in known():
                 return f"There's a group {name()} already"
             return None
 
         def submit():
             if (problem := check()) is not None:
                 raise ValueError(problem)
-            sidebar.make_group(name())
+            self.sidebar.make_group(name())
             return f"made group {name()}"
         return meta.Form("New group", entry, [("name", "the group's name", entry)], check, submit, verb="Create",
                          body="A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group "

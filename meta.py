@@ -1295,13 +1295,23 @@ class Form:
     def values(self):
         return {name: self.get(w) for name, _takes, w in self.fields}
 
-    def fill(self, values):
+    def fill(self, values, partial=False):
+        """Fields filled (values: {name: value}), in the form's order (a host picked before what it offers). partial:
+        each one that can be, and the names of those that can't returned; else ValueError at the first that can't."""
         known = {name: w for name, _takes, w in self.fields}
         if unknown := [k for k in values if k not in known]:
-            raise ValueError(f"No field {unknown[0]!r}: its fields are {', '.join(known)}.")
-        for name, _takes, w in self.fields:  # (in the form's order: a host picked before what it offers)
+            if not partial:
+                raise ValueError(f"No field {unknown[0]!r}: its fields are {', '.join(known)}.")
+        missed = set(unknown)
+        for name, _takes, w in self.fields:
             if name in values:
-                self.put(w, values[name])
+                try:
+                    self.put(w, values[name])
+                except ValueError:
+                    if not partial:
+                        raise
+                    missed.add(name)
+        return missed
 
     def changed(self, fn):
         """fn() as any field changes."""
@@ -1357,7 +1367,8 @@ class MetaChat(Gtk.Box):
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
         over.add_overlay(self.pins)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
-            self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_forms())
+            self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_soon())
+        self._pin_after, self._pin_waits = None, 0  # (the after-paint handler waiting to look again: _pin_soon)
         talk.append(over)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=6)
@@ -1677,6 +1688,8 @@ class MetaChat(Gtk.Box):
             entry = self.forms_open[spec["id"]] = {"spec": spec, "slot": None}
             entry["form"], entry["widget"] = self.form_card(spec)
         entry["spec"] = spec
+        if (sync := getattr(entry["widget"], "sync", None)) is not None:
+            sync()  # (as it's kept: another window's may have filled it, or submitted it)
         slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         slot.add_css_class("meta-ui")
         widget = entry["widget"]
@@ -1687,21 +1700,21 @@ class MetaChat(Gtk.Box):
                 parent.remove(widget)
             slot.append(widget)
         entry["slot"] = slot
-        GLib.idle_add(self._pin_forms)
+        self._pin_soon()
         return slot
 
     def form_card(self, spec):
         """A form's card: its dialog's heading, what it says, its fields, what's wrong with them, and its buttons
         (Cancel, and its own: Add, Create, Start); submitted or cancelled, what came of it. Right-click: Pin, Unpin."""
         name = spec["form"]
-        try:
+        try:  # (whatever goes wrong making it: said in its place, never in the way of the window it's in)
             form = self.forms()[name][1]()
-        except (KeyError, ValueError) as e:
-            return None, label(f"({e})", css=("dim-label", "caption"))
-        try:
-            form.fill({k: v for k, v in (spec.get("values") or {}).items() if v not in (None, "")})
-        except ValueError:
-            pass  # (what was filled before, not to be had now: as the form has it)
+        except Exception as e:  # noqa: BLE001
+            print(f"meta: form {name}: {type(e).__name__}: {e}", file=sys.stderr)
+            return None, label(f"(The {name.replace('_', ' ')} form can't be had now: {e})", css=("dim-label", "caption"))
+        kept = dict(spec.get("values") or {})
+        missed = form.fill({k: v for k, v in kept.items() if v not in (None, "")}, partial=True)
+        base = form.values()  # (as it's shown: a field that couldn't be filled, kept as it was till it's changed)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.add_css_class("meta-form")
         title = Gtk.Label(label=form.heading, xalign=0, wrap=True)
@@ -1725,11 +1738,19 @@ class MetaChat(Gtk.Box):
         row.append(go)
         card.append(row)
 
+        filling = []
+
+        def checked():
+            try:
+                return form.check()
+            except Exception as e:  # noqa: BLE001 (said, as what's wrong)
+                return str(e) or type(e).__name__
+
         def looks():
             open_ = spec.get("state", "open") == "open"
             form.child.set_sensitive(open_)
             row.set_visible(open_)
-            problem = form.check() if open_ else None
+            problem = checked() if open_ else None
             go.set_sensitive(problem is None)
             filled = any(str(v).strip() for v in form.values().values())
             wrong.set_text((spec.get("error") or problem or "") if open_ and (filled or spec.get("error")) else "")
@@ -1741,18 +1762,39 @@ class MetaChat(Gtk.Box):
                                   "Right-click: Pin" if open_ else None)
 
         def edited():
-            spec["values"], spec["error"] = form.values(), None
+            if filling:
+                return
+            values = form.values()
+            for f in list(missed):  # (one that couldn't be filled: kept as it was, unless it's been changed since)
+                if values.get(f) == base.get(f) and f in kept:
+                    values[f] = kept[f]
+                else:
+                    missed.discard(f)
+            spec["values"], spec["error"] = values, None
             looks()
             self.save()
 
+        def sync():
+            """The card as its form's kept now: filled as it's been elsewhere, submitted or cancelled there."""
+            now = {k: v for k, v in (spec.get("values") or {}).items() if v not in (None, "")}
+            if any(form.values().get(k) != v for k, v in now.items() if k not in missed):
+                filling.append(True)
+                try:
+                    form.fill(now, partial=True)
+                finally:
+                    filling.clear()
+            looks()
+
         def submit(*_):
-            if (problem := form.check()) is not None:
+            if spec.get("state", "open") != "open":  # (submitted already: in another window, say)
+                return looks()
+            if (problem := checked()) is not None:
                 spec["error"] = problem
                 return looks()
             try:
                 done = form.submit()
-            except ValueError as e:
-                spec["error"] = str(e)
+            except Exception as e:  # noqa: BLE001 (said on the form, not raised in GTK's handler)
+                spec["error"] = str(e) or type(e).__name__
                 return looks()
             spec.update(state="submitted", said=done, error=None)
             self.told().append(f"(The user submitted the form {spec['id']}, {form.heading}: {done})")
@@ -1770,7 +1812,7 @@ class MetaChat(Gtk.Box):
         menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         menu.connect("pressed", lambda _g, _n, x, y: self._form_menu(card, spec, x, y))
         card.add_controller(menu)
-        card.looks = looks
+        card.looks, card.sync = looks, sync
         looks()
         return form, card
 
@@ -1808,6 +1850,20 @@ class MetaChat(Gtk.Box):
 
     PIN_MARGIN = 8  # px: a pinned form hovers this far from the pane's top
 
+    def _pin_soon(self):
+        """_pin_forms once the next frame's laid out and drawn: a scroll moves what's in the conversation only as
+        the frame's allocated, and what's just been drawn again has no place till then."""
+        clock = self.get_frame_clock()
+        if self._pin_after is not None or clock is None:
+            return
+
+        def after(c):
+            c.disconnect(self._pin_after)
+            self._pin_after = None
+            self._pin_forms()
+        self._pin_after = clock.connect("after-paint", after)
+        clock.request_phase(Gdk.FrameClockPhase.AFTER_PAINT)
+
     def _pin_forms(self):
         """The form pinned over the conversation's top: the last one not yet submitted, and pinned, whose place has
         gone up past the pane's top (its place kept as a gap its height); none once its place is back in view."""
@@ -1815,12 +1871,18 @@ class MetaChat(Gtk.Box):
         want = None
         for e in self.forms_open.values():
             slot, spec = e["slot"], e["spec"]
-            if slot is None or slot.get_root() is None or not slot.get_mapped() or slot.get_width() <= 0 or \
-                    spec.get("state", "open") != "open" or not spec.get("pinned", True) or e["form"] is None:
-                continue  # (one not laid out yet is looked at again once it is: the scroll's range changes then)
+            if slot is None or slot.get_root() is None or spec.get("state", "open") != "open" or \
+                    not spec.get("pinned", True) or e["form"] is None:
+                continue
+            if not slot.get_mapped() or slot.get_width() <= 0:  # (not laid out yet: looked at again once it is, a
+                self._pin_waits += 1  # few frames at most; hidden, as the pane's shown again: its range changes then)
+                if self._pin_waits <= 3 and self.get_mapped():
+                    self._pin_soon()
+                return False
             ok, at = slot.compute_point(self.scroll, Graphene.Point().init(0, 0))
             if ok and at.y < self.PIN_MARGIN:
                 want = e
+        self._pin_waits = 0
         if want is not pinned:
             if pinned is not None:
                 self._unpin(pinned)

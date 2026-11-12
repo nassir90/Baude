@@ -5848,10 +5848,11 @@ class RecordChat(meta.MetaChat):
                 raise ValueError(problem)
             page = full()
             nb["pages"][page] = meta.Form.get(text)
-            self.win.store.save()
-            if nb is self.win.current:
+            if nb is self.notebook:  # (a page of that name open, empty: shown again with its text, not saved over)
+                self.pages_changed({})
                 self.win.open_note(page, select=False)
-                self.win.pages.fill()
+            else:
+                self.win.store.save()
             return f"made {page}"
         return meta.Form("New page", box, [("name", "the page's own name", name),
                                            ("under", "the page it goes under, or (the top)", under),

@@ -11603,7 +11603,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.sync_effort_choices()
         self.sync_local()
         if self.remote is not None and model_program(value) != model_program(was):
-            self.remote_new_conversation(value)  # (a network session: a new one, on its server)
+            label = self.model_dd.label()
+            self.model = was  # (this one goes on with its own: the one picked is the new session's)
+            self.model_dd.select(was)
+            self.sync_effort_choices()
+            self.sync_local()
+            self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
             return
         if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
             self.note(f"model → {self.model_dd.label()}: a new conversation")
@@ -11675,7 +11680,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def apply_chat_model(self, info):
         """Put the picker on the model the chat info names was on. A Claude transcript with no model Baude knows goes
-        on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on."""
+        on Claude's last used (or claude's own default): never Apple's or one on this Mac, which can't carry it on. A
+        network session's is the one its server says it's on."""
+        if info.get("remote") is not None and info.get("model"):
+            self.model = info["model"]
+            self.model_dd.select(self.model)  # (named as its server lists it once it's said: sync_models)
+            self.sync_effort_choices()
+            self.sync_local()
+            return
         kept = (load_settings().get("chat_models") or {}).get(info["id"])
         want = (kept if kept != "default" else None) or transcript_model(info["path"])
         models = {v: m for v, m in getattr(self, "models_info", {}).items() if v != "default"}  # (an alias, not a model)
@@ -13711,13 +13723,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         dlg.present(self)
         prompt.grab_focus()
 
-    def remote_new_conversation(self, model):
+    def remote_new_conversation(self, model, label):
         """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new
         conversation, but on the same server, in the same folder, group and tags, opened to be written in."""
         r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
-        effort = (self.local_effort if model_program(model) == "pi" else self.effort) \
-            if self.effort_dd.get_sensitive() else None
-        self.note(f"model → {self.model_dd.label()}: a new conversation on {remote_name(r)}")
+        effort = self.local_effort if model_program(model) == "pi" else self.effort
+        self.note(f"model → {label}: a new conversation on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
                    "mode": self.mode, "tags": listed.get("tags") or [], "group": listed.get("group")},
                   lambda reply: self.remote_started(r, reply))

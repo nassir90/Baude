@@ -70,6 +70,7 @@ class Session:
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
+        self.queued = []          # messages sent at a turn, kept once it's over (Server.keep)
         self.routes = {}          # request id sent on -> (conn, its own request id)
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
         self.used = time.time()
@@ -165,18 +166,26 @@ class Server:
         with self.lock:
             return self._info()
 
-    def models(self, said=None):
-        """Every model it can run, as initialize lists them: Claude's (as claude last said, said if it's just said), then
-        Apple's and those on this machine that it has."""
-        claudes = [m for m in said or [] if models.model_program(m.get("value")) == "claude"]
+    def models(self, said=None, fresh=False):
+        """Every model it can run, as initialize lists them: Claude's (as claude last said; said, if it's just said it:
+        fresh), then Apple's and those on this machine that it has."""
+        claudes = [m for m in said or [] if models.model_program(m.get("value")) == "claude"] if fresh else []
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
         return (claudes or self.me.get("claude_models") or []) + models.runnable_models()
 
-    def init(self, said):
-        """What a session's program said to initialize, with every model this machine can run in it."""
-        return {**said, "models": self.models(said.get("models"))}
+    def init(self, said, fresh=False):
+        """What a session's program said to initialize (fresh: just now, not kept from before), with every model this
+        machine can run in it."""
+        return {**said, "models": self.models(said.get("models"), fresh)}
+
+    def can_run(self, model):
+        """Can this machine run a model: Claude's (claude's own say), or one of runnable_models (its program and, for
+        pi's, the model itself here)?"""
+        if models.model_program(model) == "claude":
+            return not models.launch(model, None, None)["missing"]
+        return any(m["value"] == model for m in models.runnable_models())
 
     def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
@@ -285,8 +294,8 @@ class Server:
             raise ValueError(f"not a folder here: {cwd}")
         tags = params.get("tags") or []
         run = models.launch(params.get("model") or None, params.get("mode") or "default", params.get("effort") or None)
-        if run["missing"]:
-            raise ValueError(f"{self.me['name']} can't run {params.get('model')}: its program isn't here")
+        if not self.can_run(params.get("model") or None):
+            raise ValueError(f"{self.me['name']} can't run {params.get('model')}: it, or its program, isn't here")
         meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": params.get("model") or None,
                 "effort": run["effort"], "mode": run["mode"],
                 "tags": [str(t) for t in (tags if isinstance(tags, list) else [tags]) if str(t).strip()],
@@ -317,8 +326,8 @@ class Server:
             return s.proc
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=s.transcript() is not None)
-        if run["missing"]:
-            raise OSError(f"{self.me['name']} can't run {s.meta.get('model')}: its program isn't here")
+        if not self.can_run(s.meta.get("model")):
+            raise OSError(f"{self.me['name']} can't run {s.meta.get('model')}: it, or its program, isn't here")
         made = []  # (the claude its exit is about: claude_exited)
         s.proc = claude.ClaudeProc(
             lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -339,8 +348,12 @@ class Server:
         """(lock held) What a client sends its claude."""
         kind = msg.get("type")
         if kind == "user":
+            at_turn = s.busy
             self.ensure_proc(s).send(msg)
-            self.keep(s, "user", msg.get("message") or {})
+            if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
+                s.queued.append(msg.get("message") or {})
+            else:
+                self.keep(s, "user", msg.get("message") or {})
             s.busy, s.used, s.meta["said"] = True, time.time(), time.time()
             self.save(s)
             self.changed()
@@ -373,8 +386,8 @@ class Server:
                 "error": "another kind of model can't carry this conversation on: start a session with it"}}})
         if sub == "set_model" and models.model_program(request.get("model")) == "pi" and s.proc is not None \
                 and request.get("model") != s.meta.get("model"):
-            s.proc.stopping = True  # (pi-claude runs one model: the next message starts it on this one, pi's session
-            s.proc.kill()           # going on)
+            s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model: the next message starts it on
+            s.proc.kill()                               # this one, pi's session going on: nothing's gone)
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
             s.meta[key] = request.get(field) or s.meta.get(key)
@@ -405,7 +418,7 @@ class Server:
                     if r.get("subtype") == "success":
                         s.meta["init"] = r.get("response") or {}
                         self.save(s)
-                        r = {**r, "response": self.init(s.meta["init"])}
+                        r = {**r, "response": self.init(s.meta["init"], fresh=True)}
                     for conn, theirs in s.waiting_init:
                         conn.send({"op": "claude", "session": s.id,
                                    "msg": {**msg, "response": {**r, "request_id": theirs}}})
@@ -437,6 +450,9 @@ class Server:
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
             if kind == "result":
+                for message in s.queued:
+                    self.keep(s, "user", message)
+                s.queued = []
                 s.busy, s.used = False, time.time()
                 s.asks.clear()
                 self.changed()
@@ -466,8 +482,9 @@ class Server:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
             s.waiting_init, s.routes = [], {}
-            for conn in s.live:
-                conn.send({"op": "exited", "session": s.id, "code": code})
+            if not getattr(made[0], "restarting", False):
+                for conn in s.live:
+                    conn.send({"op": "exited", "session": s.id, "code": code})
             self.changed()
 
     def changed(self):

@@ -6777,10 +6777,15 @@ class LoginCard(Gtk.Box):
 
 
 class SlashCompleter:
-    """/'s list, over the composer while its first word starts with '/': the commands, Baude's own and claude's, as
-    they're typed, each with whose it is (Claude Code's own: its logo), its arguments and what it does. It looks and
-    goes as Record's @ list does (widgets.PickList): ↑ ↓ Page Up and Page Down move, Enter or Tab or a click puts
-    the command in, Esc leaves it."""
+    """/'s list, over the composer while the word the caret's at the end of starts with '/': the prompt's first word,
+    or, anywhere in it, a / just typed at a word's start (after a space or a new line), as @ is in Record. Not a / in
+    a path (src/app) or a link (https://…), nor in code. The commands, Baude's own and claude's, as they're typed,
+    each with whose it is (Claude Code's own: its logo), its arguments and what it does. It looks and goes as Record's
+    @ list does (widgets.PickList): ↑ ↓ Page Up and Page Down move, Enter or Tab or a click puts the command in where
+    its /word was, Esc leaves it. (Only a prompt's first word is a command to Claude Code: one later on is words to
+    Claude, which takes a skill's as asking for it.)"""
+
+    WORD = re.compile(r"(?:^|(?<=\s))/(\S*)$")  # (a /word at the end of what's before the caret, at a word's start)
 
     def __init__(self, textview, anchor):
         self.view, self.anchor, self.commands, self.matches = textview, anchor, list(LOCAL_COMMANDS), []
@@ -6790,7 +6795,18 @@ class SlashCompleter:
         self.pop = self.picks.pop
         self.pop.set_halign(Gtk.Align.START)  # (its left side on the input box's)
         self.pop.set_offset(0, -10)  # a clear gap above the input box
-        textview.get_buffer().connect("changed", lambda *_: self.refresh())
+        buf = textview.get_buffer()
+        # (where a / was just typed: past the prompt's start, only that one starts the list, as only an @ just typed
+        # does in Record; text pasted or put back that has a /word in it doesn't. A mark where it went in, so it goes
+        # with the text, and how far into that the / is)
+        self.typed, self.typed_in = buf.create_mark(None, buf.get_start_iter(), True), 0
+        buf.connect("insert-text", self._inserting)
+        buf.connect("changed", lambda *_: self.refresh())
+
+    def _inserting(self, buf, at, text, _n):
+        if "/" in text and len(text) <= 2:
+            buf.move_mark(self.typed, at)
+            self.typed_in = text.rfind("/")
 
     def set_commands(self, cmds):
         seen = {n for c in LOCAL_COMMANDS for n in [c["name"], *c.get("aliases", [])]}
@@ -6798,13 +6814,33 @@ class SlashCompleter:
             (c for c in cmds if c.get("name") and c["name"] not in seen), key=lambda c: c["name"])
         self.refresh()
 
-    def query(self):
-        """The '/word' being typed, or None if we shouldn't complete."""
+    def word(self):
+        """(where its / is, what's typed after it) of the /word being typed, or None if we shouldn't complete: the
+        caret's at its end (a space, a new line or the text's end next), and it's the prompt's first word or its / was
+        just typed, not in code."""
         buf = self.view.get_buffer()
         text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
-        m = re.match(r"^/(\S*)$", text)
         cursor = buf.get_iter_at_mark(buf.get_insert()).get_offset()
-        return m.group(1).lower() if m and cursor == len(text) else None
+        m = self.WORD.search(text, 0, cursor)
+        if not m or text[cursor:cursor + 1].strip() or \
+                m.start() and m.start() != buf.get_iter_at_mark(self.typed).get_offset() + self.typed_in or \
+                self.in_code(text, m.start()):
+            return None
+        return m.start(), m.group(1).lower()
+
+    def query(self):
+        """The '/word' being typed, or None if we shouldn't complete."""
+        word = self.word()
+        return word and word[1]
+
+    @staticmethod
+    def in_code(text, offset):
+        """Whether a place in the text is in a code block or a `code` span (a / there is a path's, a shell's)."""
+        before = text[:offset]
+        at = before.count("\n")
+        return any(first <= at <= last for first, last, _closed in
+                   widgets.fence_spans(text.split("\n"), tildes=False, typing=(at,))) or \
+            before.rpartition("\n")[2].count("`") % 2 == 1
 
     def refresh(self):
         q = self.query()
@@ -6852,10 +6888,19 @@ class SlashCompleter:
         self.picks.hide()
 
     def accept(self):
-        i = self.picks.picked()
-        if i is None or i >= len(self.matches):
+        """The picked command in place of the /word, the caret after it and a space (the space hides us; one that was
+        next already goes, so there's one)."""
+        i, word = self.picks.picked(), self.word()
+        if i is None or i >= len(self.matches) or word is None:
             return
-        self.view.get_buffer().set_text(f"/{self.matches[i]['name']} ")  # trailing space hides us
+        name, buf = f"/{self.matches[i]['name']} ", self.view.get_buffer()
+        end = buf.get_iter_at_mark(buf.get_insert())
+        if end.get_char() == " ":
+            end.forward_char()
+        buf.begin_user_action()
+        buf.delete(buf.get_iter_at_offset(word[0]), end)
+        buf.insert_at_cursor(name)
+        buf.end_user_action()
         self.view.grab_focus()
 
     def handle_key(self, keyval, state=0):

@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
-"""baude-server: Claude Code sessions run headless on this machine, started and steered over the network from Baude
-(its sidebar lists them under their host and group: ⋮ → Hosts, Groups), on baudelib (see baudelib/server.py). No GTK
-needed.
+"""baude-server: Claude Code sessions run headless on this machine, started and steered from Baude, here or on another
+machine (its sidebar lists them under their host and group: ⋮ → Hosts, Groups), on baudelib (see baudelib/server.py).
+No GTK needed.
 
-    python3 baude_server.py [serve] [--group NAME] [--name NAME] [--port N] [--bind ADDR] [--state DIR]
-                                    [--idle-minutes N] [--no-advertise]
-    python3 baude_server.py servers                          # the servers on the network
-    python3 baude_server.py list   [--server HOST:PORT]      # a server's sessions
-    python3 baude_server.py models [--server HOST:PORT]      # the models it can run: Claude's, Apple's, this machine's
+    python3 baude_server.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N]
+                                    [--advertise | --no-advertise]
+    python3 baude_server.py connect                         # for ssh: stdin and stdout to this machine's host process
+    python3 baude_server.py servers                         # the hosts found: this machine's, and on the network's
+    python3 baude_server.py list   [--host DEST [--host-command CMD]]   # a host's sessions
+    python3 baude_server.py models [--host DEST]            # the models it can run: Claude's, Apple's, its own
     python3 baude_server.py start  --prompt TEXT [--cwd DIR] [--model M] [--effort E] [--mode MODE]
                                    [--group G] [--system TEXT] [--add-dir DIR]... [--allow RULE]...
                                    [--deny RULE]... [--fork-from SESSION] [--ask-timeout S [--ask-default allow]]
-                                   [--server HOST:PORT]
-    python3 baude_server.py stop   SESSION [--server HOST:PORT]
+                                   [--host DEST]
+    python3 baude_server.py stop   SESSION [--host DEST]
 
-Without --server, the commands use the one server found on the network or on this machine (in --group, if given).
-A server bound to this machine only (--bind 127.0.0.1) isn't said on the network, and wants a token: the one in its
-file in ~/.local/share/baude/local-servers, which only its owner can read; these commands, and Baude, read it there. It runs a model as
-Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in apple-claude, once
-built; one on this machine in pi-claude, once pi and the model are here. There's no sign-in: anyone who can reach the port can use it.
+There's one host process for each user on a machine. It listens only on a Unix socket in a folder of its user's own
+(no port on the network): what runs as that user on the same machine may use it. Another machine reaches it over ssh,
+as `ssh DEST baude_server.py connect`, so ssh's keys say who may: put baude_server.py on that machine's PATH (or give
+Baude its path, per host). connect, and these commands, start the host process if it isn't running. Without --host
+they use this machine's. It runs a model as Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else
+claude on PATH; Apple's in apple-claude, once built; one on this machine in pi-claude, once pi and the model are here.
 """
 import argparse
 import json
 import os
 import signal
+import socket
+import subprocess
 import sys
 import threading
 import time
@@ -33,50 +37,86 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from baudelib import wire  # noqa: E402
 from baudelib.claude import MODES  # noqa: E402
 from baudelib.discovery import Browser  # noqa: E402
-from baudelib.server import Server  # noqa: E402
+from baudelib.server import AlreadyRunning, Server, state_home  # noqa: E402
 
 
 def serve(args):
-    server = Server(state_dir=args.state, group=args.group, name=args.name, host=args.bind, port=args.port,
-                    advertise=not args.no_advertise, idle_s=args.idle_minutes * 60)
-    print(json.dumps({"port": server.port, "id": server.me["id"], "group": server.me["group"],
-                      "this_machine_only": server.local}), flush=True)
+    try:
+        server = Server(state_dir=args.state, group=args.group, name=args.name, advertise=args.advertise,
+                        idle_s=args.idle_minutes * 60, socket_path=args.socket)  # (--advertise, --no-advertise: kept)
+        if os.environ.get("BAUDE_NETWORK", "1") == "0" and not args.advertise:
+            server.advertise = False  # (nothing said this time, as Baude then looks for nothing there; not kept)
+    except AlreadyRunning as e:
+        sys.exit(f"baude-server: {e}")
+    print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
 
     def quit_(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, quit_)
     signal.signal(signal.SIGINT, quit_)
     server.serve_forever()
+    server.closed.wait(10)  # (serving's stopped: shutdown, on its thread, lets go of the socket before this exits)
+
+
+def start_here(path=None, wait=20.0):
+    """This machine's host process, started if it isn't running (in a process of its own, which goes on after this
+    one: its output in its state folder's host.log). False if it isn't there after wait seconds."""
+    path = path or wire.socket_path()
+    if wire.wait_for_socket(path, 0.2):
+        return True
+    os.makedirs(state_home(), exist_ok=True)
+    with open(os.path.join(state_home(), "host.log"), "ab") as log:
+        subprocess.Popen([sys.executable, os.path.realpath(__file__), "serve"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
+    return wire.wait_for_socket(path, wait)
+
+
+def connect(_args):
+    """ssh's end: its stdin and stdout carried to this machine's host process and back, started if it isn't running."""
+    if not start_here():
+        sys.exit(f"baude-server: no host process here (see {os.path.join(state_home(), 'host.log')})")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(wire.socket_path())
+    wire.bridge(sock)
 
 
 def find_servers(wait=2.0):
-    """The servers on this machine (their files) and on the network (multicast DNS)."""
-    found = {e["id"]: {"instance": f"{e.get('name')} (this machine)", "host": "127.0.0.1", "port": e["port"],
-                       "words": {"id": e["id"], "group": e.get("group")}} for e in wire.local_servers() if e.get("id")}
-    browser = Browser(lambda s: found.setdefault(s["words"].get("id") or s["instance"], s)).start()
-    if browser is not None:
-        time.sleep(wait)
-        browser.stop()
+    """The hosts found: this machine's (its socket), and those on the network that say Baude is on them (multicast
+    DNS), each {name, dest, words}."""
+    found = {}
+    try:
+        ch, info = wire.connect_local(timeout=2)
+        ch.close()
+        found[info.get("id")] = {"name": f"{info.get('name')} (this machine)", "dest": None,
+                                 "words": {"id": info.get("id"), "group": info.get("group")}}
+    except OSError:
+        pass
+
+    def seen(s):
+        user, host = s["words"].get("user"), s.get("target") or s["host"]
+        found.setdefault(s["words"].get("id") or s["instance"], {
+            "name": s["instance"].split(".")[0], "dest": f"{user}@{host}" if user else host, "words": s["words"]})
+    browser = Browser(seen).start()
+    time.sleep(wait)
+    browser.stop()
     return list(found.values())
 
 
-def server_address(args):
-    if args.server:
-        host, _, port = args.server.rpartition(":")
-        return host or "127.0.0.1", int(port)
-    found = find_servers()
-    found = [s for s in found if args.group and s["words"].get("group") == args.group] or found
-    if not found:
-        sys.exit("no server found on the network (give one with --server HOST:PORT)")
-    if len(found) > 1 and not args.group:
-        print(f"{len(found)} servers found, using {found[0]['instance']} (--server or --group picks)", file=sys.stderr)
-    return found[0]["host"], found[0]["port"]
+def channel(args):
+    if args.host:
+        return wire.connect_ssh(args.host, args.host_command)
+    if not start_here():
+        sys.exit("baude-server: no host process here, and it couldn't be started")
+    return wire.connect_local()
 
 
 def ask(args, msg):
-    ch, _info = wire.connect(*server_address(args))
+    try:
+        ch, _info = channel(args)
+    except OSError as e:
+        sys.exit(f"baude-server: {e}")
     ch.send({**msg, "req": 1})
-    reply = ch.read()
+    reply = ch.reply()
     ch.close()
     if not reply or reply.get("op") == "error":
         sys.exit(f"baude-server: {(reply or {}).get('error') or 'no answer'}")
@@ -89,21 +129,29 @@ def main():
 
     def client(name, help_):
         c = sub.add_parser(name, help=help_)
-        c.add_argument("--server", help="HOST:PORT (else the one found on the network)")
-        c.add_argument("--group", help="a server whose group this is, of those found; start: the session's group")
+        c.add_argument("--host", help="where ssh reaches another machine's host process: an alias in ~/.ssh/config, a "
+                                      "host, or user@host (default: this machine's)")
+        c.add_argument("--host-command", help="the host process there, if baude_server.py isn't on its PATH")
+        if name == "start":
+            c.add_argument("--group", help="the session's group")
         return c
 
     def serving(c):
         c.add_argument("--group", help="the group its sessions are in unless started in another (default: its name)")
         c.add_argument("--name", help="what it's called on the network (default: this machine's name)")
-        c.add_argument("--port", type=int, default=0, help="the port to serve on (default: any free one)")
-        c.add_argument("--bind", default="0.0.0.0", help="the address to serve on (default: all)")
         c.add_argument("--state", help="where it keeps its sessions' settings (default: ~/.local/share/baude/server)")
+        c.add_argument("--socket", help=argparse.SUPPRESS)  # (another socket than this user's one: a test's)
         c.add_argument("--idle-minutes", type=float, default=30, help="a session's claude stops after this long unused")
-        c.add_argument("--no-advertise", action="store_true", help="don't say it's here on the network (mDNS)")
+        said = c.add_mutually_exclusive_group()
+        said.add_argument("--advertise", action="store_const", const=True, dest="advertise",
+                          help="say on the local network that Baude is on this host, and which user ssh would log in "
+                               "as (multicast DNS); remembered (default: not said)")
+        said.add_argument("--no-advertise", action="store_const", const=False, dest="advertise",
+                          help="don't say it on the network any more")
     serving(sub.add_parser("serve", help="serve sessions (the default)"))
     serving(p)
-    sub.add_parser("servers", help="the servers on the network")
+    sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")
+    sub.add_parser("servers", help="the hosts found: this machine's, and those on the network")
     client("list", "a server's sessions")
     client("models", "the models a server can run")
     s = client("start", "start a session")
@@ -128,9 +176,11 @@ def main():
 
     if args.command in (None, "serve"):
         return serve(args)
+    if args.command == "connect":
+        return connect(args)
     if args.command == "servers":
         for s in find_servers():
-            print(f"{s['instance']}  {s['host']}:{s['port']}  group={s['words'].get('group')}  id={s['words'].get('id')}")
+            print(f"{s['name']}  {s['dest'] or '-'}  group={s['words'].get('group')}  id={s['words'].get('id')}")
         return
     if args.command == "list":
         for s in ask(args, {"op": "subscribe"})["sessions"]:

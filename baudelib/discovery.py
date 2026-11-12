@@ -261,7 +261,7 @@ class Advertiser(_Port):
 
 
 class Browser(_Port):
-    """Finds servers: found({instance, host, port, words}) as one says it's there (again, whenever it does), lost(instance)
+    """Finds servers: found({instance, host, target (its host's name), port, words}) as one says it's there (again, whenever it does), lost(instance)
     when one says goodbye. Asks every QUERY_S, and at once when asked to (ask_soon). Calls come on its own thread."""
 
     def __init__(self, found, lost=None):
@@ -324,7 +324,7 @@ class Browser(_Port):
                 continue
             host = self.parts.get((p.get("target") or "").lower())
             self.found({"instance": instance, "host": host if isinstance(host, str) else sender, "sender": sender,
-                        "port": p["port"], "words": p.get("words") or {}})
+                        "target": p.get("target"), "port": p["port"], "words": p.get("words") or {}})
 
     def stop(self):
         self._close()

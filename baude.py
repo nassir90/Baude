@@ -7559,12 +7559,13 @@ _LOCAL_SERVER = {"wanted": None}  # (local_server's: what waits for the server o
 
 
 def network():
-    """The servers on the network Baude knows, and their sessions (baudelib.client.Network): one for the app, started
-    when it's first wanted. BAUDE_NETWORK=0: none looked for on the network; BAUDE_SERVERS=host:port,…: these too."""
+    """The hosts Baude knows, and their sessions (baudelib.client.Network): one for the app, started when it's first
+    wanted. BAUDE_NETWORK=0: none looked for on the network or Tailscale; BAUDE_HOSTS=dest,…: these ssh destinations
+    too."""
     if not _NETWORK:
         _NETWORK.append(baudelib.client.Network(
             on_main, discover=os.environ.get("BAUDE_NETWORK", "1") != "0",
-            addresses=[a for a in os.environ.get("BAUDE_SERVERS", "").split(",") if a.strip()]))
+            hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()]))
     return _NETWORK[0]
 
 
@@ -7968,7 +7969,7 @@ class SessionSidebar(Gtk.Box):
             item = Gio.MenuItem.new(None, None)
             item.set_attribute_value("custom", GLib.Variant.new_string(name))
             menu.append_item(item)
-        hosts.append("Add server…", "sb.add_server")  # (one not found by itself: ask_add_server)
+        hosts.append("Add Host…", "sb.add_server")  # (one not found by itself: ask_add_host)
         every = Gio.MenuItem.new("Show All", "sb.show_all")  # (only while something's left out)
         every.set_attribute_value("hidden-when", GLib.Variant.new_string("action-disabled"))
         groups.append_item(every)
@@ -8013,7 +8014,13 @@ class SessionSidebar(Gtk.Box):
         here.connect("activate", lambda _a, v: (pop.popdown(), self.win.new_session_here(v.get_string())))
         actions.add_action(here)
         add_server = Gio.SimpleAction.new("add_server", None)
-        add_server.connect("activate", lambda *_: self.win.ask_add_server())
+        add_server.connect("activate", lambda *_: self.win.ask_add_host())
+        take = Gio.SimpleAction.new("connect_host", GLib.VariantType.new("s"))
+        take.connect("activate", lambda _a, v: (pop.popdown(), self.connect_host(v.get_string())))
+        actions.add_action(take)
+        command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
+        command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
+        actions.add_action(command)
         actions.add_action(add_server)
         self.insert_action_group("sb", actions)
         self.actions = actions
@@ -8086,12 +8093,12 @@ class SessionSidebar(Gtk.Box):
     # started with (this machine's own chats have none). Everything's listed till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
-        is)."""
+        is; "found", for one found on the network and not taken up: Connect, its right-click)."""
         out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
-                out.append((key, remote_name(r), "gone" if r.state == "dead" else ""))
+                out.append((key, remote_name(r), "found" if r.offered else "gone" if r.state == "dead" else ""))
         return out
 
     def known_groups(self):
@@ -8140,15 +8147,24 @@ class SessionSidebar(Gtk.Box):
             self.host_filter() is not None or self.group_filter() is not None)
 
     def host_menu(self, row, x, y):
-        """Right-click a host (⋮ → Hosts): New Session Here (not on one that's gone)."""
+        """Right-click a host (⋮ → Hosts): New Session Here (not on one that's gone); Host Command… for one reached
+        over ssh."""
         r = next((r for r in network().remotes() if host_key(r) == row.key), None)
         menu = Gio.Menu()
+        if r is not None and r.offered:  # (found on the network: reached only once it's taken up)
+            item = Gio.MenuItem.new(f"Connect as {r.where.get('dest')}", None)
+            item.set_action_and_target_value("sb.connect_host", GLib.Variant.new_string(row.key))
+            menu.append_item(item)
         item = Gio.MenuItem.new("New Session Here", None)
         if row.key == HERE_HOST or r is not None and r.state == "alive":
             item.set_action_and_target_value("sb.new_here", GLib.Variant.new_string(row.key))
         else:
             item.set_action_and_target_value("sb.gone", None)  # (no such action: shown, but not to be picked)
         menu.append_item(item)
+        if r is not None and r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
+            item = Gio.MenuItem.new("Host Command…", None)
+            item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(row.key))
+            menu.append_item(item)
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
         pop.set_parent(self.host_list)
         rect = Gdk.Rectangle()
@@ -8157,6 +8173,12 @@ class SessionSidebar(Gtk.Box):
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         self.host_menu_shown = pop
         pop.popup()
+
+    def connect_host(self, key):
+        """A host found on the network (offered), right-clicked → Connect: reached over ssh from now on, and kept."""
+        if (r := next((r for r in network().remotes() if host_key(r) == key and r.offered), None)) is not None:
+            network().accept(r)
+            toast(self, f"Connecting to {r.host}")
 
     def on_network(self):
         """The network's servers or their sessions changed: ⋮'s hosts and groups, what's hidden coming back, and the
@@ -11625,7 +11647,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.proc, self.remote_tried = None, time.monotonic()
         if r.state == "alive":
             try:
-                self.proc = RemoteProc(self.on_msg, self.on_exit, r.host, r.port, self.session_id,
+                self.proc = RemoteProc(self.on_msg, self.on_exit, r.reach_where(), self.session_id,
                                        live=not self.resume_pending)
             except OSError as e:
                 self.note(f"couldn't reach {remote_name(r)}: {e}")
@@ -13991,7 +14013,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.reset_stream_state()
         self.session_id, self.remote = info["id"], r
         path = r.mirror(info["id"])
-        if not os.path.exists(path):
+        if not os.path.exists(path) and not r.local:  # (one on this machine is read where it is, once it's there)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, "a").close()
         self.apply_chat_model({**info, "path": path})
@@ -14042,6 +14064,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         listed = self.remote.sessions.get(self.session_id)
         if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
             self.show_title(listed["title"])
+        if self.resume_pending and self.remote.local and self.remote.direct(self.session_id) and \
+                self.view_path != self.remote.mirror(self.session_id):  # (on this machine: its transcript's there now)
+            self.view_session(self.remote.mirror(self.session_id))
         if listed and self.remote.state == "alive" and \
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):
@@ -14072,30 +14097,50 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.proc.control({"subtype": "interrupt"})
             self.note("interrupt requested")
 
-    def ask_add_server(self):
-        """⋮ → Hosts → Add server…: a server by its address, one Baude doesn't find by itself (where multicast DNS doesn't
-        reach, say), kept from then on, reached or not. One on this machine is found by itself, from its file."""
-        entry = Gtk.Entry(placeholder_text="host:port", activates_default=True, width_chars=30)
-        dlg = Adw.AlertDialog(heading="Add a server", extra_child=entry, default_response="add", close_response="cancel",
-                              body="Its address, as baude_server.py says it as it starts: its machine's name or address "
-                                   "on the network, and its port")
+    def ask_add_host(self):
+        """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
+        Tailscale), by where ssh goes: an alias in ~/.ssh/config, a host, or user@host; and its host process's command
+        there, if baude_server.py isn't on its PATH. Kept from then on, reached or not."""
+        dest = Gtk.Entry(placeholder_text="user@host, or an ssh alias", activates_default=True, width_chars=30)
+        command = Gtk.Entry(placeholder_text=f"{baudelib.wire.SSH_COMMAND}, on its PATH", activates_default=True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.append(dest)
+        box.append(command)
+        dlg = Adw.AlertDialog(heading="Add a host", extra_child=box, default_response="add", close_response="cancel",
+                              body="Reached over ssh with your keys, never a password: the host must be in "
+                                   "known_hosts, and your key in its authorized_keys")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("add", "Add")
         dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
-
-        def address():
-            host, _, port = entry.get_text().strip().rpartition(":")
-            host = host.strip().strip("[]")
-            return (host, int(port)) if host and port.isdigit() and 0 < int(port) < 65536 else None
-        entry.connect("changed", lambda *_: dlg.set_response_enabled("add", address() is not None))
+        where = lambda: dest.get_text().strip() if baudelib.wire.is_dest(dest.get_text().strip()) else None  # noqa: E731
+        dest.connect("changed", lambda *_: dlg.set_response_enabled("add", where() is not None))
         dlg.set_response_enabled("add", False)
 
         def respond(_dlg, response):
-            if response == "add" and (where := address()) is not None:
-                network().add(*where, by_hand=True)
-                toast(self.sidebar, f"Looking for {where[0]}:{where[1]}")
+            if response == "add" and (to := where()) is not None:
+                network().add({"via": "ssh", "dest": to}, by_hand=True, command=command.get_text().strip() or None)
+                toast(self.sidebar, f"Looking for Baude on {to}")
         dlg.connect("response", respond)
         self.dialog = self.add_server_dialog = dlg
+        dlg.present(self)
+        dest.grab_focus()
+        return dest, command
+
+    def ask_host_command(self, key):
+        """A host's right-click → Host Command…: the command its host process is started by there (ssh's
+        `<command> connect`), if baude_server.py isn't on its PATH or isn't the one; none: what it says, or PATH's."""
+        r = next((r for r in network().remotes() if host_key(r) == key), None)
+        if r is None:
+            return
+        entry = Gtk.Entry(text=r.command or "", activates_default=True, width_chars=36,
+                          placeholder_text=r.where.get("command") or f"{baudelib.wire.SSH_COMMAND}, on its PATH")
+        dlg = Adw.AlertDialog(heading=f"Baude on {remote_name(r)}", extra_child=entry, default_response="save",
+                              close_response="cancel", body=f"The command ssh runs on {r.host}, with connect after it")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("save", "Save")
+        dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", lambda _d, res: res == "save" and network().set_command(r, entry.get_text().strip()))
+        self.dialog = dlg
         dlg.present(self)
         entry.grab_focus()
         return entry
@@ -14201,10 +14246,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         prompt.grab_focus()
 
     def local_server(self, then, wait_s=20):
-        """A server on this machine, for New Session Here on it: then(it), on the main loop, once it's there. The one
-        that's there (or on its way: its file says it's running), else one started: baude_server.py, bound to this
-        machine only, in a process of its own that goes on after Baude does, as a server's does (its output in the
-        network folder's server.log). One started at a time, for every window that wants one."""
+        """This machine's host process, for New Session Here on it: then(it), on the main loop, once it's there. The
+        one that's there, else one started: baude_server.py, in a process of its own that goes on after Baude does
+        (its output in the network folder's server.log; one that finds another already running just stops: there's
+        one each). Waited for once, for every window that wants it."""
         net = network()
         if (r := next((r for r in net.alive() if host_key(r) == HERE_HOST), None)) is not None:
             then(r)
@@ -14212,24 +14257,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if _LOCAL_SERVER["wanted"] is not None:
             _LOCAL_SERVER["wanted"].append(then)
             return
-        elsewhere = {r.key for r in net.alive() if host_key(r) != HERE_HOST}  # (said so: not this machine's after all)
-        if not [e for e in baudelib.wire.local_servers() if e.get("id") not in elsewhere]:  # (else one on its way)
-            here = os.path.dirname(os.path.realpath(__file__))
-            try:
-                os.makedirs(baudelib.client.network_home(), exist_ok=True)
-                with open(os.path.join(baudelib.client.network_home(), "server.log"), "ab") as log:
-                    subprocess.Popen([sys.executable, os.path.join(here, "baude_server.py"), "serve", "--bind",
-                                      "127.0.0.1"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
-                                     start_new_session=True)
-            except OSError as e:
-                self.note(f"couldn't start a server on {THIS_MACHINE}: {e}")
-                return
-            toast(self.sidebar, f"Starting a server on {THIS_MACHINE}…")
+        here = os.path.dirname(os.path.realpath(__file__))
+        try:
+            os.makedirs(baudelib.client.network_home(), exist_ok=True)
+            with open(os.path.join(baudelib.client.network_home(), "server.log"), "ab") as log:
+                subprocess.Popen([sys.executable, os.path.join(here, "baude_server.py"), "serve"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
+        except OSError as e:
+            self.note(f"couldn't start {THIS_MACHINE}'s host process: {e}")
+            return
+        toast(self.sidebar, f"Starting {THIS_MACHINE}'s host process…")
         _LOCAL_SERVER["wanted"] = [then]
         end = time.monotonic() + wait_s
 
         def look():
-            net.here()  # (its file's written as it binds: no need to wait for the next look)
+            net.here()  # (its socket's there as it binds: no need to wait for the next look)
             net.look()
             r = next((r for r in net.alive() if host_key(r) == HERE_HOST), None)
             if r is None and time.monotonic() < end:
@@ -14237,7 +14279,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             wanted, _LOCAL_SERVER["wanted"] = _LOCAL_SERVER["wanted"], None
             if r is None:
                 log = os.path.join(baudelib.client.network_home(), "server.log")
-                self.note(f"no server on {THIS_MACHINE} answered: {pretty_path(log)} may say why")
+                self.note(f"{THIS_MACHINE}'s host process didn't answer: {pretty_path(log)} may say why")
             for fn in wanted:
                 r is not None and fn(r)
             return False

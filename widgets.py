@@ -42,6 +42,7 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: E402,F401
 import pointers  # noqa: E402
+import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
 from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
 
 
@@ -5910,8 +5911,8 @@ def scale_setting(key):
     return round(min(SCALE_MAX, max(SCALE_MIN, float(load_settings().get(key) or 1.0))), 2)
 
 
-# ---- code's size beside the prose (Settings -> Code Size): "auto", the code font measured against the prose's
-# (matched_code_scale), or a share of the prose's size. What's drawn asks code_scale(); the CSS sizes follow it live
+# ---- code's size beside the prose: the code font's own, the size it looks the prose's at (fontsetup's, measured once
+# and for all for the fonts it offers; matched_code_scale's otherwise). What's drawn asks code_scale()
 CODE_SAMPLE = "The table's built in price_table and cached; check it with the tests, then push the branch."
 CODE_HEIGHT_WEIGHT = 2 / 3  # (the lowercase's height counts twice what the letters' width does: it's what size reads as)
 _code = {"scale": None, "css": None, "provider": None}
@@ -5941,22 +5942,11 @@ def matched_code_scale():
     return round(min(1.2, max(0.6, (px / mx) ** a * (pw / mw) ** (1 - a))), 3)
 
 
-def code_size_setting():
-    """Settings -> Code Size: "auto", or a share of the prose's size."""
-    value = load_settings().get("code_size", "auto")
-    if value in (None, "auto"):
-        return "auto"
-    try:
-        return round(min(1.3, max(0.5, float(value))), 2)
-    except (TypeError, ValueError):
-        return "auto"
-
-
 def code_scale():
-    """What code is drawn at, beside the prose: Code Size's share, or the code font's matched one (measured once)."""
+    """What code is drawn at, beside the prose: the code font's matched size, fontsetup's for the fonts it offers,
+    measured here (once) for any other."""
     if _code["scale"] is None:
-        size = code_size_setting()
-        _code["scale"] = matched_code_scale() if size == "auto" else size
+        _code["scale"] = fontsetup.known_scale() or matched_code_scale()
     return _code["scale"]
 
 
@@ -5966,9 +5956,8 @@ def code_markup_size():
 
 
 def apply_code_size(display):
-    """Code's sizes in the CSS (code blocks, the code viewer and its gutter, a member's chip a little under) as Code Size
-    says now; what's drawn from here on is at it, what's drawn already keeps its own till it's drawn again."""
-    _code["scale"] = None
+    """Code's sizes in the CSS (code blocks, the code viewer and its gutter, a member's chip a little under):
+    code_scale's."""
     s = code_scale()
     css = (f".mono, .code-view, .code-gutter {{ font-size: {s:.3f}em; }}\n"
            f".code-member {{ font-size: {s * 0.94:.3f}em; }}\n")
@@ -6081,6 +6070,32 @@ def settings_size(title, subtitle, size, apply, low=SCALE_MIN, high=SCALE_MAX):
     row.set_subtitle(subtitle or "")
     row.set_value(size)
     row.connect("notify::value", lambda r, _p: apply(round(r.get_value(), 2)))
+    return row
+
+
+def settings_code_font(win, app):
+    """Settings → Code Font: the font code's drawn in (fontsetup.code_fonts), kept in settings.json, from app's next
+    start ("Baude", "Record": Pango's fonts are set up before it starts); picked other than the one it's drawing with,
+    a Restart button (win's ☰ → Restart). It's drawn at its own size beside the prose (code_scale)."""
+    fonts, running = list(fontsetup.code_fonts()), fontsetup.running_font()
+    if fontsetup.code_font() not in fonts:  # (one named in settings.json by hand)
+        fonts.append(fontsetup.code_font())
+    if running not in fonts:
+        fonts.append(running)
+    row = Adw.ComboRow(title="Code Font", model=Gtk.StringList.new(fonts), selected=fonts.index(fontsetup.code_font()))
+    restart = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
+    restart.connect("clicked", lambda b: (b.get_ancestor(Adw.Dialog).close(), win.activate_action("win.restart", None)))
+    row.add_suffix(restart)
+
+    def show(font):
+        restart.set_visible(font != running)
+        row.set_subtitle("" if font == running else f"{font} from {app}'s next start")
+
+    def changed(r, _p):
+        save_settings(code_font=fonts[r.get_selected()])
+        show(fonts[r.get_selected()])
+    row.connect("notify::selected", changed)
+    show(fontsetup.code_font())
     return row
 
 

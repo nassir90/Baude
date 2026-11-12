@@ -1,7 +1,7 @@
 """The fonts Baude and Record draw with, set up before GTK is (no GTK here): text through FontConfig and FreeType, the
 code font Settings → Code Font says (the "monospace" every code view asks for), found among the system's fonts, those
-beside this file (fonts/: open fonts bundled with it, their licences with them) and, on macOS, SF Mono where Terminal
-keeps it. Its size beside the prose is the widgets' (widgets.code_scale)."""
+beside this file (fonts/: open fonts bundled with it, each with its licence) and, on macOS, SF Mono where Terminal
+keeps it. Its size beside the prose is its own matched one (CODE_FONTS; widgets.code_scale)."""
 import json
 import os
 import sys
@@ -9,7 +9,14 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 BUNDLED = os.path.join(HERE, "fonts")
 TERMINAL_FONTS = "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts"  # (SF Mono: macOS's own)
-DEFAULT_CODE_FONT = "Menlo" if sys.platform == "darwin" else "monospace"
+DEFAULT_CODE_FONT = "JetBrains Mono"
+# Settings → Code Font's fonts, and the size each is drawn at beside the prose: the size it looks the prose's at,
+# measured against macOS's system font as widgets.matched_code_scale measures (each lowercase as tall, and as wide on
+# average, the height weighed twice). Bundled ones (fonts/, all under the SIL Open Font License), then macOS's own.
+CODE_FONTS = {"JetBrains Mono": 0.828, "IBM Plex Mono": 0.864, "Fira Code": 0.853, "Source Code Pro": 0.899,
+              "Geist Mono": 0.849, "Cascadia Code": 0.869, "Inconsolata": 0.996, "CommitMono": 0.838}
+MACOS_CODE_FONTS = {"SF Mono": 0.841, "Menlo": 0.83}
+_set_up = {"font": None}  # (the code font this process set up: a change in Settings is the next start's)
 
 
 def settings():
@@ -23,10 +30,29 @@ def settings():
         return {}
 
 
+def code_fonts():
+    """The code fonts there are to pick, each with its size beside the prose (CODE_FONTS; macOS's too, there)."""
+    return {**CODE_FONTS, **(MACOS_CODE_FONTS if sys.platform == "darwin" else {})}
+
+
 def code_font():
     """Settings → Code Font: the family code is drawn in (DEFAULT_CODE_FONT unless one's been picked)."""
     name = settings().get("code_font")
     return name if isinstance(name, str) and name.strip() else DEFAULT_CODE_FONT
+
+
+def running_font():
+    """The code font this process draws with: what Settings said when it started (setup), a change since the next
+    start's."""
+    return _set_up["font"] or code_font()
+
+
+def known_scale():
+    """The size code's drawn at beside the prose, as measured for the code font in use (code_fonts), or None: not one
+    of those, or not set up by setup() (FontConfig missing, or set otherwise), or not macOS, whose system font they
+    were measured against (widgets.matched_code_scale measures it then)."""
+    font = _set_up["font"]
+    return code_fonts().get(font) if font and sys.platform == "darwin" else None
 
 
 def font_dirs():
@@ -67,3 +93,4 @@ def setup():
     if sys.platform == "darwin":
         os.environ["PANGOCAIRO_BACKEND"] = "fc"
     os.environ["FONTCONFIG_FILE"] = path
+    _set_up["font"] = font

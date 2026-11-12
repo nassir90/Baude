@@ -4667,10 +4667,10 @@ class RecordChat(Gtk.Box):
 # ---------------------------------------------------------------- the window
 
 class Settings(Adw.PreferencesDialog):
-    """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Full-width text, Show in Applications, and the sizes,
-    1.0 the usual: the text's and the icons' (Baude's settings: the same in both), and the zoom Ctrl/⌘ 0 goes back
-    to; Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback… and the feedback sent.
-    Each takes at once and is kept."""
+    """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Full-width text, Code Font, Show in Applications, and
+    the sizes, 1.0 the usual: the text's and the icons' (Baude's settings: the same in both, Code Font too), and the
+    zoom Ctrl/⌘ 0 goes back to; Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback…
+    and the feedback sent. Each takes at once (Code Font from the next start) and is kept."""
 
     def __init__(self, win):
         super().__init__(title="Settings")
@@ -4683,6 +4683,7 @@ class Settings(Adw.PreferencesDialog):
                                   selected=modes.index(win.store.markup))
         formatting.connect("notify::selected", lambda r, _p: win.set_markup(modes[r.get_selected()]))
         group.add(formatting)
+        group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
         self.version_row = update.version_row(self)  # (and the version, its changelog: Baude's too)
         group.add(self.version_row)

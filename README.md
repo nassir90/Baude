@@ -11,6 +11,9 @@ and shows the chat, its tool calls and every session on the machine.
 |---|---|
 | ![Markdown](docs/screenshots/30-markdown-gallery-light.png)<br>Markdown | ![Signal links](docs/screenshots/37b-signal-link-kinds-light.png)<br>Signal links |
 
+Code is set in JetBrains Mono, at the size that matches the text around it. Settings → Code Font picks another:
+the open fonts in [fonts/](fonts/README.md) (SIL Open Font License), or macOS's SF Mono and Menlo.
+
 ## Tools and permissions
 
 | | |

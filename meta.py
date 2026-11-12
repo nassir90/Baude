@@ -974,9 +974,10 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .tool-card button.meta-batch {{ min-height: 0; min-width: 0; padding: 1px 5px; }}
 .changes-bar {{ background: alpha(@accent_bg_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }}
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
-.meta-foot {{ font-size: 0.85em; }}  /* (under the box, as Baude's status line is under a chat's) */
+/* (under the box as Baude's status line is under a chat's, as tall, so the two boxes are on a line) */
+.meta-foot {{ font-size: 0.85em; padding: 4px 0; }}
 .meta-foot > * {{ opacity: 0.75; }}
-.meta-foot button {{ min-height: 22px; padding: 0 6px; }}
+.meta-foot button {{ min-height: 0; padding: 0 4px; font-weight: normal; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
 """
@@ -1253,7 +1254,7 @@ class MetaChat(Gtk.Box):
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
         talk.append(self.scroll)
         self.append(talk)
-        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=6)
+        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10)
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # (an app's own, over the box)
         comp.append(self.bars)
         self.changes_box = self._changes_bar()

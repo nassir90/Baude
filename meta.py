@@ -998,29 +998,45 @@ def install_css(display):
         _CSS.append(provider)
 
 
-MARK_STRENGTH = {"removed": 5, "archived": 4, "added": 3, "moved": 2, "edited": 1}  # (a row a change marks twice:
-# the stronger: a page added, then edited, is added; a chat moved, then archived, archived)
+MARK_STRENGTH = {"archived": 4, "added": 3, "moved": 2, "edited": 1}  # (a row a change marks twice, after the
+# undoing pairs below: the stronger; a page added, then edited, is added; a chat moved, then archived, archived)
+# (what a change's later part does to a row an earlier part marked so: the row unmarked, None, or marked as given)
+MARK_AFTER = {("added", "removed"): None, ("added", "archived"): None, ("archived", "added"): None,
+              ("removed", "added"): "edited", ("moved", "removed"): "removed", ("edited", "removed"): "removed"}
+
+
+def action_parts(a):
+    """An action's parts, each {label, kind, undo, redo}: a bundle's, or the action itself."""
+    return a.get("parts") or [a]
 
 
 def bundle(a, label_, kind, undo, redo, marks):
-    """Action a (one change to what the left bar lists) with another part: undone after it, done again before it
-    (MetaChat.apply_action); its label the parts', its marks gathered, a row marked again marked as the stronger of
-    the two (MARK_STRENGTH), with both their notes (a row whose key changed, its mark carried to the new key: a mark's
-    fifth, the key it had)."""
-    parts = a.get("parts") or [{"label": a["label"], "kind": a["kind"], "undo": a["undo"], "redo": a["redo"]}]
-    parts = parts + [{"label": label_, "kind": kind, "undo": undo, "redo": redo}]
+    """Action a (one change to what the left bar lists) with another part, updated in place (what's drawn of it
+    holds it): undone after the parts before it, done again before them (MetaChat.apply_action); its label the
+    parts', its marks gathered. A row an earlier part marked: as MARK_AFTER says for the two (a page added and deleted
+    again: not marked; deleted and added again: edited), else the stronger (MARK_STRENGTH), with both their notes. A
+    row whose key changed carries its mark to the new key (a mark's fifth, the key it had)."""
+    parts = [{"label": p["label"], "kind": p["kind"], "undo": p["undo"], "redo": p["redo"]} for p in action_parts(a)]
+    parts.append({"label": label_, "kind": kind, "undo": undo, "redo": redo})
     gathered = {(m[0], m[1]): m for m in a.get("marks") or ()}
     for m in marks:
         was = gathered.pop((m[0], m[4]), None) if len(m) > 4 and m[4] else None
         old = gathered.get((m[0], m[1])) or was
         if old is not None:
-            how = old[2] if MARK_STRENGTH.get(old[2], 0) > MARK_STRENGTH.get(m[2], 0) else m[2]
+            if (old[2], m[2]) in MARK_AFTER:
+                how = MARK_AFTER[(old[2], m[2])]
+            else:
+                how = old[2] if MARK_STRENGTH.get(old[2], 0) > MARK_STRENGTH.get(m[2], 0) else m[2]
+            if how is None:
+                gathered.pop((m[0], m[1]), None)
+                continue
             note = ", ".join(dict.fromkeys(n for n in (old[3] if len(old) > 3 else "", m[3] if len(m) > 3 else "")
                                            if n))
             m = [m[0], m[1], how, note] + m[4:]
         gathered[(m[0], m[1])] = m
-    return {**a, "kind": "bundle", "undo": None, "redo": None, "parts": parts, "kept": False,
-            "label": "; ".join(dict.fromkeys(p["label"] for p in parts)), "marks": list(gathered.values())}
+    a.update(kind="bundle", undo=None, redo=None, parts=parts, kept=False, marks=list(gathered.values()),
+             label="; ".join(dict.fromkeys(p["label"] for p in parts)))
+    return a
 
 
 def mark_rgba(how, lit=False):
@@ -1670,7 +1686,8 @@ class MetaChat(Gtk.Box):
         """What a changed chat or page is called, in a change's box."""
         if kind == "chat":
             chat = self.find_chat(key)
-            ghost = next((i for i in (action.get("redo") or {}).get("infos") or () if i.get("id") == key), None)
+            ghost = next((i for p in action_parts(action) for i in (p.get("redo") or {}).get("infos") or ()
+                          if i.get("id") == key), None)
             return chat["title"] if chat else (ghost or {}).get("title") or key[:8]
         return str(key).rpartition("\n")[2]
 
@@ -2176,11 +2193,11 @@ class MetaChat(Gtk.Box):
         turn's change, if it's made one (bundle): a turn's changes to it are one action, kept, undone and done again
         as one; a setting's is one of its own."""
         marks = [list(m) for m in marks]
-        joined = next((x for x in self.actions() if x["id"] == turn.get("bundle") and x["state"] == "done"), None) \
-            if marks else None
+        joined = next((x for x in self.actions() if x["id"] == turn.get("bundle") and x["state"] == "done" and
+                       not x.get("kept")), None) if marks else None  # (kept, or undone: what's next is new)
         if joined is not None:
-            a = bundle(joined, label_, kind, undo, redo, marks)
-            self.actions().remove(joined)
+            a = bundle(joined, label_, kind, undo, redo, marks)  # (the same action: what's drawn of it holds it)
+            self.actions().remove(a)
             self.actions().append(a)  # (last: as it's the latest change, and where it's undone in order from)
         else:
             a = {"id": uuid.uuid4().hex[:6], "label": label_, "kind": kind, "undo": undo, "redo": redo,

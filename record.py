@@ -5483,7 +5483,7 @@ class RecordChat(meta.MetaChat):
         if kind != "page" or nb is None:
             return
         if how == "removed" and action["state"] == "done" and page not in nb["pages"]:
-            return self.open_gone(key, page, (action["undo"]["books"].get(book_id) or {}).get(page) or "")
+            return self.open_gone(key, page, self.text_before(action, key) or "")  # (a bundle's: its parts')
         if page in nb["pages"]:
             self.open_page(nb, page)
 

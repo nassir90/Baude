@@ -80,7 +80,7 @@ def github_repo(top):
 
 
 # ----------------------------------------------------------------- git view --
-# The side panel's Git page: a branch's history as a commit log with lanes (the checkout the chat works in by
+# The side panel's Git page: a branch's history as a commit log with lanes (the branches the chat touched by
 # default, or any branch, local or remote; or several, their histories together), the branch it tracks upstream and
 # the branch it came from, when each commit was made (the clock time) and how much it changed (lines added and
 # removed, in all and per file), and the commits this chat's own commands made. GitHub adds pull requests when gh is
@@ -1059,11 +1059,10 @@ class GitLane(Gtk.Widget):
 
 class GitPage(Gtk.Stack):
     """The side panel's Git page (see "git view" above). The list: the branches shown, picked from a list (the ones
-    this chat touched first, the chat's own checkout's chosen at first; then the rest: git_branch_list), what the
-    branch tracks and what it came from, GitHub's state, commits per hour, and the log, each row with its author's
-    picture (GitAvatars). A commit opens its card: when it was made, its message, the lines it changed in all and
-    per file (each opens its diff), the branches that have it, its pull requests, and the turn of this chat that made
-    it."""
+    this chat touched first, all of them chosen at first; then the rest: git_branch_list), what the branch tracks and
+    what it came from, GitHub's state, commits per hour, and the log, each row with its author's picture (GitAvatars).
+    A commit opens its card: when it was made, its message, the lines it changed in all and per file (each opens its
+    diff), the branches that have it, its pull requests, and the turn of this chat that made it."""
 
     def __init__(self, win):
         super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
@@ -1167,7 +1166,8 @@ class GitPage(Gtk.Stack):
 
     def chat_changed(self):
         """The chat changed or went on: read the history again (soon, if this page shows). Another chat, or the chat
-        moving to another checkout, shows its branch again; a branch you picked stays while the chat only goes on."""
+        moving to another checkout, shows the branches it touched again; a branch you picked stays while the chat only
+        goes on."""
         key = (self.win.ref_checkout or self.win.cwd, self.win.ref_transcript())
         if key != self.chat_key:
             self.follow, self.chat_key, self.pinned = True, key, None
@@ -1307,7 +1307,8 @@ class GitPage(Gtk.Stack):
 
     @staticmethod
     def gather(folder, transcript, picked, follow, every, then=None, gh=False):
-        """picked: the branches to show (several: their histories together), else (or follow) the chat's."""
+        """picked: the branches to show (several: their histories together), else (or follow) the ones the chat
+        touched, those above the list's rule (git_branch_list's touched; none: the first checkout's)."""
         top = (_git(folder, "rev-parse", "--show-toplevel") or "").strip() if folder else ""
         if not top:
             return {"top": None, "folder": folder}
@@ -1316,15 +1317,23 @@ class GitPage(Gtk.Stack):
         entries = checkouts + git_remote_branches(top)
         mine = next((c for c in checkouts if c["worktree"] == os.path.realpath(top)), None)
         picked = [r for r in picked or () if r]
-        if then and not picked:  # (a commit: the chat's branch if it has it, else the first checkout or one with it)
+        chat = chat_git_events(transcript) if transcript else {}
+        branches = git_branch_list(top, entries, mine["rev"] if mine else None, chat) if follow or not picked else None
+        touched = [e["rev"] for e in branches or () if e["touched"]]
+        along = None  # (a commit's: the branch of those shown whose own line it's looked for along)
+        if then and not picked:  # (a commit: the branches this chat touched if one has it, else a checkout with it)
             has = set((_git(top, "for-each-ref", "--contains", then, "--format=%(refname:short)", "refs/heads")
                        or "").split())
-            pick = next((c for c in ([mine] if mine else []) + checkouts if c and c["name"] in has), None)
-            picked = [pick["rev"]] if pick else []
+            along = next((r for r in ([mine["rev"]] if mine else []) + touched if r in has), None)
+            pick = None if along else next((c for c in checkouts if c["name"] in has), None)
+            picked = touched if along else [pick["rev"]] if pick else []
         known = {e["rev"] for e in entries}
         picked = [] if follow else [r for r in picked if r in known or _git(top, "rev-parse", "--verify", "--quiet", r)]
         if not picked:
-            picked = [(mine or (checkouts[0] if checkouts else {"rev": "HEAD"}))["rev"]]
+            if branches is None:  # (the branches picked are gone)
+                branches = git_branch_list(top, entries, mine["rev"] if mine else None, chat)
+                touched = [e["rev"] for e in branches if e["touched"]]
+            picked = touched or [checkouts[0]["rev"] if checkouts else "HEAD"]
         for r in picked:  # (a branch from a link, a tag: listed too while it's shown)
             if r not in known and r != "HEAD":
                 entries.append({"rev": r, "name": r, "sha": None, "upstream": None, "ahead": 0, "behind": 0,
@@ -1336,16 +1345,16 @@ class GitPage(Gtk.Stack):
         revs = ["--branches", "--remotes", "--tags"] if every else \
             picked if len(picked) > 1 else [rev] + ([parent["name"]] if parent else [])
         commits = git_log(top, revs, first_parent=not every)
-        found = git_find(top, rev, then, revs, commits, every) if then else None
+        found = git_find(top, along if along in picked else rev, then, revs, commits, every) if then else None
         own = theirs = None
         if parent and not every:
             own = set((_git(top, "rev-list", "--max-count=5000", f"{parent['name']}..{rev}") or "").split())
             theirs = set((_git(top, "rev-list", "--max-count=5000", f"{rev}..{parent['name']}") or "").split())
         repo = github_repo(top)
         AVATARS.recall(commits, repo)
-        chat = chat_git_events(transcript) if transcript else {}
-        branches = git_branch_list(top, entries, mine["rev"] if mine else None, chat,
-                                   {rev: parent["name"]} if b and parent else None)
+        if branches is None:
+            branches = git_branch_list(top, entries, mine["rev"] if mine else None, chat,
+                                       {rev: parent["name"]} if b and parent else None)
         return {"top": top, "folder": folder, "checkouts": checkouts, "branches": branches, "rev": rev,
                 "picked": picked, "branch": b, "parent": parent, "commits": commits, "own": own, "theirs": theirs,
                 "repo": repo, "gh_refresh": gh, "fetched": fetched, "pr": None, "every": every, "found": found,

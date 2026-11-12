@@ -22,6 +22,7 @@ import argparse
 import array
 import base64
 import collections
+import contextlib
 import glob
 import hashlib
 import html
@@ -43,6 +44,7 @@ import time
 import traceback
 import queue
 import urllib.parse
+import uuid
 
 import lookup
 from macos import full_redraws, ns_string, objc_send  # (no GTK: used before it loads)
@@ -118,6 +120,7 @@ import pointers  # noqa: E402  (the pointer's shape: Record's too)
 from livefeed import (  # noqa: E402
     LIVE_SECONDS, TURN_OPEN_SECONDS, external_state, read_appended, transcript_turn_open)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
 )
@@ -125,6 +128,7 @@ import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos
 from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView  # noqa: E402,F401
+from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock,
@@ -5688,117 +5692,6 @@ def tool_input_view(name, inp):
     return box
 
 
-ICON_SLOT = 16  # status icon and disclosure arrow share one square column
-
-
-def _slot(widget):
-    widget.set_size_request(ICON_SLOT, ICON_SLOT)  # (at least: an image is at the icons' size, Settings → Size)
-    widget.set_halign(Gtk.Align.CENTER)
-    widget.set_valign(Gtk.Align.CENTER)
-    return widget
-
-
-class Disclosure:
-    """What a toggle opens under a line, built when it's first opened (on_expand). The toggle is a button after a tool
-    card's name, Command (button=True), or an arrow and its label, › 5 tool calls; it goes in toggles, a box on that
-    line. What it opens goes in grid's row, under the line."""
-
-    def __init__(self, toggles, grid, row, label="details", button=False):
-        self.on_expand = []  # run on every opening: content built only once someone looks
-        self.grid, self.row = grid, row
-        self.revealer, self.expanded = None, False  # (the revealer: once there's something in it)
-        text = self.text = Gtk.Label(label=label, xalign=0.5 if button else 0)
-        if button:
-            self.arrow = None
-            # (a click leaves the focus where it was, in what you're typing)
-            self.button = Gtk.ToggleButton(child=text, valign=Gtk.Align.CENTER, focus_on_click=False)
-            self.button.add_css_class("tool-toggle")
-            self.button.connect("toggled", lambda b: b.get_active() != self.expanded and self.clicked(b.get_active()))
-        else:
-            self.arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
-            self.arrow.add_css_class("soft-icon")
-            text.add_css_class("dim-label")
-            self.button = Gtk.Box(spacing=4)
-            self.button.append(self.arrow)
-            self.button.append(text)
-            click = Gtk.GestureClick()
-            click.connect("released", lambda *_: self.clicked(not self.expanded))
-            self.button.add_controller(click)
-            pointers.hand(self.button)
-        toggles.append(self.button)
-
-    def clicked(self, expanded):
-        """Opened or closed by the reader: the toggle stays where it is on screen, and what's under it moves down or up
-        (the chat's hold_toggle: following its end, the end would stay put and the toggle move instead)."""
-        hold = getattr(self.button.get_root(), "hold_toggle", None)
-        if hold is not None:
-            hold(self)
-        self.set_expanded(expanded)
-
-    def sliding(self):
-        """Still sliding open or closed."""
-        return self.revealer is not None and self.revealer.get_child_revealed() != self.revealer.get_reveal_child()
-
-    def set_child(self, child):
-        if self.revealer is None:  # (a long session has thousands of these, most never opened: made when needed)
-            self.revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
-                                         transition_duration=120, visible=self.button.get_visible(),
-                                         reveal_child=self.expanded)
-            self.grid.attach(self.revealer, 0, self.row, 1, 1)
-        self.revealer.set_child(child)
-
-    def set_label(self, label):
-        self.text.set_label(label)
-
-    def set_visible(self, visible):
-        for w in (self.button, self.revealer):
-            if w is not None:
-                w.set_visible(visible)
-
-    def get_visible(self):
-        return self.button.get_visible()
-
-    def get_child(self):
-        return self.revealer.get_child() if self.revealer is not None else None
-
-    def get_expanded(self):
-        return self.expanded
-
-    def set_expanded(self, expanded):
-        self.expanded = expanded
-        if expanded:
-            for fn in self.on_expand:
-                fn()
-        if self.revealer is not None:  # (nothing to show yet: what comes is shown as it comes, set_child)
-            self.revealer.set_reveal_child(expanded)
-        if self.arrow is not None:
-            self.arrow.set_from_icon_name("pan-down-symbolic" if expanded else "pan-end-symbolic")
-        elif self.button.get_active() != expanded:
-            self.button.set_active(expanded)
-
-
-def _status_icon(state):
-    """The 16px status mark shared by tool cards and groups."""
-    if state in ("running", "background"):
-        return _slot(Spinner())  # (not Adw.Spinner, nor Gtk.Spinner: see Ticker)
-    if state == "interrupted":  # a saved call that never finished: no spinner forever
-        icon = _slot(Gtk.Image.new_from_icon_name("process-stop-symbolic"))
-        icon.add_css_class("dim-label")
-        return icon
-    icon = _slot(Gtk.Image.new_from_icon_name(
-        "window-close-symbolic" if state == "error" else "object-select-symbolic"))
-    icon.add_css_class("error" if state == "error" else "success")
-    return icon
-
-
-def _card_status(state):
-    """What a tool card shows of its state at the end of its line: a spinner while it runs, a stop for one that never
-    finished; nothing once it's done (most are), nor for a failed one, whose border is red."""
-    if state in ("running", "background", "interrupted"):
-        return _status_icon(state)
-    return None
-
-
 TASK_ENDINGS = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
 # What a restart waits for: a command running (real work, a process of its own), not the model writing (a turn cut short
@@ -7622,6 +7515,31 @@ def remote_info(s):
             "archived": bool(s.get("archived"))}
 
 
+def chat_groups(st=None):
+    """{session id: the group a chat's been put in, "" for none}: settings.json's chat_groups (st: the settings, read
+    already)."""
+    found = (load_settings() if st is None else st).get("chat_groups")
+    return {k: v for k, v in found.items() if isinstance(v, str)} if isinstance(found, dict) else {}
+
+
+def made_groups(st=None):
+    """The groups made (New Group…: SessionSidebar.make_group), empty or not: settings.json's group_names."""
+    found = (load_settings() if st is None else st).get("group_names")
+    return [g for g in found if isinstance(g, str) and g] if isinstance(found, list) else []
+
+
+def chat_group(info, assigned=None):
+    """A chat's group (⋮ → Groups), "" for none: Baude's own, whatever host the chat is on. The one it's been put in
+    (assigned: chat_groups, read if not given); else, for a host's session (remote_info's, or Network.sessions' own),
+    the one it was started in (baude_oneshot.py --group), unless that's only its host's own."""
+    if (put := (chat_groups() if assigned is None else assigned).get(info.get("id"))) is not None:
+        return put
+    r = info.get("remote") or info.get("server")
+    if r is None or not info.get("group") or info["group"] == r.info.get("group"):
+        return ""
+    return info["group"]
+
+
 def remote_name(r):
     return r.info.get("name") or r.host
 
@@ -7663,113 +7581,6 @@ def remote_path(path, r):
 
 
 # ------------------------------------------------------- sessions dialog --
-
-class Ticker:
-    """What moves while something works: a working session's dot pulsing (its opacity eased between 1 and 0.25 and
-    back every 0.9 s) and the spinners of calls still running (Spinner). One timer moves them all, FPS times a
-    second: each frame GTK draws costs 1.5-3 ms of CPU on a Mac (most of it GSK readying the window's surface), and
-    a CSS animation or an Adw.Spinner draws 60 a second, so one working session's dot, or one long-running command,
-    took a sixth of a core. In a window you aren't looking at they hold still."""
-
-    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, 0.9, 0.25, 0.6
-    # (held, not weakly: a widget Python keeps no wrapper of, Signal's button's icon, lost its own at once; let go of
-    # as each is unmapped, which taking it out of the window does, and taken back as it's mapped again)
-    pulsing, spinning, source, interval, start = set(), set(), None, 0, 0.0
-
-    @classmethod
-    def run(cls, ms=None):
-        """The timer: FPS times a second while something it moves is seen, else every IDLE_MS (to notice when it is)."""
-        ms = ms or 1000 // cls.FPS
-        if cls.source is not None:
-            if cls.interval == ms:
-                return
-            GLib.source_remove(cls.source)
-        else:
-            cls.start = time.monotonic()
-        cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
-
-    @classmethod
-    def pulse(cls, widget):
-        cls.pulsing.add(widget)
-        cls.run()
-
-    @classmethod
-    def still(cls, widget):
-        cls.pulsing.discard(widget)
-        widget.set_opacity(1.0)
-
-    @staticmethod
-    def seen(widget):
-        """Mapped, in the window you're looking at."""
-        root = widget.get_root() if widget.get_mapped() else None
-        return isinstance(root, Gtk.Window) and root.is_active()
-
-    @classmethod
-    def tick(cls):
-        for held in (cls.pulsing, cls.spinning):
-            held.difference_update([w for w in held if not w.get_mapped()])
-        if not cls.pulsing and not cls.spinning:
-            cls.source = None
-            return False
-        phase = ((time.monotonic() - cls.start) / cls.PERIOD) % 2
-        ease = (1 - math.cos(math.pi * (phase if phase < 1 else 2 - phase))) / 2  # (CSS's ease-in-out, near enough)
-        level, seen = round(1 - (1 - cls.LOW) * ease, 2), False
-        for w in cls.pulsing:
-            here = cls.seen(w)
-            seen = seen or here
-            w.set_opacity(level if here else cls.STILL)
-        for w in cls.spinning:
-            if cls.seen(w):
-                seen = True
-                w.queue_draw()
-        if (ms := 1000 // cls.FPS if seen else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
-            cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
-            return False
-        return True
-
-
-class Spinner(Gtk.Widget):
-    """Adw.Spinner's look (a faint ring, and an arc going round it that grows and shrinks), moved by Ticker at its
-    frame rate rather than by a frame-clock animation of its own (see Ticker)."""
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        # (plain functions, given the spinner by the signal: a closure over it would be a cycle PyGObject can't free)
-        self.connect("map", Spinner._mapped)
-        self.connect("unmap", Spinner._unmapped)
-
-    def _mapped(self):
-        Ticker.spinning.add(self)
-        Ticker.run()
-
-    def _unmapped(self):
-        Ticker.spinning.discard(self)
-
-    def do_measure(self, orientation, for_size):
-        return _scales["icon_px"], _scales["icon_px"], -1, -1  # (an icon's size: Settings → Size)
-
-    def do_snapshot(self, snapshot):
-        w, h = self.get_width(), self.get_height()
-        width = max(1.5, min(w, h) / 8)
-        r = min(w, h) / 2 - width / 2
-        if r <= 0:
-            return
-        cx, cy, color = w / 2, h / 2, self.get_color()
-        track = color.copy()
-        track.alpha *= 0.15
-        stroke = Gsk.Stroke.new(width)
-        ring = Gsk.PathBuilder.new()
-        ring.add_circle(Graphene.Point().init(cx, cy), r)
-        snapshot.append_stroke(ring.to_path(), stroke, track)
-        t = time.monotonic()
-        a = (t % 1.0) * 2 * math.pi  # (a turn a second, the arc a fifth to two thirds of the ring, and back)
-        span = (0.2 + 0.47 * (1 - math.cos(2 * math.pi * t / 1.6)) / 2) * 2 * math.pi
-        arc = Gsk.PathBuilder.new()
-        arc.move_to(cx + r * math.cos(a), cy + r * math.sin(a))
-        arc.svg_arc_to(r, r, 0, span > math.pi, True, cx + r * math.cos(a + span), cy + r * math.sin(a + span))
-        stroke.set_line_cap(Gsk.LineCap.ROUND)
-        snapshot.append_stroke(arc.to_path(), stroke, color)
-
 
 class ContextMeter(Gtk.LevelBar):
     """The status bar's context bar: WIDTH wide given the room, narrower as the chat is (a width_request held it open)."""
@@ -8020,13 +7831,16 @@ class SessionSidebar(Gtk.Box):
         by.append("Date", "sb.group::date")
         view.append_section("Group by", by)
         # (Hosts and Groups: which sessions are listed, each a list of its own in the menu (FilterList), filled by
-        # fill_filters; a right-click on a host: New Session Here)
+        # fill_filters; a right-click on a host: New Session Here; on a group: Rename Group…, Delete Group)
         hosts, groups = Gio.Menu(), Gio.Menu()
         for menu, name in ((hosts, "hosts"), (groups, "groups")):
             item = Gio.MenuItem.new(None, None)
             item.set_attribute_value("custom", GLib.Variant.new_string(name))
             menu.append_item(item)
         hosts.append("Add Host…", "sb.add_server")  # (one not found by itself: ask_add_host)
+        item = Gio.MenuItem.new("New Group…", None)  # (no chat moved to it: ask_new_group)
+        item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
+        groups.append_item(item)
         every = Gio.MenuItem.new("Show All", "sb.show_all")  # (only while something's left out)
         every.set_attribute_value("hidden-when", GLib.Variant.new_string("action-disabled"))
         groups.append_item(every)
@@ -8034,7 +7848,7 @@ class SessionSidebar(Gtk.Box):
         view.append_section("Groups", groups)
         pop = Gtk.PopoverMenu.new_from_model(view)
         self.host_list = FilterList(lambda keys: self.filtered(sidebar_hosts=keys), self.host_menu)
-        self.group_list = FilterList(lambda keys: self.filtered(sidebar_groups=keys))
+        self.group_list = FilterList(lambda keys: self.filtered(sidebar_groups=keys), self.group_menu)
         pop.add_child(self.host_list, "hosts")
         pop.add_child(self.group_list, "groups")
         self.view_btn = Gtk.MenuButton(icon_name="view-more-symbolic", popover=pop, valign=Gtk.Align.CENTER,
@@ -8082,9 +7896,20 @@ class SessionSidebar(Gtk.Box):
         command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
         actions.add_action(command)
         actions.add_action(add_server)
+        # (groups: a chat right-clicked → Move to Group, its group ticked (the action's state: (its id, its group));
+        # New Group… (a chat's id, to be moved to it; "": none); a group right-clicked in ⋮ → Rename Group…, Delete)
+        move = Gio.SimpleAction.new_stateful("move_group", GLib.VariantType.new("(ss)"), GLib.Variant("(ss)", ("", "")))
+        move.connect("activate", lambda _a, v: self.move_to_group([v.unpack()[0]], v.unpack()[1]))
+        actions.add_action(move)
+        for name, fn in (("new_group", lambda sid: self.ask_new_group(sid or None)),
+                         ("rename_group", self.ask_rename_group), ("delete_group", self.delete_group_with_undo)):
+            act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
+            act.connect("activate", lambda _a, v, fn=fn: (pop.popdown(), fn(v.get_string())))
+            actions.add_action(act)
         self.insert_action_group("sb", actions)
         self.actions = actions
         self.remote_keys, self.remote_ids = {}, frozenset()  # (a server's folders: their servers; see groups)
+        self.assigned = None  # (chat_groups, as groups last read them, for session_row)
         self.fill_filters()
         network().listen(self.on_network)
         win.connect("notify::is-active", lambda *_: self.by_date() and self.day != self.today() and self.fill())
@@ -8149,8 +7974,9 @@ class SessionSidebar(Gtk.Box):
 
     # ---- ⋮ → Hosts and Groups: which sessions are listed. A host is a machine: this one (THIS_MACHINE: Claude Code's
     # and Claude Desktop's chats, as ever, and those of a server on it), or another a server's on (baudelib.server),
-    # its sessions kept as last seen and marked dead while it's gone. A group is the label a server's session was
-    # started with (this machine's own chats have none). Everything's listed till some are picked (FilterList)
+    # its sessions kept as last seen and marked dead while it's gone. A group is Baude's own, a list of chats of its
+    # own, whatever host they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group).
+    # Everything's listed till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
         is; "found", for one found on the network and not taken up: Connect, its right-click)."""
@@ -8162,9 +7988,12 @@ class SessionSidebar(Gtk.Box):
         return out
 
     def known_groups(self):
-        """[(name, label, note)]: each group the network's sessions are in, by name, then No group (""): this
-        machine's own chats, and a server's session started in none."""
-        return [(g, g, "") for g in network().groups()] + [("", "No group", "")]
+        """[(name, label, note)]: each group, by name (those made, those chats are put in, and those hosts' sessions
+        are in as they were started: chat_group), then No group ("")."""
+        st = load_settings()
+        assigned = chat_groups(st)
+        names = set(made_groups(st)) | set(assigned.values()) | {chat_group(s, assigned) for s in network().sessions()}
+        return [(g, g, "") for g in sorted(names - {""}, key=str.lower)] + [("", "No group", "")]
 
     def picked(self, name, known, was=None):
         """The hosts or groups picked (settings' sidebar_hosts, sidebar_groups) that are still there, or None: all of
@@ -8183,9 +8012,11 @@ class SessionSidebar(Gtk.Box):
     def group_filter(self):
         return self.picked("sidebar_groups", self.known_groups())
 
-    def shows(self, s, hosts, groups):
-        """Is a server's session (Network.sessions') listed, with these hosts and groups picked (None: all)?"""
-        return (hosts is None or host_key(s["server"]) in hosts) and (groups is None or (s.get("group") or "") in groups)
+    def shows(self, s, hosts, groups, assigned=None):
+        """Is a server's session (Network.sessions') listed, with these hosts and groups picked (None: all)? assigned:
+        chat_groups, read already."""
+        return (hosts is None or host_key(s["server"]) in hosts) and \
+            (groups is None or chat_group(s, assigned) in groups)
 
     def filtered(self, **picked):
         """Hosts or groups picked (sidebar_hosts=[keys], sidebar_groups=[names]; None: all of them, as is every one
@@ -8225,20 +8056,156 @@ class SessionSidebar(Gtk.Box):
             item = Gio.MenuItem.new("Host Command…", None)
             item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(row.key))
             menu.append_item(item)
+        self.host_menu_shown = self.menu_at(menu, self.host_list, x, y)
+
+    def group_menu(self, row, x, y):
+        """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
+        if not row.key:
+            return
+        menu = Gio.Menu()
+        for label, action in (("Rename Group…", "rename_group"), ("Delete Group", "delete_group")):
+            item = Gio.MenuItem.new(label, None)
+            item.set_action_and_target_value(f"sb.{action}", GLib.Variant.new_string(row.key))
+            menu.append_item(item)
+        self.group_menu_shown = self.menu_at(menu, self.group_list, x, y)
+
+    def menu_at(self, menu, parent, x, y):
+        """A right-click's menu, shown at x, y in parent (gone once it's closed)."""
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
-        pop.set_parent(self.host_list)
+        pop.set_parent(parent)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         pop.set_pointing_to(rect)
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        self.host_menu_shown = pop
         pop.popup()
+        return pop
 
     def connect_host(self, key):
         """A host found on the network (offered), right-clicked → Connect: reached over ssh from now on, and kept."""
         if (r := next((r for r in network().remotes() if host_key(r) == key and r.offered), None)) is not None:
             network().accept(r)
             toast(self, f"Connecting to {r.host}")
+
+    # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
+    # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it
+    # so, and returns what undoes it: move_to_group's for restore_groups, the others' for restore_group_state
+    def group_state(self, ids=None):
+        """What restore_group_state puts back: {"chat_groups": {id: its entry, None if it has none} (ids', or every
+        chat's with one), "group_names": the groups made, "sidebar_groups": the groups picked (None: all)}."""
+        st = load_settings()
+        assigned, picked = chat_groups(st), st.get("sidebar_groups")
+        return {"chat_groups": {i: assigned.get(i) for i in (assigned if ids is None else ids)},
+                "group_names": made_groups(st), "sidebar_groups": list(picked) if isinstance(picked, list) else None}
+
+    def restore_group_state(self, state):
+        """What group_state said put back, each of its keys there: its chats' entries (None: none, so a chat's group
+        is the one chat_group gives it without), the groups made, the groups picked."""
+        changes = {}
+        if "chat_groups" in state:
+            assigned = chat_groups()
+            for i, group in state["chat_groups"].items():
+                if group is None:
+                    assigned.pop(i, None)
+                else:
+                    assigned[i] = group
+            changes["chat_groups"] = assigned or None
+        if "group_names" in state:
+            changes["group_names"] = list(state["group_names"] or []) or None
+        if "sidebar_groups" in state:
+            changes["sidebar_groups"] = state["sidebar_groups"]
+        save_settings(**changes)
+        self.groups_changed()
+
+    def groups_changed(self):
+        self.fill_filters()
+        self.fill()
+
+    def move_to_group(self, ids, group):
+        """Chats (their session ids) put in a group; "": in none, a host's session too, whatever it was started in.
+        Returns {id: its chat_groups entry before, None if it had none}, for restore_groups."""
+        ids = [ids] if isinstance(ids, str) else list(ids)
+        assigned = chat_groups()
+        before = {i: assigned.get(i) for i in ids}
+        save_settings(chat_groups={**assigned, **dict.fromkeys(ids, group or "")})
+        self.groups_changed()
+        return before
+
+    def restore_groups(self, before):
+        """Chats' chat_groups entries put back as move_to_group found them ({id: entry, None: none})."""
+        self.restore_group_state({"chat_groups": before})
+
+    def group_members(self, group, assigned):
+        """The ids of the chats in a group: those put in it, and hosts' sessions started in it and put in none."""
+        return [i for i, g in assigned.items() if g == group] + \
+            [s["id"] for s in network().sessions() if s["id"] not in assigned and chat_group(s, assigned) == group]
+
+    def make_group(self, name):
+        """A group made: listed in ⋮ → Groups and Move to Group, empty or not. Returns group_state() from before."""
+        state = self.group_state(())
+        if name and name not in state["group_names"]:
+            save_settings(group_names=state["group_names"] + [name])
+            self.groups_changed()
+        return state
+
+    def rename_group(self, old, new):
+        """A group renamed: its chats (group_members) put in new, which is made in its place if it was made and picked
+        in its place if it was; to a group there already, they join it. Returns group_state() from before."""
+        if not old or not new or old == new:
+            return self.group_state(())
+        st = load_settings()
+        assigned, picked = chat_groups(st), st.get("sidebar_groups")
+        ids = self.group_members(old, assigned)
+        state = self.group_state(ids)
+        save_settings(chat_groups={**assigned, **dict.fromkeys(ids, new)} or None,
+                      group_names=list(dict.fromkeys(new if g == old else g for g in made_groups(st))) or None,
+                      sidebar_groups=sorted(set(picked) - {old} | {new})
+                      if isinstance(picked, list) and old in picked else picked)
+        self.groups_changed()
+        return state
+
+    def delete_group(self, name):
+        """A group deleted: its chats (group_members) in none, and it neither made nor picked. Returns group_state()
+        from before."""
+        if not name:
+            return self.group_state(())
+        st = load_settings()
+        assigned, picked = chat_groups(st), st.get("sidebar_groups")
+        ids = self.group_members(name, assigned)
+        state = self.group_state(ids)
+        save_settings(chat_groups={**assigned, **dict.fromkeys(ids, "")} or None,
+                      group_names=[g for g in made_groups(st) if g != name] or None,
+                      sidebar_groups=sorted(set(picked) - {name}) or None if isinstance(picked, list) else picked)
+        self.groups_changed()
+        return state
+
+    def delete_group_with_undo(self, name):
+        """Delete Group (⋮ → Groups, a group right-clicked): deleted, said with Undo."""
+        state = self.delete_group(name)
+        if (root := self.get_root()) is not None and hasattr(root, "toasts"):
+            said = Adw.Toast(title=f"Group “{GLib.markup_escape_text(name)}” deleted", button_label="Undo", timeout=5)
+            said.connect("button-clicked", lambda *_: self.restore_group_state(state))
+            root.toasts.add_toast(said)
+
+    def ask_new_group(self, sid=None):
+        """New Group…: a group made, and the chat sid moved to it, if given."""
+        self.ask_group_name("New group", "Create", "",
+                            lambda name: (self.make_group(name), sid and self.move_to_group([sid], name)))
+
+    def ask_rename_group(self, name):
+        """Rename Group… (⋮ → Groups, a group right-clicked)."""
+        self.ask_group_name("Rename group", "Rename", name, lambda new: new != name and self.rename_group(name, new))
+
+    def ask_group_name(self, heading, verb, text, then):
+        """A group's name asked for, as ask_rename asks a chat's: then(the name, its spaces tidied), unless blank."""
+        entry = Gtk.Entry(text=text, activates_default=True)
+        dlg = Adw.AlertDialog(heading=heading, extra_child=entry, default_response="ok", close_response="cancel")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("ok", verb)
+        dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", lambda d, r: r == "ok" and (name := " ".join(entry.get_text().split())) and then(name))
+        self.dialog = dlg
+        dlg.present(self.win)
+        entry.grab_focus()
 
     def on_network(self):
         """The network's servers or their sessions changed: ⋮'s hosts and groups, what's hidden coming back, and the
@@ -8248,11 +8215,12 @@ class SessionSidebar(Gtk.Box):
             return
         self.fill_filters()
         self.unhide_remote()
-        hosts, groups = self.host_filter(), self.group_filter()
+        hosts, groups, assigned = self.host_filter(), self.group_filter(), chat_groups()
         ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"), s.get("said"),
-                       s.get("group"), bool(s.get("archived"))) for s in network().sessions() if self.shows(s, hosts, groups))
+                       s.get("group"), bool(s.get("archived"))) for s in network().sessions()
+                      if self.shows(s, hosts, groups, assigned))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8294,26 +8262,30 @@ class SessionSidebar(Gtk.Box):
         in that host's folder: "remote:<server>:<folder>"); or by day (date_group), newest first, where a session and
         those under it (its forks, a Desktop chat's side sessions) go together, by the latest activity of any of them,
         as Claude Desktop's sidebar has them: a fork used today brings the session it came from into today, with it.
-        Only the hosts and groups picked in ⋮ (host_filter, group_filter); a server's sessions deleted here
-        (hide_remote): not listed till they show up again."""
+        Only the hosts and groups picked in ⋮ (host_filter, group_filter; a chat's group: chat_group, the open one not
+        saved yet's too); a server's sessions deleted here (hide_remote): not listed till they show up again."""
         q = self.search.get_text().strip().lower()
         here = session_group(self.win.cwd)[0]
         by_date, now = self.by_date(), self.clock()
         hosts, picked = self.host_filter(), self.group_filter()
-        mine = (hosts is None or HERE_HOST in hosts) and (picked is None or "" in picked)  # (this machine's own chats)
+        assigned = self.assigned = chat_groups()  # (session_row's too)
+        marks = self.marks = self.meta_marks()  # (Meta's changes, listed where they were till they're kept: session_row)
+        mine = hosts is None or HERE_HOST in hosts  # (this machine's own chats)
         groups, listed, gone = {}, [], []
         archived, hidden = self.archived_ids(), self.hidden_remote()
         # (a server's sessions aren't this machine's own chats, though one on this machine keeps their transcripts here)
         remote = self.remote_ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
-        for info in sorted(self.sessions if mine else [], key=last_used, reverse=True):  # (the last typed in first)
-            if info["id"] in remote:
+        ghosts = [g for g in self.meta_ghosts() if not any(i["id"] == g["id"] for i in self.sessions)]
+        for info in sorted(self.sessions + ghosts if mine else [], key=last_used, reverse=True):  # (the last typed in
+            if info["id"] in remote or picked is not None and chat_group(info, assigned) not in picked and \
+                    info["id"] not in marks:  # first)
                 continue
             folder = info.get("folder", info.get("cwd"))
             key, label = session_group(folder)
             tree = os.path.basename(info.get("worktree") or "")
             if q and q not in f"{info.get('title') or ''} {label} {tree}".lower():
                 continue
-            if info["id"] in archived:
+            if info["id"] in archived and info["id"] not in marks:
                 gone.append(info)
                 continue
             listed.append((info, key, label, folder))
@@ -8331,13 +8303,14 @@ class SessionSidebar(Gtk.Box):
         # host's in a group of its own for each folder there, its name with it
         self.remote_keys = {}
         for info in sorted((remote_info(s) for s in network().sessions()  # (not a new chat not written in yet: a
-                            if self.shows(s, hosts, picked) and not s.get("draft")),  # draft, the open one's row)
+                            if (self.shows(s, hosts, picked, assigned) or s["id"] in marks) and not s.get("draft")),
+                           # (a draft, the open one's)
                            key=last_used, reverse=True):
             r = info["remote"]
             if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r)]).lower():
                 continue
-            if info.get("archived") or info["id"] in archived:  # (archived on its host; or here, before hosts did)
-                gone.append(info)
+            if (info.get("archived") or info["id"] in archived) and info["id"] not in marks:  # (archived on its host;
+                gone.append(info)  # or here, before hosts did)
                 continue
             if info["id"] in hidden:
                 continue
@@ -8351,6 +8324,7 @@ class SessionSidebar(Gtk.Box):
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         sid = self.win.session_id
         if mine and not q and self.win.chat_begun() and (self.win.remote is None or self.win.remote.mine) and \
+                (picked is None or chat_group({"id": sid}, assigned) in picked) and \
                 not any(i["id"] == sid for g in groups.values() for i in g[2]):
             key, label = session_group(self.win.cwd)
             groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
@@ -8497,10 +8471,21 @@ class SessionSidebar(Gtk.Box):
         row.folder, row.key = folder, key
         return row
 
+    def meta_marks(self):
+        """{session id: (how, note, action)}: the chats Meta's changed and that aren't kept so yet, and those it's
+        highlighted (BaudeMeta.marks)."""
+        panel = getattr(self.win, "panel", None)
+        return panel.meta.marks("chat") if panel is not None else {}
+
+    def meta_ghosts(self):
+        """The chats Meta's deleted and that aren't kept so: listed still, struck through (BaudeMeta.ghosts)."""
+        panel = getattr(self.win, "panel", None)
+        return panel.meta.ghosts() if panel is not None else []
+
     def session_row(self, info, depth=0, last=True):
         """Title ··· [worktree] [dot] — one line; the worktree's name for a worktree's chat, the dot only when
         something's happening (working, waiting for an answer, finished and waiting for input). Forks sit under their
-        session like files in a tree."""
+        session like files in a tree. One Meta's changed: marked, with Keep and Undo (meta.mark_row)."""
         box = Gtk.Box(spacing=6, margin_start=6 + depth * TreeList.INDENT, margin_end=4)
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
@@ -8526,7 +8511,9 @@ class SessionSidebar(Gtk.Box):
         tip = [info.get("title") or "", info.get("cwd") or ""]
         if r is not None:
             gone = f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
-            tip += [f"On {remote_name(r)} ({r.host}){gone}", "Group " + (info.get("group") or "?")]
+            tip.append(f"On {remote_name(r)} ({r.host}){gone}")
+        if group := chat_group(info, self.assigned):
+            tip.append(f"Group {group}")
         if tree:
             tip.append(f"Worktree {os.path.basename(tree)} of {pretty_path(info.get('folder') or '')}")
         if info.get("source") and r is None:
@@ -8535,7 +8522,9 @@ class SessionSidebar(Gtk.Box):
             tip.append(f"{info['copies']} earlier cop{'y' if info['copies'] == 1 else 'ies'} of this conversation hidden")
         row = Gtk.ListBoxRow(child=box, tooltip_text="\n".join(t for t in tip if t))
         row.info, row.dot, row.depth, row.tree_anchor = info, dot, depth, title
-        if not info.get("unsaved"):
+        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: meta.mark_row)
+            meta.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
+        if not info.get("unsaved") and not info.get("ghost"):
             click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
             click.connect("pressed", lambda g, n, x, y: self.show_menu(row, x, y))
             row.add_controller(click)
@@ -8562,18 +8551,31 @@ class SessionSidebar(Gtk.Box):
                 [("Rename…", "rename")] + ([("Unarchive", "unarchive")] if archived else [] if active else
                                            [("Archive", "archive")]) + \
                 ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]  # (Archive stops it: not at a turn)
+        items.insert(1 if items[0][1] == "rename" else 0, ("Move to Group", None))  # (any chat's, on a host or not)
         for label, action in items:
+            if action is None:
+                menu.append_submenu(label, self.group_submenu(info))
+                continue
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", sid)
             menu.append_item(item)
-        pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
-        pop.set_parent(row)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        pop.set_pointing_to(rect)
-        pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        self.menu = pop
-        pop.popup()
+        self.menu = self.menu_at(menu, row, x, y)
+
+    def group_submenu(self, info):
+        """A chat's Move to Group: each group, its own ticked, then No Group; and New Group…, which it's moved to."""
+        now = chat_group(info)
+        self.actions.lookup_action("move_group").set_state(GLib.Variant("(ss)", (info["id"], now)))
+        menu, known, new = Gio.Menu(), Gio.Menu(), Gio.Menu()
+        for key, label, _note in self.known_groups():
+            item = Gio.MenuItem.new(label.replace("_", "__") if key else "No Group", None)  # (no mnemonics)
+            item.set_action_and_target_value("sb.move_group", GLib.Variant("(ss)", (info["id"], key)))
+            known.append_item(item)
+        item = Gio.MenuItem.new("New Group…", None)
+        item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(info["id"]))
+        new.append_item(item)
+        menu.append_section(None, known)
+        menu.append_section(None, new)
+        return menu
 
     def on_key(self, _ctl, keyval, _code, _state):
         if keyval == Gdk.KEY_F2:
@@ -8726,13 +8728,14 @@ class SessionSidebar(Gtk.Box):
         self.refresh()
 
     def mine_listed(self):
-        """Are this machine's own chats listed (This Mac's host, and No group, picked in ⋮)?"""
+        """Is a new chat here listed (This Mac's host, and No group, picked in ⋮: it's in no group till it's put in
+        one)?"""
         hosts, groups = self.host_filter(), self.group_filter()
         return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
 
     def new_chat(self):
-        """New session: a chat here; or, while this machine's own chats aren't listed (⋮: only other hosts, or only
-        groups), one through a host that's listed (ask_remote_start), so it's listed too."""
+        """New session: a chat here; or, while a new one here isn't listed (⋮: only other hosts, or only groups), one
+        through a host that's listed (ask_remote_start: in the group picked, if one is), so it's listed too."""
         if self.mine_listed():
             self.win.switch_to(self.win.new_session)
         else:
@@ -8831,8 +8834,8 @@ class SessionSidebar(Gtk.Box):
             self.fill()
             return
         info = getattr(row, "info", None)
-        if info is None or info.get("unsaved") or info["id"] == self.win.session_id:
-            return
+        if info is None or info.get("unsaved") or info.get("ghost") or info["id"] == self.win.session_id:
+            return  # (a ghost: a chat Meta's deleted, its transcript in Baude's trash)
         if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
             self.win.open_remote_soon(info)
             return
@@ -8890,10 +8893,8 @@ class SideQuestion(Gtk.Box):
         text = (text or "").strip()
         if not text or self.busy or self.proc is None:
             return
-        if not first:
-            q = Gtk.Label(label=text, xalign=0, wrap=True)
-            q.add_css_class("side-followup")
-            self.body.append(q)
+        if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
+            self.body.append(self.win.user_bubble(text, []))
         self.answer = MarkdownView()
         self.body.append(self.answer)
         self.busy = True
@@ -8943,8 +8944,659 @@ class SideQuestion(Gtk.Box):
 
 # ------------------------------------------------------------- side panel --
 
+# ------------------------------------------------------------------ Meta --
+# Meta (meta.py, Record's too), the side panel's first page: Baude's helper, which changes the sidebar (groups, hosts
+# listed, archiving, deleting and renaming chats, how they're grouped) and the settings, each change an action under
+# its reply, undone there, and marked in the sidebar till it's kept or undone (SessionSidebar.session_row).
+
+BAUDE_PROMPT = """Chats: each has an id (its first 8 characters will do) and a title, and is in a folder, on a host and \
+in a group. Hosts are the machines chats run on; groups are the user's own division of the chats into whole lists. \
+⋮ in the left bar picks which are listed: show_hosts and show_groups (none given: all of them). move_chats puts chats \
+in a group (made if it's new; "" for none, whatever host they're on); make_group, rename_group and delete_group change \
+the groups. highlight_chats highlights chats in the list without changing them: use it to show which you mean before a \
+change the user should check. archive_chats and unarchive_chats; delete_chats moves chats of this machine's own (not \
+a host's sessions) to Baude's trash, where undo finds them; a host's session you don't delete: show button:trash. How \
+the list is grouped (by folder or by day) is the setting group_by."""
+
+BAUDE_TOOLS = [
+    {"name": "highlight_chats", "description": "Highlight chats in the left bar, changing nothing, to show the user "
+     "which you mean (till their next message).",
+     "inputSchema": {"type": "object", "required": ["chats"], "properties": {
+         "chats": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "move_chats", "description": "Put chats in a group (a new name makes it; \"\" for no group).",
+     "inputSchema": {"type": "object", "required": ["chats", "group"], "properties": {
+         "chats": {"type": "array", "items": {"type": "string"}}, "group": {"type": "string"}}}},
+    {"name": "make_group", "description": "Make a group, empty till chats are moved to it.",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
+    {"name": "rename_group", "description": "Rename a group; to a group there already, its chats join that one.",
+     "inputSchema": {"type": "object", "required": ["group", "name"], "properties": {
+         "group": {"type": "string"}, "name": {"type": "string"}}}},
+    {"name": "delete_group", "description": "Delete a group; its chats are in no group then.",
+     "inputSchema": {"type": "object", "required": ["group"], "properties": {"group": {"type": "string"}}}},
+    {"name": "show_groups", "description": "Which groups the left bar lists (\"No group\" for chats in none; none "
+     "given: all).",
+     "inputSchema": {"type": "object", "required": ["groups"], "properties": {
+         "groups": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "show_hosts", "description": "Which hosts the left bar lists, by name (none given: all).",
+     "inputSchema": {"type": "object", "required": ["hosts"], "properties": {
+         "hosts": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "archive_chats", "description": "Archive chats: listed under Archived, out of the way.",
+     "inputSchema": {"type": "object", "required": ["chats"], "properties": {
+         "chats": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "unarchive_chats", "description": "Bring archived chats back to the list.",
+     "inputSchema": {"type": "object", "required": ["chats"], "properties": {
+         "chats": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "delete_chats", "description": "Delete chats of this machine's own: their transcripts go to Baude's "
+     "trash, and undo brings them back. Not a host's session, nor the chat open.",
+     "inputSchema": {"type": "object", "required": ["chats"], "properties": {
+         "chats": {"type": "array", "items": {"type": "string"}}}}},
+]
+META_KEEP = 400  # messages and actions kept in meta.json, each (the oldest go)
+_META = []
+
+
+def meta_path():
+    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "meta.json")
+
+
+def meta_store():
+    """Baude's conversation with Meta: its messages and its actions (the journal undo works from), one for the app,
+    every window's, kept in Baude's data folder's meta.json."""
+    if not _META:
+        try:
+            with open(meta_path()) as f:
+                kept = json.load(f)
+        except (OSError, ValueError):
+            kept = {}
+        _META.append({"messages": list(kept.get("messages") or []), "actions": list(kept.get("actions") or [])})
+    return _META[0]
+
+
+def save_meta_store():
+    store, path = meta_store(), meta_path()
+    for key in ("messages", "actions"):
+        del store[key][:-META_KEEP]
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w") as f:
+            json.dump(store, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
+    except OSError as e:
+        print(f"baude: Meta's conversation not kept: {e}", file=sys.stderr)
+
+
+def meta_trash():
+    """Where Meta's delete_chats puts transcripts: Baude's own trash folder (Move to Trash's, where there's no
+    system trash), a folder each."""
+    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "trash")
+
+
+class MetaNames(lookup.SearchSpace):
+    """What @ lists in Meta's box: Baude's chats by their titles (the sidebar's), then the names the open chat's
+    folder has (the glossary's search: SearchSpace, of catalogue_signal)."""
+
+    def __init__(self, win):
+        super().__init__(None, GLib.timeout_add)
+        self.win, self._chats, self._space = win, (None, []), None
+
+    def folder_space(self):
+        signal = self.win.catalogue_signal()
+        if signal is None:
+            return None
+        if self._space is None or self._space.source is not signal:
+            self._space = SearchSpace(signal)
+        return self._space
+
+    @property
+    def root(self):
+        return self.win.cwd
+
+    @property
+    def busy(self):
+        return (space := self.folder_space()) is not None and space.busy
+
+    def refresh(self, on_ready=None):
+        return space.refresh(on_ready) if (space := self.folder_space()) is not None else None
+
+    def chat_items(self):
+        sessions = self.win.sidebar.sessions if getattr(self.win, "sidebar", None) is not None else []
+        if self._chats[0] is not sessions:
+            items = []
+            for info in sorted(sessions, key=last_used, reverse=True):
+                if not info.get("title"):
+                    continue
+                at, where = last_used(info), pretty_path(info.get("folder") or info.get("cwd") or "") or "no folder"
+                items.append({"surface": info["title"], "canonical": "", "icon": "claude", "what": "Chat",
+                              "kind": "chat", "at": at, "ago": (ago := time_ago(at)), "where": where,
+                              "summary": f"{where} · {ago}", "path": info.get("path"), "id": info["id"], "line": None,
+                              "entry": None, "faint": False})
+            self._chats = (sessions, items)
+        return self._chats[1]
+
+    def items(self):
+        space = self.folder_space()
+        parts = (self.chat_items(), space.items() if space is not None else [])
+        if self._items is None or any(a is not b for a, b in zip(parts, getattr(self, "_parts", ()))):
+            self._items, self._parts, self._by = parts[0] + parts[1], parts, {}
+            for it in self._items:
+                self._by.setdefault(it["surface"], it)
+        return self._items
+
+
+class BaudeMeta(meta.MetaChat):
+    """Meta in Baude (meta.MetaChat), the side panel's first page: one conversation for the app (meta_store), each
+    window's session its own, started in its chat's folder. Its tools change the sidebar (BAUDE_TOOLS) and the
+    settings; what it changes in the list is marked there (SessionSidebar.session_row), a chat it deletes listed still,
+    struck through, till that's kept or undone (ghosts)."""
+
+    APP = "Baude"
+    WHAT = "a client for Claude Code chats, listed in its left bar."
+    LISTED = "the chats"
+    CHAT_ROWS = True
+    every = weakref.WeakSet()  # (each window's: the conversation's theirs too, shown again as it changes)
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.names = MetaNames(win)
+        self.settings = self.make_settings()
+        BaudeMeta.every.add(self)
+        self.render()
+
+    # ---- what meta.MetaChat asks of Baude
+    def messages(self):
+        return meta_store()["messages"]
+
+    def actions(self):
+        return meta_store()["actions"]
+
+    def save(self, now=False):
+        save_meta_store()
+        for other in list(BaudeMeta.every):  # (another window's, not at a turn: shown as it is now)
+            if other is not self and other.ask is None and not getattr(other.win, "let_go_done", False):
+                GLib.idle_add(other.render)
+
+    def told(self):
+        return meta_store().setdefault("told", [])
+
+    def space(self):
+        return self.names
+
+    def scope(self):
+        return self.win.cwd
+
+    def agent_setup(self):
+        cwd = self.win.cwd if self.win.cwd and os.path.isdir(self.win.cwd) else os.path.expanduser("~")
+        return {"cwd": cwd, "roots": [self.win.cwd] if self.win.cwd else [], "exe": claude_exe()}
+
+    def app_prompt(self):
+        return BAUDE_PROMPT
+
+    def app_tools(self):
+        return BAUDE_TOOLS
+
+    def app_handlers(self):
+        return {"highlight_chats": self.highlight_chats, "move_chats": self.move_chats, "make_group": self.make_group,
+                "rename_group": self.rename_group, "delete_group": self.delete_group, "show_groups": self.show_groups,
+                "show_hosts": self.show_hosts, "archive_chats": lambda t, a: self.archive_chats(t, a, True),
+                "unarchive_chats": lambda t, a: self.archive_chats(t, a, False), "delete_chats": self.delete_chats}
+
+    def make_settings(self):
+        win = self.win
+        out = meta.shared_settings(win, self, "Baude", lambda: win.zoom_default)
+        by = ["folder", "date"]
+
+        def group_by(v):
+            if (sidebar := getattr(win, "sidebar", None)) is not None:
+                sidebar.actions.lookup_action("group").change_state(GLib.Variant.new_string(v))
+            else:
+                save_settings(sidebar_group=v)
+
+        def row():
+            r = Adw.ComboRow(title="Group by", model=Gtk.StringList.new(["Folder", "Date"]),
+                             selected=by.index(now()))
+            r.connect("notify::selected", lambda r, _p: group_by(by[r.get_selected()]))
+            return r
+        now = lambda: "date" if load_settings().get("sidebar_group") == "date" else "folder"  # noqa: E731
+        out["group_by"] = meta.Setting("group_by", "Group by", now, group_by, row, by,
+                                       note="the left bar's chats, under their folders or their days")
+        return out
+
+    def marks_changed(self):
+        if (sidebar := getattr(self.win, "sidebar", None)) is not None:
+            sidebar.fill()
+
+    def ghosts(self):
+        """The chats Meta's deleted and that aren't kept so: listed still, struck through, where they were."""
+        return [{**info, "ghost": True} for a in self.unkept() if a["kind"] == "delete_chats"
+                for info in a["redo"].get("infos") or ()]
+
+    # ---- chats
+    def all_infos(self):
+        """Every chat Baude knows: this machine's own (the sidebar's), and the hosts' sessions."""
+        net = [remote_info(s) for s in network().sessions() if not s.get("draft")]  # (a new chat not written in yet)
+        theirs = {i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i}
+        sidebar = getattr(self.win, "sidebar", None)
+        return net + [i for i in (sidebar.sessions if sidebar is not None else []) if i["id"] not in theirs]
+
+    def find_chat(self, ref):
+        ref = ref.strip().removeprefix("s:")
+        if not ref:
+            return None
+        infos = self.all_infos()
+        for test in (lambda i: i["id"] == ref, lambda i: len(ref) >= 4 and i["id"].startswith(ref),
+                     lambda i: (i.get("title") or "").lower() == ref.lower()):
+            found = [i for i in infos if test(i)]
+            if len(found) == 1:
+                info = found[0]
+                return {"key": info["id"], "title": info.get("title") or "(untitled)", "path": info.get("path"),
+                        "info": info}
+        return None
+
+    def _infos(self, refs):
+        infos = [self._chat(ref)["info"] for ref in refs or ()]
+        if not infos:
+            raise ValueError("Which chats? chats is empty.")
+        return infos
+
+    @staticmethod
+    def said(infos):
+        titles = [f"“{i.get('title') or '(untitled)'}”" for i in infos]
+        return titles[0] if len(titles) == 1 else f"{len(titles)} chats"
+
+    def open_chat(self, info):
+        """A chat's row clicked (show chats): it's opened, as the sidebar opens one."""
+        win = self.win
+        if info["id"] == win.session_id:
+            return
+        if info.get("remote") is not None:
+            win.open_remote_soon(info)
+        else:
+            win.switch_to(lambda: win.resume_session(info))
+
+    def chats_rows(self, refs):
+        rows, assigned = [], chat_groups()
+        for ref in refs:
+            info = self._chat(ref)["info"]
+            group = chat_group(info, assigned)
+            rows.append({"icon": "baude-claude-symbolic", "title": info.get("title") or "(untitled)",
+                         "subtitle": " · ".join(filter(None, [pretty_path(info.get("folder") or info.get("cwd") or ""),
+                                                             time_ago(last_used(info)), group and f"group {group}"])),
+                         "open": lambda info=info: self.open_chat(info)})
+        return rows
+
+    def rename_chat_to(self, chat, title):
+        self.win.sidebar.rename({**chat["info"], "title": None}, title)  # (its title as listed may be one behind)
+
+    def open_mark(self, kind, key, how, action):
+        """A chat in a change's box clicked: opened, as the sidebar opens one; one deleted is in Baude's trash."""
+        if (chat := self.find_chat(key)) is not None:
+            self.open_chat(chat["info"])
+        elif how == "removed":
+            toast(self, "It's in Baude's trash: undo brings it back")
+
+    def chat_text(self, chat):
+        path = chat.get("path")
+        return meta.transcript_text(path) if path and os.path.exists(path) else "(its transcript isn't here)"
+
+    def buttons(self):
+        return {"trash": "Move to Trash… a chat (items: its id), to the system's trash or its host's; asks first, "
+                         "and can't be undone here"}
+
+    def button(self, action, items):
+        if action != "trash" or not items:
+            raise ValueError(f"There's no button {action}{'' if items else ' without items'}: app_index buttons.")
+        info = self._chat(items[0])["info"]
+        btn = Gtk.Button(label=f"Move “{info.get('title') or '(untitled)'}” to Trash…")
+        btn.add_css_class("destructive-action")
+        btn.connect("clicked", lambda *_: self.win.sidebar.ask_trash(self.find_chat(info["id"])["info"]
+                                                                     if self.find_chat(info["id"]) else info))
+        return btn
+
+    # ---- its tools
+    def highlight_chats(self, turn, args):
+        infos = self._infos(args.get("chats"))
+        self.lit = {**self.lit, "chat": {i["id"] for i in infos}}
+        self.marks_changed()
+        return {"text": f"Highlighted {self.said(infos)} in the left bar."}
+
+    def move_chats(self, turn, args):
+        infos, group = self._infos(args.get("chats")), " ".join(str(args.get("group") or "").split())
+        sidebar = self.win.sidebar
+        made = bool(group) and group not in {k for k, *_ in sidebar.known_groups()}
+        if made:
+            sidebar.make_group(group)
+        ids = [i["id"] for i in infos]
+        before = sidebar.move_to_group(ids, group)
+        where = f"group {group}" if group else "no group"
+        a = self.act(turn, f"Moved {self.said(infos)} to {where}", "move_chats",
+                     {"before": before, "group": group, "made": made}, {"ids": ids, "group": group, "made": made},
+                     [("chat", i, "moved", f"→ {group or 'no group'}") for i in ids])
+        return {"text": f"Moved to {where} (action {a['id']})."}
+
+    def make_group(self, turn, args):
+        name = " ".join(str(args.get("name") or "").split())
+        if not name:
+            raise ValueError("A group's name is needed.")
+        if name in {k for k, *_ in self.win.sidebar.known_groups()}:
+            return {"text": f"There's a group {name} already."}
+        self.win.sidebar.make_group(name)
+        a = self.act(turn, f"Made group {name}", "groups", {"op": "unmake", "name": name}, {"op": "make", "name": name})
+        return {"text": f"Made {name} (action {a['id']})."}
+
+    def _group(self, name):
+        name = " ".join(str(name or "").split())
+        if name.lower() == "no group":
+            raise ValueError("No group isn't a group: it's the chats in none.")
+        if name not in {k for k, *_ in self.win.sidebar.known_groups()}:
+            raise ValueError(f"No group {name!r}: app_index groups lists them.")
+        return name
+
+    def rename_group(self, turn, args):
+        old, new = self._group(args.get("group")), " ".join(str(args.get("name") or "").split())
+        if not new or new == old:
+            raise ValueError("A new name is needed.")
+        state = self.win.sidebar.rename_group(old, new)
+        undo = {"op": "unrename", "old": old, "new": new, "entries": state["chat_groups"],
+                "made": old in state["group_names"], "new_made": new in state["group_names"],
+                "picked": old in (state["sidebar_groups"] or ()), "new_picked": new in (state["sidebar_groups"] or ())}
+        a = self.act(turn, f"Renamed group {old} to {new}", "groups", undo, {"op": "rename", "old": old, "new": new})
+        return {"text": f"Renamed (action {a['id']})."}
+
+    def delete_group(self, turn, args):
+        name = self._group(args.get("group"))
+        state = self.win.sidebar.delete_group(name)
+        undo = {"op": "undelete", "name": name, "entries": state["chat_groups"], "made": name in state["group_names"],
+                "picked": name in (state["sidebar_groups"] or ())}
+        a = self.act(turn, f"Deleted group {name}", "groups", undo, {"op": "delete", "name": name})
+        return {"text": f"Deleted {name}; its chats are in no group (action {a['id']})."}
+
+    def _filter(self, turn, key, said, known, names):
+        """Which hosts or groups are listed (⋮), by their names (known: [(key, name, note)]); none: all."""
+        by_name = {name.lower(): k for k, name, _note in known}
+        keys = []
+        for n in names or ():
+            if str(n).strip().lower() not in by_name:
+                raise ValueError(f"No {said} {n!r}: they're {', '.join(name for _k, name, _n in known)}.")
+            keys.append(by_name[str(n).strip().lower()])
+        before = load_settings().get(key)
+        self.win.sidebar.filtered(**{key: sorted(set(keys)) or None})
+        now = load_settings().get(key)
+        if now == before:
+            return {"text": "That's what's listed already."}
+        a = self.act(turn, f"Listed {', '.join(map(str, names)) if keys else f'every {said}'}", "filter",
+                     {"key": key, "value": before, "expect": now}, {"key": key, "value": now, "expect": before})
+        return {"text": f"Listed (action {a['id']})."}
+
+    def show_groups(self, turn, args):
+        return self._filter(turn, "sidebar_groups", "group", self.win.sidebar.known_groups(), args.get("groups"))
+
+    def show_hosts(self, turn, args):
+        return self._filter(turn, "sidebar_hosts", "host", self.win.sidebar.known_hosts(), args.get("hosts"))
+
+    def archive_chats(self, turn, args, archive):
+        sidebar, archived = self.win.sidebar, self.win.sidebar.archived_ids()
+        infos = [i for i in self._infos(args.get("chats"))
+                 if (i["id"] in archived or bool(i.get("archived"))) != archive]
+        if not infos:
+            return {"text": f"They're {'archived' if archive else 'listed'} already."}
+        busy = [i for i in infos if (i.get("remote_state") if i.get("remote") is not None else
+                                     sidebar.file_state(i)) in ("working", "waiting")]
+        if archive and busy:
+            raise ValueError(f"{self.said(busy)} {'is' if len(busy) == 1 else 'are'} at a turn: archiving would stop "
+                             "it, which can't be undone. Say so to the user.")
+        ids, st = [i["id"] for i in infos], load_settings()
+        lists = {i["id"]: [i["id"] in st.get("archived", []), i["id"] in st.get("unarchived", [])]
+                 for i in infos if i.get("remote") is None}  # (this machine's: put back as they were, undone)
+        self.apply_app("archive", {"ids": ids, "archived": archive, "expect": not archive})
+        a = self.act(turn, f"{'Archived' if archive else 'Unarchived'} {self.said(infos)}", "archive",
+                     {"ids": ids, "archived": not archive, "lists": lists, "expect": archive},
+                     {"ids": ids, "archived": archive, "expect": not archive},
+                     [("chat", i, "archived" if archive else "added", "archived" if archive else "back") for i in ids])
+        return {"text": f"{'Archived' if archive else 'Unarchived'} (action {a['id']})."}
+
+    def delete_chats(self, turn, args):
+        infos = self._infos(args.get("chats"))
+        if hosted := [i for i in infos if i.get("remote") is not None]:
+            raise ValueError(f"{self.said(hosted)}: a host's session, whose deleting can't be undone here. Show "
+                             "button:trash for the user instead.")
+        if desktop := [i for i in infos if is_desktop(i["id"])]:
+            raise ValueError(f"{self.said(desktop)}: Claude Desktop's, which keeps its own record of it. Show "
+                             "button:trash for the user instead.")
+        if any(i["id"] == self.win.session_id for i in infos):
+            raise ValueError("One of them is the chat open: the user switches to another first.")
+        recent = [i for i in infos if time.time() - (os.path.getmtime(i["path"]) if os.path.exists(i["path"]) else 0)
+                  < self.DELETE_QUIET]
+        if recent:
+            raise ValueError(f"{self.said(recent)}: used in the last {self.DELETE_QUIET // 60} minutes, perhaps open "
+                             "elsewhere (another window, a terminal), which would write it again. Say so to the user.")
+        folder = os.path.join(meta_trash(), f"meta-{uuid.uuid4().hex[:10]}")
+        moved = [[path, os.path.join(folder, info["id"], os.path.basename(path))]
+                 for info in infos for path in [info["path"], *info.get("copy_paths", [])] if os.path.exists(path)]
+        keep = ("id", "title", "cwd", "folder", "worktree", "mtime", "said", "prompts", "desktop_used")
+        infos_kept = [{k: i[k] for k in keep if k in i} for i in infos]
+        self.apply_app("delete_chats", {"moved": moved})
+        a = self.act(turn, f"Deleted {self.said(infos)}", "delete_chats",
+                     {"moved": [[dst, src] for src, dst in moved]}, {"moved": moved, "infos": infos_kept},
+                     [("chat", i["id"], "removed", "deleted") for i in infos])
+        return {"text": f"Deleted: in Baude's trash; undo brings {'it' if len(infos) == 1 else 'them'} back "
+                        f"(action {a['id']})."}
+
+    DELETE_QUIET = 600  # s since a chat's transcript was last written before delete_chats takes it
+
+    def _groups_put(self, assigned=None, names=None, picked=...):
+        """chat_groups, group_names and sidebar_groups as given (any left out as they are), and the list shown so."""
+        changes = {}
+        if assigned is not None:
+            changes["chat_groups"] = assigned or None
+        if names is not None:
+            changes["group_names"] = names or None
+        if picked is not ...:
+            changes["sidebar_groups"] = picked
+        save_settings(**changes)
+        self.win.sidebar.groups_changed()
+
+    def _entries_back(self, entries, now):
+        """Chats' chat_groups entries put back (entries: {id: entry, None: none}), each only while it's now (else
+        ValueError: moved since)."""
+        assigned, moved = chat_groups(), 0
+        for i in entries:
+            chat = self.find_chat(i)
+            moved += chat_group(chat["info"] if chat else {"id": i}, assigned) != now
+        if moved:
+            raise ValueError(f"{moved} of its chats moved since")
+        for i, entry in entries.items():
+            if entry is None:
+                assigned.pop(i, None)
+            else:
+                assigned[i] = entry
+        return assigned
+
+    def apply_app(self, kind, data):
+        sidebar = self.win.sidebar
+        st = load_settings()
+        names, picked = made_groups(st), st.get("sidebar_groups") if isinstance(st.get("sidebar_groups"), list) else None
+        if kind == "move_chats":
+            if "before" in data:  # (undone: each chat back where it was, while it's still where it was moved to)
+                assigned = self._entries_back(data["before"], data["group"])
+                if data.get("made") and data["group"] not in assigned.values():
+                    names = [g for g in names if g != data["group"]]
+                self._groups_put(assigned, names)
+            else:
+                if data["group"] and data["group"] not in {k for k, *_ in sidebar.known_groups()}:
+                    sidebar.make_group(data["group"])
+                sidebar.move_to_group(data["ids"], data["group"])
+        elif kind == "groups":
+            op = data["op"]
+            if op == "make":
+                sidebar.make_group(data["name"])
+            elif op == "unmake":
+                self._groups_put(names=[g for g in names if g != data["name"]])
+            elif op == "rename":
+                sidebar.rename_group(data["old"], data["new"])
+            elif op == "delete":
+                sidebar.delete_group(data["name"])
+            elif op == "unrename":
+                old, new = data["old"], data["new"]
+                assigned = self._entries_back(data["entries"], new)
+                names = [g for g in names if g != new or data["new_made"]] + \
+                    ([old] if data["made"] and old not in names else [])
+                if picked is not None and data["picked"]:
+                    picked = sorted({*picked, old} - (set() if data["new_picked"] else {new}))
+                self._groups_put(assigned, names, picked)
+            elif op == "undelete":
+                name = data["name"]
+                assigned = self._entries_back(data["entries"], "")
+                if data["made"] and name not in names:
+                    names = names + [name]
+                if picked is not None and data["picked"] and name not in picked:
+                    picked = sorted({*picked, name})
+                self._groups_put(assigned, names, picked)
+        elif kind == "filter":
+            if load_settings().get(data["key"]) != data["expect"]:
+                raise ValueError("what's listed changed since")
+            sidebar.filtered(**{data["key"]: data["value"]})
+        elif kind == "archive":
+            archived_now = sidebar.archived_ids()
+            for i in data["ids"]:
+                if (chat := self.find_chat(i)) is None:
+                    raise ValueError("that chat isn't here any more")
+                if (i in archived_now or bool(chat["info"].get("archived"))) != data["expect"]:
+                    raise ValueError("archived or unarchived since")
+            lists = data.get("lists") or {}
+            if lists:  # (this machine's chats: archived and unarchived as they were)
+                archived, unarchived = set(st.get("archived", [])), set(st.get("unarchived", []))
+                for i, (was_archived, was_unarchived) in lists.items():
+                    (archived.add if was_archived else archived.discard)(i)
+                    (unarchived.add if was_unarchived else unarchived.discard)(i)
+                save_settings(archived=sorted(archived), unarchived=sorted(unarchived))
+                sidebar.fill()
+            for i in data["ids"]:
+                if i in lists:
+                    continue
+                if (chat := self.find_chat(i)) is None:
+                    raise ValueError("that chat isn't here any more")
+                (sidebar.archive if data["archived"] else sidebar.unarchive)(chat["info"])
+        elif kind == "delete_chats":
+            if clash := [dst for _src, dst in data["moved"] if os.path.exists(dst)]:
+                raise ValueError(f"{clash[0]} is there again (the chat was written to since); what was deleted is "
+                                 f"still at {data['moved'][0][0]}")
+            done = []
+            try:
+                for src, dst in data["moved"]:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.move(src, dst)
+                    done.append((src, dst))
+            except OSError as e:  # (part way: what was moved, put back)
+                for src, dst in reversed(done):
+                    with contextlib.suppress(OSError):
+                        shutil.move(dst, src)
+                raise ValueError(f"couldn't move {os.path.basename(src)}: {e}")
+            for src, _dst in data["moved"]:  # (the folders a chat's left in Baude's trash, empty now: gone)
+                if src.startswith(meta_trash() + os.sep):
+                    for folder in (os.path.dirname(src), os.path.dirname(os.path.dirname(src))):
+                        with contextlib.suppress(OSError):
+                            os.rmdir(folder)
+            sidebar.refresh()
+        else:
+            raise ValueError(f"No such action: {kind}")
+
+    # ---- the index: Baude's part
+    def index_lines(self):
+        win, sidebar, lines = self.win, self.win.sidebar, []
+        if win.session_id and win.chat_begun():
+            lines.append(f"chat open: {win.session_id[:8]} {json.dumps(getattr(win, 'session_title', None) or '')} · "
+                         f"{pretty_path(win.cwd or '')} · {win.model or 'default model'} · {win.mode} · "
+                         f"{win.session_state()}")
+        infos, assigned = self.all_infos(), chat_groups()
+        archived = sidebar.archived_ids()
+        counts = {}
+        for i in infos:
+            counts[chat_group(i, assigned)] = counts.get(chat_group(i, assigned), 0) + 1
+        hosts, groups = sidebar.host_filter(), sidebar.group_filter()
+        lines.append("hosts: " + ", ".join(name + (f" ({note})" if note else "") for _k, name, note in
+                                           sidebar.known_hosts()) +
+                     f" · listed: {'all' if hosts is None else ', '.join(sorted(hosts))}")
+        lines.append("groups: " + ", ".join(f"{label} {counts.get(k, 0)}" for k, label, _n in sidebar.known_groups()) +
+                     f" · listed: {'all' if groups is None else ', '.join(g or 'No group' for g in sorted(groups))}")
+        lines.append(f"chats: {len(infos)}, {sum(i['id'] in archived or bool(i.get('archived')) for i in infos)} "
+                     f"archived; grouped by {'date' if sidebar.by_date() else 'folder'} (app_index chats, filter by a "
+                     "word, a folder or a group)")
+        return lines
+
+    def running_lines(self):
+        win, out = self.win, []
+        if win.proc is not None:
+            pid = getattr(getattr(win.proc, "p", None), "pid", None)
+            out.append(f"the open chat's claude ({win.session_state()}" + (f", pid {pid})" if pid else ")"))
+        if busy := [s for s in network().sessions() if s.get("state") in ("working", "waiting")]:
+            out.append(f"{len(busy)} host session{'s' if len(busy) != 1 else ''} at a turn: " +
+                       ", ".join(f"{s['id'][:8]} {s.get('state')}" for s in busy[:8]))
+        panel = win.panel
+        for n, said in ((len(panel.agent_rows), "subagent"), (len(panel.proc_rows), "background process"),
+                        (len(panel.side_questions()), "side question")):
+            if n:
+                out.append(f"{n} {said}{'s' if n != 1 else ''} in the open chat")
+        if self.agent is not None and not self.agent.closed:
+            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model})")
+        return out
+
+    def sections(self):
+        sidebar = self.win.sidebar
+
+        def chats(_f):
+            assigned, archived = chat_groups(), sidebar.archived_ids()
+            return [{"id": i["id"][:8], "title": i.get("title") or "(untitled)",
+                     "folder": pretty_path(i.get("folder") or i.get("cwd") or "") or "no folder",
+                     "group": chat_group(i, assigned),
+                     "host": remote_name(i["remote"]) if i.get("remote") and host_key(i["remote"]) != HERE_HOST else
+                     THIS_MACHINE, "ago": time_ago(last_used(i)),
+                     "state": i.get("remote_state") if i.get("remote") is not None else sidebar.file_state(i),
+                     "archived": i["id"] in archived or bool(i.get("archived"))}
+                    for i in sorted(self.all_infos(), key=last_used, reverse=True)]
+
+        def groups(_f):
+            picked = sidebar.group_filter()
+            return [{"name": label, "listed": picked is None or k in picked} for k, label, _n in sidebar.known_groups()]
+
+        def hosts(_f):
+            picked = sidebar.host_filter()
+            return [{"name": name, "note": note, "listed": picked is None or k in picked}
+                    for k, name, note in sidebar.known_hosts()]
+        return {
+            "chats": (chats, lambda r: f"{r['id']} {json.dumps(r['title'])} · {r['folder']} · " +
+                      (f"group {r['group']} · " if r["group"] else "") + f"{r['host']} · {r['ago']}" +
+                      (f" · {r['state']}" if r["state"] not in (None, "inactive") else "") +
+                      (" · archived" if r["archived"] else "")),
+            "groups": (groups, lambda r: r["name"] + (" · listed" if r["listed"] else "")),
+            "hosts": (hosts, lambda r: r["name"] + (f" ({r['note']})" if r["note"] else "") +
+                      (" · listed" if r["listed"] else "")),
+        }
+
+    def context(self, agent, msg):
+        """What's @-referenced: a chat's conversation, a file's text, or what it is."""
+        said = []
+        for item in self.referenced(msg["text"]):
+            if item.get("kind") == "chat" and item.get("path"):
+                said.append(f'<chat title="{meta.attr(item["surface"])}" id="{item.get("id", "")[:8]}">\n'
+                            f'{meta.transcript_text(item["path"], 12000)}\n</chat>')
+                agent.allowed.add(os.path.realpath(item["path"]))
+            elif (path := item.get("path")) and os.path.isfile(path):
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        text = f.read(meta.REF_LIMIT + 1)
+                except OSError:
+                    text = "(not read)"
+                said.append(f'<file name="{meta.attr(item["surface"])}" path="{meta.attr(path)}">\n'
+                            f'{meta.trimmed(text, meta.REF_LIMIT, path)}\n</file>')
+                agent.allowed.add(os.path.realpath(path))
+            else:
+                said.append(f'<ref name="{meta.attr(item["surface"])}">{meta.attr(item.get("what") or "")}, '
+                            f'{meta.attr(item.get("summary") or "")}</ref>')
+        return ["<referenced>\n" + "\n".join(said) + "\n</referenced>"] if said else []
+
+
 class SidePanel(Gtk.Box):
-    """Right-hand pane: subagents (each with its own transcript) and background processes
+    """Right-hand pane: Meta (BaudeMeta), subagents (each with its own transcript) and background processes
     (status, live output tail, stop)."""
 
     def __init__(self, win):
@@ -8956,6 +9608,11 @@ class SidePanel(Gtk.Box):
                                     margin_top=6, margin_bottom=6, halign=Gtk.Align.CENTER)
         self.append(switcher)  # (no rule under it: the frame has none: widgets.CSS)
         self.append(self.stack)
+
+        # Meta, Baude's helper: first, its spanner
+        self.meta = BaudeMeta(win)
+        page = self.stack.add_titled(self.meta, "meta", meta.NAME)
+        page.set_icon_name("baude-meta-symbolic")
 
         # subagents: list -> detail
         self.agent_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
@@ -10424,7 +11081,8 @@ def _num(path):
 
 
 class SettingsDialog(Adw.PreferencesDialog):
-    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): full-width text, the code font, the accent colour, Baude in
+    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): Meta's (its model, Code mode), full-width text, the code font,
+    the accent colour, Baude in
     the platform's list of apps, feedback, and the sizes, 1.0 the usual: the text's and the icons', all of them in every
     window (apply_scales), and the chat's zoom that ⌘0 / Ctrl+0 goes back to. Each takes as it's changed (the code font
     from the next start) and is kept in settings.json. (The switches are the window's actions, full-width's the menu's
@@ -10433,6 +11091,7 @@ class SettingsDialog(Adw.PreferencesDialog):
     def __init__(self, win):
         super().__init__(title="Settings")
         page = widgets.settings_page()
+        page.add(meta.settings_group(win.panel.meta))  # (Record's too, and the same settings)
         group = Adw.PreferencesGroup()
         group.add(self.switch("Full-width text", None, "win.fullwidth"))
         group.add(widgets.settings_code_font(win, "Baude"))
@@ -13048,6 +13707,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     if GLib.MainContext.default().find_source_by_id(source):
                         GLib.source_remove(source)
         self.tail.stop()
+        self.panel.meta.close_agent()  # (Meta's session: the window's own)
         for fn in (self.on_network, self.sidebar.on_network):  # (the network's news isn't this window's any more)
             if fn in network().listeners:
                 network().listeners.remove(fn)
@@ -14709,11 +15369,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
             return
         r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
-        sb = self.sidebar  # (its host and group listed, if ⋮ leaves them out)
-        hosts, groups, group = sb.host_filter(), sb.group_filter(), reply["session"].get("group") or ""
+        sb, info = self.sidebar, remote_info({**reply["session"], "server": r})
+        hosts, groups, group = sb.host_filter(), sb.group_filter(), chat_group(info)  # (listed, if ⋮ leaves them out)
         sb.filtered(sidebar_hosts=sorted(hosts | {host_key(r)}) if hosts is not None else None,
                     sidebar_groups=sorted(groups | {group}) if groups is not None else None)
-        self.open_remote_soon(remote_info({**reply["session"], "server": r}))
+        self.open_remote_soon(info)
 
     def open_remote_link(self, uri):
         """A link in a network session to a file on its server, not this machine: fetched from it and shown in a tab, as

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""record — notes, and an agent beside them that reads them, and AI-written prose, with you.
+"""record — notes, and Meta beside them, which reads them, and AI-written prose, with you.
 
 Each notebook is a glossary, kept as notes: wiki pages (Markdown, [[links]] between them, @name for a page, a notebook
-or anything Baude's ⌘K finds) of the things you already understand, in your own words. The Record, in the right bar, is
-an agent (Claude Code, run as `claude -p`, Haiku unless Settings → Intelligence says another) for the notebook open:
+or anything Baude's ⌘K finds) of the things you already understand, in your own words. Meta, in the right bar, is
+the helper that operates Record (meta.py: Claude Code, run as `claude -p`, Haiku unless Settings → Meta says another),
+its conversation the notebook open's:
   * it reads the notebook's pages and folders, and whatever's @-referenced in what you ask (a page, a notebook, a file,
     a chat: its text goes with your message), and remembers the conversation;
   * a passage selected on a page, or picked in a chat read, is quoted with what you ask: asked to fill it in or change
     it, it proposes the change, shown on the page as a diff for you to accept or reject. It never writes your notes;
+  * it adds, deletes and moves pages, renames chats and changes settings, each an action you can undo, the pages it
+    changed marked in the pages' list; asked about a setting, it shows the setting's row;
   * asked what a chat's passage means, it explains it through your notes, and names what it would need to know when
     they aren't enough.
 
@@ -23,8 +26,8 @@ Record is part of Baude: it lives beside baude.py and searches a notebook's fold
 Baude's ⌘K, for @ in the diary, for the names linked in the chat, and for what its questions say those names are.
 One Record runs at a time: started again, it hands what it was asked to the one running.
 
-Its session is `claude -p` speaking stream-json (baudelib's ClaudeProc), its tools Read, Grep and Glob and its own
-propose_edit, in Claude Code's default permission mode. Set RECORD_CLAUDE=/path/to/claude to use a specific claude
+Meta's session is `claude -p` speaking stream-json (baudelib's ClaudeProc), its tools Read, Grep and Glob and its own
+(meta.SHARED_TOOLS, RECORD_TOOLS), in Claude Code's default permission mode. Set RECORD_CLAUDE=/path/to/claude to use a specific claude
 binary (else claude on PATH, else, on macOS, the Claude desktop app's). Records are saved in
 $XDG_DATA_HOME/record/records.json (macOS: ~/Library/Application Support/Record; RECORD_DATA=dir puts them somewhere
 else).
@@ -38,10 +41,8 @@ import math
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unicodedata
@@ -69,17 +70,16 @@ import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
 from baudelib.transcripts import task_notification  # noqa: E402  (a background task's ending, as said)
-from baudelib.claude import MODELS, ClaudeProc  # noqa: E402  (Claude Code's process, as Baude runs its chats)
+from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
 from codeview import FindInText  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
+import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 
 APP_ID = "dev.baude.Record"
-AGENT_MODEL = "haiku"  # the agent's model, unless Settings → Intelligence says another
-AGENT_MODELS = list(reversed(MODELS))  # ((value, label): what Intelligence offers, the quickest first)
 QUOTE_LIMIT = 6000
 MACOS_DESKTOP_CLAUDE = "~/Library/Application Support/Claude/claude-code"
 
@@ -155,7 +155,7 @@ LINK_RE = re.compile(r"\[\[([^\]|\n]+)(?:\|([^\]\n]*))?\]\]")
 # or always (a link's [[ ]] and address kept hidden)
 MARKUP_MODES = {"line": "Show formatting on current line", "none": "Don't show formatting",
                 "all": "Show all formatting (Except Links)"}
-REF_RE = re.compile(r"(?<![\w@])@(?:\{([^}\n]+)\}|([\w][\w./:\-]*[\w/]|\w))")
+REF_RE = meta.REF_RE  # (@name, @{a name})
 ISSUE_OPENS = re.compile(r"[\s(\[{<]")  # (what a # that's asking for GitHub's list comes after, if anything does)
 # (a line's quote and list marks, and a task's box: a # after them is first on the line, as far as it's concerned)
 ISSUE_LEAD = re.compile(r"\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
@@ -178,6 +178,21 @@ def page_target(page, target):
 def page_link(page, target):
     """How a link in page to target is written: +Ideas for one of its own sub-pages, else target's name."""
     return "+" + target[len(page) + 1:] if target.startswith(page + ":") else target
+
+
+def relinked_pages(pages, moved):
+    """pages ({name: text}) with moved's renamed ({old: new}: a page and its sub-pages, DiaryEditor.rename_page's or
+    Meta's move_pages) and every [[link]] to any of them following; a +link stays one where it still can (its page's
+    sub-page)."""
+    def relinked(text, here, there):  # (here: the page the text is in, before; there: after)
+        def relink(m):
+            to = page_target(here, m.group(1))
+            if to not in moved:
+                return m.group(0)
+            written = page_link(there, moved[to]) if m.group(1).strip().startswith("+") else moved[to]
+            return f"[[{written}|{m.group(2)}]]" if m.group(2) is not None else f"[[{written}]]"
+        return LINK_RE.sub(relink, text)
+    return {moved.get(n, n): relinked(text, n, moved.get(n, n)) for n, text in pages.items()}
 
 
 def heading_levels(lines):
@@ -342,10 +357,7 @@ def github_ref(m):
         m.group(1).lstrip().startswith("@")
 
 
-def plain_ref(surface):
-    """A name as plain @ has it: @name, or @{name} when it has characters a bare one can't."""
-    return "@" + (surface if re.fullmatch(r"[\w][\w./:\-]*[\w/]|\w", surface) else "{" + surface + "}")
-
+plain_ref = meta.plain_ref  # (a name as plain @ has it: @name, or @{name})
 
 def issue_query(before, at):
     """What a # at position at of a line is searching GitHub's list for, the line typed as far as the caret (before), or
@@ -403,7 +415,6 @@ class Store:
         self.chats = []  # (the chats open, a tab each, in their order: [{path, title, cwd}])
         self.pages_folded = self.books_folded = False  # (the pages' list, and the notebooks', folded away)
         self.markup = "line"  # (the notes' formatting shown: "line", the caret's; "none"; "all", all but links')
-        self.agent_model = AGENT_MODEL  # (Settings → Intelligence: the model the Record's agent runs on)
         self.books_width = None  # (the notebooks' column, dragged; None: as it comes)
         self.zoom = self.zoom_default = 1.0  # (Ctrl/⌘ + − 0: the notes', the chat's and the conversation's text)
         try:
@@ -422,8 +433,9 @@ class Store:
                 self.pages_folded = bool(saved.get("pages_folded"))
                 self.books_folded = bool(saved.get("books_folded"))
                 self.markup = saved.get("markup") if saved.get("markup") in MARKUP_MODES else "line"
-                self.agent_model = saved.get("agent_model") if saved.get("agent_model") in dict(AGENT_MODELS) \
-                    else AGENT_MODEL
+                chosen = saved.get("agent_model")  # (the model chosen for Record's own agent: Meta's, if it has none)
+                if chosen in dict(MODELS) and chosen != meta.MODEL and "meta_model" not in widgets.load_settings():
+                    widgets.save_settings(meta_model=chosen)
         except (OSError, ValueError, AttributeError):
             pass
         zim = bool(self.notebooks) and saved_notes != "markdown"  # (notes from before Markdown: Zim's markup, made so once)
@@ -558,8 +570,8 @@ class Store:
             json.dump({"records": self.notebooks, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
-                       "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
-                       "agent_model": self.agent_model}, f, indent=1)
+                       "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all},
+                      f, indent=1)
             f.flush()
             os.fsync(f.fileno())  # (on the disk before it takes the file's place)
         os.replace(tmp, self.path)
@@ -847,73 +859,7 @@ def short_dir(d):
 
 # ---------------------------------------------------------------- markdown → Pango
 
-def _name_link(name, shown):
-    return f'<a href="ref:{urllib.parse.quote(name, safe="")}">{shown}</a>'
-
-
-def _inline(s, names=()):
-    """A line's inline markdown as Pango markup, the names (from SearchSpace.mentions) linked as ref:name."""
-    out = []
-    for part in re.split(r"(`[^`\n]+`)", s):
-        if len(part) > 1 and part.startswith("`") and part.endswith("`"):
-            code = '<span font_family="monospace" size="' + widgets.code_markup_size() + '" background="#8882">' + html.escape(part[1:-1], False) + "</span>"
-            name = next((n for n in (part[1:-1], lookup.ref_key(part[1:-1])) if n in names), None)
-            out.append(_name_link(name, code) if name else code)
-            continue
-        found = []  # (the names in prose, kept out of the formatting as \0n\0, put back linked)
-        if names:
-            keep = lambda m: m[0] if m[0] not in names else (found.append(m[0]) or f"\0{len(found) - 1}\0")  # noqa: E731
-            part = lookup._CATALOGUE_TOKEN.sub(keep, lookup.GITHUB_NAME.sub(keep, part))
-        t = html.escape(part, False)
-        t = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", lambda m: f'<a href="{html.escape(m.group(2))}">{m.group(1)}</a>', t)
-        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
-        t = re.sub(r"(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])", r"<i>\1</i>", t)
-        t = re.sub(r"(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)", r"<i>\1</i>", t)
-        t = re.sub(r"\0(\d+)\0", lambda m: _name_link(found[int(m[1])], html.escape(found[int(m[1])], False)), t)
-        out.append(t)
-    return "".join(out)
-
-
-def md_markup(text, names=()):
-    lines, out, code = text.split("\n"), [], None
-    for line in lines:
-        if line.lstrip().startswith("```"):
-            if code is None:
-                code = []
-            else:
-                out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape("\n".join(code), False) + "</span>")
-                code = None
-            continue
-        if code is not None:
-            code.append(line)
-            continue
-        m = re.match(r"(#{1,6})\s+(.*)", line)
-        if m:
-            size = "x-large" if len(m.group(1)) == 1 else "large" if len(m.group(1)) == 2 else "medium"
-            out.append(f'<span size="{size}" weight="bold">{_inline(m.group(2), names)}</span>')
-        elif re.match(r"\s*([-*+])\s+", line):
-            ind = len(line) - len(line.lstrip())
-            out.append("   " * (ind // 2) + " •  " + _inline(re.sub(r"^\s*[-*+]\s+", "", line), names))
-        elif line.lstrip().startswith("|"):
-            out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape(line, False) + "</span>")
-        elif line.startswith(">"):
-            out.append("<i>" + _inline(line.lstrip("> "), names) + "</i>")
-        elif re.fullmatch(r"\s*([-*_])\1{2,}\s*", line):
-            out.append("―――")
-        else:
-            out.append(_inline(line, names))
-    if code is not None:
-        out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape("\n".join(code), False) + "</span>")
-    return "\n".join(out)
-
-
-def set_md(label, text, names=()):
-    markup = md_markup(text, names)
-    try:  # (checked as Pango has it: <a> is the label's own, which Pango doesn't know)
-        Pango.parse_markup(re.sub(r"</?a\b[^>]*>", "", markup), -1, "\0")
-        label.set_markup(markup)
-    except GLib.Error:
-        label.set_text(text)
+_name_link, _inline, md_markup, set_md = meta._name_link, meta._inline, meta.md_markup, meta.set_md
 
 
 def paned_grip(paned):
@@ -928,31 +874,34 @@ def paned_grip(paned):
     return paned
 
 
-# ---------------------------------------------------------------- the agent
-# Record's agent is a Claude Code session (claude -p, speaking stream-json: baudelib's ClaudeProc, as Baude runs its
-# chats), one for the conversation with the notebook open, kept while it's open: it remembers what's been said, as a
-# chat does, and a new one (a notebook gone back to, Record started again, another model) is told what was said before.
-# It reads (Read, Grep, Glob) the notebook's pages, as their files (Store.mirror_pages), and its folders, and changes
-# nothing: a change to a page it proposes with propose_edit (its MCP tool, answered here: RecordChat.propose), which the
-# page shows as a diff, to accept or reject (DiaryEditor.show_proposal).
+# ---------------------------------------------------------------- Meta, in Record
+# Record's helper is Meta (meta.py, Baude's too), in the right bar: its conversation is the notebook open's
+# (RecordChat, a meta.MetaChat), one session kept while it's open, and a new one (a notebook gone back to, Record started
+# again, another model) told what was said before. It reads (Read, Grep, Glob) the notebook's pages, as their files
+# (Store.mirror_pages), and its folders. A change to a page's text it proposes with propose_edit (RecordChat.propose),
+# which the page shows as a diff, to accept or reject (DiaryEditor.show_proposal); the pages themselves it adds,
+# deletes and moves at once, as actions, marked in the pages' list till they're kept or undone (PagesList.fill).
 
-SYSTEM = """You are {name}, the agent in the user's notes app. They keep notebooks of pages in Markdown \
-([[Page]] links a page to another; @name is a page, a notebook, a file, a chat or anything else their folders have). \
-You see the notebook they have open: its pages, the folders attached to it, and what they @-reference or select. Your \
-tools only read: Read, Grep and Glob, over the notebook's pages (each one a file, read-only) and its folders.
+RECORD_PROMPT = """The user keeps notebooks of pages in Markdown ([[Page]] links a page to another; a page's name is \
+its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file, a chat or anything else their \
+folders have). You see the notebook they have open: its pages, the folders attached to it, and what they @-reference \
+or select. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and its folders.
 
-You never write the notes yourself. To change a page (fill a passage in, rewrite one, add to it), call propose_edit \
+You never write a page's text yourself. To change it (fill a passage in, rewrite one, add to it), call propose_edit \
 with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
 rejects it. When they've selected a passage on a page and ask you to fill it in or change it, the text it replaces is \
 that selection, exactly. Write in the page's Markdown and its voice, and only what was asked. Don't announce, \
-describe or sum up an edit: the user sees it. After one, say nothing unless there's something they need to know (a \
-guess you made, a TODO you left). You'll be told whether they accepted it.
+describe or sum up an edit: the user sees it. You'll be told whether they accepted it.
 
 Your edits stay pending, across turns and sessions, until the user accepts or rejects them: a draft over the page, \
 which they may keep writing in meanwhile. Work on that draft. list_edits shows what's pending; propose_edit's old_text \
 is found in the page as it reads with your pending edits applied, so a change to text one of them puts in revises \
 that edit, and one to text an edit replaces replaces it, rather than adding a second; revise_edit changes an edit \
 outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
+
+The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from another \
+notebook into the one open): each changes them at once, as an action, marked in the pages' list. highlight_pages \
+marks pages there without changing them, to show which you mean.
 
 What the user @-references comes with their message: its text, or where to read it. Use it and the conversation as \
 what you know of the subject, and read more with your tools when that helps. Don't make facts up: where something \
@@ -975,10 +924,10 @@ one last line: "Unknown: " then the jargon and ideas from the passage that are n
 their notes, separated by semicolons, each a short noun phrase, or "Unknown: none". Only a reply explaining a passage \
 ends so.
 
-Be brief and plain, with no headings unless you're asked for them. Talk like a peer."""
+Talk like a peer."""
 
-# the agent's own tools (MCP), as Claude Code sees them; Record answers them (RecordChat.propose)
-AGENT_MCP_TOOLS = [
+# Record's own tools, as Claude Code sees them (meta.SHARED_TOOLS are Baude's too); RecordChat answers them
+RECORD_TOOLS = [
     {"name": "propose_edit",
      "description": "Propose a change to a page of the user's notes, in the notebook open. The user sees it on the "
      "page as a diff and accepts or rejects it; nothing is written until they accept. old_text is the text that "
@@ -1004,69 +953,29 @@ AGENT_MCP_TOOLS = [
     {"name": "withdraw_edit",
      "description": "Take back one of your pending edits (list_edits): it goes from the page, the page as it is.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
+    {"name": "add_page",
+     "description": "Add a page to the notebook open, with its text (Markdown). A sub-page's name is its parent's "
+     "and its own: Work:Plans.",
+     "inputSchema": {"type": "object", "required": ["page"], "properties": {
+         "page": {"type": "string"}, "text": {"type": "string"}}}},
+    {"name": "delete_page",
+     "description": "Delete a page of the notebook open (not Home); its sub-pages stay.",
+     "inputSchema": {"type": "object", "required": ["page"], "properties": {"page": {"type": "string"}}}},
+    {"name": "move_pages",
+     "description": "Move pages, each with its sub-pages, under another page (under: its name; empty: the top), "
+     "keeping their own names; links to them follow. from_notebook: move them from that notebook into the one open.",
+     "inputSchema": {"type": "object", "required": ["pages", "under"], "properties": {
+         "pages": {"type": "array", "items": {"type": "string"}}, "under": {"type": "string"},
+         "from_notebook": {"type": "string"}}}},
+    {"name": "highlight_pages",
+     "description": "Mark pages in the pages' list, changing nothing, to show the user which you mean (till their "
+     "next message).",
+     "inputSchema": {"type": "object", "required": ["pages"], "properties": {
+         "pages": {"type": "array", "items": {"type": "string"}}}}},
 ]
-AGENT_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
-# its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
-# claude.ai connectors, no telemetry or update checks (as Baude's Signal reader has it)
-AGENT_ENV = {"ENABLE_TOOL_SEARCH": "false", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
-             "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
-REF_LIMIT = 20000  # characters of a referenced page's, file's or chat's text put in with a message (past it: where to Read)
+REF_LIMIT = meta.REF_LIMIT  # characters of a referenced page's, file's or chat's text put in with a message
 REFS_LIMIT = 60000  # of all a message references, together
 NOTES_LIMIT = 30000  # of the notebook's pages, with a session's first message (past it: their files, to Read)
-EARLIER_LIMIT = 16000  # of what was said before a session started, with its first message
-
-# the relay Claude Code starts as the agent's MCP server (python -c, nothing written): stdio JSON-RPC in, Record's
-# socket out (ToolSocket), a call a line. As Baude's Signal reader's (SIGNAL_READER_MCP)
-AGENT_RELAY = r'''import json, socket, sys
-
-sock = sys.argv[1]
-
-
-def call(tool, args):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(sock)
-    s.sendall((json.dumps({"tool": tool, "args": args}) + "\n").encode())
-    data = b""
-    while not data.endswith(b"\n"):
-        chunk = s.recv(1 << 16)
-        if not chunk:
-            break
-        data += chunk
-    s.close()
-    return json.loads(data or b"{}")
-
-
-def send(msg):
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
-
-
-for line in sys.stdin:
-    try:
-        msg = json.loads(line)
-    except ValueError:
-        continue
-    method, mid = msg.get("method"), msg.get("id")
-    if mid is None:
-        continue
-    try:
-        if method == "initialize":
-            result = {"protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                      "capabilities": {"tools": {}}, "serverInfo": {"name": "record", "version": "1"}}
-        elif method == "tools/list":
-            result = {"tools": call("_tools", {}).get("tools", [])}
-        elif method == "tools/call":
-            p = msg.get("params") or {}
-            res = call(p.get("name"), p.get("arguments") or {})
-            result = {"content": [{"type": "text", "text": res.get("error") or res.get("text") or json.dumps(res)}],
-                      "isError": bool(res.get("error"))}
-        else:
-            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
-            continue
-        send({"jsonrpc": "2.0", "id": mid, "result": result})
-    except Exception as e:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": "Record: " + str(e)}})
-'''
 
 
 def what_it_is(item, space):
@@ -1089,15 +998,7 @@ def said_names(text, space):
     return REF_RE.sub(known, plain_refs(text))
 
 
-def attr(value):
-    return html.escape(str(value), quote=True)
-
-
-def trimmed(text, limit, where=None):
-    """text, or its start as far as limit and what's left said, with where to read the rest."""
-    if len(text) <= limit:
-        return text
-    return text[:limit].rstrip() + f"\n[… {len(text) - limit} more characters" + (f": Read {where}" if where else "") + "]"
+attr, trimmed = meta.attr, meta.trimmed
 
 
 def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
@@ -1122,24 +1023,6 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
     parts.append("Its folders: " + (", ".join(folders) if folders else "none attached"))
     parts.append("</notebook>")
     return "\n".join(parts)
-
-
-def earlier_said(messages, limit=EARLIER_LIMIT):
-    """What was said before this session (a new one: Record started again, the notebook gone back to, another model),
-    the newest as far back as limit."""
-    lines, size = [], 0
-    for m in reversed([m for m in messages if not m.get("error")]):
-        who = "User" if m.get("role") == "user" else noun()
-        body = m.get("text") or ""
-        if m.get("quote"):
-            body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
-        for p in m.get("proposals") or ():
-            body += f"\n(an edit to {p['page']}: {p.get('status', 'pending')})"
-        size += len(body)
-        if size > limit and lines:
-            break
-        lines.append(f"{who}: {body}")
-    return "<earlier_conversation>\n" + "\n\n".join(reversed(lines)) + "\n</earlier_conversation>" if lines else ""
 
 
 def referenced(text, space):
@@ -1336,280 +1219,12 @@ def pages_root():
     return root
 
 
-def tool_said(name, inp):
-    """A tool call of the agent's, as its reply says it while it works."""
-    short = lambda p: os.path.basename(str(p).rstrip(os.sep)) or str(p)  # noqa: E731
-    if name == "Read":
-        return f"Reading {short(inp.get('file_path', ''))}…"
-    if name == "Grep":
-        return f"Searching for “{inp.get('pattern', '')}”…"
-    if name == "Glob":
-        return f"Looking for {inp.get('pattern', '')}…"
-    if name == "mcp__record__propose_edit":
-        return f"Proposing a change to {short_page(str(inp.get('page', '')))}…"
-    if name == "mcp__record__list_edits":
-        return "Looking at the edits waiting…"
-    if name in ("mcp__record__revise_edit", "mcp__record__withdraw_edit"):
-        return "Revising an edit…" if name.endswith("revise_edit") else "Taking back an edit…"
-    return f"{name}…"
-
-
-class ToolSocket:
-    """Where the agent's own tools come in (propose_edit): a Unix socket of Record's, its owner's only, that the relay
-    Claude Code runs as the agent's MCP server (AGENT_RELAY) talks to, a call a line. A call's answered on the main loop
-    (handler(tool, args) -> {"text"} or {"error"}), its thread waiting for that."""
-
-    _one = []
-
-    @classmethod
-    def get(cls):
-        if not cls._one:
-            cls._one.append(cls())
-        return cls._one[0]
-
-    def __init__(self):
-        self.handler = None
-        self.path = os.path.join(tempfile.gettempdir(), f"record-tools-{os.getpid()}.sock")
-        for old in glob.glob(os.path.join(tempfile.gettempdir(), "record-tools-*.sock")):  # (left by a Record gone, or
-            try:                                                                            # restarted: no atexit then)
-                pid = int(os.path.basename(old)[len("record-tools-"):-len(".sock")])
-                if pid != os.getpid():
-                    os.kill(pid, 0)
-                    continue
-            except ProcessLookupError:
-                pass
-            except (ValueError, OSError):
-                continue
-            try:
-                os.unlink(old)
-            except OSError:
-                pass
-        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        mask = os.umask(0o177)  # (made its owner's only)
-        try:
-            srv.bind(self.path)
-        finally:
-            os.umask(mask)
-        srv.listen(8)
-        threading.Thread(target=self._serve, args=(srv,), daemon=True, name="record-tools").start()
-        import atexit
-        atexit.register(lambda: os.path.exists(self.path) and os.unlink(self.path))
-
-    def _serve(self, srv):
-        while True:
-            try:
-                conn, _ = srv.accept()
-            except OSError:
-                return
-            threading.Thread(target=self._serve_one, args=(conn,), daemon=True).start()
-
-    def _serve_one(self, conn):
-        try:
-            data = b""
-            while not data.endswith(b"\n"):
-                chunk = conn.recv(1 << 16)
-                if not chunk:
-                    break
-                data += chunk
-            req = json.loads(data or b"{}")
-            if req.get("tool") == "_tools":
-                res = {"tools": AGENT_MCP_TOOLS}
-            else:
-                box, done = {}, threading.Event()
-                GLib.idle_add(self._call, req.get("tool"), req.get("args") or {}, box, done)
-                res = box.get("result") if done.wait(120) else None
-                res = res or {"error": f"{noun()} didn't answer: try again"}
-            conn.sendall((json.dumps(res, ensure_ascii=False, default=str) + "\n").encode())
-        except (OSError, ValueError) as e:
-            try:
-                conn.sendall((json.dumps({"error": str(e)}) + "\n").encode())
-            except OSError:
-                pass
-        finally:
-            conn.close()
-
-    def _call(self, tool, args, box, done):
-        try:
-            box["result"] = self.handler(tool, args) if self.handler is not None else {"error": f"{noun()} is closing"}
-        except Exception as e:  # noqa: BLE001 (the agent's told; Record goes on)
-            box["result"] = {"error": f"{type(e).__name__}: {e}"}
-        done.set()
-        return False
-
-
-class AgentProc(ClaudeProc):
-    """baudelib's ClaudeProc, on GTK's main loop, in Record's environment for claude (child_env)."""
-    dispatch = staticmethod(GLib.idle_add)
-    env_of = staticmethod(child_env)
-
-
-class Agent:
-    """Record's agent: a Claude Code session for a notebook's conversation (one turn at a time: ask), on the model
-    Settings → Intelligence says. Its tools only read (AGENT_TOOLS), in Claude Code's own default permission mode (Baude's
-    Manual): what's in the pages' folder and the notebook's folders it reads as it likes; anything else it asks for,
-    and is let read what the user referenced, else the user's asked (RecordChat.ask_permission); anything but its tools
-    it's refused. Its own tool, propose_edit, comes in on the ToolSocket. Its callbacks reach chat on the main loop:
-    _delta, _status, _done, agent_gone."""
-
-    STOP_WAIT = 3000  # ms for an interrupted turn to end, before the session's stopped
-
-    def __init__(self, chat, notebook, model, folders):
-        self.chat, self.notebook, self.model, self.folders = chat, notebook, model, list(folders)
-        self.key = Agent.key_for(notebook, model, folders)
-        self.turn, self.fresh, self.stderr, self.closed = None, True, [], False
-        self.allowed = set()  # (paths the user referenced: read when it asks)
-        tools = ToolSocket.get()
-        tools.handler = chat._tool
-        relay = {"mcpServers": {"record": {"command": sys.executable, "args": ["-I", "-c", AGENT_RELAY, tools.path]}}}
-        args = ["--system-prompt", SYSTEM.format(name=noun(), to_learn=TO_LEARN), "--tools", ",".join(AGENT_TOOLS),
-                "--mcp-config", json.dumps(relay), "--strict-mcp-config",
-                "--allowedTools", ",".join(f"mcp__record__{t['name']}" for t in AGENT_MCP_TOOLS),  # (they write
-                # nothing: asking for them would be noise)
-                "--no-session-persistence",  # (no transcript: it would be listed with your chats, for @ and ⌘K)
-                "--disable-slash-commands", "--setting-sources", ""]
-        for folder in self.folders:
-            args += ["--add-dir", folder]
-        self.proc = AgentProc(self.on_msg, self.on_exit, pages_root(), model, "default", extra=args, env=AGENT_ENV,
-                              exe=claude_exe())
-
-    @staticmethod
-    def key_for(notebook, model, folders):
-        """What a session's made for: one made for another is closed, and a new one started (RecordChat.submit)."""
-        return notebook.get("id"), model, tuple(folders)
-
-    def ask(self, text, turn):
-        """A message (turn: what the reply's made of, as it comes: text, proposals, the selection it's about)."""
-        self.turn, self.fresh = turn, False
-        self.proc.user(text)
-
-    def stop(self):
-        """The turn interrupted (Esc, the stop button): what's been said kept; the session too, unless it won't stop."""
-        if self.turn is None or self.turn.get("stopped"):
-            return
-        self.turn["stopped"] = True
-        self.chat._drop_asking(deny=True)  # (a read it's waiting to be let make: not)
-        self.proc.control({"subtype": "interrupt"})
-        turn = self.turn
-        GLib.timeout_add(self.STOP_WAIT, lambda: self.turn is turn and self.close() and False)
-
-    def close(self):
-        """Done with: its turn ended where it is, the session stopped."""
-        if self.closed:
-            return False
-        self.closed = True
-        turn, self.turn = self.turn, None
-        self.proc.kill()
-        if turn is not None:
-            self.chat._done(self, "".join(turn["text"]).strip(), None, turn)
-        self.chat.agent_gone(self)
-        return False
-
-    def may_read(self, path):
-        """Whether a path is one it reads without asking: in the pages' folder or the notebook's, or referenced."""
-        if not path:
-            return False  # (asked with none: Claude Code found it outside its folders some other way, a pattern's)
-        path = os.path.realpath(os.path.join(pages_root(), os.path.expanduser(str(path))))
-        roots = [os.path.realpath(pages_root()), *self.folders, *(p for p in self.allowed if os.path.isdir(p))]
-        return path in self.allowed or any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
-
-    def permission(self, msg):
-        rid, req = msg["request_id"], msg.get("request") or {}
-        name, inp = req.get("tool_name") or "", req.get("input") or {}
-        if name.startswith("mcp__record__") or name in AGENT_TOOLS and self.may_read(inp.get("file_path") or
-                                                                                      inp.get("path")):
-            self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
-        elif name in AGENT_TOOLS:
-            self.chat.ask_permission(self, rid, name, inp)
-        else:
-            self.proc.respond(rid, {"behavior": "deny", "message": f"{noun()}'s agent reads, and proposes changes with "
-                                    "propose_edit: it doesn't run other tools."})
-
-    def answer(self, rid, allow, name, inp):
-        """The user's answer to a read it asked for (RecordChat.ask_permission)."""
-        if self.closed:
-            return
-        if allow:
-            if path := inp.get("file_path") or inp.get("path"):
-                self.allowed.add(os.path.realpath(os.path.join(pages_root(), os.path.expanduser(str(path)))))
-            self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
-        else:
-            self.proc.respond(rid, {"behavior": "deny", "message": f"The user didn't let you {name} that."})
-
-    def on_msg(self, proc, msg):
-        if proc is not self.proc or self.closed:
-            return False
-        t, turn = msg.get("type"), self.turn
-        if t == "_stderr":
-            self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
-        elif t == "control_request":
-            if (msg.get("request") or {}).get("subtype") == "can_use_tool":
-                self.permission(msg)
-            else:
-                proc.send({"type": "control_response", "response": {
-                    "subtype": "error", "request_id": msg.get("request_id"),
-                    "error": f"record: unsupported {(msg.get('request') or {}).get('subtype')}"}})
-        elif turn is None or msg.get("parent_tool_use_id"):
-            pass
-        elif t == "stream_event":
-            ev = msg.get("event") or {}
-            if ev.get("type") == "message_start":  # (a message of the turn's, after a tool's: a paragraph of its own)
-                turn["streamed"] = False
-                if "".join(turn["text"]).strip() and not "".join(turn["text"]).endswith("\n\n"):
-                    turn["text"].append("\n\n")
-            delta = ev.get("delta") or {}
-            if ev.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
-                turn["text"].append(delta["text"])
-                turn["streamed"] = True
-                self.chat._delta(self, "".join(turn["text"]))
-        elif t == "assistant":
-            for c in (msg.get("message") or {}).get("content") or []:
-                if c.get("type") == "tool_use":
-                    self.chat._status(self, tool_said(c.get("name"), c.get("input") or {}))
-                elif c.get("type") == "text" and not turn.get("streamed") and c.get("text"):
-                    turn["text"].append(c["text"])
-                    self.chat._delta(self, "".join(turn["text"]))
-        elif t == "result":
-            self.turn = None
-            text = "".join(turn["text"]).strip() or ("" if msg.get("is_error") else (msg.get("result") or "").strip())
-            error = None
-            if msg.get("is_error") and not turn.get("stopped"):
-                error = (msg.get("result") or "; ".join(map(str, msg.get("errors") or [])) or
-                         "claude reported an error")[-600:]
-                if "log" in error.lower() and "in" in error.lower():
-                    error += "\n\nRun `claude` in a terminal and /login, then ask again."
-            self.chat._done(self, text, error, turn)
-        return False
-
-    EXIT_WAIT = 200  # ms for what it said as it ended (stderr, read on its own thread) to come in
-
-    def on_exit(self, code):
-        if not self.closed:
-            GLib.timeout_add(self.EXIT_WAIT, self._exited, code)
-        return False
-
-    def _exited(self, code):
-        if self.closed:
-            return False
-        self.closed = True
-        turn, self.turn = self.turn, None
-        if turn is not None:
-            error = None if turn.get("stopped") else \
-                ("\n".join(self.stderr[-6:]).strip() or f"claude exited with {code}")[-600:]
-            self.chat._done(self, "".join(turn["text"]).strip(), error, turn)
-        self.chat.agent_gone(self)
-        return False
-
-
 # ---------------------------------------------------------------- UI pieces
 
 CSS = """
 .reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
 .reader-assistant { padding: 4px 2px; }
 .reader-assistant label.prose { font-size: 1.02em; }
-.bubble-user { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
-.bubble-record { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
-.bubble-error { background: alpha(@error_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
-label.said-refs link { color: #2f8f72; }  /* (an @reference in what you wrote: as a page's @names, RecordChat._said) */
 button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 4px; color: white; box-shadow: none; }
 button.edit-accept { background: #2ec27e; }
 button.edit-accept:hover { background: #26a269; }
@@ -1623,7 +1238,7 @@ button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reje
                    opacity: 0.8; }  /* (a quote as Baude's chat has one: .md-quote) */
 .diary-title { font-size: 1.75em; font-weight: 800; }
 .diary { font-size: 1.05em; background: transparent; }
-/* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and the Record's column the frame, no lines
+/* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
 entry.diary-title { background: none; }
 entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
@@ -1653,18 +1268,7 @@ def set_zoom_class(widget, name):
         widget.zoomed = name
 
 
-def label(text="", css=(), wrap=True, select=False, xalign=0.0, markup=False):
-    lb = (widgets.WrapLabel if wrap else Gtk.Label)(xalign=xalign, wrap=wrap, selectable=select)
-    if wrap:
-        lb.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    if markup:
-        lb.set_markup(text)
-    else:
-        lb.set_text(text)
-    for c in css:
-        lb.add_css_class(c)
-    return lb
-
+label = meta.label  # (a label as Meta's column has them)
 
 def folder_attachment(folder):
     """A folder picked to attach (AttachDialog): no transcript (path None), the folder's name, the folder. A Record
@@ -3131,16 +2735,8 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.win.toast(f"There's a page called {typed} already")
             return False
 
-        def relinked(text, here, there):  # (here: the page the text is in, before; there: after)
-            def relink(m):
-                to = page_target(here, m.group(1))
-                if to not in moved:
-                    return m.group(0)
-                written = page_link(there, moved[to]) if m.group(1).strip().startswith("+") else moved[to]
-                return f"[[{written}|{m.group(2)}]]" if m.group(2) is not None else f"[[{written}]]"
-            return LINK_RE.sub(relink, text)
-        renamed = {moved.get(n, n): relinked(text, n, moved.get(n, n)) for n, text in pages.items()}
-        pages.clear()  # (the same dict: the Record keeps it)
+        renamed = relinked_pages(pages, moved)
+        pages.clear()  # (the same dict: the notebook keeps it)
         pages.update(renamed)
         self.win.store.save()
         self.win.note_renamed(moved)
@@ -3467,6 +3063,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.view.queue_draw()
         self._mark_token()  # (@'s search, if it's on: its colour over what was just drawn)
         self._mark_proposals()  # (and a proposed change's)
+        if (chat := getattr(self.win, "chat", None)) is not None:
+            chat.tint(self)  # (and Meta's, a page it added: all green)
         self._find_again()
 
 
@@ -4943,7 +4541,7 @@ class PagesList(Gtk.Box):
         self.append(self.head)
         self.index = widgets.TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.index.add_css_class("navigation-sidebar")
-        self.index.connect("row-activated", lambda _l, row: self.win.open_note(row.page))
+        self.index.connect("row-activated", lambda _l, row: not row.gone and self.win.open_note(row.page))
         self.revealer = Gtk.Revealer(child=Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                               child=self.index),
                                      transition_type=Gtk.RevealerTransitionType.NONE,
@@ -5008,12 +4606,20 @@ class PagesList(Gtk.Box):
     def fill(self):
         """The pages (names), each sub-page under its parent (by its own name, indented, on Baude's tree line),
         Home's first; one with nothing written in it yet is grey and italic, as Zim shows them; the page shown
-        selected."""
+        selected. Those Meta's added, deleted (listed still, struck through) or moved, till they're kept or undone,
+        marked so (meta.mark_row), and those it's highlighted."""
         while (r := self.index.get_row_at_index(0)) is not None:
             self.index.remove(r)
         if self.notebook is None:
             return
         self.listed = order, grey = self.names()
+        chat = getattr(self.win, "chat", None)
+        own = f"{self.notebook.get('id')}\n"
+        marks = {key[len(own):]: mark for key, mark in (chat.marks("page") if chat is not None else {}).items()
+                 if key.startswith(own)}
+        gone = [n for n, (how, *_r) in marks.items() if how == "removed" and n not in order]
+        if gone:
+            order = sorted({*order, *gone}, key=lambda n: (n.partition(":")[0] != HOME, [s.lower() for s in n.split(":")]))
         shown = getattr(self.win.diary_shown(), "page", None)
         rows = {}
         for name in order:
@@ -5027,9 +4633,14 @@ class PagesList(Gtk.Box):
             row = rows[name] = Gtk.ListBoxRow(child=box, tooltip_text=name if depth else None)
             row.page, row.tree_anchor = name, lb  # (the line runs down from under its parent's name to its own)
             row.tree_parent = rows.get(name.rpartition(":")[0]) if depth else None
-            click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)  # (right-click: page_menu)
-            click.connect("pressed", lambda _g, _n, x, y, row=row: self.page_menu(row, x, y))
-            row.add_controller(click)
+            row.gone = name in gone  # (deleted: there's nothing to open)
+            if name in marks:
+                meta.mark_row(row, ("page", own + name), marks[name], chat, lb, inline=False)  # (where it was:
+                # under the pointer)
+            if not row.gone:
+                click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)  # (right-click: page_menu)
+                click.connect("pressed", lambda _g, _n, x, y, row=row: self.page_menu(row, x, y))
+                row.add_controller(click)
             self.index.append(row)
             if name == shown:
                 self.index.select_row(row)
@@ -5646,192 +5257,43 @@ class Reader(Gtk.Box):
             self.marks.queue_draw()
 
 
-class RefCompleter:
-    """@'s list over the Record's box: what @ lists in the notes (Window.space: the notebooks and their pages, the
-    folders' names, the chats), as the notes' @ looks and goes (DiaryEditor._token_changed) and as Baude's / is over its
-    composer (SlashCompleter). An @ typed at a word's start starts it; what's typed after it is its search, spaces and
-    all, till Enter or Tab takes what's picked (as @name, or @{a name} with spaces), Esc leaves it, a new line, the caret
-    back before the @, or words that find nothing. With nothing typed yet, the notebook's own pages come first."""
-
-    def __init__(self, win, view, anchor):
-        self.win, self.view, self.anchor = win, view, anchor
-        self.picks = widgets.PickList(anchor, self._bind, self.accept, position=Gtk.PositionType.TOP)
-        self.pop = self.picks.pop
-        self.pop.set_halign(Gtk.Align.START)  # (its left side on the @'s: PickList.over)
-        self.pop.set_offset(0, -10)
-        self.shown, self.query, self.moved, self.waiting, self.at = [], None, False, None, None
-        buf = view.get_buffer()
-        # (the @names it knows, as the notes colour theirs, and the search being typed: after the box's own markdown)
-        buf.create_tag("record-ref", foreground="#2f8f72", weight=600, background="rgba(79,138,124,0.14)")
-        buf.connect("insert-text", self._inserting)
-        buf.connect_after("changed", lambda *_: (self.refresh(), self.mark()))
-        buf.connect("notify::cursor-position", lambda *_: (self.refresh(), self.mark()))
-
-    def _inserting(self, buf, at, text, _n):
-        if text != "@":
-            return
-        before = at.copy()
-        if at.starts_line() or before.backward_char() and (before.get_char().isspace() or before.get_char() in "([{\"'"):
-            if self.at is not None:
-                buf.delete_mark(self.at)
-            self.at = buf.create_mark(None, at, True)  # (left of what goes in: on the @)
-
-    def word(self):
-        """(where its @ is, what's typed after it) while @'s search is on, else None."""
-        if self.at is None or self.at.get_deleted():
-            return None
-        buf = self.view.get_buffer()
-        a = buf.get_iter_at_mark(self.at).get_offset()
-        caret = buf.get_iter_at_mark(buf.get_insert()).get_offset()
-        typed = buf.get_text(buf.get_iter_at_offset(a), buf.get_iter_at_offset(max(a, caret)), True)
-        if caret <= a or not typed.startswith("@") or "\n" in typed:
-            return None
-        return a, typed[1:].lstrip("{")
-
-    def forget(self):
-        if self.at is not None:
-            self.view.get_buffer().delete_mark(self.at)
-            self.at = None
-        self.hide()
-
-    def refresh(self):
-        word = self.word()
-        if word is None:
-            if self.at is not None or self.picks.visible():
-                self.forget()
-            return
-        space, q = self.win.space(), word[1]
-        if space is None:
-            return self.forget()
-        shown, matched = space.search(q)
-        if not q.strip():
-            shown = notes_first(shown)
-        if not shown and " " in q:  # (an @ and words that name nothing: just words)
-            return self.forget()
-        i = self.picks.picked()
-        kept = self.shown[i]["surface"] if self.moved and q == self.query and i is not None and i < len(self.shown) \
-            else None  # (the same search, listed again as the catalogue comes in: what's picked stays picked)
-        self.shown, self.query = shown, q
-        at = next((j for j, it in enumerate(shown) if it["surface"] == kept), None)
-        self.moved = at is not None
-        if self.waiting is None and space.busy:
-            self.waiting = space.refresh(self._catalogued)
-        note = (f"{matched} found" if matched else "Nothing found") + (" · cataloguing…" if space.busy else "")
-        wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
-        self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
-        self.picks.show(len(shown), (at or 0) if shown else None, note,
-                        widgets.PickList.over(self.view, word[0], self.anchor))
-
-    def _catalogued(self):
-        self.waiting = None
-        if self.picks.visible():
-            self.refresh()
-        self.mark()
-
-    def mark(self):
-        """The @names the catalogue knows, in the notes' @names' colour, and @'s search while it's on."""
-        buf = self.view.get_buffer()
-        start, end = buf.get_bounds()
-        buf.remove_tag_by_name("record-ref", start, end)
-        text, space = buf.get_text(start, end, True), self.win.space()
-        for m in REF_RE.finditer(text):
-            if space is not None and space.find(m.group(1) or m.group(2)) is not None:
-                buf.apply_tag_by_name("record-ref", buf.get_iter_at_offset(m.start()), buf.get_iter_at_offset(m.end()))
-        if (word := self.word()) is not None:
-            buf.apply_tag_by_name("record-ref", buf.get_iter_at_offset(word[0]),
-                                  buf.get_iter_at_offset(word[0] + 1 + len(word[1])))
-
-    def _bind(self, i, icon, name, where):
-        it = self.shown[i]
-        icon.icon = it["icon"]
-        name.set_text(it.get("label") or it["surface"])
-        where.set_text(f"{it['what']} · {it['summary']}")
-        widgets.time_tip(where, it.get("at"), it.get("ago"))
-
-    def accept(self):
-        """The picked name in place of the @word, a space after it (one there already is the one)."""
-        i, word = self.picks.picked(), self.word()
-        if i is None or i >= len(self.shown) or word is None:
-            return
-        buf = self.view.get_buffer()
-        end = buf.get_iter_at_mark(buf.get_insert())
-        if end.get_char() == " ":
-            end.forward_char()
-        surface = self.shown[i]["surface"]
-        self.forget()
-        buf.begin_user_action()
-        buf.delete(buf.get_iter_at_offset(word[0]), end)
-        buf.insert_at_cursor(plain_ref(surface) + " ")
-        buf.end_user_action()
-        self.view.grab_focus()
-
-    def visible(self):
-        return self.picks.visible()
-
-    def hide(self):
-        self.moved = False
-        self.picks.hide()
-
-    def handle_key(self, keyval, state=0):
-        """True if the key was the list's."""
-        if not self.visible():
-            return False
-        steps = widgets.PickList.STEPS
-        if state & Gdk.ModifierType.SHIFT_MASK and keyval in (*steps, Gdk.KEY_Left, Gdk.KEY_Right):
-            self.forget()  # (Shift and an arrow: selecting the text, not picking in the list)
-            return False
-        if keyval in steps:
-            if self.shown:
-                self.picks.move(steps[keyval])
-                self.moved = True
-        elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
-            self.accept()
-        elif keyval == Gdk.KEY_Escape:
-            self.forget()
-        else:
-            return False
-        return True
+def markup_row(win):
+    """Settings → Markup visibility (and Meta's row for it): which of the notes' Markdown marks are shown."""
+    modes = list(MARKUP_MODES)
+    row = Adw.ComboRow(title="Markup visibility", model=Gtk.StringList.new(list(MARKUP_MODES.values())),
+                       selected=modes.index(win.store.markup))
+    row.connect("notify::selected", lambda r, _p: win.set_markup(modes[r.get_selected()]))
+    return row
 
 
-class SaidLabel(widgets.LinkLabel):
-    """What you wrote to the Record (RecordChat._said): a LinkLabel whose logos are in the @names' colour, as a page
-    draws them (NotesView.COLOR), not the text's. (LinkLabel draws them in get_color()'s; the text's own is GTK's.)"""
-
-    def get_color(self):
-        return NotesView.COLOR
+def page_key(notebook, page):
+    """A page as Meta's marks and actions name it: its notebook's id and its name."""
+    return f"{notebook.get('id')}\n{page}"
 
 
-class RecordChat(Gtk.Box):
-    """Your conversation with the Record, the notebook's agent (Agent): a passage picked in a chat read, or selected on
-    a page, quoted with what's asked; @ in the box lists what's to reference (RefCompleter), and what's referenced goes
-    with the message (ref_said); a change it proposes to a page is said under its reply, and shown on the page."""
+def page_name(text):
+    """A page's name as typed, its parts' spaces evened out (Work : Plans is Work:Plans)."""
+    return ":".join(base_name(part) for part in str(text or "").split(":") if base_name(part))
+
+
+class RecordChat(meta.MetaChat):
+    """Meta in Record (meta.MetaChat), the notebook open's conversation: a passage picked in a chat read, or selected
+    on a page, quoted with what's asked; what's referenced goes with the message (ref_said); a change it proposes to a
+    page's text is shown on the page, to accept or reject, and the pages it adds, deletes and moves are marked in the
+    pages' list (PagesList.fill)."""
+
+    APP = noun()
+    WHAT = "a notes app: notebooks of pages in Markdown that the user writes, and the Claude Code chats they read."
+    LISTED = "the pages"
+    PAGES = True
 
     def __init__(self, win):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        super().__init__(win)
+        self.notebook, self.quote, self.selection = None, "", None
         self.add_css_class("record-column")  # (the frame's: widgets.CSS)
-        self.win, self.notebook, self.ask, self.agent, self.quote, self.selection = win, None, None, None, "", None
-        self.live_widget, self.asking = None, []  # (the reply coming, and the reads it's asking to make: cards)
-        # (no name here: the notebooks' list says which it is, and the window's title)
-        head = Gtk.Box(spacing=6, halign=Gtk.Align.END, margin_end=8, margin_top=10, margin_bottom=6)
-        clear = Gtk.Button(icon_name="edit-clear-all-symbolic", tooltip_text="Clear conversation")
-        clear.add_css_class("flat")
-        clear.connect("clicked", lambda *_: self._clear())
-        head.append(clear)
-        self.append(head)  # (no rule under it: the frame has none)
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
-                           margin_start=12, margin_end=12)
-        self.scroll = widgets.markdown_scroller(self.box, vexpand=True)  # (as Baude's chat: widgets)
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.apply_zoom)
-        # the conversation and the box asked in, set into the column as a chat is into Baude's window, and a subagent's
-        # into its side panel (the inside: widgets.inside), Clear above it on the frame. No gap of its own on the
-        # page's side: the page's is the one between them, as thin as the window's edges are
-        talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
-        talk.append(self.scroll)
-        self.append(talk)
-        # composer
-        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=10)
         self.pending_box = self._pending_bar()
-        comp.append(self.pending_box)
+        self.bars.append(self.pending_box)
         self.quote_box = Gtk.Box(spacing=6)
         self.quote_box.add_css_class("quote-chip")
         self.quote_label = label("", css=("caption",))
@@ -5845,20 +5307,8 @@ class RecordChat(Gtk.Box):
         x.connect("clicked", lambda *_: self.set_quote(""))
         self.quote_box.append(x)
         self.quote_box.set_visible(False)
-        comp.append(self.quote_box)
-        # the box asked in: Baude's (widgets.Composer), its markdown shown as it's written, its button red to stop
-        # (no words laid over it: a label over a text view sat 2px off its caret, and wrapped below its one line at a
-        # bigger Text Scale)
-        self.writing = widgets.Composer()  # (its button's tip says the model: model_changed)
-        self.composer, self.send = self.writing.input, self.writing.send
-        self.refs = RefCompleter(win, self.composer, self.writing)
-        keys = Gtk.EventControllerKey()
-        keys.connect("key-pressed", self._key)
-        self.composer.add_controller(keys)
-        self.send.connect("clicked", lambda *_: self.ask.stop() if self.ask else self.submit())
-        comp.append(self.writing)
-        talk.append(comp)
-        self.model_changed()
+        self.bars.append(self.quote_box)
+        self.settings = self.make_settings()
 
     def show(self, notebook):
         self.close_agent()
@@ -5866,27 +5316,148 @@ class RecordChat(Gtk.Box):
         self.set_quote("")
         self.render()
 
-    def close_agent(self):
-        """Its session stopped (another notebook shown, the conversation cleared, the window gone): the next message
-        starts another, told what was said."""
-        if self.agent is not None:
-            self.agent.close()
-        self.agent = self.ask = None
+    # ---- what Meta.MetaChat asks of Record
+    def messages(self):
+        return self.notebook["messages"] if self.notebook is not None else []
 
-    def agent_gone(self, agent):
-        if agent is self.agent:
-            self.agent = self.ask = None
-            self.writing.set_busy(False)
-            self._drop_asking()
+    def actions(self):
+        return self.notebook.setdefault("meta_actions", []) if self.notebook is not None else []
 
-    def model_changed(self):
-        """Settings → Intelligence: the send button says the model it asks; the next message is the new model's
-        (submit)."""
-        model = dict(AGENT_MODELS).get(self.win.store.agent_model, self.win.store.agent_model)
-        self.writing.send_tip = f"Ask {model} (Enter)\nNew line: Shift+Enter\n@: a page, a notebook, a file…"
-        if self.ask is None:
-            self.send.set_tooltip_text(self.writing.send_tip)
+    def save(self, now=False):
+        (self.win.store.save_now if now else self.win.store.save)()
 
+    def ready(self):
+        return self.notebook is not None
+
+    def space(self):
+        return self.win.space()
+
+    def first_refs(self, items):
+        return notes_first(items)
+
+    def scope(self):
+        return self.notebook.get("id") if self.notebook else None, tuple(self.win.read_folders())
+
+    def agent_setup(self):
+        return {"cwd": pages_root(), "roots": [pages_root(), *self.win.read_folders()], "exe": claude_exe(),
+                "env_of": child_env}
+
+    def agent_made(self, agent):
+        agent.notebook = self.notebook
+
+    def app_prompt(self):
+        return RECORD_PROMPT.format(name=meta.NAME, to_learn=TO_LEARN)
+
+    def app_tools(self):
+        return RECORD_TOOLS
+
+    def app_handlers(self):
+        return {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
+                "withdraw_edit": self.withdraw_edit, "add_page": self.add_page, "delete_page": self.delete_page,
+                "move_pages": self.move_pages, "highlight_pages": self.highlight_pages}
+
+    def make_settings(self):
+        win = self.win
+        out = meta.shared_settings(win, self, noun(), lambda: win.store.zoom_default)
+        out["markup"] = meta.Setting("markup", "Markup visibility", lambda: win.store.markup, win.set_markup,
+                                     lambda: markup_row(win), list(MARKUP_MODES),
+                                     note="; ".join(f"{k}: {v}" for k, v in MARKUP_MODES.items()))
+        backup = "Include glossary and chats in backup"
+        out["backup_all"] = meta.Setting(
+            "backup_all", backup, lambda: win.store.backup_all,
+            lambda v: win.change_action_state("backupall", GLib.Variant.new_boolean(v)),
+            lambda: widgets.settings_switch(backup, backup_zip().replace(os.path.expanduser("~"), "~", 1),
+                                            "win.backupall"), bool)
+        return out
+
+    def _guard(self, agent):
+        if getattr(agent, "notebook", None) is not self.notebook:
+            return {"error": "That notebook isn't open any more: nothing was done."}
+        return super()._guard(agent)
+
+    def told(self):
+        return self.notebook.setdefault("meta_told", []) if self.notebook is not None else []
+
+    def showing(self, agent):
+        return getattr(agent, "notebook", None) is self.notebook
+
+    def store_reply(self, agent, m):
+        getattr(agent, "notebook", self.notebook)["messages"].append(m)
+
+    def marks_changed(self):
+        """What Meta's marked changed: the pages' list, the pages open (tint), and a deleted one's tab gone once it's
+        kept or undone."""
+        if self.notebook is None:
+            return
+        if self.win.pages.notebook is self.notebook:
+            self.win.pages.fill()
+        for child in self.win.tabs.children():
+            if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
+                self.tint(child)
+        gone = {key for key, (how, *_r) in self.marks("page").items() if how == "removed"}
+        for key in [k for k in list(self.win.tabs.pages) if k[0] == "gone" and k[1] not in gone]:
+            self.win.tabs.close(key)
+
+    def tint(self, editor):
+        """A page open as Meta's marks have it: one it added, all its text green (meta.mark_rgba, lit as its change's
+        box is under the pointer: light); else as it is."""
+        key = page_key(editor.notebook, editor.page)
+        mark = self.marks("page").get(key) if editor.notebook is self.notebook else None
+        buf = editor.buf
+        tag = buf.get_tag_table().lookup("meta-tint") or buf.create_tag("meta-tint")
+        buf.remove_tag(tag, *buf.get_bounds())
+        slots = self.painted.setdefault(("page", key), {})
+        if mark is None or mark[0] != "added":
+            slots.pop("text", None)
+            return
+
+        def paint(lit=False):
+            tag.set_property("background-rgba", meta.mark_rgba("added", lit))
+            buf.apply_tag(tag, *buf.get_bounds())
+        paint()
+        slots["text"] = paint
+
+    def open_mark(self, kind, key, how, action):
+        """A page in a change's box clicked: opened (in its notebook); one deleted, its text as it was, all red, in a
+        tab that can't be written in (open_gone)."""
+        book_id, _, page = key.partition("\n")
+        nb = next((t for t in self.win.store.notebooks if t.get("id") == book_id), None)
+        if kind != "page" or nb is None:
+            return
+        if how == "removed" and action["state"] == "done" and page not in nb["pages"]:
+            return self.open_gone(key, page, (action["undo"]["books"].get(book_id) or {}).get(page) or "")
+        if page in nb["pages"]:
+            self.open_page(nb, page)
+
+    def open_gone(self, key, page, text):
+        def make():
+            view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=24,
+                                right_margin=24, top_margin=16, bottom_margin=16)
+            view.add_css_class("diary")
+            buf = view.get_buffer()
+            buf.set_text(text)
+            tag = buf.create_tag("meta-tint", strikethrough=True)
+
+            def paint(lit=False):
+                tag.set_property("background-rgba", meta.mark_rgba("removed", lit))
+                buf.apply_tag(tag, *buf.get_bounds())
+            paint()
+            self.painted.setdefault(("page", key), {})["text"] = paint
+            return Gtk.ScrolledWindow(child=view, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.win.tabs.open(("gone", key), make, f"{short_page(page)} (deleted)", icon="user-trash-symbolic",
+                           tooltip=f"{page}: deleted by {meta.NAME}; undo brings it back")
+
+    def tool_summary(self, name, inp):
+        short = name.removeprefix("mcp__meta__")
+        if short in ("propose_edit", "add_page", "delete_page"):
+            return short_page(str(inp.get("page") or ""))
+        if short == "move_pages":
+            pages = ", ".join(short_page(str(p)) for p in inp.get("pages") or ())
+            return f"{pages} → {short_page(str(inp.get('under') or '')) or 'the top'}" + \
+                (f" (from {inp['from_notebook']})" if inp.get("from_notebook") else "")
+        return super().tool_summary(name, inp)
+
+    # ---- what's asked
     def set_quote(self, text):
         self.quote, self.selection = text[:QUOTE_LIMIT], None
         self.quote_label.set_text("“" + " ".join(text.split()) + "”" if text else "")
@@ -5908,73 +5479,109 @@ class RecordChat(Gtk.Box):
         self.selection = {"notebook": notebook.get("id"), "page": page, "start": start, "end": end, "text": text}
         self.quote_label.set_text(f"{short_page(page)} · “{' '.join(text.split())}”")
 
-    def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line (a list's next item,
-        a code block's closing fence put in), as in Baude; a selection and * ` or / is made bold, code or italic;
-        @'s list, while it's up, has the arrows, Enter, Tab and Esc (RefCompleter); Esc stops the reply."""
-        if self.refs.handle_key(keyval, state):
-            return True
-        if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
-            return True  # (just formatted, and Left or Right: outside its marks)
-        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and state & Gdk.ModifierType.ALT_MASK and \
-                not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK):
-            return self.writing.markdown.move_item(-1 if keyval == Gdk.KEY_Up else 1)
-        if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
-                widgets.wrap_selection(self.composer.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
-            return True
-        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()  # (False: the text view puts in a plain new line)
-            self.submit()
-            return True
-        if keyval == Gdk.KEY_Escape and self.ask:
-            self.ask.stop()
-            return True
-        return False
+    def plain(self, text):
+        return plain_refs(text)
+
+    def make_message(self, text):
+        msg = super().make_message(text)
+        notebook, space = self.notebook, self.space()
+        if msg.get("refs"):  # (each said as the catalogue says it)
+            msg["refs"] = [{"surface": it["surface"], "what": what_it_is(it, space), "icon": it.get("icon")}
+                           for it in self.referenced(text)]
+        if self.quote:
+            msg["quote"] = self.quote
+            if self.selection is not None and self.selection["notebook"] == notebook.get("id"):
+                msg["selection"] = self._selection_now(notebook) or \
+                    {"page": self.selection["page"], "start": None, "end": None, "text": self.selection["text"]}
+        return msg
+
+    def can_ask_empty(self):
+        return bool(self.quote)
+
+    def empty_question(self):
+        return "What does this mean?"
+
+    def before_ask(self):
+        self.win.store.flush()  # (the pages' files as they are: what it reads)
+
+    def taken(self, msg):
+        self.set_quote("")
+
+    def turn_extra(self, msg):
+        return {"proposals": [], "selection": msg.get("selection")}
+
+    def context(self, agent, msg):
+        """A new session's notebook; what's become of the changes proposed; what's referenced (ref_said, of
+        Window.space), the passage quoted from a chat (its names, the chat's) or selected on a page."""
+        notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
+        if agent.fresh:
+            parts.append(notebook_said(notebook, store, space))
+        for m in notebook["messages"]:
+            for p in m.get("proposals") or ():
+                if p.get("status") in ("accepted", "rejected") and not p.get("told"):
+                    if not agent.fresh:
+                        parts.append(f"(The change you proposed to {p['page']} was {p['status']} by the user.)")
+                    p["told"] = True
+        if waiting := pending_edits(notebook):
+            pages = list(dict.fromkeys(p["page"] for p in waiting))
+            parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
+                         "shows them.)")
+        left, said = REFS_LIMIT, []
+        for item in self.referenced(msg["text"]):
+            text, paths = ref_said(item, store, space, min(REF_LIMIT, max(2000, left)))
+            left -= len(text)
+            agent.allowed.update(os.path.realpath(p) for p in paths if p)
+            said.append(text)
+        if said:
+            parts.append("<referenced>\n" + "\n".join(said) + "\n</referenced>")
+        if msg.get("selection"):
+            parts.append(selection_said(msg["selection"], notebook, store))
+        elif msg.get("quote"):
+            chat_space = self.win.reader.space if self.win.reader is not None else None
+            parts.append(passage_said(msg["quote"], chat_space or space))
+        return parts
+
+    # ---- what it says
+    def render(self):
+        super().render()
+        self.show_pending_bar()
 
     def _clear(self):
-        self.close_agent()
-        self.notebook["messages"] = []
-        self.win.store.save_now()
-        self.render()
+        super()._clear()
         for child in self.win.tabs.children():  # (and what it proposed, from the pages open)
             if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
                 child.show_pending()
 
-    def render(self):
-        while (c := self.box.get_first_child()) is not None:
-            self.box.remove(c)
-        for m in self.notebook["messages"] if self.notebook else ():
-            self.box.append(self._bubble(m))
-        if self.ask is not None and self.live_widget is not None:  # (the reply coming, and what it's asking: kept)
-            self.box.append(self.live_widget)
-            for card in self.asking:
-                self.box.append(card)
-        self.show_pending_bar()
-        GLib.timeout_add(60, self._to_bottom)
+    def quote_said(self, m):
+        q = super().quote_said(m)
+        if q is not None and m.get("selection"):
+            return f"{short_page(m['selection']['page'])} · {q}"
+        return q
 
-    def _to_bottom(self):
-        if getattr(self.scroll, "held", False):
-            return False  # (put back where it was read to: widgets.hold_place)
-        adj = self.scroll.get_vadjustment()
-        adj.set_value(adj.get_upper())
-        return False
+    def prose(self, text):
+        """A reply's text, its folders' names linked (Window.follow), as Read shows a chat's."""
+        lb = label(select=True)
+        lb.add_css_class("prose")
+        self.set_prose(lb, text)
+        self.linked(lb)
+        return lb
+
+    def set_prose(self, lb, text):
+        set_md(lb, text, self.win.names_in(text))
+
+    def linked(self, lb):
+        lb.connect("activate-link", lambda _l, uri: self.win.follow(uri, from_chat=True))
+        on_name_hover(lb, self.win)
+
+    def has_work(self, m):
+        return super().has_work(m) or bool(m.get("proposals"))
 
     def _bubble(self, m):
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        if m["role"] == "user":
-            b.add_css_class("bubble-user")
-            outer.set_margin_start(28)
-            if m.get("quote"):
-                q = m["quote"]
-                where = f"{short_page(m['selection']['page'])} · " if m.get("selection") else ""
-                b.append(label(where + "“" + (" ".join(q.split())[:400] + ("…" if len(q) > 400 else "")) + "”",
-                               css=("quote-in-bubble",), select=True))
-            b.append(self._said(m))
-        elif (m.get("proposals") or m.get("revised") or m.get("withdrew")) and not m["text"] and not m.get("error"):
+        if m["role"] != "user" and m.get("items") is None and (m.get("proposals") or m.get("revised") or
+                                                                m.get("withdrew")) and \
+                not m.get("text") and not m.get("error") and not super().has_work(m):  # (from before tool cards)
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             edited = list(dict.fromkeys([short_page(p["page"]) for p in m.get("proposals") or ()] +
                                         [short_page(page) for page in m.get("revised") or ()]))  # (as it was then)
             gone = [short_page(page) for page in m.get("withdrew") or () if short_page(page) not in edited]
@@ -5983,51 +5590,28 @@ class RecordChat(Gtk.Box):
             b.append(label(" · ".join(said), css=("dim-label", "caption")))  # (it only edited)
             b.set_margin_start(12)
             b.prose = b.status = label("")
-        else:
-            b.add_css_class("bubble-error" if m.get("error") else "bubble-record")
-            outer.set_margin_end(28)
-            prose = label(select=True)
-            set_md(prose, m["text"] or ("…" if not m.get("proposals") else ""), self.win.names_in(m["text"] or ""))
-            prose.connect("activate-link", lambda _l, uri: self.win.follow(uri, from_chat=True))
-            on_name_hover(prose, self.win)
-            prose.set_visible(bool(m["text"]) or not m.get("proposals"))
-            b.append(prose)
-            b.prose = prose
-            b.status = label("", css=("dim-label", "caption"))
-            b.status.set_visible(False)
-            b.append(b.status)
-            if m.get("unknown"):
-                b.append(self._unknown_chips(m))
-        outer.append(b)
-        outer.bubble = b
+            outer.append(b)
+            outer.bubble = b
+            return outer
+        outer = super()._bubble(m)
+        if m["role"] != "user" and m.get("unknown"):
+            outer.bubble.append(self._unknown_chips(m))
         return outer
 
-    def _said(self, m):
-        """What you wrote, its @references in it as a page draws an @name: the logo where its @ is (LinkLabel draws
-        it), the name in the @names' colour on their patch, a pull request or an issue by its number alone, as the page
-        shows one (ref_text); clicked, opened as one on a page is."""
-        refs, text = {r["surface"]: r for r in m.get("refs") or ()}, plain_refs(m["text"])
-        out, at = [], 0
-        for found in REF_RE.finditer(text):
-            r = refs.get(found.group(1) or found.group(2))
-            if r is None:
-                continue
-            github = lookup.GITHUB_NAME.fullmatch(r["surface"]) if (r.get("icon") or "").startswith(("pr_", "issue")) \
-                else None  # (by its logo: a branch may be called feature/login#12)
-            name = html.escape(github[2] if github else r["surface"], False)
-            out += [html.escape(text[at:found.start()], False),
-                    f'<a href="ref:{urllib.parse.quote(r["surface"], safe="")}"><span foreground="#2f8f72" '
-                    f'background="#4f8a7c" bgalpha="14%" weight="600" underline="none">'
-                    f'{widgets.ref_icon_slot(r.get("icon")) or "@"}{name}</span></a>']
-            at = found.end()
-        out.append(html.escape(text[at:], False))
-        said = SaidLabel(xalign=0.0, wrap=True, selectable=True)
-        said.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        said.add_css_class("said-refs")
-        said.set_markup("".join(out))
-        said.connect("activate-link", lambda _l, uri: self.win.follow(uri, from_chat=True))
-        on_name_hover(said, self.win)
-        return said
+    def reply_text(self, text):
+        reply, _ = split_unknown(text)
+        return re.sub(r"\n?\s*\**Unknown:?\**[^\n]*$", "", reply) if "Unknown" in text[-200:] else reply
+
+    def worked(self, turn):
+        return super().worked(turn) or bool(turn.get("proposals") or turn.get("revised") or turn.get("withdrew"))
+
+    def finish(self, m, turn):
+        m["text"], m["unknown"] = split_unknown(m["text"])
+        if m["unknown"] and (texts := [it for it in m.get("items") or () if it["kind"] == "text"]):
+            texts[-1]["text"] = split_unknown(texts[-1]["text"])[0]  # (its last part ended with the line)
+        for key in ("proposals", "revised", "withdrew"):  # (the same proposals the pages show: decided there, kept here)
+            if turn.get(key):
+                m[key] = turn[key]
 
     def pending(self, notebook):
         return pending_edits(notebook, self.agent)
@@ -6101,152 +5685,277 @@ class RecordChat(Gtk.Box):
             sel = {**sel, "start": start, "end": start + len(found), "text": found}
         return {k: sel[k] for k in ("page", "start", "end", "text")}
 
-    def message_for(self, agent, msg, space, chat_space):
-        """What's sent for a message: a new session's notebook and what was said before it, what's become of the
-        changes proposed, what's referenced (ref_said, of space: Window.space's), the passage quoted from a chat (its
-        names, chat_space's) or selected on a page, and what was written."""
-        notebook, store, parts = agent.notebook, self.win.store, []
-        if agent.fresh:
-            parts.append(notebook_said(notebook, store, space))
-            if earlier := earlier_said(notebook["messages"][:-1]):
-                parts.append(earlier)  # (what was decided too)
-        for m in notebook["messages"]:
-            for p in m.get("proposals") or ():
-                if p.get("status") in ("accepted", "rejected") and not p.get("told"):
-                    if not agent.fresh:
-                        parts.append(f"(The change you proposed to {p['page']} was {p['status']} by the user.)")
-                    p["told"] = True
-        if waiting := pending_edits(notebook):
-            pages = list(dict.fromkeys(p["page"] for p in waiting))
-            parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
-                         "shows them.)")
-        left, said = REFS_LIMIT, []
-        for item in referenced(msg["text"], space):
-            text, paths = ref_said(item, store, space, min(REF_LIMIT, max(2000, left)))
-            left -= len(text)
-            agent.allowed.update(os.path.realpath(p) for p in paths if p)
-            said.append(text)
-        if said:
-            parts.append("<referenced>\n" + "\n".join(said) + "\n</referenced>")
-        if msg.get("selection"):
-            parts.append(selection_said(msg["selection"], notebook, store))
-        elif msg.get("quote"):
-            parts.append(passage_said(msg["quote"], chat_space))
-        parts.append(msg["text"])
-        return "\n\n".join(p.strip("\n") for p in parts if p)
+    # ---- the index: Record's part
+    def index_lines(self):
+        nb, store, lines = self.notebook, self.win.store, []
+        if nb is not None:
+            pages = sorted(nb["pages"], key=lambda p: (p != HOME, p.lower()))
+            folders = attached_folders(nb)
+            lines.append(f"notebook open: {json.dumps(full_name(nb))} · {len(pages)} pages · folders: " +
+                         (", ".join(short_dir(f) for f in folders) or "none"))
+            lines.append("its pages: " + ", ".join(pages[:40]) +
+                         (f" (+{len(pages) - 40}: app_index pages)" if len(pages) > 40 else ""))
+            if waiting := pending_edits(nb, self.agent):
+                lines.append(f"your edits waiting: {len(waiting)} (list_edits)")
+        if others := [t for t in store.notebooks if t is not nb]:
+            lines.append("other notebooks: " + ", ".join(f"{json.dumps(full_name(t))} ({len(t['pages'])} page"
+                                                         f"{'s' if len(t['pages']) != 1 else ''})"
+                                                         for t in others[:20]) +
+                         (f" (+{len(others) - 20}: app_index notebooks)" if len(others) > 20 else ""))
+        tabs = [short_page(c.page) if isinstance(c, DiaryEditor) else f"chat {json.dumps(c.chat['title'])}"
+                for c in self.win.tabs.children() if isinstance(c, DiaryEditor) or isinstance(c, Reader) and c.chat]
+        if tabs:
+            lines.append("tabs open: " + ", ".join(tabs))
+        lines.append(f"chats: {len(chat_names().chats)} on this computer (app_index chats; an id is its first 8 "
+                     "characters)")
+        return lines
 
-    def submit(self):
-        buf = self.composer.get_buffer()
-        text = self.writing.text().strip()  # (its bullets back to -)
-        if self.ask or not self.notebook or not (text or self.quote):
-            return
-        notebook, store = self.notebook, self.win.store
-        store.flush()  # (the pages' files as they are: what it reads)
-        space = self.win.space()
-        msg = {"role": "user", "text": text or "What does this mean?", "t": time.time()}
-        if self.quote:
-            msg["quote"] = self.quote
-            if self.selection is not None and self.selection["notebook"] == notebook.get("id"):
-                msg["selection"] = self._selection_now(notebook) or \
-                    {"page": self.selection["page"], "start": None, "end": None, "text": self.selection["text"]}
-        refs = referenced(msg["text"], space)
-        if refs:
-            msg["refs"] = [{"surface": it["surface"], "what": what_it_is(it, space), "icon": it.get("icon")}
-                           for it in refs]
-        notebook["messages"].append(msg)
-        buf.set_text("")
-        self.set_quote("")
-        folders = self.win.read_folders()  # (the notebook's, and the chat Read shows's)
-        key = Agent.key_for(notebook, store.agent_model, folders)
-        if self.agent is not None and self.agent.key != key:
-            self.close_agent()  # (another model, other folders: a session for them, told what was said)
+    def running_lines(self):
+        out = []
+        if self.agent is not None and not self.agent.closed:
+            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model}"
+                       f"{', at a turn' if self.ask else ''})")
+        if readers := [c for c in self.win.tabs.children() if isinstance(c, Reader) and c.chat]:
+            out.append(f"{len(readers)} chat{'s' if len(readers) != 1 else ''} followed as written")
+        return out
+
+    def sections(self):
+        def notebooks(_f):
+            return [{"name": full_name(t), "pages": len(t["pages"]), "open": t is self.notebook,
+                     "folders": ", ".join(short_dir(f) for f in attached_folders(t))} for t in self.win.store.notebooks]
+
+        def pages(_f):
+            open_ = set(self.win.open_pages())
+            books = ([self.notebook] if self.notebook else []) + \
+                [t for t in self.win.store.notebooks if t is not self.notebook]
+            return [{"notebook": full_name(t), "page": p, "chars": len(t["pages"][p]), "mine": t is self.notebook,
+                     "tab": t is self.notebook and p in open_}
+                    for t in books for p in sorted(t["pages"], key=lambda p: (p != HOME, p.lower()))]
+
+        def chats(_f):
+            readers = {c.chat["path"] for c in self.win.tabs.children() if isinstance(c, Reader) and c.chat}
+            return [{"id": self.chat_id(c["path"])[:8], "title": c["title"], "folder": short_dir(c["cwd"]) or "no folder",
+                     "ago": widgets.time_ago(c["used"]), "open": c["path"] in readers} for c in chat_names().chats]
+        return {
+            "notebooks": (notebooks, lambda r: f"{json.dumps(r['name'])} · {r['pages']} pages" +
+                          (" · open" if r["open"] else "") + (f" · folders: {r['folders']}" if r["folders"] else "")),
+            "pages": (pages, lambda r: (r["page"] if r["mine"] else f"{r['notebook']}/{r['page']}") +
+                      (f" · {r['chars']} characters" if r["chars"] else " · empty") + (" · tab open" if r["tab"] else "")),
+            "chats": (chats, lambda r: f"{r['id']} {json.dumps(r['title'])} · {r['folder']} · {r['ago']}" +
+                      (" · open" if r["open"] else "")),
+        }
+
+    # ---- chats
+    @staticmethod
+    def chat_id(path):
+        return os.path.basename(path).removesuffix(".jsonl")
+
+    def find_chat(self, ref):
+        ref = ref.strip().removeprefix("s:")
+        if not ref:
+            return None
+        chats = list(chat_names().chats)
+        for c in self.win.store.chats:  # (those open, if the list isn't read yet)
+            if not any(x["path"] == c.get("path") for x in chats):
+                chats.append({"path": c["path"], "title": c.get("title") or "Untitled chat", "cwd": c.get("cwd")})
+        tests = (lambda c: self.chat_id(c["path"]) == ref, lambda c: len(ref) >= 4 and self.chat_id(c["path"]).startswith(ref),
+                 lambda c: c["title"].lower() == ref.lower(), lambda c: os.path.realpath(c["path"]) == os.path.realpath(ref))
+        for test in tests:
+            found = [c for c in chats if test(c)]
+            if len(found) == 1:
+                c = found[0]
+                return {"key": self.chat_id(c["path"]), "title": c["title"], "path": c["path"], "cwd": c.get("cwd"),
+                        "used": c.get("used")}
+        return None
+
+    def chats_rows(self, refs):
+        rows = []
+        for ref in refs:
+            chat = self._chat(ref)
+            ago = f" · {widgets.time_ago(chat['used'])}" if chat.get("used") else ""
+            rows.append({"icon": "baude-claude-symbolic", "title": chat["title"],
+                         "subtitle": (short_dir(chat.get("cwd")) or "no folder") + ago,
+                         "open": lambda path=chat["path"]: self.win.open_chat(path)})
+        return rows
+
+    def chat_text(self, chat):
         try:
-            if self.agent is None:
-                self.agent = Agent(self, notebook, store.agent_model, folders)
-            turn = {"text": [], "proposals": [], "selection": msg.get("selection"), "streamed": False}
-            # (a passage from the chat being read: its names, as the chat links them)
-            chat_space = self.win.reader.space if self.win.reader is not None else None
-            self.agent.ask(self.message_for(self.agent, msg, space, chat_space or space), turn)
+            text = chat_text(chat["path"], chat["title"], chat.get("cwd"))
         except OSError as e:
-            self.agent = None
-            notebook["messages"].append({"role": "record", "text": f"Couldn't run claude ({e}). Set RECORD_CLAUDE to "
-                                         "its path.", "error": True, "t": time.time()})
-            store.save_now()
-            return self.render()
-        self.ask = self.agent
-        self.live_widget = self._bubble({"role": "record", "text": "Reading…"})
-        self.render()
-        self.writing.set_busy(True)
-        store.save_now()
+            return f"(not read: {e})"
+        return text if len(text) <= REF_LIMIT else \
+            f"[… its first {len(text) - REF_LIMIT} characters not put here: Read {chat['path']}]\n" + text[-REF_LIMIT:]
 
-    def _delta(self, agent, text):
-        if agent is self.ask and self.live_widget is not None:
-            reply, _ = split_unknown(text)
-            reply = re.sub(r"\n?\s*\**Unknown:?\**[^\n]*$", "", reply) if "Unknown" in text[-200:] else reply
-            set_md(self.live_widget.bubble.prose, reply or "…")
-            GLib.idle_add(self._to_bottom)
+    def rename_chat_to(self, chat, title):
+        self.win.rename_chat(chat["path"], title)
 
-    def _status(self, agent, said):
-        """What the agent's doing (a page read, a search, a change proposed), under what it's said so far."""
-        if agent is self.ask and self.live_widget is not None:
-            status = self.live_widget.bubble.status
-            status.set_text(said)
-            status.set_visible(True)
-            GLib.idle_add(self._to_bottom)
+    # ---- pages
+    def pages_rows(self, refs):
+        rows, store = [], self.win.store
+        for ref in refs:
+            book, _, name = ref.rpartition("/")
+            nb = next((t for t in store.notebooks if full_name(t).lower() == book.strip().lower()), None) if book \
+                else self.notebook
+            page = page_named(nb, name, store) if nb is not None else None
+            if page is None:
+                raise ValueError(f"No page {ref!r}: app_index pages lists them.")
+            rows.append({"icon": "text-x-generic-symbolic", "title": short_page(page),
+                         "subtitle": f"{full_name(nb)} · {page}" if ":" in page else full_name(nb),
+                         "open": lambda nb=nb, page=page: self.open_page(nb, page)})
+        return rows
 
-    def ask_permission(self, agent, rid, name, inp):
-        """A read outside the notebook's pages and folders, not of anything referenced: the user's asked, as Baude asks
-        in its Manual mode, Allow or Deny."""
-        path = str(inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("glob") or "")
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("bubble-record")
-        verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in"}.get(name, name)
-        card.append(label(f"{noun()} would like to {verb} {path.replace(os.path.expanduser('~'), '~', 1)}"))
-        row = Gtk.Box(spacing=6, halign=Gtk.Align.END)
+    def open_page(self, notebook, page):
+        if notebook is not self.win.current:
+            self.win.select(notebook["id"])
+        self.win.open_note(page)
 
-        def answer(allow):
-            if card in self.asking:
-                self.asking.remove(card)
-            if card.get_parent() is not None:
-                self.box.remove(card)
-            agent.answer(rid, allow, name, inp)
-        for text, allow in (("Deny", False), ("Allow", True)):
-            btn = Gtk.Button(label=text)
-            if allow:
-                btn.add_css_class("suggested-action")
-            btn.connect("clicked", lambda *_, allow=allow: answer(allow))
-            row.append(btn)
-        card.append(row)
-        card.answer = answer
-        self.asking.append(card)
-        self.box.append(card)
-        GLib.idle_add(self._to_bottom)
+    def buttons(self):
+        return {"delete_notebook": f"Delete the {book().lower()} open, its pages and conversation with it (asks first; "
+                                   "can't be undone)"}
 
-    def _drop_asking(self, deny=False):
-        """The reads asked for, gone (deny: answered no, the turn stopped; else the turn's over)."""
-        for card in list(self.asking):
-            if deny:
-                card.answer(False)
-            elif card.get_parent() is not None:
-                self.box.remove(card)
-        self.asking = []
+    def button(self, action, items):
+        if action != "delete_notebook" or self.notebook is None:
+            raise ValueError(f"There's no button {action}: app_index buttons lists them.")
+        btn = Gtk.Button(label=f"Delete {full_name(self.notebook)}…")
+        btn.add_css_class("destructive-action")
+        btn.connect("clicked", lambda *_: self.win.delete())
+        return btn
 
-    TOOLS = ("propose_edit", "list_edits", "revise_edit", "withdraw_edit")
+    def _pages_act(self, turn, said, before, moved=None, marks=()):
+        """Pages changed (before: {notebook id: {page: its text before, or None}}, of every one touched; moved: {old
+        name: new}, of the notebook open), kept as an action: undone, they're put back as they were, and done again,
+        as the action left them; either only while every one it touched is as the other left it (apply_app)."""
+        books = {t.get("id"): t for t in self.win.store.notebooks}
+        after = {b: {p: books[b]["pages"].get(p) for p in pages} for b, pages in before.items()}
+        return self.act(turn, said, "pages",
+                        {"books": before, "expect": after, "moved": {v: k for k, v in (moved or {}).items()}},
+                        {"books": after, "expect": before, "moved": dict(moved or {})}, marks)
 
-    def _tool(self, tool, args):
-        """The agent's own tools (ToolSocket), on the main loop."""
-        agent = self.agent
-        if tool not in self.TOOLS:
-            return {"error": f"There's no tool {tool}."}
-        if agent is None or agent.turn is None or agent.notebook is not self.notebook:
-            return {"error": "That notebook isn't open any more: nothing was done."}
-        return self.run_tool(agent.turn, tool, args)
+    def apply_app(self, kind, data):
+        if kind != "pages":
+            raise ValueError(f"No such action: {kind}")
+        books = {t.get("id"): t for t in self.win.store.notebooks}
+        if any(b not in books for b in data["books"]):
+            raise ValueError(f"its {book().lower()} is gone")
+        changed = [p for b, pages in (data.get("expect") or {}).items() for p, text in pages.items()
+                   if books[b]["pages"].get(p) != text]
+        if changed:  # (written in since, or changed by what came after: that would be lost)
+            raise ValueError(f"{', '.join(short_page(p) for p in changed[:3])} changed since; undo what came after "
+                             "first, or change it back")
+        for b, pages in data["books"].items():
+            for p, text in pages.items():
+                if text is None:
+                    books[b]["pages"].pop(p, None)
+                else:
+                    books[b]["pages"][p] = text
+        self.pages_changed(data.get("moved") or {})
 
-    def run_tool(self, turn, tool, args):
-        """One of the agent's tools, in a turn of its (turn: what its reply's made of, the edits it made among it)."""
-        return {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
-                "withdraw_edit": self.withdraw_edit}[tool](turn, args)
+    def pages_changed(self, moved):
+        """The notebook open's pages changed under its tabs: those moved go with their pages (Window.note_renamed),
+        and so do the edits waiting on them; those gone are closed; the rest shown again; the list again."""
+        win, nb = self.win, self.notebook
+        for p in pending_edits(nb, self.agent) if nb is not None else ():
+            if p["page"] in moved:
+                p["page"] = moved[p["page"]]
+        win.store.save()
+        if moved:
+            win.note_renamed(moved)
+        for child in list(win.tabs.children()):
+            if isinstance(child, DiaryEditor) and child.notebook is nb:
+                if child.page != HOME and child.page not in nb["pages"]:
+                    win.tabs.close(("note", child.page))
+                else:
+                    child.reload()
+        win.pages.fill()
 
+    def _named_page(self, name, notebook=None):
+        notebook = notebook or self.notebook
+        page = page_named(notebook, str(name or ""), self.win.store)
+        if page is None:
+            raise ValueError(f"There's no page {name!r} in {full_name(notebook)}: app_index pages lists them.")
+        return page
+
+    def add_page(self, turn, args):
+        nb, name = self.notebook, page_name(args.get("page"))
+        if not name:
+            raise ValueError("A page's name is needed.")
+        if nb["pages"].get(name, "").strip():
+            raise ValueError(f"There's a page {name} already: propose_edit changes its text.")
+        before = {nb["id"]: {name: nb["pages"].get(name)}}
+        nb["pages"][name] = str(args.get("text") or "")
+        a = self._pages_act(turn, f"Added {short_page(name)}", before, marks=[("page", page_key(nb, name), "added")])
+        self.win.open_note(name, select=False)
+        self.pages_changed({})
+        return {"text": f"Added {name} (action {a['id']})."}
+
+    def delete_page(self, turn, args):
+        nb = self.notebook
+        page = self._named_page(args.get("page"))
+        if page == HOME:
+            raise ValueError(f"{HOME} can't be deleted.")
+        before = {nb["id"]: {page: nb["pages"].get(page)}}
+        self.win.tabs.close(("note", page))
+        nb["pages"].pop(page, None)
+        a = self._pages_act(turn, f"Deleted {short_page(page)}", before, marks=[("page", page_key(nb, page), "removed")])
+        self.pages_changed({})
+        return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
+
+    def move_pages(self, turn, args):
+        nb, store = self.notebook, self.win.store
+        under, source = page_name(args.get("under")), str(args.get("from_notebook") or "").strip()
+        src = nb if not source else next((t for t in store.notebooks if full_name(t).lower() == source.lower()), None)
+        if src is None:
+            raise ValueError(f"There's no {book().lower()} {source!r}: app_index notebooks lists them.")
+        names = [self._named_page(p, src) for p in args.get("pages") or ()]
+        if not names:
+            raise ValueError("Which pages? pages is empty.")
+        if HOME in names:
+            raise ValueError(f"{HOME} stays where it is.")
+        listed = set(src["pages"]) | (set(self.win.pages.names()[0]) if src is nb else set())
+        moved = {}
+        for old in names:
+            if src is nb and (under == old or under.startswith(old + ":")):
+                raise ValueError(f"{old} can't go under itself.")
+            new = f"{under}:{short_page(old)}" if under else short_page(old)
+            moved.update({n: new + n[len(old):] for n in listed if n == old or n.startswith(old + ":")})
+        moved = {k: v for k, v in moved.items() if k != v or src is not nb}
+        if not moved:
+            return {"text": "They're there already."}
+        if clash := [to for to in moved.values() if to in nb["pages"] and (src is not nb or to not in moved)]:
+            raise ValueError(f"There's a page {clash[0]} already.")
+        where = under or "the top"
+        said = f"Moved {', '.join(short_page(n) for n in names)} {'under ' + short_page(under) if under else 'to the top'}"
+        if src is nb:
+            was = dict(nb["pages"])
+            renamed = relinked_pages(nb["pages"], moved)
+            touched = {k for k in set(was) | set(renamed) if was.get(k) != renamed.get(k)}
+            before = {nb["id"]: {k: was.get(k) for k in touched}}
+            nb["pages"].clear()  # (the same dict: the notebook keeps it)
+            nb["pages"].update(renamed)
+            marks = [("page", page_key(nb, new), "moved", f"from {old.rpartition(':')[0] or 'the top'}")
+                     for old, new in moved.items() if old in was]
+            a = self._pages_act(turn, said, before, moved, marks)
+            self.pages_changed(moved)
+        else:
+            before = {src["id"]: {old: src["pages"].get(old) for old in moved},
+                      nb["id"]: {new: nb["pages"].get(new) for new in moved.values()}}
+            for old, new in moved.items():
+                if old in src["pages"]:
+                    nb["pages"][new] = src["pages"].pop(old)
+            marks = [("page", page_key(nb, new), "moved", f"from {full_name(src)}") for new in moved.values()
+                     if new in nb["pages"]]
+            a = self._pages_act(turn, said + f" from {full_name(src)}", before, marks=marks)
+            self.pages_changed({})
+        return {"text": f"Moved {len(moved)} page{'s' if len(moved) != 1 else ''} under {where} (action {a['id']})."}
+
+    def highlight_pages(self, turn, args):
+        nb = self.notebook
+        keys = {page_key(nb, self._named_page(p)) for p in args.get("pages") or ()}
+        self.lit = {**self.lit, "page": keys}
+        self.marks_changed()
+        return {"text": f"Highlighted {len(keys)} page{'s' if len(keys) != 1 else ''} in the pages' list."}
+
+    # ---- page edits (propose_edit, list_edits, revise_edit, withdraw_edit)
     def _page(self, args):
         """The page a tool's call names, or (None, the error to answer it with)."""
         notebook = self.notebook
@@ -6422,39 +6131,12 @@ class RecordChat(Gtk.Box):
         self._restage(turn, p, status="withdrawn")
         return {"text": f"Edit {p['id']} taken back."}
 
-    def _done(self, agent, text, error, turn):
-        notebook, props, revised = agent.notebook, turn.get("proposals") or [], turn.get("revised") or []
-        withdrew = turn.get("withdrew") or []
-        if agent is self.ask:
-            self.ask, self.live_widget = None, None
-            self.writing.set_busy(False)
-            self._drop_asking()
-        if error:
-            m = {"role": "record", "text": error, "error": True, "t": time.time()}
-        elif text.strip() or props or revised or withdrew:
-            reply, unknown = split_unknown(text)
-            m = {"role": "record", "text": reply, "unknown": unknown, "t": time.time()}
-        else:
-            m = None
-        if m is not None:
-            if props:
-                m["proposals"] = props  # (the same ones the pages show: what's decided there is kept here)
-            if revised:
-                m["revised"] = revised  # (pages whose edits waiting it changed: said as edited)
-            if withdrew:
-                m["withdrew"] = withdrew  # (and those it took one back from)
-            notebook["messages"].append(m)
-        self.win.store.save_now()
-        if notebook is self.notebook:
-            self.render()
-        return False
-
 
 # ---------------------------------------------------------------- the window
 
 class Settings(Adw.PreferencesDialog):
-    """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Intelligence (the model the Record's agent runs on,
-    Haiku unless another's chosen), Full-width text, Code Font, Accent Colour, Show in Applications, and the sizes, 1.0 the usual: the
+    """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Meta (the model it thinks with, Haiku unless another's
+    chosen, and Code mode), Full-width text, Code Font, Accent Colour, Show in Applications, and the sizes, 1.0 the usual: the
     text's and the icons' (Baude's settings: the same in both, Code Font and Accent Colour too), and the zoom Ctrl/⌘ 0 goes back to;
     Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback… and the feedback sent. Each
     takes at once (Code Font from the next start) and is kept."""
@@ -6462,22 +6144,10 @@ class Settings(Adw.PreferencesDialog):
     def __init__(self, win):
         super().__init__(title="Settings")
         page = widgets.settings_page()
-        group = Adw.PreferencesGroup()
-        models = [value for value, _label in AGENT_MODELS]
-        thinks = Adw.ComboRow(title="Intelligence", subtitle=f"The model {noun()}'s agent thinks with",
-                              model=Gtk.StringList.new([label for _value, label in AGENT_MODELS]),
-                              selected=models.index(win.store.agent_model) if win.store.agent_model in models else 0)
-        thinks.connect("notify::selected", lambda r, _p: win.set_agent_model(models[r.get_selected()]))
-        group.add(thinks)
-        page.add(group)
+        page.add(meta.settings_group(win.chat))  # (Baude's too, and the same settings)
         group = Adw.PreferencesGroup()
         group.add(widgets.settings_switch("Full-width text", None, "win.fullwidth"))
-        modes = list(MARKUP_MODES)
-        formatting = Adw.ComboRow(title="Markup visibility",
-                                  model=Gtk.StringList.new(list(MARKUP_MODES.values())),
-                                  selected=modes.index(win.store.markup))
-        formatting.connect("notify::selected", lambda r, _p: win.set_markup(modes[r.get_selected()]))
-        group.add(formatting)
+        group.add(markup_row(win))
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
@@ -6553,7 +6223,7 @@ class Settings(Adw.PreferencesDialog):
 class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
-    code), their bar the window's top; on the right the Record (your conversation with it), Files and Git, as Baude's
+    code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
     side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B)."""
 
     def __init__(self, app):
@@ -6605,7 +6275,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         split.append(column)
         # the middle: what's open, a tab each, their bar at the top of it, as Baude's chat has its tabs
         # (⌥⌘← ⌥⌘→: back and forward through them)
-        self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True)
+        self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True,
+                                     rename=(lambda c: isinstance(c, Reader) and c.chat, self.ask_rename_chat))
         self.tabs.view.connect("notify::selected-page", lambda *_: self._tab_shown())
         main = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, hexpand=True)
         main.add_css_class("record-content")
@@ -6703,12 +6374,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.zoom_wait = self.zoom_saving = None  # (the frame to zoom in; its saving: set_zoom)
         self.rolling, self.zipping = GLib.timeout_add_seconds(Store.BACKUP_EVERY, self.roll_backup), False  # (roll_backup)
         self.scale_wait, self.text_scaled = None, False  # (the sizes applied in a moment; the text's among them: set_scale)
-        # right: the Record (your conversation with it), its folders, Files and Git, as Baude's side panel has them
+        # right: Meta (your conversation with it), its folders, Files and Git, as Baude's side panel has them
         self.chat = RecordChat(self)
         self.apply_zoom()
         self.right_stack = Adw.ViewStack(vexpand=True)
-        widgets.ensure_icons()  # (baude-record-symbolic, baude-claude-symbolic: Baude's own icons)
-        self.right_stack.add_titled_with_icon(self.chat, "record", noun(), "baude-record-symbolic")
+        widgets.ensure_icons()  # (baude-meta-symbolic, baude-claude-symbolic: Baude's own icons)
+        self.right_stack.add_titled_with_icon(self.chat, "meta", meta.NAME, "baude-meta-symbolic")
         self.folders_page = FoldersPage(self)
         self.right_stack.add_titled_with_icon(self.folders_page, "folders", "Folders", "folder-open-symbolic")
         self.add_viewer_pages(self.right_stack, code=False)  # (Files and Git; code opens in a tab: show_code)
@@ -6720,15 +6391,14 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         right.set_content(self.right_stack)
         right.set_size_request(340, -1)
         self.right_toggle = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic", active=True,
-                                             tooltip_text=f"{noun()}, Files and Git (Ctrl+Alt+B)")
+                                             tooltip_text=f"{meta.NAME}, Files and Git (Ctrl+Alt+B)")
         whole.append(self.right_toggle)
         whole.append(menu_btn)
         whole.append(end_buttons)
         self.content_stack = Gtk.Stack()
         none = Adw.StatusPage(icon_name="system-users-symbolic", title=f"Make a {book()}",
-                              description=f"A {book()} is your notes on a subject, and a {noun()} that reads AI prose "
-                                          "with you through them: it knows only what's in them and remembers only "
-                                          "the last three messages.")
+                              description=f"A {book()} is your notes on a subject; {meta.NAME}, in the right bar, "
+                                          "reads them and AI prose with you, and organises them.")
         b = Gtk.Button(label=f"New {book()}", halign=Gtk.Align.CENTER)
         b.add_css_class("pill")
         b.add_css_class("suggested-action")
@@ -7525,12 +7195,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         if item.get("kind") == "page" and self.current is not None and item.get("page") in self.current["pages"]:
             self.open_note(item["page"])
 
-    def set_agent_model(self, model):
-        """Settings → Intelligence: the model the Record's agent runs on, from its next message (RecordChat.submit)."""
-        self.store.agent_model = model
-        self.store.save()
-        self.chat.model_changed()
-
     def open_item(self, item):
         """An @name opened where it is, in Record's tabs and views as Baude's ⌘K opens one: its file on the Code tab,
         a branch on the Git tab, a Kubernetes object in its view, a table in the database diagram; else its file in
@@ -7622,6 +7286,38 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         if present:
             self.present()
         return reader
+
+    def ask_rename_chat(self, reader):
+        """Rename… on a chat's tab (right-click): its title, to type in (rename_chat)."""
+        chat = reader.chat
+        d = Adw.AlertDialog(heading="Rename chat")
+        e = Gtk.Entry(text=chat.get("title") or "", activates_default=True, hexpand=True)
+        d.set_extra_child(e)
+        d.add_response("cancel", "Cancel")
+        d.add_response("ok", "Rename")
+        d.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        d.set_default_response("ok")
+        d.connect("response", lambda _d, r: r == "ok" and (title := " ".join(e.get_text().split())) and
+                  title != chat.get("title") and self.rename_chat(chat["path"], title))
+        d.present(self)
+        e.grab_focus()
+
+    def rename_chat(self, path, title):
+        """A chat renamed as Claude Code renames one: a custom-title line at its transcript's end; its tab and the
+        chats' list say so."""
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "custom-title", "customTitle": title, "sessionId": RecordChat.chat_id(path)},
+                               separators=(",", ":")) + "\n")
+        names = chat_names()
+        names.at = 0
+        names.refresh()
+        if (reader := self.tabs.get(("chat", path))) is not None and reader.chat:
+            reader.chat["title"] = title
+            self.tabs.retitle(("chat", path), title, tooltip=f"{title} · {short_dir(reader.chat.get('cwd') or path)}")
+        for c in self.store.chats:
+            if c.get("path") == path:
+                c["title"] = title
+        self.store.save()
 
     def open_citation(self, url):
         """A citation link followed from the notes: its chat open, at its passage (Reader.show_passage)."""

@@ -34,6 +34,15 @@ the open fonts in [fonts/](fonts/README.md) (SIL Open Font License), or macOS's 
 | ![Attachments](docs/screenshots/42-composer-attachments-light.png)<br>Attachments | ![Slash commands](docs/screenshots/43-slash-completer-light.png)<br>Slash commands |
 | ![Send Feedback](docs/screenshots/92-feedback-with-capture-light.png)<br>Send Feedback | ![Ongoing Feedback](docs/screenshots/96-feedback-ready-light.png)<br>Ongoing Feedback |
 
+## Meta
+
+Meta (the spanner, first in the right bar of Baude and of Record) is a helper that operates the app: ask it to move
+chats into a group, archive or rename them, list only some hosts or groups, or, in Record, move, add or delete pages
+and propose edits to them. Every change it makes shows under its reply with undo, and is marked in the left bar (green
+added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
+own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model. Code mode has it
+act by writing up to 10 lines of Python against the app's tools (`meta.py`).
+
 ## Running it
 
 You need Python 3.11+, GTK 4 and libadwaita 1.5+ with PyGObject (on Debian/Ubuntu:

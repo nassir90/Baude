@@ -6,7 +6,9 @@ As a session (`--input-format stream-json`, as Record's agent runs it through ba
 message in turn. A message with a passage selected on a page and asking to fill it in proposes the change through the
 agent's own MCP server (its --mcp-config, run as Claude Code runs it: propose_edit), filling it from the page
 referenced with it; one asking to read /a/path asks permission to (can_use_tool, as Claude Code asks for a read
-outside its folders) and says what it was told; any other is a canned reply that says what was referenced."""
+outside its folders) and says what it was told; one with lines CALL <tool> <json arguments>, or any while
+FAKE_META_SCRIPT's file has turns in it, calls those tools of Meta's, in order, and replies with what's written after
+them (or the turn's reply); any other is a canned reply that says what was referenced."""
 import json, os, re, subprocess, sys, time
 
 
@@ -77,6 +79,22 @@ def fill(text, selection):
     return {"page": page, "old_text": passage, "new_text": new}, ""  # (the edit says itself: nothing more said)
 
 
+def scripted():
+    """The next turn of FAKE_META_SCRIPT's, if it names a file of them (a JSON list of {calls: [[tool, {arguments}]],
+    reply}), taken from it: its calls, its reply kept as scripted.reply; else none."""
+    scripted.reply, path = None, os.environ.get("FAKE_META_SCRIPT")
+    if not path or not os.path.exists(path):
+        return []
+    with open(path) as f:
+        turns = json.load(f)
+    if not turns:
+        return []
+    with open(path, "w") as f:
+        json.dump(turns[1:], f)
+    scripted.reply = turns[0].get("reply") or ""
+    return [(tool, json.dumps(args)) for tool, args in turns[0].get("calls") or ()]
+
+
 def session():
     out({"type": "system", "subtype": "init", "model": "claude-haiku-5-5", "tools": ["Read", "Grep", "Glob"]})
     mcp = None
@@ -104,11 +122,22 @@ def session():
                     break
             told = got["response"].get("response") or {}
             reply = f"I was {'let' if told.get('behavior') == 'allow' else 'not let'} read {path.group(1)}."
+        elif calls := scripted() or re.findall(r"^CALL (\w+) (\{.*\})$", text, re.M):
+            mcp = mcp or Mcp("meta")
+            for n, (tool, args) in enumerate(calls):
+                out({"type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": f"c{n}", "name": f"mcp__meta__{tool}", "input": json.loads(args)}]}})
+                res = mcp.rpc("tools/call", {"name": tool, "arguments": json.loads(args)})
+                out({"type": "user", "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": f"c{n}", "content": res["content"],
+                     "is_error": res["isError"]}]}})
+            reply = scripted.reply if scripted.reply is not None else \
+                re.split(r"^CALL .*$", text, flags=re.M)[-1].strip()  # (what's written after the last call)
         elif sel and re.search(r"\b(fill|write|complete)\b", asks):
             change, reply = fill(text, (sel.group(1), sel.group(2)))
-            mcp = mcp or Mcp("record")
+            mcp = mcp or Mcp("meta")
             out({"type": "assistant", "message": {"role": "assistant", "content": [
-                {"type": "tool_use", "id": "t1", "name": "mcp__record__propose_edit", "input": change}]}})
+                {"type": "tool_use", "id": "t1", "name": "mcp__meta__propose_edit", "input": change}]}})
             res = mcp.rpc("tools/call", {"name": "propose_edit", "arguments": change})
             out({"type": "user", "message": {"role": "user", "content": [
                 {"type": "tool_result", "tool_use_id": "t1", "content": res["content"], "is_error": res["isError"]}]}})

@@ -181,13 +181,33 @@ def version_row(dialog, commit=None, root=HERE):
     return row
 
 
-def changelog_page(commit, root=HERE):
-    """View Changelog: the commits the version has (changelog), newest first, each its subject and when it was made."""
-    page, group = widgets.settings_page(), Adw.PreferencesGroup()
-    for short, stamp, subject in changelog(commit, root):
+def changelog_group(commit, root=HERE, limit=None):
+    """The commits the version has (changelog), newest first, each its subject and when it was made, as rows; past
+    limit, a Show N more row (Meta's changelog, under its reply)."""
+    group, made = Adw.PreferencesGroup(), changelog(commit, root)
+
+    def add(short, stamp, subject):
         row = Adw.ActionRow(title=subject, subtitle=f"{made_when(stamp)} · {short}", use_markup=False)
         row.commit = short
         group.add(row)
+    shown = made if limit is None else made[:limit]
+    for entry in shown:
+        add(*entry)
+    if len(shown) < len(made):
+        more = Adw.ButtonRow(title=f"Show {len(made) - len(shown)} more")
+
+        def rest(btn):
+            group.remove(btn)
+            for entry in made[len(shown):]:
+                add(*entry)
+        more.connect("activated", rest)
+        group.add(more)
+    return group
+
+
+def changelog_page(commit, root=HERE):
+    """View Changelog: the commits the version has (changelog_group), as a page."""
+    page, group = widgets.settings_page(), changelog_group(commit, root)
     page.add(group)
     view = Adw.ToolbarView(content=page)
     view.add_top_bar(Adw.HeaderBar())

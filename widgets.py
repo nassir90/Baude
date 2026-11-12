@@ -1446,13 +1446,17 @@ class WrapLabel(Gtk.Label):
 class LinkLabel(WrapLabel):
     """A label whose Signal links each have their logo before them (ref_icon): git's, Kubernetes', a database's, a
     file's… The markup keeps a place for it (ref_icon_slot), which this makes the logo's width (a Pango shape) and
-    draws the logo in, at the text's size. Copied, the text has only invisible characters there."""
+    draws the logo in, at the text's size. Copied, the text has only invisible characters there. A chip in it
+    (chip_markup: the Git page's branch names, in the line a commit's subject's in) keeps a place at each end, its
+    margins, and this draws its patch behind it and gives its name its colour."""
 
     GAP = 3  # px between a logo and its name
+    CHIP_PAD, CHIP_SCALE, CHIP_RADIUS = 5, 0.78, 4  # px either side of a chip's name, its size of the text's, and its
+    # corners' px: .git-ref's, as a chip on its own had them
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.icons, self.icon_px = [], 0  # ([(byte index, logo)], its size)
+        self.icons, self.chips, self.icon_px = [], [], 0  # ([(byte index, logo)], [(start, end, kind)], their size)
 
     def set_markup(self, markup):
         Gtk.Label.set_markup(self, markup)
@@ -1467,35 +1471,53 @@ class LinkLabel(WrapLabel):
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
     def place_icons(self):
-        """Find the places kept for logos, and make each the logo's width (again, when the text's size changed)."""
+        """Find the places kept for logos and chips' ends, and make each its width (again, when the text's size
+        changed); a chip's name in its colour (again, when the theme's changed)."""
         text = self.get_text()
         if "\u2063" not in text:
-            if self.icons:
-                self.icons = []
+            if self.icons or self.chips:
+                self.icons, self.chips = [], []
                 self.set_attributes(None)
             return False
-        names = re.findall(r'font_family="baude-icon-(\w+)">\u2063</span>', self.get_label())
+        names = re.findall(r'font_family="baude-(icon|chip)-(\w+)">\u2063</span>', self.get_label())
         spots = [len(text[:m.start()].encode()) for m in re.finditer("\u2063", text)]
         ascent, descent, px = self.text_px()
-        attrs = Pango.AttrList()
-        for at in spots[:len(names)]:
+        attrs, icons, chips, opened, fg = Pango.AttrList(), [], [], None, self.get_color()
+        for at, (kind, name) in zip(spots, names):
+            if kind == "icon":
+                width = px + self.GAP
+                icons.append((at, name))
+            elif name == "end":  # (a chip's end: its name, between the two, in its colour)
+                width = self.CHIP_PAD
+                if opened is not None:
+                    chips.append((opened[0], at + 3, opened[1]))
+                    color = chip_colors(opened[1], fg)[0]
+                    for a in (Pango.attr_foreground_new(*(round(v * 65535) for v in (color.red, color.green, color.blue))),
+                              Pango.attr_foreground_alpha_new(max(1, round(color.alpha * 65535)))):
+                        a.start_index, a.end_index = opened[0] + 3, at
+                        attrs.insert(a)
+                opened = None
+            else:  # (a chip's start: name is its kind)
+                width, opened = self.CHIP_PAD, (at, name)
             r = Pango.Rectangle()
-            r.x, r.y, r.width, r.height = 0, -ascent, (px + self.GAP) * Pango.SCALE, ascent + descent
+            r.x, r.y, r.width, r.height = 0, -ascent, width * Pango.SCALE, ascent + descent
             a = Pango.attr_shape_new(r, r)
             a.start_index, a.end_index = at, at + 3  # (U+2063: 3 bytes)
             attrs.insert(a)
-        self.icons, self.icon_px = list(zip(spots, names)), px
+        self.icons, self.chips, self.icon_px = icons, chips, px
         self.set_attributes(attrs)
         return False
 
     def do_css_changed(self, change):
         Gtk.Label.do_css_changed(self, change)
         # zoomed: the places take the text's new size as it's styled, before the frame's layout (resized once drawn,
-        # the text came at its new size and the logos a frame later)
-        if self.icons and self.text_px()[2] != self.icon_px:
+        # the text came at its new size and the logos a frame later). Chips: their colours, light or dark, too
+        if self.chips or self.icons and self.text_px()[2] != self.icon_px:
             self.place_icons()
 
     def do_snapshot(self, snapshot):
+        if self.chips:
+            self.draw_chips(snapshot)
         Gtk.Label.do_snapshot(self, snapshot)
         if not self.icons:
             return
@@ -1517,6 +1539,70 @@ class LinkLabel(WrapLabel):
             x = pixel(ox + r.x / Pango.SCALE, bx)
             y = pixel(oy + (r.y + r.height / 2) / Pango.SCALE - size / scale / 2, by)
             draw_ref_icon(snapshot, icon, x, y, size / scale, fg)
+
+    def draw_chips(self, snapshot):
+        """The chips' patches, behind the text: as tall as their names' smaller text is and a pixel more each way, the
+        corners rounded as .git-ref's, a piece on each line if one's broken across two."""
+        layout, (ox, oy) = self.get_layout(), self.get_layout_offsets()
+        ascent, descent, _px = self.text_px()
+        up, down = ascent / Pango.SCALE * self.CHIP_SCALE + 1, descent / Pango.SCALE * self.CHIP_SCALE + 1
+        fg = self.get_color()
+        for start, end, kind in self.chips:
+            patch = chip_colors(kind, fg)[1]
+            for x, baseline, w in layout_runs(layout, start, end):
+                rect = Graphene.Rect().init(ox + x, oy + baseline - up, w, up + down)
+                rr = Gsk.RoundedRect()
+                rr.init_from_rect(rect, self.CHIP_RADIUS)
+                snapshot.push_rounded_clip(rr)
+                snapshot.append_color(patch, rect)
+                snapshot.pop()
+
+
+CHIP_TINTS = {"tag": ("#c88800", 0.16), "chat": ("#7f77dd", 0.18)}  # (.git-ref's: a tag's amber, this chat's violet)
+
+
+def chip_colors(kind, fg):
+    """A chip's name's colour and its patch's, as .git-ref has them: the accent's for a branch (local, head), the text's
+    own faint for a remote's (fg: the text's colour), a tag's amber, this chat's violet. Light or dark, as it's now."""
+    if kind in CHIP_TINTS:
+        text = Gdk.RGBA()
+        text.parse(CHIP_TINTS[kind][0])
+        patch = text.copy()
+        patch.alpha = CHIP_TINTS[kind][1]
+    elif kind == "remote":
+        text, patch = fg.copy(), fg.copy()
+        text.alpha, patch.alpha = fg.alpha * 0.7, fg.alpha * 0.08
+    else:
+        style = Adw.StyleManager.get_default()
+        text = Adw.AccentColor.to_standalone_rgba(style.get_accent_color(), style.get_dark())  # (@accent_color)
+        patch = style.get_accent_color_rgba()  # (@accent_bg_color)
+        patch.alpha = 0.14
+    return text, patch
+
+
+def chip_markup(text, kind):
+    """text (plain) as a chip in a LinkLabel's markup: kind local, head (bold), remote, tag or chat, as .git-ref's are.
+    Never broken across lines; a place kept at each end for its margins."""
+    weight = "bold" if kind == "head" else "normal"
+    return (f'<span allow_breaks="false"><span font_family="baude-chip-{kind}">\u2063</span>'
+            f'<span size="{round(LinkLabel.CHIP_SCALE * 100)}%" weight="{weight}">{html.escape(text, quote=False)}'
+            f'</span><span font_family="baude-chip-end">\u2063</span></span>')
+
+
+def layout_runs(layout, start, end):
+    """Where the text from byte start to end is on each line it's on: [(x, baseline, width)], px from the layout's
+    corner."""
+    out, it = [], layout.get_iter()
+    while True:
+        line = it.get_line_readonly()
+        a, b = max(start, line.start_index), min(end, line.start_index + line.length)
+        if a < b:
+            _ink, logical = it.get_line_extents()
+            x0, x1 = line.index_to_x(a, False), line.index_to_x(b, False)
+            out.append(((logical.x + min(x0, x1)) / Pango.SCALE, it.get_baseline() / Pango.SCALE,
+                        abs(x1 - x0) / Pango.SCALE))
+        if not it.next_line():
+            return out
 
 
 def sel_label(markup="", css=None, mono=False):

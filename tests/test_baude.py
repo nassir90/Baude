@@ -6402,10 +6402,9 @@ def test_choice_drop_downs_list_centred(app):
 
 
 def test_chat_goes_narrow(app):
-    """With both side bars open, the panel's rule dragged as far as it goes leaves the chat next to nothing, its start still
-    seen (it's cut off on the right): no least of the chat's holds the panel back. Before that, it shortens what it has:
-    the context meter is its width given the room and shortens without it, and Feedback's Capture bar, been and gone,
-    takes none."""
+    """With both side bars open, the panel's rule dragged as far as it goes stops where the chat is at its least: narrow,
+    and none of it under the panel. Before that, it shortens what it has: the context meter is its width given the room
+    and shortens without it, and Feedback's Capture bar, been and gone, takes none."""
     app.next_size = (1200, 700)
     try:
         win = app.window()
@@ -6425,13 +6424,12 @@ def test_chat_goes_narrow(app):
         wait_for(lambda: not win.capture_bar.get_child_revealed(), "the Capture bar gone", 3)
         win.split.set_position(200)  # (narrow, and wider than all it has at its least)
         pump(0.3)
-        shown, chat = (w.compute_bounds(win)[1] for w in (win.split.get_start_child(), win.tabs))
-        assert chat.get_x() + chat.get_width() <= shown.get_x() + shown.get_width(), "all of it seen"
         assert win.ctx_label.get_layout().is_ellipsized()
-        win.split.set_position(0)  # (as far as it goes)
+        win.split.set_position(0)  # (as far as it goes: the chat at its least)
         pump(0.3)
-        shown, chat = (w.compute_bounds(win)[1] for w in (win.split.get_start_child(), win.tabs))
-        assert shown.get_width() < 20 and chat.get_x() - shown.get_x() < 20, (shown.get_width(), chat.get_x(), shown.get_x())
+        chat, panel = (w.compute_bounds(win)[1] for w in (win.tabs, win.panel))
+        assert win.split.get_position() > 0 and win.tabs.get_width() <= 120, win.tabs.get_width()
+        assert chat.get_x() + chat.get_width() <= panel.get_x(), (chat.get_x() + chat.get_width(), panel.get_x())
     finally:
         close(win)
 

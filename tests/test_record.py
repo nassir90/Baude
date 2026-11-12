@@ -872,9 +872,9 @@ def test_right_bar_closed_at_launch_opens(app):
 
 
 def test_notes_go_narrow(app):
-    """With the right bar open, its rule dragged as far as it goes leaves the notes next to nothing, their start still seen
-    (cut off on the right): no least of theirs holds the right bar back. Narrow, they're laid out narrow first: the find
-    bar and Feedback's Capture bar, each been and gone, take no width (shut, they held the notes at 530px)."""
+    """With the right bar open, its rule dragged as far as it goes stops where the notes are at their least: narrow, and
+    none of them under the bar. The find bar and Feedback's Capture bar, each been and gone, take no width (shut, they
+    held the notes at 530px)."""
     win = app.win
     select(win, "a")
     d = win.open_note("Narrow notes")
@@ -889,15 +889,11 @@ def test_notes_go_narrow(app):
         win.capture_bar.set_reveal_child(False)
         wait_for(lambda: not (win.capture_bar.get_child_revealed() or d.search_bar.get_first_child().get_child_revealed()),
                  "both bars gone", 3)
-        shown, notes = win.paned.get_start_child(), win.content_stack.get_ancestor(Adw.ToolbarView)
-        win.paned.set_position(220)  # (narrow, and wider than all they have at their least)
+        win.paned.set_position(0)  # (as far as it goes: the notes at their least)
         pump(0.3)
-        at, inside = (w.compute_bounds(win)[1] for w in (shown, notes))
-        assert inside.get_x() + inside.get_width() <= at.get_x() + at.get_width(), "all of them seen"
-        win.paned.set_position(0)  # (as far as it goes)
-        pump(0.3)
-        at, inside = (w.compute_bounds(win)[1] for w in (shown, notes))
-        assert at.get_width() < 20 and inside.get_x() == at.get_x(), (at.get_width(), inside.get_x(), at.get_x())
+        notes, bar = (w.compute_bounds(win)[1] for w in (win.paned.get_start_child(), win.paned.get_end_child()))
+        assert win.paned.get_position() > 0 and notes.get_width() <= 220, notes.get_width()
+        assert notes.get_x() + notes.get_width() <= bar.get_x(), (notes.get_x() + notes.get_width(), bar.get_x())
     finally:
         win.paned.set_position(was)
         pump(0.1)
@@ -3849,8 +3845,8 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
 
 def test_window_bar_stays_in_sight(app):
     """The notebooks' toggle, the right bar's and ☰ are in the window's bar, over all three, as Baude's are: the right bar
-    dragged all the way over the notes, or the notebooks' column as wide as it goes, each is still what's under the pointer
-    at its middle, where it was."""
+    dragged as far as it goes, or the notebooks' column as wide as it goes, each is still what's under the pointer at its
+    middle, where it was."""
     win = app.win
     select(win, "a")
     win.right_slide.set_shown(True)
@@ -3869,7 +3865,7 @@ def test_window_bar_stays_in_sight(app):
         return [in_sight(b) for b in (win.left_slide.toggles[0], win.right_toggle, win.menu_button)]
     try:
         was = places()
-        win.paned.set_position(0)  # (the right bar over all of the notes)
+        win.paned.set_position(0)  # (the right bar as wide as it goes)
         pump(0.3)
         assert places() == was
         column.set_width(10_000)  # (the notebooks' column as wide as it goes)

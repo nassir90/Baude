@@ -4916,8 +4916,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         beside.add_overlay(column.grip_past(split))
         main.set_content(beside)
         main.add_bottom_bar(self.make_capture_bar())  # (feedback.FeedbackHost: Capture while one's pending)
-        self.paned = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=widgets.Squeezable(main),
-                                          end_child=right, resize_start_child=True, resize_end_child=False, shrink_start_child=False,
+        # (the right bar's rule stops where the notes are at their least: it never goes over them, nor does the
+        # column's edge, dragged, push them under it: FixedWidth.limited)
+        self.paned = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=main, end_child=right,
+                                          resize_start_child=True, resize_end_child=False, shrink_start_child=False,
                                           shrink_end_child=False, hexpand=True, position=100_000))
         self.paned.add_css_class("main-split")  # (its rule unseen: the inside's edge is the line; still dragged)
         self.paned.add_css_class("inside-before")

@@ -10387,12 +10387,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         root.append(statusbar)
         self.panel = SidePanel(self)
         # a plain split: same background on both sides, a 1px rule between them, no shadow;
-        # drag the rule to resize the panel
+        # drag the rule to resize the panel. It stops where the chat's at its least (what it has, its cards' lines, its
+        # composer): the panel never goes over the chat, nor does the sessions' rule push it under the panel
         self.panel.set_visible(False)
         self.panel.set_size_request(320, -1)
-        self.split = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL,
-                                          start_child=widgets.Squeezable(self.tabs), end_child=self.panel,
-                                          resize_start_child=True, resize_end_child=False,
+        self.split = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.tabs,
+                                          end_child=self.panel, resize_start_child=True, resize_end_child=False,
                                           shrink_start_child=False, shrink_end_child=False, wide_handle=False))
         self.split.add_css_class("main-split")
         self.split.add_css_class("inside-before")

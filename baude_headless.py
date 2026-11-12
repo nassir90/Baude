@@ -5,7 +5,8 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
 
     python3 baude_headless.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N]
                                       [--exit-after-hours N] [--advertise | --no-advertise] [--no-menu-bar]
-    python3 baude_headless.py connect             # for ssh: stdin and stdout to this machine's host process
+                                      [--auto-update] [--follow-checkout]
+    python3 baude_headless.py [--auto-update] connect   # for ssh: stdin and stdout to this machine's host process
     python3 baude_headless.py socket              # where this user's host process listens (or would), to connect to
     python3 baude_headless.py quit                # this machine's host process stopped (its sessions kept)
     python3 baude_headless.py hosts               # the hosts found: this machine's, and on the network's
@@ -36,6 +37,13 @@ claudes, their transcripts kept, so their sessions are resumed next time.
 
 It runs a model as Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in
 apple-claude, once built; one on this machine in pi-claude, once pi and the model are here.
+
+It keeps itself up to date from git once that's asked for: --auto-update, or Settings → Auto restart on update in this
+machine's Baude (and never with BAUDE_UPDATE=0). Every CHECK_S (baudelib/selfupdate.py) its checkout's looked at:
+fetched and fast-forwarded, as Baude's updater does, unless --follow-checkout (Baude starts this machine's so: Baude's
+own updater moves the checkout, and it follows its HEAD). A new commit that it imports from, and it restarts onto it,
+its sessions' claudes stopped (a turn going on is cut short, and marked so: cut), but not while any of them is running
+a command (a Bash or PowerShell call, a background shell): its info says what it's waiting for (update) meanwhile.
 """
 import argparse
 import json
@@ -44,11 +52,14 @@ import signal
 import socket
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from baudelib import hosts, wire  # noqa: E402
+from baudelib import hosts, selfupdate, wire  # noqa: E402
 from baudelib.server import AlreadyRunning, Server  # noqa: E402
+
+READY_S = 2  # (a new version found: how often it's seen whether the commands it waits for are done)
 
 
 def serve(args):
@@ -63,6 +74,8 @@ def serve(args):
     except AlreadyRunning as e:
         sys.exit(f"baude-headless: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
+    if server.commit:  # (a git checkout: kept up to date, once that's asked for)
+        threading.Thread(target=updater, args=(server, args), daemon=True, name="updater").start()
     item = None
     if not args.no_menu_bar:
         from baudelib import menubar
@@ -91,10 +104,15 @@ def serve(args):
     if item is None:
         server.serve_forever()
         server.closed.wait(10)  # (serving's stopped: shutdown, on its thread, lets go of the socket before this exits)
+        if server.restarting:
+            restart(server)
         return
 
-    def ended():  # (shut down, by Quit, a signal, quit or a long idle: the process goes, AppKit's loop with it)
+    def ended():  # (shut down, by Quit, a signal, quit or a long idle: the process goes, AppKit's loop with it; by
+        # an update, it starts again)
         server.closed.wait()
+        if server.restarting:
+            restart(server)
         os._exit(0)
     server.on_change = item.changed
     for fn in (server.serve_forever, ended):
@@ -102,9 +120,66 @@ def serve(args):
     item.run()
 
 
-def connect(_args):
-    """ssh's end: its stdin and stdout carried to this machine's host process and back, started if it isn't running."""
-    if not hosts.start_here():
+def updater(server, args):
+    """The host process kept up to date (once it's asked for: selfupdate.host_enabled): every CHECK_S, a look at its
+    checkout (selfupdate.look: fetched and fast-forwarded; --follow-checkout, only its HEAD as Baude leaves it), and a
+    new commit that imports is restarted onto, its turns cut short, but not while a command runs: info's update says
+    what it's waiting for, and it's tried again every READY_S. Said in its log as it goes."""
+    root, started, ready, waited, looked = selfupdate.HERE, server.commit, None, None, 0.0
+    while not server.stopped.wait(READY_S if ready else selfupdate.CHECK_S):
+        if not selfupdate.host_enabled(args.auto_update):
+            if ready:
+                server.log(f"update to {ready[:12]} not waited for: updates turned off")
+            ready = waited = None
+            server.set_update(None)
+            continue
+        if ready and time.monotonic() - looked >= selfupdate.CHECK_S and \
+                selfupdate.git(root, "rev-parse", "HEAD", timeout=5) != ready:
+            ready = waited = None  # (moved on since: looked at again)
+            server.set_update(None)
+        if ready is None:
+            ready, looked = selfupdate.look(started, "baude_headless", root, follow=args.follow_checkout), \
+                time.monotonic()
+            if ready is None:
+                continue
+            n = selfupdate.new_commits(started, ready, root)
+            server.log(f"update: {ready[:12]}, {n} commit{'s' if n != 1 else ''} after {started[:12]}")
+        waiting = server.shutdown(if_idle=True, restart=ready)
+        if waiting is None:  # (shut down, to start again on it: serve's restart)
+            return
+        if waiting != waited:
+            server.log(f"update to {ready[:12]} waiting for {len(waiting)} command{'s' if len(waiting) != 1 else ''}"
+                       f": {'; '.join(w['what'] for w in waiting)}")
+            waited = waiting
+        server.set_update({"to": ready, "waiting": waiting})
+
+
+def restart(server):
+    """Shut down for an update (restarting): this process started again, as it was (its Python's flags, the same
+    arguments), on the code checked out now. Its lock and socket are let go of already (shutdown's), and whatever
+    else it has open is closed as it's started (Python opens nothing inheritable)."""
+    argv = [sys.executable, *(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])[1:]]
+    server.log(f"update: restarting onto {server.restarting[:12]}")
+    try:  # (a head's "listen again" till the new one's listening: ignored, as serve does; kept so across exec)
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+    except ValueError:  # (not the main thread: AppKit's, with the menu bar)
+        pass
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except (OSError, ValueError):
+            pass
+    try:
+        os.execv(sys.executable, argv)
+    except OSError as e:  # (gone, its Python moved: the next head starts one)
+        server.log(f"couldn't start again ({e}): going")
+        os._exit(1)
+
+
+def connect(args):
+    """ssh's end: its stdin and stdout carried to this machine's host process and back, started if it isn't running
+    (keeping its checkout up to date itself, as there may be no Baude here to: --auto-update, or Baude's setting)."""
+    if not hosts.start_here(follow_checkout=False, auto_update=args.auto_update):
         sys.exit(f"baude-headless: no host process here (see {hosts.log_path()})")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(wire.socket_path())
@@ -150,6 +225,12 @@ def main():
         said.add_argument("--no-advertise", action="store_const", const=False, dest="advertise",
                           help="don't say it on the network any more")
         c.add_argument("--no-menu-bar", action="store_true", help="on macOS, no item in the menu bar")
+        c.add_argument("--auto-update", action="store_true",
+                       help="keep itself up to date from git, as Baude's Auto restart on update does (default: as "
+                            "this machine's Baude settings say; never with BAUDE_UPDATE=0)")
+        c.add_argument("--follow-checkout", action="store_true",
+                       help="updating, only follow what's checked out (which this machine's Baude keeps up to date), "
+                            "never fetching or merging")
     serving(sub.add_parser("serve", help="the host process (the default)"))
     serving(p)
     sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")

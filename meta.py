@@ -956,6 +956,11 @@ class Agent:
 CSS = f"""
 label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wrote: MetaChat._said) */
 .meta-ui {{ margin-top: 2px; }}
+/* Settings' rows as Meta shows them (a setting's, chats', pages', the changelog's): hollow, in a tool card's outline,
+   where Settings has them on a card */
+.meta-ui list.boxed-list {{ background: none; box-shadow: none; border: 1px solid @baude_rule; border-radius: 8px; }}
+.meta-ui list.boxed-list > row {{ background: none; }}
+.meta-ui list.boxed-list > row:hover {{ background: alpha(@view_fg_color, 0.04); }}
 .tool-card button.meta-batch {{ min-height: 0; min-width: 0; padding: 1px 5px; }}
 .changes-bar {{ background: alpha(@accent_bg_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }}
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
@@ -1227,22 +1232,21 @@ class MetaChat(Gtk.Box):
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
-        head = Gtk.Box(spacing=6, halign=Gtk.Align.START, margin_start=8, margin_top=6, margin_bottom=4)
-        clear = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Clear conversation")
-        clear.add_css_class("flat")
-        clear.add_css_class("circular")
-        clear.add_css_class("meta-clear")
-        clear.connect("clicked", lambda *_: self._clear())
-        head.append(clear)
-        self.head = head
-        self.append(head)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
                            margin_start=12, margin_end=12)
         self.scroll = widgets.markdown_scroller(self.box, vexpand=True)
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
-        # widgets.inside), Clear above it on the frame
+        # widgets.inside); Clear a little × over the conversation's top left corner, taking no line of its own
+        clear = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Clear conversation", halign=Gtk.Align.START,
+                           valign=Gtk.Align.START, margin_start=6, margin_top=6)
+        clear.add_css_class("flat")
+        clear.add_css_class("circular")
+        clear.add_css_class("meta-clear")
+        clear.connect("clicked", lambda *_: self._clear())
+        over = Gtk.Overlay(child=self.scroll, vexpand=True)
+        over.add_overlay(clear)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
-        talk.append(self.scroll)
+        talk.append(over)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=10)
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # (an app's own, over the box)
@@ -1554,14 +1558,17 @@ class MetaChat(Gtk.Box):
         return box
 
     def setting_box(self, it, batch):
-        """set_setting's: the change in a line, and the setting's own row under it, to go on adjusting."""
-        spec = it["shown"][0]
-        s = self.settings.get(spec["name"])
-        box = self.outline(batch, batch[0]["label"] if batch else s.title if s else spec["name"])
-        for spec in it.get("shown") or ():
-            if (w := self.shown_widget(spec)) is not None:
-                box.append(w)
-        return box
+        """set_setting's: the setting's own row, as Meta shows Settings' rows (shown_widget: hollow, outlined), to go on
+        adjusting; on it, what it was before (its subtitle, if it has none of its own) and the change's Undo (Redo)."""
+        group = self.shown_widget(it["shown"][0])
+        if batch and (row := getattr(group, "row", None)) is not None:
+            a = batch[0]
+            row.set_tooltip_text(f"{NAME}: {a['label']}")
+            if not row.get_subtitle():
+                row.set_subtitle(f"Was {said_value(a['undo']['value'])}" if a["state"] == "done" else
+                                 f"Set to {said_value(a['redo']['value'])}, undone")
+            row.add_suffix(self.batch_controls(batch))
+        return group
 
     def change_box(self, batch):
         """Pages or chats a call changed: what it did, and each one it changed, highlighted as the left bar has it
@@ -1718,7 +1725,8 @@ class MetaChat(Gtk.Box):
             s = self.settings[spec["name"]]
             group = Adw.PreferencesGroup()
             group.add_css_class("meta-ui")
-            group.add(s.row())
+            group.row = s.row()  # (Settings' own, in Meta's look: CSS's .meta-ui)
+            group.add(group.row)
             return group
         if kind == "chats":
             return rows_group(self.chats_rows(spec.get("items") or []), limit=12)

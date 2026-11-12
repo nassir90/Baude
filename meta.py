@@ -18,6 +18,7 @@ tools, which come in on a Unix socket of the app's (ToolSocket) through a relay 
 Each app makes its column a MetaChat of its own: its tools (app_tools), what they do (app_handlers), its part of the
 index (sections), and how its actions are undone (apply_app). Nothing here is Baude's or Record's own."""
 import ast
+import contextlib
 import html
 import json
 import os
@@ -575,7 +576,8 @@ what the index has.
 
 Everything you do is recorded as an action, with an id, and can be undone: under your reply the user sees each one \
 with undo and redo, and a change to {listed} is marked in the left bar (green added, red removed, blue moved) till they \
-keep or undo it. undo and redo take one back or put it again. You're told when the user undoes something. Never do \
+keep or undo it; all you change of {listed} in one turn is one change, undone and done again as one. \
+undo and redo take one back or put it again. You're told when the user undoes something. Never do \
 what can't be undone: say so plainly, and show its button (show button:<action>) for the user to press themselves.
 
 Settings: set_setting changes one at once, and its row shows under your reply, where the user can go on adjusting it; \
@@ -981,7 +983,8 @@ label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
 """
 _CSS = []
-MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a"}  # (highlight:
+MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a",
+               "edited": "#9141ac"}  # (edited: a page whose text changed; highlight:
 # the accent's)
 MARK_ALPHA, LIT_ALPHA = 0.28, 0.6  # (a mark's highlight; lit, its card under the pointer: MetaChat.light)
 
@@ -993,6 +996,31 @@ def install_css(display):
         provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         _CSS.append(provider)
+
+
+MARK_STRENGTH = {"removed": 5, "archived": 4, "added": 3, "moved": 2, "edited": 1}  # (a row a change marks twice:
+# the stronger: a page added, then edited, is added; a chat moved, then archived, archived)
+
+
+def bundle(a, label_, kind, undo, redo, marks):
+    """Action a (one change to what the left bar lists) with another part: undone after it, done again before it
+    (MetaChat.apply_action); its label the parts', its marks gathered, a row marked again marked as the stronger of
+    the two (MARK_STRENGTH), with both their notes (a row whose key changed, its mark carried to the new key: a mark's
+    fifth, the key it had)."""
+    parts = a.get("parts") or [{"label": a["label"], "kind": a["kind"], "undo": a["undo"], "redo": a["redo"]}]
+    parts = parts + [{"label": label_, "kind": kind, "undo": undo, "redo": redo}]
+    gathered = {(m[0], m[1]): m for m in a.get("marks") or ()}
+    for m in marks:
+        was = gathered.pop((m[0], m[4]), None) if len(m) > 4 and m[4] else None
+        old = gathered.get((m[0], m[1])) or was
+        if old is not None:
+            how = old[2] if MARK_STRENGTH.get(old[2], 0) > MARK_STRENGTH.get(m[2], 0) else m[2]
+            note = ", ".join(dict.fromkeys(n for n in (old[3] if len(old) > 3 else "", m[3] if len(m) > 3 else "")
+                                           if n))
+            m = [m[0], m[1], how, note] + m[4:]
+        gathered[(m[0], m[1])] = m
+    return {**a, "kind": "bundle", "undo": None, "redo": None, "parts": parts, "kept": False,
+            "label": "; ".join(dict.fromkeys(p["label"] for p in parts)), "marks": list(gathered.values())}
 
 
 def mark_rgba(how, lit=False):
@@ -1499,9 +1527,12 @@ class MetaChat(Gtk.Box):
         reply.bubble, reply.prose = reply, None
         items = m.get("items")
         if m.get("error"):
+            drawn = set()
             for it in items or ():
-                if it["kind"] == "tool":
-                    widget, holds = self.call_widget(it)
+                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn):
+                    widget, holds = self.call_widget({**it, "actions": [i for i in it.get("actions") or ()
+                                                                         if i not in drawn]})
+                    drawn.update(it.get("actions") or ())
                     if widget is not None:
                         reply.append(widget)
                     if not holds:
@@ -1511,13 +1542,20 @@ class MetaChat(Gtk.Box):
             return reply
         if items is None:  # (a reply kept from before its parts were: its text, then what it did)
             items = [{"kind": "text", "text": m["text"]}] if m.get("text") else []
+        drawn = set()  # (the actions drawn: a turn's change, made by several calls, drawn once, at the first)
         for it in items:
             if it["kind"] == "text":
                 if (text := self.reply_text(it["text"]).strip()):
                     reply.prose = self.prose(text)
                     reply.append(reply.prose)
             else:
-                widget, holds = self.call_widget(it)
+                ids = it.get("actions") or []
+                fresh = [i for i in ids if i not in drawn]
+                if ids and not fresh:
+                    self.add_shown(reply, it.get("shown") or ())
+                    continue
+                drawn.update(ids)
+                widget, holds = self.call_widget({**it, "actions": fresh})
                 if widget is not None:
                     reply.append(widget)
                 if not holds:
@@ -2133,14 +2171,27 @@ class MetaChat(Gtk.Box):
 
     def act(self, turn, label_, kind, undo, redo, marks=()):
         """An action Meta's taken (done already): kept in the journal, under the reply it's in. undo, redo: what
-        apply needs to take it back and do it again; marks: [kind, key, how, note] for the left bar's rows it changed
-        (added, removed, moved)."""
-        a = {"id": uuid.uuid4().hex[:6], "label": label_, "kind": kind, "undo": undo, "redo": redo, "state": "done",
-             "kept": not marks, "marks": [list(m) for m in marks], "t": time.time()}
-        self.actions().append(a)
-        turn["actions"].append(a["id"])
-        if (item := turn.get("at")) is not None:
-            item.setdefault("actions", []).append(a["id"])
+        apply needs to take it back and do it again; marks: [kind, key, how, note, the key it had] for the left bar's
+        rows it changed (added, removed, moved, archived, edited). A change to what the left bar lists joins the
+        turn's change, if it's made one (bundle): a turn's changes to it are one action, kept, undone and done again
+        as one; a setting's is one of its own."""
+        marks = [list(m) for m in marks]
+        joined = next((x for x in self.actions() if x["id"] == turn.get("bundle") and x["state"] == "done"), None) \
+            if marks else None
+        if joined is not None:
+            a = bundle(joined, label_, kind, undo, redo, marks)
+            self.actions().remove(joined)
+            self.actions().append(a)  # (last: as it's the latest change, and where it's undone in order from)
+        else:
+            a = {"id": uuid.uuid4().hex[:6], "label": label_, "kind": kind, "undo": undo, "redo": redo,
+                 "state": "done", "kept": not marks, "marks": marks, "t": time.time()}
+            self.actions().append(a)
+            if marks:
+                turn["bundle"] = a["id"]
+        if a["id"] not in turn["actions"]:
+            turn["actions"].append(a["id"])
+        if (item := turn.get("at")) is not None and a["id"] not in item.setdefault("actions", []):
+            item["actions"].append(a["id"])
         self.save()
         if marks:
             self.marks_changed()
@@ -2158,6 +2209,21 @@ class MetaChat(Gtk.Box):
         else:
             self.apply_app(kind, data)
 
+    def apply_action(self, a, undo):
+        """An action undone (undo) or done again: a bundle's parts, the last first or in order, all of them or none
+        (one that can't be: what was done before it put back as it was, and ValueError saying why)."""
+        parts = a.get("parts") or [a]
+        done = []
+        try:
+            for p in (reversed(parts) if undo else parts):
+                self.apply(p["kind"], p["undo"] if undo else p["redo"])
+                done.append(p)
+        except (ValueError, KeyError, OSError) as e:
+            for p in reversed(done):
+                with contextlib.suppress(ValueError, KeyError, OSError):
+                    self.apply(p["kind"], p["redo"] if undo else p["undo"])
+            raise ValueError(str(e))
+
     def undo_action(self, a, by_user=False):
         return self.undo_many([a], by_user)
 
@@ -2167,7 +2233,7 @@ class MetaChat(Gtk.Box):
         failed = []
         for a in reversed([a for a in acts if a["state"] == "done"]):
             try:
-                self.apply(a["kind"], a["undo"])
+                self.apply_action(a, undo=True)
                 a["state"] = "undone"
                 if by_user:
                     self.told().append(f"(The user undid your action {a['id']}: {a['label']}.)")
@@ -2182,7 +2248,7 @@ class MetaChat(Gtk.Box):
         if a["state"] != "undone":
             return []
         try:
-            self.apply(a["kind"], a["redo"])
+            self.apply_action(a, undo=False)
         except (ValueError, KeyError, OSError) as e:
             if by_user:
                 widgets.toast(self, f"Couldn't redo {a['label']}: {e}")

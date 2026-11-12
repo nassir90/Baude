@@ -5920,6 +5920,18 @@ class ThinkingView(Gtk.Box):
 FILE_WRITTEN = re.compile(r"(?:The file (?:(?! \()[^\n])+ has been updated successfully\."
                           r"|File created successfully at: (?:(?! \()[^\n])+)"
                           r"(?:\s+\(file state is current in your context[^()\n]*\))?")
+# (and a Skill's, that it started: the card's name and summary say which; what it was given is its Input)
+SKILL_LAUNCHED = re.compile(r"Launching skill: [^\n]+")
+
+
+def said_nothing(base, text, is_error):
+    """Is a call's whole result only that it went through (an edit or write made, a skill started): no Output to
+    open, since the card says that already?"""
+    text = (text or "").strip()
+    if is_error:
+        return False
+    return base in ("Edit", "MultiEdit", "Write") and bool(FILE_WRITTEN.fullmatch(text)) or \
+        base == "Skill" and bool(SKILL_LAUNCHED.fullmatch(text))
 
 
 class ToolCard(Gtk.Box):
@@ -6124,8 +6136,7 @@ class ToolCard(Gtk.Box):
                 self.report = text.strip()
                 self.result_box.append(MarkdownView(text))  # a finished agent's answer is markdown
                 self.show_output()
-        elif text and not (not is_error and self.base in ("Edit", "MultiEdit", "Write")
-                           and FILE_WRITTEN.fullmatch(text.strip())):  # (it went through: no Output to open)
+        elif text and not said_nothing(self.base, text, is_error):  # (it went through: no Output to open)
             self.add_output_text(text)
         for data in images:
             try:

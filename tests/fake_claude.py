@@ -51,13 +51,24 @@ if os.environ.get("FAKE_CLAUDE_SESSION_IDS"):  # (opt in: the id it's given, as 
 SAID = {"text": "", "thinking": ""}  # (streamed since the last message: keep() writes it with the next)
 
 
-def keep(kind, message):
-    """FAKE_CLAUDE_TRANSCRIPTS=1: a transcript kept as claude keeps one, in $CLAUDE_CONFIG_DIR (only there: never the
-    real ~/.claude)."""
+def kept_in():
+    """FAKE_CLAUDE_TRANSCRIPTS=1: where transcripts are kept as claude keeps them, in $CLAUDE_CONFIG_DIR (only there:
+    never the real ~/.claude); None if they aren't."""
     root = os.environ.get("CLAUDE_CONFIG_DIR")
     if not (os.environ.get("FAKE_CLAUDE_TRANSCRIPTS") and root):
+        return None
+    return os.path.join(root, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()))
+
+
+AGENTS = {}  # an Agent call's tool_use_id -> its agent's id (what its own transcript's named by)
+
+
+def keep(kind, message, agent=None, **extra):
+    """A message kept in the transcript (kept_in); a subagent's in its own, beside it (agent: the Agent call's id)."""
+    folder = kept_in()
+    if folder is None:
         return
-    if kind == "assistant":
+    if kind == "assistant" and agent is None:  # (what was streamed is the main chat's)
         content = list(message.get("content") or [])
         if SAID["text"] and not any(c.get("type") == "text" for c in content):
             content.insert(0, {"type": "text", "text": SAID["text"]})
@@ -65,13 +76,34 @@ def keep(kind, message):
             content.insert(0, {"type": "thinking", "thinking": SAID["thinking"], "signature": ""})
         message = {**message, "content": content}
         SAID.update(text="", thinking="")
-    folder = os.path.join(root, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()))
-    os.makedirs(folder, exist_ok=True)
-    rec = {"parentUuid": None, "isSidechain": False, "type": kind, "uuid": str(uuid.uuid4()),
+    path = os.path.join(folder, f"{SESSION}.jsonl")
+    if agent is not None:
+        path = os.path.join(folder, SESSION, "subagents", f"agent-{AGENTS.get(agent, agent)}.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rec = {"parentUuid": None, "isSidechain": agent is not None, "type": kind, "uuid": str(uuid.uuid4()),
            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "sessionId": SESSION,
-           "cwd": os.getcwd(), "entrypoint": "sdk-cli", "message": message}
-    with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
+           "cwd": os.getcwd(), "entrypoint": "sdk-cli", **extra, "message": message}
+    with open(path, "a") as f:
         f.write(json.dumps(rec) + "\n")
+
+
+def keep_agent(tool, tid, kind, prompt):
+    """An agent started (kept_in): its meta.json, naming the call that started it, and its prompt, first in its
+    transcript."""
+    AGENTS[tool] = tid
+    folder = kept_in()
+    if folder is None:
+        return
+    folder = os.path.join(folder, SESSION, "subagents")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, f"agent-{tid}.meta.json"), "w") as f:
+        json.dump({"agentType": kind, "toolUseId": tool}, f)
+    keep("user", {"role": "user", "content": prompt}, agent=tool)
+
+
+def launched(tid):
+    """What an Agent call run in the background returns (claude names the agent, when it keeps its transcript)."""
+    return "Async agent launched successfully." + (f"\nagentId: {tid} (internal ID)" if kept_in() else "")
 
 
 def system_prompt():
@@ -104,6 +136,9 @@ def control_reply(req):
         return {"applied": {"model": state["model"], "effort": state["effort"]}}
     if sub == "get_context_usage":
         return context_usage()
+    if sub == "rename_session" and (folder := kept_in()) is not None:  # (written in the transcript, then answered)
+        with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
+            f.write(json.dumps({"type": "custom-title", "customTitle": req.get("title"), "sessionId": SESSION}) + "\n")
     return {}
 
 log = open(os.environ.get("FAKE_CLAUDE_LOG", os.devnull), "a")
@@ -131,8 +166,8 @@ def out(obj, delay=0.005):
             d = ev.get("delta") or {}
             SAID["text"] += d.get("text") or ""
             SAID["thinking"] += d.get("thinking") or ""
-        elif kind in ("assistant", "user") and not obj.get("parent_tool_use_id"):
-            keep(kind, obj["message"])
+        elif kind in ("assistant", "user"):
+            keep(kind, obj["message"], agent=obj.get("parent_tool_use_id"))
         elif kind == "result" and SAID["text"]:
             keep("assistant", {"role": "assistant", "model": "fake", "content": []})
     time.sleep(delay)
@@ -211,6 +246,10 @@ def finish_task(tid, status="completed", summary=None):
     system("task_updated", task_id=tid, patch={"status": status})
     system("task_notification", task_id=tid, tool_use_id=t["tool_use_id"], status=status,
            output_file=t["output_file"], summary=summary or t["summary"], usage=t.get("usage"))
+    keep("user", {"role": "user", "content": f"<task-notification>\n<task-id>{tid}</task-id>\n<tool-use-id>"
+                  f"{t['tool_use_id']}</tool-use-id>\n<output-file>{t['output_file']}</output-file>\n<status>{status}"
+                  f"</status>\n<summary>{summary or t['summary']}</summary>\n</task-notification>"},
+         origin={"kind": "task-notification"})
     system("background_tasks_changed", tasks=[{"task_id": k, "task_type": v["type"]} for k, v in TASKS.items()])
     if status == "completed":  # like the real CLI: a new turn starts by itself
         system("status", status="requesting")
@@ -260,12 +299,12 @@ def subagent(n, delay):
     TASKS[tid] = {"tool_use_id": tool, "type": "local_agent", "output_file": "/dev/null",
                   "summary": "There are **28** test functions.", "followup": "The subagent counted 28 tests.",
                   "usage": {"total_tokens": 18000, "tool_uses": 1, "duration_ms": 900}}
+    keep_agent(tool, tid, "Explore", inp["prompt"])
     system("task_started", task_id=tid, tool_use_id=tool, description=inp["description"],
            subagent_type="Explore", task_type="local_agent", is_backgrounded=True, prompt=inp["prompt"])
     system("background_tasks_changed", tasks=[{"task_id": tid, "task_type": "local_agent"}])
     out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
-        {"type": "tool_result", "tool_use_id": tool, "content": [
-            {"type": "text", "text": "Async agent launched successfully."}]}]}})
+        {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": launched(tid)}]}]}})
     say("A subagent is surveying the tests.", f"s{tid}")
     result("launched")
 
@@ -301,12 +340,12 @@ def nested_subagent(n, hold):
                   "summary": "No dead code; the helper counted **28** tests.",
                   "followup": "The audit found no dead code.",
                   "usage": {"total_tokens": 41000, "tool_uses": 3, "duration_ms": 2100}}
+    keep_agent(tool, tid, "general-purpose", inp["prompt"])
     system("task_started", task_id=tid, tool_use_id=tool, description=inp["description"],
            subagent_type="general-purpose", task_type="local_agent", is_backgrounded=True, prompt=inp["prompt"])
     system("background_tasks_changed", tasks=[{"task_id": tid, "task_type": "local_agent"}])
     out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
-        {"type": "tool_result", "tool_use_id": tool, "content": [
-            {"type": "text", "text": "Async agent launched successfully."}]}]}})
+        {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": launched(tid)}]}]}})
     say("An agent is auditing the app.", f"s{tid}")
     result("launched")
 
@@ -327,6 +366,7 @@ def nested_subagent(n, hold):
         TASKS[itid] = {"tool_use_id": itool, "type": "local_agent", "output_file": "/dev/null",
                        "summary": "There are **28** test functions.", "followup": None,
                        "usage": {"total_tokens": 12000, "tool_uses": 1, "duration_ms": 700}}
+        keep_agent(itool, itid, "Explore", iinp["prompt"])
         system("task_started", task_id=itid, tool_use_id=itool, description=iinp["description"],
                subagent_type="Explore", task_type="local_agent", prompt=iinp["prompt"])
         said(itool, [{"type": "tool_use", "id": f"{itool}_g", "name": "Grep",

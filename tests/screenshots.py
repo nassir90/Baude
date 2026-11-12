@@ -1115,12 +1115,39 @@ def network_fixture():
     return NET
 
 
-def network_window(app, group="Lab"):
+def network_window(app, group="Lab", sid=None):
+    """A window showing a group on the network (in Planning, sid: the session waited for)."""
     network_fixture()
     baude.save_settings(sidebar_network=group)
     win = app.window(opts(cwd=NET["folders"][0]))
-    T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "the network's sessions")
+    if sid is None:
+        T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "the network's sessions")
+    else:
+        T.wait_for(lambda: session_row(win, sid) is not None, "the session")
     return win
+
+
+def session_row(win, sid):
+    for i in range(200):
+        row = win.sidebar.list.get_row_at_index(i)
+        if row is None:
+            return None
+        if getattr(row, "info", {}).get("id") == sid:
+            return row
+
+
+def subagent_session():
+    """A session on lab-mac, in Planning, that had a subagent count the tests in the background: the subagent's own
+    transcript kept beside the session's, as claude keeps it."""
+    if "agent" in NET:
+        return NET["agent"]
+    network_fixture()
+    server = NET["lab"][0]
+    s = server.start({"prompt": "Have a SUBAGENT count the test functions", "title": "Count the test functions",
+                      "cwd": NET["folders"][0], "group": "Planning", "tags": ["tests"]})
+    T.wait_for(lambda: s.transcript() and "subagent counted" in open(s.transcript()).read(), "its subagent done", 15)
+    NET["agent"] = s.id
+    return s.id
 
 
 def open_network_session(win, prompt):
@@ -1247,11 +1274,41 @@ def _(app):
     return win
 
 
-@scene("55g-network-session-menu", "Right-click a network session: Archive, and Delete (it comes back if it's used "
-                                   "again); one at a turn: Stop")
+@scene("55g-network-session-menu", "Right-click a network session: Rename…, Archive, and Delete (it comes back if "
+                                   "it's used again); one at a turn: Stop")
 def _(app):
     win = network_window(app)
     win.sidebar.show_menu(sidebar_row(win, "Write the release notes for 2.4"), 120, 14)
+    return win
+
+
+@scene("55i-network-subagent", "A network session's subagent in the side panel: its own transcript, fetched from its "
+                               "server with the session's", size=(1200 + SIDEBAR, H))
+def _(app):
+    sid = subagent_session()
+    win = network_window(app, "Planning", sid)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, sid))
+    T.wait_for(lambda: win.remote is not None and win.session_id == sid and win.proc is not None, "opened")
+    T.wait_for(lambda: "toolu_ag1" in win.panel.agent_rows, "its subagent")
+    win.show_panel(True, "agents")
+    win.panel.open_agent("toolu_ag1")
+    end = time.monotonic() + 5  # (its details: what's mirrored of its transcript, read as it's there)
+    while "28" not in T.labels_text(win.panel.agent_view("toolu_ag1")) and time.monotonic() < end:
+        T.pump(0.1)
+    return win
+
+
+@scene("55j-network-renamed", "A network session renamed (Rename…, or F2): its server renames it, and it's listed "
+                              "and shown by its new name")
+def _(app):
+    network_fixture()
+    sid = NET["ids"]["Plan the Q1 roadmap"]
+    win = network_window(app, "Planning", sid)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, sid))
+    T.wait_for(lambda: win.remote is not None and win.session_id == sid and win.proc is not None, "opened")
+    win.sidebar.rename(session_row(win, sid).info, "Q1 roadmap: first draft")
+    T.wait_for(lambda: (session_row(win, sid).info.get("title") or "").startswith("Q1 roadmap"), "renamed")
+    T.pump(0.3)
     return win
 
 

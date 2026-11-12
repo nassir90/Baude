@@ -1,6 +1,6 @@
 """Servers as Baude sees them: each one found on the network (discovery.Browser), given by address, or remembered from
-before; the sessions each lists; a session's transcript mirrored here, so what reads a transcript reads it as it reads
-a local one; and a session's claude, talked to as Baude talks to its own (RemoteProc).
+before; the sessions each lists; a session's transcript mirrored here, and its subagents' beside it, so what reads a
+transcript reads it as it reads a local one; and a session's claude, talked to as Baude talks to its own (RemoteProc).
 
 A server that goes (its connection drops, or it says nothing for wire.SILENT_S) isn't forgotten: it's "dead", its
 sessions still listed as they were, until it's back or it's been gone for FORGET_S. Calls to what's given (on_change,
@@ -22,6 +22,12 @@ RETRY_S = (1, 2, 5, 10, 30)  # a dead server is tried again after these, then ev
 
 def network_home():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "network")
+
+
+def _subagent_file(name):
+    """A name a subagents folder's file may have (and one to write here: no path in it)."""
+    return isinstance(name, str) and name.endswith((".jsonl", ".meta.json")) and not name.startswith(".") \
+        and os.path.basename(name) == name and "\\" not in name
 
 
 def is_here(info):
@@ -140,9 +146,9 @@ class Remote:
         except OSError:
             return 0
 
-    def sync(self, session_id, timeout=30):
-        """Bring a session's mirror up to what the server has (one sync of a session at a time, whichever window asks;
-        timeout: what each request's waited for). True if it is."""
+    def sync(self, session_id, timeout=30, subagents=True):
+        """Bring a session's mirror up to what the server has, and its subagents' (one sync of a session at a time,
+        whichever window asks; timeout: what each request's waited for). True if its transcript's is."""
         path = self.mirror(session_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with self.lock:
@@ -157,7 +163,75 @@ class Remote:
                 with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
                     f.write(data)
                 if not data or r["next"] >= r["size"]:
-                    return True
+                    break
+            if subagents and self.subagents_behind(session_id):
+                self.sync_subagents(session_id, timeout)
+            return True
+
+    def subagents_mirror(self, session_id):
+        """Where a session's subagents' files are mirrored: beside its mirror, as claude keeps them beside its
+        transcript (what reads a transcript's subagents finds them there)."""
+        return os.path.join(self.network.home, self.key, session_id, "subagents")
+
+    def subagents_had(self, session_id):
+        """What the mirror has of a session's subagents' files: {name: [size, mtime_ns]}, each one's mtime the
+        server's as it was when it was fetched."""
+        out = {}
+        try:
+            with os.scandir(self.subagents_mirror(session_id)) as found:
+                for e in found:
+                    if _subagent_file(e.name) and e.is_file():
+                        st = e.stat()
+                        out[e.name] = [st.st_size, st.st_mtime_ns]
+        except OSError:
+            pass
+        return out
+
+    def subagents_behind(self, session_id):
+        """Has the server changed a session's subagents' files since they were mirrored (as it last listed it)?"""
+        listed = (self.sessions.get(session_id) or {}).get("subagents")
+        newest = max((m for _size, m in self.subagents_had(session_id).values()), default=0)
+        return isinstance(listed, int) and listed != newest  # (None: a server that doesn't say)
+
+    def sync_subagents(self, session_id, timeout=30):
+        """(sync's) A session's subagents' files mirrored as the server has them, each one's mtime set to its own
+        there. True if they are."""
+        folder = self.subagents_mirror(session_id)
+        while True:
+            had = self.subagents_had(session_id)
+            r = self.call({"op": "subagents", "session": session_id, "have": had}, timeout)
+            if r.get("op") != "subagents":
+                return False
+            got, listed = False, set()
+            for f in r.get("files") or []:
+                name = f.get("name") if isinstance(f, dict) else None
+                if not _subagent_file(name):
+                    continue
+                listed.add(name)
+                path, at = os.path.join(folder, name), (had.get(name) or [0])[0]
+                data = base64.b64decode(f.get("data") or "")
+                got |= bool(data)
+                if f.get("offset") == at and at:
+                    if data:
+                        with open(path, "ab") as fh:
+                            fh.write(data)
+                elif data or f.get("offset") != at or name not in had:  # (new, changed, or shorter there)
+                    os.makedirs(folder, exist_ok=True)
+                    with open(os.path.join(folder, f".{name}.tmp"), "wb") as fh:
+                        fh.write(data)
+                    os.replace(os.path.join(folder, f".{name}.tmp"), path)
+                if isinstance(f.get("mtime"), int) and os.path.exists(path) and \
+                        (not data or (f.get("next") or 0) >= (f.get("size") or 0)):  # (as it is there, all of it)
+                    os.utime(path, ns=(f["mtime"], f["mtime"]))
+            if r.get("more") and got:
+                continue
+            if not r.get("more"):
+                for name in set(had) - listed:  # (gone there)
+                    try:
+                        os.remove(os.path.join(folder, name))
+                    except OSError:
+                        pass
+            return True
 
     def stop(self):
         self.stopped = True

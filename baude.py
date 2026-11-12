@@ -8207,9 +8207,10 @@ class SessionSidebar(Gtk.Box):
                  ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
                   "unarchive" if info["id"] in self.archived_ids() else "archive"),
                  ("Move to Trash…", "trash")]
-        if info.get("remote") is not None:  # (on a server: stopped there, or deleted here, never trashed from here)
-            active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")
-            items = items[1:2] + ([("Stop", "stop")] if active else [("Delete", "hide")])
+        if info.get("remote") is not None:  # (on a server: renamed or stopped there while it's there, or deleted here,
+            active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")  # never trashed)
+            items = items[:1 if not info.get("dead") else 0] + items[1:2] + \
+                ([("Stop", "stop")] if active else [("Delete", "hide")])
         for label, action in items:
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", sid)
@@ -8227,7 +8228,7 @@ class SessionSidebar(Gtk.Box):
         if keyval == Gdk.KEY_F2:
             row = self.list.get_focus_child() or self.list.get_selected_row()
             if row is not None and getattr(row, "info", None) and not row.info.get("unsaved") \
-                    and row.info.get("remote") is None:  # (a network session's transcript isn't here to rename)
+                    and not row.info.get("dead"):  # (a network session's renamed by its server: not while it's gone)
                 self.ask_rename(row.info)
                 return True
         return False
@@ -8251,6 +8252,10 @@ class SessionSidebar(Gtk.Box):
         if not title or title == info.get("title"):
             return
         win = self.win
+        if (r := info.get("remote")) is not None:  # (on a server: its server renames it, and lists it so)
+            r.request({"op": "rename", "session": info["id"], "title": title},
+                      lambda reply: self.renamed_remote(r, info, title, reply))
+            return
         if info["id"] == win.session_id and win.proc and not win.resume_pending:
             win.request({"subtype": "rename_session", "title": title}, lambda _r: None)  # the live session
         else:  # what the CLI itself writes for a rename
@@ -8260,6 +8265,19 @@ class SessionSidebar(Gtk.Box):
         if info["id"] == win.session_id:
             win.show_title(title)
         self.refresh()
+
+    def renamed_remote(self, r, info, title, reply):
+        """A network session's server answered a rename: listed by its new title here before it next says what it has
+        (the title it has there: its claude may have made it its own)."""
+        if reply.get("op") != "renamed":
+            toast(self, f"{remote_name(r)} didn't rename it: {reply.get('error')}")
+            return
+        listed = reply.get("session") or {}
+        if listed.get("id") == info["id"]:
+            r.sessions[info["id"]] = listed
+        if info["id"] == self.win.session_id and self.win.remote is r:
+            self.win.show_title(listed.get("title") or title)
+        self.fill()
 
     def archive(self, info):
         if info:
@@ -13620,12 +13638,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         threading.Thread(target=work, daemon=True).start()
 
     def on_network(self):
-        """The network changed: the open network session's transcript fetched as it grows, the banner as it is now."""
+        """The network changed: the open network session's transcript fetched as it grows (its subagents' too), the
+        banner as it is now."""
         if getattr(self, "let_go_done", False) or self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
         if listed and self.remote.state == "alive" and \
-                (listed.get("size") or 0) != self.remote.mirrored(self.session_id):
+                ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
+                 self.remote.subagents_behind(self.session_id)):
             self.sync_remote(self.remote, self.session_id)
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:
@@ -13900,7 +13920,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.remote is not None and self.remote.state == "alive" and self.view_path:
             # (a network session: what its server's written since it was last fetched, drawn now, not lost to the
             # live chat that takes over: the end of a turn answered while it was watched, say)
-            self.remote.sync(self.session_id, timeout=3)
+            self.remote.sync(self.session_id, timeout=3, subagents=False)  # (on the main loop: only what's drawn)
             self.tail.read()
         self.resume_pending, self.view_path = False, None
         self.tail.stop()

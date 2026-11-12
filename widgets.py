@@ -5919,7 +5919,7 @@ def empty_label(text):
 # Baude's stylesheet: the chat's, and the viewers' (kubeview, schemaview, gitview, codeview), so wherever they run
 # (Record's viewers.ViewerWindow too) they look as they do in Baude. Its classes are its own: none is Record's.
 CSS = """
-.update-bar button { font-weight: bold; color: @accent_color; }
+.update-bar button { font-weight: normal; }  /* (the text's own colour: white on a dark sidebar, as its rows are) */
 .cut-note { margin-top: 2px; }
 .cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
 /* One look for Baude and Record: the frame round the work (the bars, the lists on the left, the panels on the

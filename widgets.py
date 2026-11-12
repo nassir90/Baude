@@ -6540,7 +6540,7 @@ def accent_text_rgba():
 
 def apply_accent(display):
     """The accent settings.json has, in every window. Changed, what's drawn here is drawn again, a chip's name
-    recoloured, as the CSS is restyled."""
+    recoloured, what keeps its own colours told (accent_changed), as the CSS is restyled."""
     name = load_settings().get("accent")
     name = name if name in ACCENTS else None
     rgba = Adw.AccentColor.to_rgba(ACCENTS[name]).to_string() if name else None
@@ -6557,6 +6557,8 @@ def apply_accent(display):
         for widget in walk(win):
             if isinstance(widget, LinkLabel) and widget.chips:
                 widget.place_icons()
+            if (changed := getattr(widget, "accent_changed", None)) is not None:  # (its own colours: Record's links)
+                changed()
             widget.queue_draw()
 
 

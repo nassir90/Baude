@@ -204,10 +204,18 @@ class Server:
 
         self.tcp = TCP((host, port), Handler)
         self.port = self.tcp.server_address[1]
-        # bound to this machine only: no one else's to use, so it wants a token only its owner can read (its file)
-        self.local = wire.is_loopback(host)
+        # bound to this machine only: no one else's to use, so it wants a token only its owner can read (its file),
+        # there before anyone's told its port
+        bound = self.tcp.server_address[0]
+        self.local = wire.is_loopback(bound)
         self.token = secrets.token_urlsafe(32) if self.local else None
         self.file = os.path.join(wire.local_dir(), f"{self.me['id']}.json")
+        try:
+            self.say_here("127.0.0.1" if bound in ("0.0.0.0", "::") else bound)
+        except OSError as e:
+            if self.local:
+                raise
+            self.log(f"not said on this machine: {e}")  # (a server on the network is found without it)
         self.advertiser = None
         self.stopped = threading.Event()
 
@@ -255,7 +263,6 @@ class Server:
     # ---- running
     def serve_forever(self):
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
-        self.say_here()
         if self.advertise and self.local:
             self.log("bound to this machine only: not said on the network")
         elif self.advertise:
@@ -264,16 +271,25 @@ class Server:
         self.log(f"serving {len(self.sessions)} sessions on port {self.port}, group {self.me['group']!r}")
         self.tcp.serve_forever(poll_interval=0.25)
 
-    def say_here(self):
-        """Its file in wire.local_dir(): where it is, and the token it wants, for its owner's programs on this machine
-        (and theirs only: the folder and the file are theirs to read)."""
-        os.makedirs(os.path.dirname(self.file), mode=0o700, exist_ok=True)
-        tmp = self.file + ".tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    def say_here(self, host):
+        """Its file in wire.local_dir(): where it is (host: the address it's bound to, or one that reaches it), and
+        the token it wants, for its owner's programs on this machine, and theirs only: the folder must be theirs and
+        theirs alone, and the file's made new, not through a link someone left."""
+        folder = os.path.dirname(self.file)
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        st = os.lstat(folder)
+        if not os.path.isdir(folder) or os.path.islink(folder) or st.st_uid != os.getuid():
+            raise OSError(f"{folder} isn't a folder of this user's own")
+        os.chmod(folder, 0o700)
+        tmp = f"{self.file}.{os.getpid()}.tmp"
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "port": self.port,
-                       "token": self.token, "pid": os.getpid()}, f)
-        os.chmod(tmp, 0o600)
+            json.dump({"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "host": host,
+                       "port": self.port, "token": self.token, "pid": os.getpid()}, f)
         os.replace(tmp, self.file)
 
     def shutdown(self):
@@ -368,24 +384,32 @@ class Server:
 
     # ---- sessions
     def start(self, params, conn=None, req=None):
-        """A new session, as start asks (wire.py): started said to conn before its prompt's sent, conn attached live
-        to it first if it asks to be (attach)."""
-        cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
-        if not os.path.isdir(cwd):
-            raise ValueError(f"not a folder here: {cwd}")
+        """A new session, as start asks (wire.py): conn attached live to it first if it asks to be (attach), and told
+        started once it's begun (its claude started, its prompt sent): before claude says anything of it, which waits
+        on the lock this holds. Anything wrong, and it's not kept."""
         model = params.get("model") or None
         with self.lock:
             src = self.sessions.get(params["fork_from"]) if params.get("fork_from") else None
         if params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
             raise ValueError(f"no conversation here to fork: {params['fork_from']}")
+        cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or (src.meta["cwd"] if src else "~")))
+        if not os.path.isdir(cwd):
+            raise ValueError(f"not a folder here: {cwd}")
+        if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
+            raise ValueError(f"a fork runs in its session's folder: {src.meta['cwd']}")
         model = model or (src.meta.get("model") if src else None)
         run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
         if not self.can_run(model):
             raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
         options = {k: params[k] for k, _flag in CLAUDE_OPTIONS if params.get(k)}
+        if not isinstance(options.get("system", ""), str):
+            raise ValueError("system is text")
         for k in ("add_dirs", "allowed_tools", "disallowed_tools"):
             if k in options:
-                options[k] = [str(v) for v in (options[k] if isinstance(options[k], list) else [options[k]]) if v]
+                values = options[k] if isinstance(options[k], list) else [options[k]]
+                if not all(isinstance(v, str) and v.strip() and not v.startswith("-") for v in values):
+                    raise ValueError(f"{k} is a list of words, none starting with -")
+                options[k] = values
         if (options or src) and run["program"] != "claude":
             raise ValueError(f"{', '.join([*options, *(['fork_from'] if src else [])])}: claude's, not {model}'s")
         if params.get("ask_default") not in (None, "deny", "allow"):
@@ -400,14 +424,24 @@ class Server:
             s = Session(self, meta)
             self.sessions[s.id] = s
             self.save(s)
+            if conn is not None and params.get("attach"):
+                s.viewers.add(conn)
+                s.live.add(conn)
+            try:
+                if meta["prompt"].strip():
+                    self.ensure_proc(s)
+                    self.send_user(s, meta["prompt"])
+            except Exception:  # (its claude couldn't start: no session, and the error's the answer)
+                del self.sessions[s.id]
+                if s.proc is not None:
+                    s.proc.kill()
+                try:
+                    os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
+                except OSError:
+                    pass
+                raise
             if conn is not None:
-                if params.get("attach"):
-                    s.viewers.add(conn)
-                    s.live.add(conn)
-                conn.send({"op": "started", "req": req, "session": s.listing()})  # (before what claude says of it)
-            if meta["prompt"].strip():
-                self.ensure_proc(s)
-                self.send_user(s, meta["prompt"])
+                conn.send({"op": "started", "req": req, "session": s.listing()})
             self.log(f"started {s.id} in {cwd} ({meta['group']})")
             self.changed()
         return s

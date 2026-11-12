@@ -309,14 +309,15 @@ class Network:
             key = e.get("id")
             if not key:
                 continue
-            with self.lock:
-                r = self.servers.get(key) or next(
-                    (r for r in self.servers.values() if wire.is_loopback(r.host) and r.port == e["port"]), None)
+            host = e["host"] if wire.is_loopback(e["host"]) and e["host"] != "localhost" else "127.0.0.1"
+            with self.lock:  # (by its id; else one given by its address and not reached yet, so with no id of its own)
+                r = self.servers.get(key) or next((r for r in self.servers.values() if r.key == f"{r.host}:{r.port}"
+                                                   and (r.host, r.port) == (host, e["port"])), None)
                 if r is None:
-                    self.servers[key] = Remote(self, key, "127.0.0.1", e["port"]).start()
+                    self.servers[key] = Remote(self, key, host, e["port"]).start()
                     self.changed()
                 elif r.state != "alive" and (wire.is_loopback(r.host) or r.port != e["port"]):
-                    r.address("127.0.0.1", e["port"])
+                    r.address(host, e["port"])
 
     def take_saved(self):
         """servers.json's servers that aren't known here (put in it while Baude runs): known, and tried."""
@@ -377,6 +378,9 @@ class Network:
             if old is not None and old is not remote:
                 old.stop()
                 remote.sessions = remote.sessions or old.sessions
+                remote.by_hand = remote.by_hand or old.by_hand
+            if remote.key != key:
+                self.forgotten.add(remote.key)  # (the address it was known by: not a server of its own in servers.json)
             remote.key = key
             self.servers[key] = remote
 

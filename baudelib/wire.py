@@ -53,6 +53,7 @@ A server on this machine leaves a file in local_dir() (its owner's to read, no o
 bound to this machine only, the token hello wants: how Baude here finds it, whether multicast DNS can or not.
 """
 import hmac
+import ipaddress
 import json
 import os
 import socket
@@ -158,12 +159,22 @@ def connect(host, port, timeout=5.0, token=None):
     return ch, reply.get("server") or {}
 
 
-LOOPBACK = ("127.0.0.1", "::1", "localhost")
-
-
 def is_loopback(host):
-    """Is an address this machine's only (a server bound to it can't be reached from another)?"""
-    return host in LOOPBACK or str(host).startswith("127.")
+    """Is host one of this machine's own addresses only (127.0.0.0/8, ::1; "localhost", as a server's bound to it)? A
+    name besides localhost isn't: what it means isn't the server's to say."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(str(host).strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _same_address(a, b):
+    try:
+        return ipaddress.ip_address(str(a).strip("[]")) == ipaddress.ip_address(str(b).strip("[]"))
+    except ValueError:
+        return False
 
 
 def local_dir():
@@ -173,8 +184,9 @@ def local_dir():
 
 
 def local_servers():
-    """The servers on this machine, as their files say: [{id, name, group, port, token (None: not wanted), pid}],
-    those whose process is gone left out."""
+    """The servers on this machine, as their files say: [{id, name, group, host (the address it's bound to, or one
+    that reaches it), port, token (None: not wanted), pid}]. A file whose server's gone (killed, or the machine
+    restarted: its pid's no process of ours) is removed."""
     out = []
     try:
         names = os.listdir(local_dir())
@@ -183,24 +195,29 @@ def local_servers():
     for name in names:
         if not name.endswith(".json"):
             continue
+        path = os.path.join(local_dir(), name)
         try:
-            with open(os.path.join(local_dir(), name), encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 entry = json.load(f)
-            os.kill(int(entry["pid"]), 0)  # (still running: a file a killed server left says nothing)
-        except PermissionError:
-            pass  # (running, as another user: its file wasn't ours to read anyway)
+            os.kill(int(entry["pid"]), 0)  # (a process of ours: else another user's, or none, since the server went)
         except (OSError, ValueError, KeyError, TypeError):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
             continue
-        if isinstance(entry, dict) and entry.get("port"):
+        if isinstance(entry, dict) and entry.get("port") and entry.get("host"):
             out.append(entry)
     return out
 
 
 def token_for(host, port):
-    """The token a server at host:port wants, if it's one bound to this machine only (local_servers); else None."""
-    if not is_loopback(host):
+    """The token a server at host:port wants: only for the very address its file says it's bound to (an address, not a
+    name, which could lead elsewhere: ::1 for 127.0.0.1's port, say, where anyone can listen); else None."""
+    if not is_loopback(host) or host == "localhost":
         return None
-    return next((e.get("token") for e in local_servers() if e.get("port") == port and e.get("token")), None)
+    return next((e.get("token") for e in local_servers()
+                 if e.get("port") == port and e.get("token") and _same_address(e.get("host"), host)), None)
 
 
 def same_token(given, wanted):

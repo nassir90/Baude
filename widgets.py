@@ -5929,7 +5929,6 @@ banner label.heading { font-weight: normal; }
 listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1px; margin-top: 1px; margin-bottom: 0; }
 .session-sidebar .sidebar-folder.current { opacity: 1; color: @accent_color; }
 .session-sidebar .fork-title { opacity: 0.85; }
-.session-sidebar .session-place { font-size: 0.85em; opacity: 0.55; }
 .session-sidebar .worktree-tag { font-size: 0.75em; padding: 0 5px; border-radius: 4px;
   background: @baude_raised; color: alpha(@view_fg_color, 0.7); }
 .feedback-thumb { padding: 0; border-radius: 8px; border: 1px solid @baude_rule; }

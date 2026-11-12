@@ -5769,7 +5769,7 @@ class Disclosure:
             # (a click leaves the focus where it was, in what you're typing)
             self.button = Gtk.ToggleButton(child=text, valign=Gtk.Align.CENTER, focus_on_click=False)
             self.button.add_css_class("tool-toggle")
-            self.button.connect("toggled", lambda b: b.get_active() != self.expanded and self.set_expanded(b.get_active()))
+            self.button.connect("toggled", lambda b: b.get_active() != self.expanded and self.clicked(b.get_active()))
         else:
             self.arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
             self.arrow.add_css_class("soft-icon")
@@ -5778,10 +5778,22 @@ class Disclosure:
             self.button.append(self.arrow)
             self.button.append(text)
             click = Gtk.GestureClick()
-            click.connect("released", lambda *_: self.set_expanded(not self.expanded))
+            click.connect("released", lambda *_: self.clicked(not self.expanded))
             self.button.add_controller(click)
             pointers.hand(self.button)
         toggles.append(self.button)
+
+    def clicked(self, expanded):
+        """Opened or closed by the reader: the toggle stays where it is on screen, and what's under it moves down or up
+        (the chat's hold_toggle: following its end, the end would stay put and the toggle move instead)."""
+        hold = getattr(self.button.get_root(), "hold_toggle", None)
+        if hold is not None:
+            hold(self)
+        self.set_expanded(expanded)
+
+    def sliding(self):
+        """Still sliding open or closed."""
+        return self.revealer is not None and self.revealer.get_child_revealed() != self.revealer.get_reveal_child()
 
     def set_child(self, child):
         if self.revealer is None:  # (a long session has thousands of these, most never opened: made when needed)
@@ -10238,6 +10250,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.apply_full_width(bool(self.settings.get("full_width")))
         self.follow = livefeed.FollowEnd(self.scroller)  # (the newest in view, once it's read to: on_layout)
         self.restore_scroll = None  # (distance from the bottom, until) after a restart
+        self.toggle_held = None  # (a toggle clicked in the chat, till it's done sliding: hold_toggle)
         vadj = self.scroller.get_vadjustment()
         vadj.connect("value-changed", self.on_scrolled)
         wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
@@ -10723,6 +10736,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.above_changed = False
             if self.stick_bottom:  # (an earlier chunk drawn or sized again: the end's kept at once, not glided to as
                 self.follow.to_end()  # new content at the end is)
+        self.toggle_settled()
         self.follow.laid_out()
         if held is not True:  # (moved this pass: what's in view is found once it's laid out where it's moved to)
             self.note_view_anchor()
@@ -10842,6 +10856,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.hold_value(self.scroller.get_vadjustment().get_value() + b.get_y() - y)
         self.view_anchor = (msg, b.get_y(), width)  # (held to it till the view's laid out where it's been moved)
         return True
+
+    def hold_toggle(self, toggle):
+        """A toggle in the chat clicked (a card's Command or Output, a group's › 5 tool calls): it stays where it is on
+        screen, what opens under it pushing what's below down (closing, pulling it up). The end isn't followed from
+        then on, nor a restart's place kept: either would keep the bottom still and move the toggle. The message at
+        the view's top holds the view (hold_view_anchor); scrolled back to the end, it's followed again, and so it is
+        if it's at the end once the toggle's done sliding (closed again where it was opened: toggle_settled)."""
+        if toggle.button.is_ancestor(self.transcript):
+            self.follow.stop_glide()
+            self.stick_bottom, self.restore_scroll, self.toggle_held = False, None, toggle
+
+    def toggle_settled(self):
+        held = self.toggle_held
+        here = held is not None and held.button.is_ancestor(self.transcript)  # (not: the chat's been switched)
+        if held is None or here and held.sliding():
+            return
+        self.toggle_held = None
+        adj = self.scroller.get_vadjustment()
+        if here and adj.get_value() + adj.get_page_size() >= adj.get_upper() - 1:
+            self.stick_bottom = True
 
     def hold_value(self, value):
         """The view put at value to hold what's in it still (not a move of the reader's: reader_moved isn't told)."""

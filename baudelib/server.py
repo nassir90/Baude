@@ -323,7 +323,7 @@ class Server:
                 s.proc.send(msg)
             return
         rid, request = msg.get("request_id"), msg.get("request") or {}
-        sub = request.get("subtype")
+        sub, undo = request.get("subtype"), None
         answer = lambda response: conn.send({"op": "claude", "session": s.id, "msg": {  # noqa: E731
             "type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": response}}})
         if sub == "initialize":
@@ -334,7 +334,8 @@ class Server:
             return
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
-            s.meta[key] = request.get(field) or s.meta.get(key)
+            undo = (key, s.meta.get(key), request.get(field) or s.meta.get(key))  # (put back if claude says no)
+            s.meta[key] = undo[2]
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         self.save(s)
@@ -344,7 +345,7 @@ class Server:
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             return answer({})
         on = f"srv_{next(self.rids)}"
-        s.routes[on] = (conn, rid)
+        s.routes[on] = (conn, rid, undo)
         self.ensure_proc(s).send({**msg, "request_id": on})
         self.changed()
 
@@ -367,7 +368,11 @@ class Server:
                                    "msg": {**msg, "response": {**r, "request_id": theirs}}})
                     s.waiting_init = []
                 elif rid in s.routes:
-                    conn, theirs = s.routes.pop(rid)
+                    conn, theirs, undo = s.routes.pop(rid)
+                    if undo and r.get("subtype") == "error" and s.meta.get(undo[0]) == undo[2]:
+                        s.meta[undo[0]] = undo[1]  # (refused, a mode it can't switch to say: kept as it still is)
+                        self.save(s)
+                        self.changed()
                     conn.send({"op": "claude", "session": s.id, "msg": {**msg, "response": {**r, "request_id": theirs}}})
                 return
             if kind == "control_request":

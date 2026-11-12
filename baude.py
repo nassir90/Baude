@@ -10183,7 +10183,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.always_allow = set()
         self.attachments = []
         self.chat_sent, self.listed_begun = False, None  # (the sidebar lists the open chat once it's begun)
-        self.pending = {}          # control request id -> callback(response)
+        self.pending = {}          # control request id -> (callback(response), refused(error) or None) (request)
         self.tasks = {}            # background task id -> latest info (commands and subagents)
         self.waiting_cards = set()  # permission prompts not answered yet
         self.background = {}  # session id -> the claude of a chat left mid-turn, going on with it (detach_proc)
@@ -11247,9 +11247,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         save_settings(full_width=value.get_boolean())
 
     # ---- control requests with replies
-    def request(self, req, callback):
+    def request(self, req, callback, refused=None):
+        """callback(response) when claude does what's asked; refused(error) when it says no (with no refused, a no
+        goes unsaid)."""
         if self.proc:
-            self.pending[self.proc.control(req)] = callback
+            self.pending[self.proc.control(req)] = (callback, refused)
 
     def refresh_context(self):
         self.request({"subtype": "get_context_usage"}, self.show_context)
@@ -11829,8 +11831,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def on_mode_changed(self, value):
         self.mode = value
         if self.proc:
-            self.proc.control({"subtype": "set_permission_mode", "mode": value})
-            self.note(f"permission mode → {self.mode_dd.label()}")
+            self.request({"subtype": "set_permission_mode", "mode": value},
+                         lambda _r: self.mode_taken(value), lambda error: self.mode_refused(value, error))
+
+    def mode_taken(self, value):
+        self.proc.mode = value  # (what it's in: where a mode it refuses next goes back to)
+        self.note(f"permission mode → {dict(MODES).get(value, value)}")
+
+    def mode_refused(self, value, error):
+        """claude said no to a mode picked (Bypass permissions, when it wasn't started able to bypass them): the
+        picker and self.mode (what the chat's claude starts in next) back on the mode it's still in, unless another's
+        been picked since, and why said."""
+        was = getattr(self.proc, "mode", None)
+        if self.mode == value and was:
+            self.sync_mode(was)
+        why = error.split(" because ", 1)[-1].rstrip(".") if error else "claude said no"
+        still = f" (still {dict(MODES).get(was, was)})" if was else ""
+        self.note(f"couldn't switch to {dict(MODES).get(value, value)}: {why}{still}")
 
     # ---- each chat's own model: picked in one, it isn't the others'. Kept by session id as a turn ends (chat_models);
     # a chat opened is put back on it, or on its transcript's last reply's model (one Baude hasn't kept)
@@ -11914,7 +11931,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.mode_dd.set_choices(MODES)
         if mode:
             self.mode = mode
-            self.mode_dd.select(mode)
+            self.mode_dd.select(mode)  # (quietly: not asked of claude again)
+            if self.proc is not None:
+                self.proc.mode = mode  # (what claude says it's in)
 
     def on_launcher_toggled(self, action, value):
         try:
@@ -14087,7 +14106,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def h_control_response(self, msg):
         r = msg.get("response", {})
-        callback = self.pending.pop(r.get("request_id"), None)
+        callback, refused = self.pending.pop(r.get("request_id"), (None, None))
         if r.get("request_id") == self.proc.init_rid and r.get("subtype") == "success":
             trace("claude ready")  # (its commands, models and modes are known)
             resp = r.get("response") or {}
@@ -14098,6 +14117,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.refresh_context()
         elif callback and r.get("subtype") == "success":
             callback(r.get("response") or {})
+        elif r.get("subtype") == "error" and refused:
+            refused(r.get("error") or "")
         elif r.get("subtype") == "error" and not callback:
             self.note(f"control error: {r.get('error')}")
 

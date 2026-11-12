@@ -1571,16 +1571,21 @@ class WrapLabel(Gtk.Label):
 class LinkLabel(WrapLabel):
     """A label whose Signal links each have their logo before them (ref_icon): git's, Kubernetes', a database's, a
     file's… The markup keeps a place for it (ref_icon_slot), which this makes the logo's width (a Pango shape) and
-    draws the logo in, at the text's size. Copied, the text has only invisible characters there. A pull request's
-    pill (pr_pill_markup) keeps a place at each end: its logo and a margin before its name, a margin after it, and this
-    draws the patch behind the lot, rounded, a piece on each line if it's broken across two."""
+    draws the logo in, at the text's size. Copied, the text has only invisible characters there. A chip (chip_markup:
+    the Git page's branch names, in the line a commit's subject's in) and a pull request's pill (pr_pill_markup) keep
+    a place at each end, their margins (a pill's logo too), and this draws their patches behind them, a piece on each
+    line if one's broken across two; a chip's name it gives its colour."""
 
     GAP = 3  # px between a logo and its name
+    CHIP_PAD, CHIP_SCALE, CHIP_RADIUS = 5, 0.78, 4  # px either side of a chip's name, its size of the text's, and its
+    # corners' px: .git-ref's, as a chip on its own had them (a pill's corners too)
     PILL_IN, PILL_OUT = 4, 5  # px: a pill's margin before its logo, and after its name
+    pill_scale = 1.0  # (a pill's size of the text's: a log row's are a chip's size)
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.icons, self.pills, self.icon_px = [], [], 0  # ([(byte index, logo)], [(start, end, state)], their size)
+        # ([(byte index, logo)], [(start, end, kind)], [(start, end, state)], the logos' size)
+        self.icons, self.chips, self.pills, self.icon_px = [], [], [], 0
 
     def set_markup(self, markup):
         Gtk.Label.set_markup(self, markup)
@@ -1594,49 +1599,62 @@ class LinkLabel(WrapLabel):
         m = self.get_pango_context().get_metrics(None, None)
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
+    def pill_px(self):
+        """A pill's logo's size, px."""
+        return max(8, round(self.icon_px * self.pill_scale))
+
     def place_icons(self):
-        """Find the places kept for logos and pills' ends, and make each its width (again, when the text's size
-        changed)."""
+        """Find the places kept for logos, chips' and pills' ends, and make each its width (again, when the text's size
+        changed); a chip's name in its colour (again, when the theme's changed)."""
         text = self.get_text()
         if "\u2063" not in text:
-            if self.icons or self.pills:
-                self.icons, self.pills = [], []
+            if self.icons or self.chips or self.pills:
+                self.icons, self.chips, self.pills = [], [], []
                 self.set_attributes(None)
             return False
-        names = re.findall(r'font_family="baude-(icon|pill)-(\w+)">\u2063</span>', self.get_label())
+        names = re.findall(r'font_family="baude-(icon|chip|pill)-(\w+)">\u2063</span>', self.get_label())
         spots = [len(text[:m.start()].encode()) for m in re.finditer("\u2063", text)]
         ascent, descent, px = self.text_px()
-        attrs, icons, pills, opened = Pango.AttrList(), [], [], None
+        self.icon_px = px
+        attrs, icons, chips, pills, opened, fg = Pango.AttrList(), [], [], [], None, self.get_color()
         for at, (kind, name) in zip(spots, names):
             if kind == "icon":
                 width = px + self.GAP
                 icons.append((at, name))
-            elif name == "end":  # (a pill's end)
-                width = self.PILL_OUT
-                if opened is not None:
-                    pills.append((opened[0], at + 3, opened[1]))
+            elif name == "end":  # (a chip's or a pill's end)
+                width = self.CHIP_PAD if kind == "chip" else self.PILL_OUT
+                if opened is not None and opened[0] == "chip":  # (a chip's name, between the two, in its colour)
+                    chips.append((opened[1], at + 3, opened[2]))
+                    color = chip_colors(opened[2], fg)[0]
+                    for a in (Pango.attr_foreground_new(*(round(v * 65535) for v in (color.red, color.green, color.blue))),
+                              Pango.attr_foreground_alpha_new(max(1, round(color.alpha * 65535)))):
+                        a.start_index, a.end_index = opened[1] + 3, at
+                        attrs.insert(a)
+                elif opened is not None:
+                    pills.append((opened[1], at + 3, opened[2]))
                 opened = None
-            else:  # (a pill's start, its logo's place: name is where it stands)
-                width, opened = self.PILL_IN + px + self.GAP, (at, name)
+            else:  # (a start: a chip's, name its kind; a pill's, its logo's place too, name where it stands)
+                width = self.CHIP_PAD if kind == "chip" else self.PILL_IN + self.pill_px() + self.GAP
+                opened = (kind, at, name)
             r = Pango.Rectangle()
             r.x, r.y, r.width, r.height = 0, -ascent, width * Pango.SCALE, ascent + descent
             a = Pango.attr_shape_new(r, r)
             a.start_index, a.end_index = at, at + 3  # (U+2063: 3 bytes)
             attrs.insert(a)
-        self.icons, self.pills, self.icon_px = icons, pills, px
+        self.icons, self.chips, self.pills = icons, chips, pills
         self.set_attributes(attrs)
         return False
 
     def do_css_changed(self, change):
         Gtk.Label.do_css_changed(self, change)
         # zoomed: the places take the text's new size as it's styled, before the frame's layout (resized once drawn,
-        # the text came at its new size and the logos a frame later)
-        if (self.icons or self.pills) and self.text_px()[2] != self.icon_px:
+        # the text came at its new size and the logos a frame later). Chips: their colours, light or dark, too
+        if self.chips or (self.icons or self.pills) and self.text_px()[2] != self.icon_px:
             self.place_icons()
 
     def do_snapshot(self, snapshot):
-        if self.pills:
-            self.draw_pills(snapshot)
+        if self.chips or self.pills:
+            self.draw_patches(snapshot)
         Gtk.Label.do_snapshot(self, snapshot)
         if not (self.icons or self.pills):
             return
@@ -1644,7 +1662,7 @@ class LinkLabel(WrapLabel):
         # went blocky), its corner on one of the screen's pixels so its straight lines stay sharp
         layout, (ox, oy) = self.get_layout(), self.get_layout_offsets()
         scale = screen_scale(self)
-        size = max(8, round(self.icon_px * scale))
+        ascent, descent, _px = self.text_px()
         fg = self.get_color()
         native = self.get_native()
         ok, origin = self.compute_point(native, Graphene.Point().init(0, 0)) if native is not None else (False, None)
@@ -1653,29 +1671,37 @@ class LinkLabel(WrapLabel):
 
         def pixel(v, base):
             return round((base + v) * scale) / scale - base
-        for at, icon, pad, color in [(at, icon, 0, fg) for at, icon in self.icons] + \
-                [(at, "merge", self.PILL_IN, pr_rgba(state, fg)) for at, _end, state in self.pills]:
+        small = (ascent - descent) / Pango.SCALE / 2 * (1 - self.pill_scale)  # (a smaller pill's middle: lower)
+        for at, icon, pad, color, px, lower in [(at, icon, 0, fg, self.icon_px, 0) for at, icon in self.icons] + \
+                [(at, "merge", self.PILL_IN, pr_rgba(state, fg), self.pill_px(), small) for at, _end, state in self.pills]:
+            size = max(8, round(px * scale))
             r = layout.index_to_pos(at)
             x = pixel(ox + r.x / Pango.SCALE + pad, bx)
-            y = pixel(oy + (r.y + r.height / 2) / Pango.SCALE - size / scale / 2, by)
+            y = pixel(oy + (r.y + r.height / 2) / Pango.SCALE + lower - size / scale / 2, by)
             draw_ref_icon(snapshot, icon, x, y, size / scale, color)
 
-    def draw_pills(self, snapshot):
-        """The pills' patches, behind the text: each its line's height less a little, rounded at the ends, in the
-        colour of where its pull request stands, faint."""
+    def draw_patches(self, snapshot):
+        """The chips' and pills' patches, behind the text, their corners rounded as .git-ref's. A chip's as tall as
+        its name's smaller text and a pixel more each way, in its kind's colour; a pill's the line's height less a
+        little (a chip's, at a chip's size), in the colour of where its pull request stands, faint."""
         layout, (ox, oy) = self.get_layout(), self.get_layout_offsets()
         ascent, descent, _px = self.text_px()
-        ascent, descent = ascent / Pango.SCALE, descent / Pango.SCALE
-        h = round((ascent + descent) * 0.86)
-        fg = self.get_color()
-        for start, end, state in self.pills:
+        ascent, descent, fg = ascent / Pango.SCALE, descent / Pango.SCALE, self.get_color()
+
+        def chip_box(scale):  # (top, height) of a patch, from the baseline
+            return -(ascent * scale + 1), (ascent + descent) * scale + 2
+        tall = round((ascent + descent) * 0.86)
+        pill_box = chip_box(self.pill_scale) if self.pill_scale < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
+        patches = [(s, e, chip_colors(kind, fg)[1], chip_box(self.CHIP_SCALE)) for s, e, kind in self.chips]
+        for s, e, state in self.pills:
             color = pr_rgba(state, fg)
             color.alpha = 0.09 if state in ("closed", "unknown") else 0.16
+            patches.append((s, e, color, pill_box))
+        for start, end, color, (top, h) in patches:
             for x, baseline, w in layout_runs(layout, start, end):
-                top = oy + baseline - (ascent - descent) / 2 - h / 2
-                rect = Graphene.Rect().init(ox + x, top, w, h)
+                rect = Graphene.Rect().init(ox + x, oy + baseline + top, w, h)
                 rr = Gsk.RoundedRect()
-                rr.init_from_rect(rect, h / 2)
+                rr.init_from_rect(rect, self.CHIP_RADIUS)
                 snapshot.push_rounded_clip(rr)
                 snapshot.append_color(color, rect)
                 snapshot.pop()
@@ -1687,6 +1713,37 @@ def pr_rgba(state, fg):
     if not c.parse(PR_COLORS.get(state) or ""):
         c = fg.copy()
     return c
+
+
+CHIP_TINTS = {"tag": ("#c88800", 0.16), "chat": ("#7f77dd", 0.18)}  # (.git-ref's: a tag's amber, this chat's violet)
+
+
+def chip_colors(kind, fg):
+    """A chip's name's colour and its patch's, as .git-ref has them: the accent's for a branch (local, head), the text's
+    own faint for a remote's (fg: the text's colour), a tag's amber, this chat's violet. Light or dark, as it's now."""
+    if kind in CHIP_TINTS:
+        text = Gdk.RGBA()
+        text.parse(CHIP_TINTS[kind][0])
+        patch = text.copy()
+        patch.alpha = CHIP_TINTS[kind][1]
+    elif kind == "remote":
+        text, patch = fg.copy(), fg.copy()
+        text.alpha, patch.alpha = fg.alpha * 0.7, fg.alpha * 0.08
+    else:
+        style = Adw.StyleManager.get_default()
+        text = Adw.AccentColor.to_standalone_rgba(style.get_accent_color(), style.get_dark())  # (@accent_color)
+        patch = style.get_accent_color_rgba()  # (@accent_bg_color)
+        patch.alpha = 0.14
+    return text, patch
+
+
+def chip_markup(text, kind):
+    """text (plain) as a chip in a LinkLabel's markup: kind local, head (bold), remote, tag or chat, as .git-ref's are.
+    Never broken across lines; a place kept at each end for its margins."""
+    weight = "bold" if kind == "head" else "normal"
+    return (f'<span allow_breaks="false"><span font_family="baude-chip-{kind}">\u2063</span>'
+            f'<span size="{round(LinkLabel.CHIP_SCALE * 100)}%" weight="{weight}">{html.escape(text, quote=False)}'
+            f'</span><span font_family="baude-chip-end">\u2063</span></span>')
 
 
 def layout_runs(layout, start, end):
@@ -5428,13 +5485,13 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .git-own { font-weight: 500; }
 .git-log row.git-found { background: alpha(@accent_bg_color, 0.2); box-shadow: inset 3px 0 @accent_bg_color; }
 .git-log row.git-hover { background: alpha(@accent_bg_color, 0.14); }
-/* a pull request's pill (where it stands: PR_COLORS, set below), rounder than a branch's chip; the chat's list */
-.git-pr { font-size: 0.78em; font-weight: normal; padding: 0 6px 0 4px; min-height: 0; min-width: 0;
-          border-radius: 999px; background: alpha(currentColor, 0.16); box-shadow: none; }
-.git-pr:hover { background: alpha(currentColor, 0.26); }
+/* a pull request's pill on the Git page's list of the chat's (where it stands: PR_COLORS, set below), as a chip;
+   the list's rows as the log's are, theirs a little apart */
+.git-pr { font-size: 0.78em; font-weight: normal; padding: 0 5px 0 4px; border-radius: 4px;
+          background: alpha(currentColor, 0.16); }
 .git-pr.closed { background: alpha(currentColor, 0.09); }
 .git-pr.closed label { text-decoration-line: line-through; }
-.git-pulls > button { padding: 2px 4px; min-height: 0; font-weight: normal; }
+.git-log.git-pulls row { padding-top: 2px; padding-bottom: 2px; }
 /* the branch picker: its button's names as a choice's are (not a button's bold); its list's rows 26px apart, as
    ⌘K's are, instead of libadwaita's 34, the rule between this chat's branches and the rest a faint one */
 menubutton.git-branches > button { font-weight: normal; }

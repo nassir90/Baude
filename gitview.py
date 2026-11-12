@@ -37,8 +37,9 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
     _git,
 )
 from widgets import (  # noqa: E402,F401
-    PR_COLORS, RefreshButton, WorkerPool, discard, draw_ref_icon, full_time, keep_times, on_label_link, pr_title,
-    pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, themed_icon, toast,
+    LinkLabel, PR_COLORS, RefreshButton, WorkerPool, chip_markup, discard, draw_ref_icon, full_time, keep_times,
+    on_label_link, pr_pill_markup, pr_title, pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, themed_icon,
+    toast,
 )
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
@@ -101,7 +102,13 @@ GIT_LANES = ("#3584e4", "#2ec27e", "#e66100", "#9141ac", "#c88800", "#e01b24", "
 GIT_CHAT = "#7f77dd"     # a commit this chat made: its dot
 
 
+GIT_CHIP_CHARS = 24      # a branch's name in a log row's chip, at most (longer: its start … its end)
+
+
 GIT_PULLS_SHOWN = 8      # the pull requests this chat touches listed at most (the rest: how many more)
+
+
+GIT_ROW_GAP = 6          # px between a log row's lane, its author's picture and its text (the list at the top's too)
 
 
 # (%b has lines of its own, and --shortstat's come after it: a last %x1f ends it)
@@ -816,6 +823,17 @@ def git_chat_commit(chat, sha):
     return next((e for short, e in chat.get("commits", {}).items() if sha.startswith(short)), None)
 
 
+def git_ref_chip(ref):
+    """A ref as git's log names it (HEAD -> main, origin/main, tag: v1) as a log row's chip (widgets.chip_markup): a
+    long name cut short in the middle (GIT_CHIP_CHARS), its start and its end what tell branches apart."""
+    name = ref.removeprefix("tag: ").replace("HEAD -> ", "")
+    kind = "tag" if ref.startswith("tag: ") else "head" if ref.startswith("HEAD") else \
+        "remote" if "/" in ref and ref.split("/")[0] in ("origin", "upstream") else "local"
+    if len(name) > GIT_CHIP_CHARS:
+        name = name[:GIT_CHIP_CHARS // 2 - 1] + "…" + name[-(GIT_CHIP_CHARS - GIT_CHIP_CHARS // 2):]
+    return chip_markup(name, kind)
+
+
 # ------------------------------------------------------- the chat's pull requests --
 # At the top of the Git page, the pull requests the chat touches, each a link to its page in the colour of where it
 # stands (lookup.PULLS, widgets.PR_COLORS): those from the branches it worked on (the chat's checkout's, and those its
@@ -920,23 +938,54 @@ class GitPullIcon(Gtk.Widget):
         draw_ref_icon(snapshot, "merge", 0, 0, min(self.get_width(), self.get_height()), self.get_color())
 
 
-def git_pull_pill(p, repo, button=True):
-    """A pull request's pill: git's merge logo and its #number in the colour of where it stands (.git-pr, PR_COLORS):
-    a button that opens its page, or (button False) a pill alone, in something that's clicked."""
-    box = Gtk.Box(spacing=3)
-    box.append(GitPullIcon())
-    box.append(Gtk.Label(label=f"#{p['number']}"))
-    pill = pointers.hand(Gtk.Button(child=box, valign=Gtk.Align.START)) if button else \
-        Gtk.Box(valign=Gtk.Align.CENTER)
-    if not button:
-        pill.append(box)
-    pill.add_css_class("git-pr")
+def git_pull_pill(p):
+    """A pull request's pill on its own (the list at the top's): git's merge logo and its #number in the colour of
+    where it stands (.git-pr, PR_COLORS)."""
+    pill = Gtk.Box(spacing=3, valign=Gtk.Align.CENTER, css_classes=["git-pr"])
+    pill.append(GitPullIcon())
+    pill.append(Gtk.Label(label=f"#{p['number']}"))
     if p.get("state") in PR_COLORS:
         pill.add_css_class(p["state"])
-    if button:
-        pill.set_tooltip_text(f"{pr_title(p, repo, p['number'])}\n{p['url']}")
-        pill.connect("clicked", lambda b: open_url(b, p["url"]))
     return pill
+
+
+def git_pull_markup(p, repo):
+    """A pull request's pill in a log row's line (widgets.pr_pill_markup), a link to its page, a chip's size."""
+    pill = pr_pill_markup(f"#{p['number']}", p["url"], pr_title(p, repo, p["number"]), p.get("state"))
+    return f'<span allow_breaks="false" size="{round(LinkLabel.CHIP_SCALE * 100)}%">{pill}</span>'
+
+
+class GitGutter(Gtk.Widget):
+    """The start of a row of the list at the top: as wide as a log row's lane and its author's picture are (width),
+    its child (a pull request's pill) at its end, so what follows starts where a log row's text does. A child wider
+    than that goes out past its start, rather than move the text on."""
+
+    def __init__(self, child, width):
+        super().__init__()
+        self.child, self.width = child, width
+        child.set_parent(self)
+
+    def set_width(self, width):
+        if width != self.width:
+            self.width = width
+            self.queue_resize()
+
+    def do_measure(self, orientation, for_size):
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            return self.width, self.width, -1, -1
+        least, natural, _, _ = self.child.measure(orientation, -1)
+        return least, natural, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        w = self.child.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+        h = min(height, self.child.measure(Gtk.Orientation.VERTICAL, w)[1])
+        self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, (height - h) / 2)))
+
+    def do_dispose(self):
+        if self.child is not None:
+            self.child.unparent()
+            self.child = None
+        Gtk.Widget.do_dispose(self)
 
 
 class GitLane(Gtk.Widget):
@@ -948,7 +997,12 @@ class GitLane(Gtk.Widget):
     def __init__(self, row, cols, chat=False, dim=False):
         super().__init__(vexpand=True)
         self.row, self.chat, self.dim = row, chat, dim
-        self.set_size_request(self.PAD * 2 + max(0, min(cols, 10) - 1) * self.STEP, -1)
+        self.set_size_request(self.width(cols), -1)
+
+    @classmethod
+    def width(cls, cols):
+        """How wide a row's slice of a graph of cols lanes is, px."""
+        return cls.PAD * 2 + max(0, min(cols, 10) - 1) * cls.STEP
 
     def x(self, col):
         return self.PAD + min(col, 10) * self.STEP
@@ -1046,8 +1100,12 @@ class GitPage(Gtk.Stack):
         # the pull requests this chat touches (git_touched_pulls), each a link to its page: nothing at all, not even a
         # gap, while there are none (no gh, or signed out, too)
         self.pulls, self.heads = None, {}  # (lookup.PULLS' of the repository shown; git_pull_heads')
-        self.pulls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=8, visible=False,
-                                 css_classes=["git-pulls"])
+        # (each row as a log row is: its text where theirs starts, after the graph's lanes, as many as it has, and the
+        # author's picture; its pill before that)
+        self.lane_cols = 1  # (the graph's lanes, as the log was last drawn)
+        self.pulls_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, visible=False,
+                                     css_classes=["git-log", "git-pulls"])
+        self.pulls_box.connect("row-activated", lambda _l, row: open_url(row, row.url) if row.url else None)
         top.append(self.pulls_box)
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.add_css_class("git-log")
@@ -1411,23 +1469,39 @@ class GitPage(Gtk.Stack):
             shown = git_touched_pulls(prs, repo, heads, opened, res.get("links") or ())
         else:  # (Record: no chat, the folder's checkout's branches)
             shown = git_touched_pulls(prs, repo, [e["name"] for e in res.get("checkouts") or () if e.get("name")])
-        for p in shown[:GIT_PULLS_SHOWN]:
-            row = pointers.hand(Gtk.Button(tooltip_text=f"{pr_title(p, repo, p['number'])}\n{p['url']}"))
-            row.add_css_class("flat")
-            line = Gtk.Box(spacing=6)
-            line.append(git_pull_pill(p, repo, button=False))
+        more = len(shown) - GIT_PULLS_SHOWN
+        for p in shown[:GIT_PULLS_SHOWN] + [None] * (more > 0):
+            row = Gtk.ListBoxRow(activatable=p is not None)
+            row.url = p and p["url"]
+            line = Gtk.Box(spacing=GIT_ROW_GAP)
+            line.append(GitGutter(git_pull_pill(p) if p else Gtk.Box(), self.gutter_px()))
             # (its natural width a character's: a long name never widens the panel, it's cut off with …)
-            line.append(Gtk.Label(label=p["title"], xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                                  max_width_chars=1))
+            title = Gtk.Label(label=p["title"] if p else f"{more} more", xalign=0, hexpand=True,
+                              ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+            line.append(title)
             row.set_child(line)
-            row.connect("clicked", lambda b, url=p["url"]: open_url(b, url))
+            if p:
+                pointers.hand(row).set_tooltip_text(f"{pr_title(p, repo, p['number'])}\n{p['url']}")
+            else:
+                title.add_css_class("dim-label")
             box.append(row)
-        if len(shown) > GIT_PULLS_SHOWN:
-            more = Gtk.Label(label=f"{len(shown) - GIT_PULLS_SHOWN} more", xalign=0, margin_start=6)
-            more.add_css_class("dim-label")
-            more.add_css_class("caption")
-            box.append(more)
         box.set_visible(bool(shown))
+
+    def gutter_px(self):
+        """Where a log row's text starts, after its lane and its author's picture (the list at the top's gutter)."""
+        return GitLane.width(self.lane_cols) + GIT_ROW_GAP + AVATAR_SIZE
+
+    def line_markup(self, c, made):
+        """A log row's line: its refs' chips, a pull request's pill before its branch's (one a pull request: its
+        remote copy's chip has none of its own), this chat's chip if it made it, then the subject."""
+        parts, done = [], set()
+        for ref in c["refs"]:
+            if (p := self.pull_at(ref)) is not None and p["number"] not in done:
+                done.add(p["number"])
+                parts.append(git_pull_markup(p, self.state.get("repo")))
+            parts.append(git_ref_chip(ref))
+        parts += [chip_markup("this chat", "chat")] * bool(made)
+        return " ".join(parts + [html.escape(c["title"], quote=False)])
 
     def pull_at(self, ref):
         """The pull request from the branch a log row's ref names (its local name, or a remote's copy's), or None."""
@@ -1438,27 +1512,12 @@ class GitPage(Gtk.Stack):
             name = name.split("/", 1)[1]
         return self.heads.get(name)
 
-    def pills(self, first, chips):
-        """A log row's pills: before each branch's name (chips: [(ref, its chip)]) that a pull request is from, one
-        (one a pull request, in a row: its remote copy's chip has none of its own)."""
-        child = first.get_first_child()
-        while child is not None:  # (the ones it had)
-            after = child.get_next_sibling()
-            if child.has_css_class("git-pr"):
-                first.remove(child)
-                discard(child)
-            child = after
-        done = set()
-        for ref, chip in chips:
-            if (p := self.pull_at(ref)) is not None and p["number"] not in done:
-                done.add(p["number"])
-                first.insert_child_after(git_pull_pill(p, self.state.get("repo")), chip.get_prev_sibling())
-
     def repill(self):
+        """The log rows' pills as the pull requests are now (their lines' markup: the rows stay)."""
         row = self.list.get_first_child()
         while row is not None:
-            if getattr(row, "chips", None) is not None:
-                self.pills(row.first, row.chips)
+            if getattr(row, "line", None) is not None:
+                row.line.set_markup(self.line_markup(row.commit, row.made))
             row = row.get_next_sibling()
 
     def github_read(self, token, pr):
@@ -1498,6 +1557,12 @@ class GitPage(Gtk.Stack):
                 shown.append(({**c, "parents": c["parents"][:1]}, c, True))
         rows = git_lanes([drawn for drawn, _c, _m in shown])
         cols = max([1] + [max([r["col"]] + [c for c, _ in r["through"] + r["out"]]) + 1 for r in rows])
+        if cols != self.lane_cols:  # (the list at the top's text starts where the rows' does)
+            self.lane_cols = cols
+            row = self.pulls_box.get_first_child()
+            while row is not None:
+                row.get_child().get_first_child().set_width(self.gutter_px())
+                row = row.get_next_sibling()
         own, theirs = self.state.get("own"), self.state.get("theirs")
         for (_drawn, c, merge), lane in zip(shown, rows):
             self.list.append(self.row(c, lane, cols, dim=bool(theirs and c["sha"] in theirs),
@@ -1545,33 +1610,26 @@ class GitPage(Gtk.Stack):
         row = Gtk.ListBoxRow(activatable=True)
         row.commit = c
         made = git_chat_commit(self.chat, c["sha"])
-        box = Gtk.Box(spacing=6)
+        box = Gtk.Box(spacing=GIT_ROW_GAP)
         box.append(GitLane(lane, cols, chat=bool(made), dim=dim))
         # (their initials on a colour; their picture, already if it's known, so a redrawn row doesn't flicker)
         row.avatar = Adw.Avatar(size=AVATAR_SIZE, text=c["author"], show_initials=True, valign=Gtk.Align.CENTER,
                                 custom_image=AVATARS.pictures.get(c["email"].lower()))
         box.append(row.avatar)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=4, margin_bottom=4)
-        first = Gtk.Box(spacing=4)
-        row.first, row.chips = first, [(ref, self.chip(ref)) for ref in c["refs"]]
-        for _ref, chip in row.chips:
-            first.append(chip)
-        self.pills(first, row.chips)  # (a pull request's before its branch's name)
-        if made:
-            chip = Gtk.Label(label="this chat")
-            chip.add_css_class("git-ref")
-            chip.add_css_class("chat")
-            first.append(chip)
-        for chip in iter(first):  # (with the subject's first line, however many lines it takes)
-            chip.set_valign(Gtk.Align.START)
-        # (two lines, then …: a pull request's name is often what a commit's called, and seldom fits on one. Its
-        # natural width one character, so a long one never widens the panel: it wraps in what the panel has)
-        subject = Gtk.Label(label=c["title"], xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
-                            lines=2, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1, valign=Gtk.Align.START)
+        # (one line of text, as a paragraph's: the branches' chips first, a pull request's pill before its branch's,
+        # then the subject, its second line under the chips. Two lines, then …: a pull request's name is often what a
+        # commit's called, and seldom fits on one. Its natural width a character's, so a long one never widens the
+        # panel: it wraps in what the panel has)
+        row.made = made
+        row.line = LinkLabel(xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2,
+                             ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+        row.line.pill_scale = LinkLabel.CHIP_SCALE  # (a pull request's pill, a chip's size)
+        row.line.connect("activate-link", on_label_link)
+        row.line.set_markup(self.line_markup(c, made))
         if own:
-            subject.add_css_class("git-own")
-        first.append(subject)
-        text.append(first)
+            row.line.add_css_class("git-own")
+        text.append(row.line)
         meta = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         meta.add_css_class("caption")
         say_time(meta, c["at"], after=f" · {html.escape(c['author'])}" + git_delta_markup(c), markup=True)
@@ -1592,17 +1650,8 @@ class GitPage(Gtk.Stack):
         row.set_tooltip_text(f"{c['sha'][:9]} · {c['title']}" +
                              (f"\n{c['subject']}" if c["title"] != c["subject"] else "") +  # (a pull request's name)
                              (f"\nMade by this chat: {made['subject']}" if made else ""))
+        row.line.set_tooltip_text(row.get_tooltip_text())  # (its own, but over a pill's link: the pull request's)
         return row
-
-    @staticmethod
-    def chip(ref):
-        label = ref.removeprefix("tag: ").replace("HEAD -> ", "")
-        chip = Gtk.Label(label=label, ellipsize=Pango.EllipsizeMode.END, max_width_chars=22)
-        chip.add_css_class("git-ref")
-        chip.add_css_class("tag" if ref.startswith("tag: ") else "head" if ref.startswith("HEAD") else
-                           "remote" if "/" in ref and not ref.startswith("HEAD") and ref.split("/")[0] in ("origin", "upstream")
-                           else "local")
-        return chip
 
     def load_more(self):
         res, skip = self.state, len(self.commits)

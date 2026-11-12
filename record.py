@@ -1134,7 +1134,7 @@ def earlier_said(messages, limit=EARLIER_LIMIT):
         if m.get("quote"):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
-            body += f"\n(edited {p['page']}: {p.get('status', 'pending')})"
+            body += f"\n(an edit to {p['page']}: {p.get('status', 'pending')})"
         size += len(body)
         if size > limit and lines:
             break
@@ -1260,10 +1260,12 @@ def pending_edits(notebook, agent=None):
 
 def staged(text, edits):
     """A page's text as it reads with edits applied: (that text, its pieces). edits: [(start, old, new, edit)], in the
-    page's own places; one that overlaps one before it is left out. A piece: (its start and end in the staged text,
+    page's own places; one that overlaps one before it is left out. At one place an insertion (old empty) comes before
+    a replacement, and edits otherwise in the order they were made. A piece: (its start and end in the staged text,
     its start and end in the page's, the edit it's of or None)."""
     out, pieces, at, pos = [], [], 0, 0
-    for start, old, new, edit in sorted(edits, key=lambda x: x[0]):
+    order = lambda x: (x[0], bool(x[1]), x[3].get("t", 0) if isinstance(x[3], dict) else 0)  # noqa: E731
+    for start, old, new, edit in sorted(edits, key=order):
         if start < at:
             continue
         if start > at:
@@ -3525,6 +3527,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                      "b": self.buf.create_mark(None, self.buf.get_iter_at_offset(end), True), "g0": None, "g1": None,
                      "gone": gone}
             self.proposals.append(shown)
+            self.proposals.sort(key=lambda e: (not e["p"]["old"], e["p"].get("t", 0)))  # (as staged has them)
             was = self.buf.create_mark(None, self.buf.get_iter_at_offset(ins), True)  # (the caret: kept where it was)
             with self._quiet():
                 self._put_greens()
@@ -5972,10 +5975,13 @@ class RecordChat(Gtk.Box):
                 b.append(label(where + "“" + (" ".join(q.split())[:400] + ("…" if len(q) > 400 else "")) + "”",
                                css=("quote-in-bubble",), select=True))
             b.append(self._said(m))
-        elif (m.get("proposals") or m.get("revised")) and not m["text"] and not m.get("error"):  # (it only edited)
-            pages = list(dict.fromkeys([short_page(p["page"]) for p in m.get("proposals") or ()] +
-                                       [short_page(page) for page in m.get("revised") or ()]))
-            b.append(label("Edited " + ", ".join(pages), css=("dim-label", "caption")))
+        elif (m.get("proposals") or m.get("revised") or m.get("withdrew")) and not m["text"] and not m.get("error"):
+            edited = list(dict.fromkeys([short_page(p["page"]) for p in m.get("proposals") or ()] +
+                                        [short_page(page) for page in m.get("revised") or ()]))  # (as it was then)
+            gone = [short_page(page) for page in m.get("withdrew") or () if short_page(page) not in edited]
+            said = ["Edited " + ", ".join(edited)] if edited else []
+            said += ["Took back an edit to " + ", ".join(gone)] if gone else []
+            b.append(label(" · ".join(said), css=("dim-label", "caption")))  # (it only edited)
             b.set_margin_start(12)
             b.prose = b.status = label("")
         else:
@@ -6269,9 +6275,13 @@ class RecordChat(Gtk.Box):
 
     def _edited(self, turn, p):
         """A turn's edit to a page, made or changed: kept with the turn (said under its reply), shown on its page."""
-        if p not in turn["proposals"] and p["page"] not in turn.setdefault("revised", []):
+        if p["status"] != "pending":
+            if p["page"] not in turn.setdefault("withdrew", []):
+                turn["withdrew"].append(p["page"])
+        elif p not in turn["proposals"] and p["page"] not in turn.setdefault("revised", []):
             turn["revised"].append(p["page"])
-        self._status(self.agent, f"Edited {short_page(p['page'])}")
+        self._status(self.agent, f"{'Edited' if p['status'] == 'pending' else 'Took back an edit to'} "
+                                 f"{short_page(p['page'])}")
         if p["status"] == "pending" and (editor := self.win.open_note(p["page"])) is not None:
             editor.show_proposal(p, scroll=True)
         self.show_pending_bar()
@@ -6300,12 +6310,14 @@ class RecordChat(Gtk.Box):
         text, spans = self._spans(page)
         sel = turn.get("selection")
         near = sel["start"] if sel and sel["page"] == page and sel.get("start") is not None else None
-        if not old:
-            if text and not text.endswith("\n") and not new.startswith("\n"):
-                new = "\n" + new  # (added at the end: on a line of its own)
-            return self._new_edit(turn, page, len(text), "", new)
         view, pieces = staged(text, spans)
+        if not old:
+            if view and not view.endswith("\n") and not new.startswith("\n"):
+                new = "\n" + new  # (added at the end, after what's there and what's waiting: on a line of its own)
+            return self._new_edit(turn, page, len(text), "", new)
         at, found = place_change(view, old, staged_at(pieces, near) if near is not None else None)
+        if at is None and any(want and want in view for want in (old, old.strip())):
+            return {"error": found}  # (in the page as the edits have it, more than once)
         if at is None:  # (not in the page as the edits have it: text one of them replaces, perhaps)
             k, kept_found = place_change(text, old, near)
             if k is None:
@@ -6322,8 +6334,9 @@ class RecordChat(Gtk.Box):
         if not hit:  # (none of a pending edit's passage in it: one of its own)
             k0, k1 = kept_at(pieces, at, max), kept_at(pieces, end, min)
             return self._new_edit(turn, page, k0, text[k0:k1], new)
-        s0, s1 = min(at, hit[0][0]), max(end, hit[-1][1])  # (all of theirs in it)
-        k0, k1 = kept_at(pieces, s0, min), kept_at(pieces, s1, max)
+        s0, s1 = min(at, hit[0][0]), max(end, hit[-1][1])  # (all of theirs in it, and none of another's)
+        k0 = hit[0][2] if s0 == hit[0][0] else kept_at(pieces, at, max)
+        k1 = hit[-1][3] if s1 == hit[-1][1] else kept_at(pieces, end, min)
         return self._merged(turn, [piece[4] for piece in hit], k0, text[k0:k1], view[s0:at] + new + view[end:s1])
 
     def _new_edit(self, turn, page, start, old, new):
@@ -6355,8 +6368,15 @@ class RecordChat(Gtk.Box):
             if error:
                 return error
             pages = [page] if page in pages else []
-        listed = [{"id": p["id"], "page": page, "old_text": old, "new_text": new}
-                  for page in pages for _at, old, new, p in sorted(self._spans(page)[1], key=lambda x: x[0])]
+        listed = []
+        for page in pages:
+            spans = self._spans(page)[1]
+            listed += [{"id": p["id"], "page": page, "old_text": old, "new_text": new}
+                       for _at, old, new, p in sorted(spans, key=lambda x: x[0])]
+            placed = {id(x[3]) for x in spans}
+            listed += [{"id": p["id"], "page": page, "old_text": p["old"], "new_text": p["new"],
+                        "note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
+                       for p in pending_edits(self.notebook, self.agent) if p["page"] == page and id(p) not in placed]
         if not listed:
             return {"text": "No edits of yours are waiting" + (f" on {pages[0] if pages else args['page']}."
                                                                if args.get("page") else ".")}
@@ -6373,6 +6393,11 @@ class RecordChat(Gtk.Box):
         if error:
             return error
         new, fields = str(args.get("new_text") or ""), {}
+        if not p["old"] and not ("old_text" in args and args["old_text"]) and not new.startswith("\n"):
+            text, spans = self._spans(p["page"])  # (an addition: after what's there and what's waiting before it)
+            before = staged(text, [x for x in spans if x[3] is not p and (x[1] or x[3].get("t", 0) < p.get("t", 0))])[0]
+            if before and not before.endswith("\n"):
+                new = "\n" + new
         if "old_text" in args and str(args["old_text"]) != p["old"]:
             text, spans = self._spans(p["page"])
             near = next((x[0] for x in spans if x[3] is p), p.get("start"))
@@ -6397,13 +6422,14 @@ class RecordChat(Gtk.Box):
 
     def _done(self, agent, text, error, turn):
         notebook, props, revised = agent.notebook, turn.get("proposals") or [], turn.get("revised") or []
+        withdrew = turn.get("withdrew") or []
         if agent is self.ask:
             self.ask, self.live_widget = None, None
             self.writing.set_busy(False)
             self._drop_asking()
         if error:
             m = {"role": "record", "text": error, "error": True, "t": time.time()}
-        elif text.strip() or props or revised:
+        elif text.strip() or props or revised or withdrew:
             reply, unknown = split_unknown(text)
             m = {"role": "record", "text": reply, "unknown": unknown, "t": time.time()}
         else:
@@ -6413,6 +6439,8 @@ class RecordChat(Gtk.Box):
                 m["proposals"] = props  # (the same ones the pages show: what's decided there is kept here)
             if revised:
                 m["revised"] = revised  # (pages whose edits waiting it changed: said as edited)
+            if withdrew:
+                m["withdrew"] = withdrew  # (and those it took one back from)
             notebook["messages"].append(m)
         self.win.store.save_now()
         if notebook is self.notebook:

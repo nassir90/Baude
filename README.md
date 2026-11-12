@@ -130,3 +130,5 @@ state, which isn't supported.
 ## License
 
 [MIT](LICENSE). The Kubernetes sidebar icons in `widgets.py` are Freelens' (MIT) and Material Icons (Apache-2.0).
+[Pygments](https://pygments.org), which colours code, is in `vendor/` under its own BSD-2-Clause licence (see
+[vendor/README.md](vendor/README.md)).

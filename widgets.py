@@ -26,6 +26,8 @@ import traceback
 import queue
 import urllib.parse
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "vendor"))  # (Pygments: vendor/README.md)
+
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")

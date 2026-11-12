@@ -10448,13 +10448,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if restore:
             self.session_id = restore.get("session_id") or self.session_id
             self.model, self.mode = restore.get("model") or self.model, restore.get("mode") or self.mode
-        if self.session_id and (info := find_session(self.session_id)):
+        if restore and restore.get("remote") and (r := network().find(self.session_id)) is not None:
+            self.open_remote(remote_info({**r.sessions[self.session_id], "server": r}))  # (its server's, again)
+        elif self.session_id and (info := find_session(self.session_id)):
             self.view_session(info["path"])
         self.poll_source = GLib.timeout_add(1000, self.poll_tail)
         if restore:
             self.apply_chat_signal()  # (the restored chat's own switches)
             self.apply_restart_state(restore)
-        self.start_proc()
+        if self.proc is None:  # (a network session's is its server's, attached to already: open_remote)
+            self.start_proc()
         self.input.grab_focus()
         self.apply_read_only()  # (a session opened read-only before)
 
@@ -10487,6 +10490,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         fixes_page = self.tabs.get(("fixes",))
         return {
             "cwd": self.run_cwd, "session_id": self.session_id, "viewing": self.resume_pending,
+            "remote": self.remote.key if self.remote is not None else None,  # (a network session's server)
             "at_bottom": self.stick_bottom,
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
             "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
@@ -11281,7 +11285,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         and commands (its transcript, fetched as it grows, is the rest: sync_remote); once you write in it, all it
         says, as it says it. Nothing if its server's gone."""
         r = self.remote
-        self.proc = None
+        self.proc, self.remote_tried = None, time.monotonic()
         if r.state == "alive":
             try:
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.host, r.port, self.session_id,
@@ -11554,6 +11558,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             return
         if self.proc is None:
             self.start_proc()
+        if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
+            buf.set_text(text)
+            return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
         self.add(self.user_bubble(text, atts))
@@ -13619,6 +13626,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if listed and self.remote.state == "alive" and \
                 (listed.get("size") or 0) != self.remote.offsets.get(self.session_id, 0):
             self.sync_remote(self.remote, self.session_id)
+        if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:
+            self.start_remote_proc()  # (its server's there again, or at last: what it asks, its models)
         self.update_banner()
         self.update_session_state()
 
@@ -13812,7 +13822,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         session: at a turn on its server, or its server gone."""
         if self.remote is not None:
             listed = self.remote.sessions.get(self.session_id) or {}
-            return self.resume_pending and (self.remote.state == "dead" or listed.get("state") in ("working", "waiting"))
+            return self.resume_pending and (self.remote.state != "alive" or listed.get("state") in ("working", "waiting"))
         return self.resume_pending and self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
@@ -13824,6 +13834,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             name = remote_name(self.remote)
             if self.remote.state == "dead":
                 self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen")
+            elif self.remote.state != "alive":
+                self.banner.set_title(f"Looking for {name} on the network…")
             else:
                 listed = self.remote.sessions.get(self.session_id) or {}
                 waiting = listed.get("state") == "waiting"
@@ -14113,6 +14125,8 @@ class BaudeApp(Adw.Application):
             for p in list(w.background.values()):  # (chats left mid-turn: their turns end here)
                 w.let_go_background(p)
         save_info_cache(force=True)  # (as quitting does: exec skips do_shutdown)
+        if _NETWORK:
+            _NETWORK[0].save()
         os.execv(sys.executable, launch_command("--cwd", wins[-1].run_cwd if wins else self.opts.cwd, "--restore", path))
 
 

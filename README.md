@@ -42,6 +42,22 @@ python3 baude.py --install   # add Baude to your application menu
 python3 record.py            # Record
 ```
 
+## Sessions on the network
+
+`baude_server.py` runs Claude Code sessions headless on a machine, for Baude to start, watch and steer from another
+(or the same) one. It needs only Python and `claude`, not GTK. Baude finds servers on the local network by multicast
+DNS (`_baude._tcp`); ⋮ beside the sidebar's search → Group picks Local (this machine's sessions) or a group on the
+network.
+
+```bash
+python3 baude_server.py --group Lab      # serve, in the group Lab
+python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --model opus --effort high --tag perf
+python3 baude_server.py list
+```
+
+`BAUDE_SERVERS=host:port` gives Baude servers it can't find by itself; `BAUDE_NETWORK=0` stops it looking. There's no
+sign-in yet: anyone who can reach a server's port can start sessions on it and read its files.
+
 ## License
 
 [MIT](LICENSE). The Kubernetes sidebar icons in `widgets.py` are Freelens' (MIT) and Material Icons (Apache-2.0).

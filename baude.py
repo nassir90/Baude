@@ -14689,26 +14689,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 pass
 
     def live_elsewhere(self):
-        """Is the viewed session in use by another program: Claude Desktop, which runs its chats itself, a terminal's
-        claude, or another window of Baude's own claude? That one's kept from a second writer here, which would
-        interleave two conversations in its transcript (update_banner). Not Baude's claude at a turn in a chat left
-        mid-turn, which writing here takes over (begin_resume), nor a host process's session (on the network, or this
-        machine's), where several heads at once is how it's used: what's sent mid-turn waits for the turn's end, on its
-        host."""
-        if not self.resume_pending:
+        """Is the viewed session one Claude Desktop runs, and is it writing it now? Desktop runs its chats itself, so a
+        second writer here would interleave two conversations in its transcript: that's kept from it (update_banner).
+        No other chat is: a host's session (this machine's or another's), one this machine's host hasn't taken up yet,
+        one another window or a terminal's claude has open too. Several writers at once is how those are used, and
+        what's sent mid-turn waits for the turn's end. Not Baude's own claude at a turn in a Desktop chat left
+        mid-turn, which writing here takes over (begin_resume)."""
+        if not self.resume_pending or self.remote is not None:
             return False
-        if self.remote is not None:  # (a terminal's claude --resume on one of its sessions, its own claude not running)
-            listed = self.remote.sessions.get(self.session_id) or {}
-            if not (self.remote.mine and listed.get("state") == "stopped"):
-                return False
-            if (written := listed.get("written")) is not None:  # (nothing since its own claude stopped: its own
-                try:                                            # writing, a restart of its host's, say)
-                    size = os.path.getsize(self.view_path) if self.view_path else 0
-                except OSError:
-                    size = 0
-                if max(size, listed.get("size") or 0) <= written:
-                    return False
-            return self.tail.in_use()
+        if not (self.desktop_chat or is_desktop(self.session_id)):
+            return False
         return self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):

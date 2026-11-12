@@ -1356,6 +1356,21 @@ def _(app):
     return win
 
 
+@scene("55r-network-found-host", "A host found on the network (one that says Baude is on it): listed as found, not "
+                                 "reached till it's right-clicked → Connect, as the user it says, by its name there")
+def _(app):
+    win = network_window(app, None)
+    baude.network().found({"instance": "studio._baude._tcp.local.", "host": "192.0.2.7", "target": "studio.local.",
+                           "port": 22, "words": {"id": "5a1d0c1e-0000-4000-8000-0000000000aa", "user": "lab"}})
+    win.sidebar.fill_filters()
+    win.sidebar.view_btn.popup()
+    T.pump(0.2)
+    row = next(x for x in win.sidebar.host_list.rows() if x.key == "5a1d0c1e-0000-4000-8000-0000000000aa")
+    ok, rect = row.compute_bounds(win.sidebar.host_list)
+    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
+    return win
+
+
 @scene("55q-network-host-command", "Host Command…: the command ssh runs on the host, with connect after it")
 def _(app):
     win = network_window(app, None)

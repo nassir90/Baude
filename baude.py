@@ -8015,6 +8015,9 @@ class SessionSidebar(Gtk.Box):
         actions.add_action(here)
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
+        take = Gio.SimpleAction.new("connect_host", GLib.VariantType.new("s"))
+        take.connect("activate", lambda _a, v: (pop.popdown(), self.connect_host(v.get_string())))
+        actions.add_action(take)
         command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
         command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
         actions.add_action(command)
@@ -8090,12 +8093,12 @@ class SessionSidebar(Gtk.Box):
     # started with (this machine's own chats have none). Everything's listed till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
-        is)."""
+        is; "found", for one found on the network and not taken up: Connect, its right-click)."""
         out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
-                out.append((key, remote_name(r), "gone" if r.state == "dead" else ""))
+                out.append((key, remote_name(r), "found" if r.offered else "gone" if r.state == "dead" else ""))
         return out
 
     def known_groups(self):
@@ -8148,6 +8151,10 @@ class SessionSidebar(Gtk.Box):
         over ssh."""
         r = next((r for r in network().remotes() if host_key(r) == row.key), None)
         menu = Gio.Menu()
+        if r is not None and r.offered:  # (found on the network: reached only once it's taken up)
+            item = Gio.MenuItem.new(f"Connect as {r.where.get('dest')}", None)
+            item.set_action_and_target_value("sb.connect_host", GLib.Variant.new_string(row.key))
+            menu.append_item(item)
         item = Gio.MenuItem.new("New Session Here", None)
         if row.key == HERE_HOST or r is not None and r.state == "alive":
             item.set_action_and_target_value("sb.new_here", GLib.Variant.new_string(row.key))
@@ -8166,6 +8173,12 @@ class SessionSidebar(Gtk.Box):
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         self.host_menu_shown = pop
         pop.popup()
+
+    def connect_host(self, key):
+        """A host found on the network (offered), right-clicked → Connect: reached over ssh from now on, and kept."""
+        if (r := next((r for r in network().remotes() if host_key(r) == key and r.offered), None)) is not None:
+            network().accept(r)
+            toast(self, f"Connecting to {r.host}")
 
     def on_network(self):
         """The network's servers or their sessions changed: ⋮'s hosts and groups, what's hidden coming back, and the

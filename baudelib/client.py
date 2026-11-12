@@ -22,7 +22,10 @@ from baudelib.discovery import Browser
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
+RETRY_SSH_S = (2, 10, 30, 120, 300)  # (one over ssh: a login each time, on another machine)
 PEERS_S = 5 * 60  # Tailscale's peers looked at again, and those Baude wasn't on tried again, at most this often
+PEERS_MAX = 16  # (of them, those tried, one at a time)
+OFFERED_MAX = 32  # hosts found on the network, offered till one's taken up (Network.accept)
 TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"  # (macOS's, where tailscale isn't on PATH)
 
 
@@ -51,7 +54,7 @@ class Remote:
         cached = cached or {}
         self.network, self.key, self.where = network, key, dict(where)
         self.info = cached.get("info") or {}
-        self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and s.get("id")}
+        self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
         self.seen = cached.get("seen") or 0.0  # when it last said anything
@@ -59,6 +62,8 @@ class Remote:
         self.found_by = cached.get("found_by") or found_by
         self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
         self.probe, self.tried, self.error = probe and not self.info, 0.0, None
+        self.attempted = threading.Event()  # (set as each try's done: peers waits for one before the next)
+        self.offered = False  # (found on the network: listed, not reached, till it's taken up: Network.accept)
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
@@ -98,9 +103,14 @@ class Remote:
                 self.error = None
             except OSError as e:
                 ch, self.error = None, str(e)
+            if ch is not None and self.stopped:  # (let go of while it connected: rekey's)
+                ch.close()
+                break
             if ch is not None:
                 tries, self.probe = 0, False
+                self.attempted.set()
                 self._serve(ch, info)
+            self.attempted.set()
             if self.stopped:
                 break
             if self.state != "dead":
@@ -109,17 +119,20 @@ class Remote:
             if self.probe:  # (not one, or not yet: tried again when the network's next looked at, not before)
                 self.wake.wait()
             else:
-                self.wake.wait(RETRY_S[min(tries, len(RETRY_S) - 1)])
+                retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
+                self.wake.wait(retry[min(tries, len(retry) - 1)])
             self.wake.clear()
             tries += 1
 
     def _serve(self, ch, info):
         with self.lock:
             self.ch = ch
-        if info.get("id") and info["id"] != self.key and not self.network.rekey(self, info["id"]):
-            with self.lock:  # (this machine's, reached by its socket already: not twice)
+        if not wire.is_id(info.get("id")) or info["id"] != self.key and not self.network.rekey(self, info["id"]):
+            with self.lock:  # (no id fit to name its files by; or this machine's, reached by its socket already)
                 self.ch = None
             ch.close()
+            if not wire.is_id(info.get("id")):
+                self.error = "it gave no id Baude can use"
             return
         self.info, self.seen = info, time.time()
         ch.sock.settimeout(wire.SILENT_S)
@@ -130,7 +143,8 @@ class Remote:
             op = msg.get("op")
             if op == "sessions":
                 self.info = msg.get("server") or self.info
-                self.sessions = {s["id"]: s for s in msg.get("sessions") or [] if s.get("id")}
+                self.sessions = {s["id"]: s for s in msg.get("sessions") or []
+                                 if isinstance(s, dict) and wire.is_id(s.get("id"))}
                 if self.state != "alive":
                     self.state = "alive"
                 self.network.changed()
@@ -174,6 +188,8 @@ class Remote:
     def mirror(self, session_id):
         """Where a session's transcript is read here: on this machine (local), its own file, as the host lists it (none
         before it's there: no copy of what's here is ever made); else its copy here, fetched as it grows (sync)."""
+        if not wire.is_id(session_id) or not wire.is_id(self.key) and not self.key.startswith(("ssh:", "unix:", "local")):
+            raise ValueError(f"not a session's id: {session_id!r}")
         if self.local:
             path = (self.sessions.get(session_id) or {}).get("transcript")
             if isinstance(path, str) and path.endswith(".jsonl") and os.path.isfile(path):
@@ -331,7 +347,7 @@ class Network:
         for r in list(self.servers.values()):
             r.start()
         self.discover = discover
-        self.browser = Browser(self.found).start() if discover else None
+        self.browser = Browser(self.found, self.lost).start() if discover else None
         self.here()
         if discover:
             threading.Thread(target=self.peers, daemon=True, name="tailscale-peers").start()
@@ -384,6 +400,8 @@ class Network:
             r = next((r for r in self.servers.values() if r.where == dict(where)), None)
             if r is None:
                 key = f"ssh:{where['dest']}" if where.get("via") == "ssh" else f"unix:{where.get('path')}"
+                if (old := self.servers.get(key)) is not None:  # (the same destination, reached otherwise: this one)
+                    old.stop()
                 r = self.servers[key] = Remote(self, key, where, found_by="hand")
                 r.command = command or r.command
                 r.start()
@@ -403,30 +421,55 @@ class Network:
         self.save()
 
     def found(self, service):
-        """A host on the network said Baude is on it: reached over ssh, as its user, by its name (its key must be known
-        already: anyone can say they're anyone on the network), with the command it says, if it's one of Baude's."""
+        """A host on the network said Baude is on it: offered (listed, as found), not reached: anyone on the network
+        can say anything, so it's reached only once it's taken up (accept), over ssh, by its own name on the network
+        (name.local) and as the user it says, its key known already. None's command is taken from what it says."""
         words = service["words"]
         key, user = words.get("id"), words.get("user")
-        target = (service.get("target") or "").rstrip(".") or service["host"]
-        if not isinstance(key, str) or not key or user is not None and not wire._NAME.fullmatch(str(user)):
+        target = (service.get("target") or "").rstrip(".")
+        if not wire.is_id(key) or not target.lower().endswith(".local") or not wire.is_dest(target) or "@" in target \
+                or user is not None and not wire._NAME.fullmatch(str(user)):
             return
         where = {"via": "ssh", "dest": f"{user}@{target}" if user else target, "strict": True}
-        if not wire.is_dest(where["dest"]):
-            return
-        if command := wire.discovered_command(words.get("path")):
-            where["command"] = command
         with self.lock:
             r = self.servers.get(key)
-            if r is None:
-                r = self.servers[key] = Remote(self, key, where, found_by="network").start()
-                self.changed()
-            elif r.found_by == "network":  # (one here, given by hand or on Tailscale, is reached as it was)
-                r.address(where)
+            if r is not None:
+                if r.offered:
+                    r.where, r.seen, r.instance = where, time.time(), service.get("instance")
+                return  # (one known already is reached as it was: not wherever the network now says)
+            if sum(x.offered for x in self.servers.values()) >= OFFERED_MAX:
+                return
+            r = self.servers[key] = Remote(self, key, where, found_by="network")
+            r.offered, r.seen, r.instance = True, time.time(), service.get("instance")
+            r.info = {"name": str(service.get("instance") or target).split(".")[0][:64]}
+            r.state = "dead"  # (not reached)
+        self.changed()
+
+    def lost(self, instance):
+        """A host on the network said it's gone: if it was only offered, not offered any more."""
+        with self.lock:
+            gone = [k for k, r in self.servers.items() if r.offered and getattr(r, "instance", None) == instance]
+            for k in gone:
+                del self.servers[k]
+        if gone:
+            self.changed()
+
+    def accept(self, r):
+        """A host offered (found on the network) taken up: reached from now on, and kept, as one given by hand is."""
+        with self.lock:
+            if not r.offered:
+                return
+            r.offered, r.by_hand, r.info = False, True, {}
+            r.state = "connecting"
+        r.start()
+        self.save()
+        self.changed()
 
     def peers(self):
         """Tailscale's peers (`tailscale status --json`, where it's installed), as multicast DNS doesn't cross a tailnet:
-        each one online that isn't a phone, tried over ssh by its name there (its key must be known already), and a host
-        once it's answered as one. Again at most every PEERS_S (look), those Baude wasn't on tried again then."""
+        each one online that isn't a phone, PEERS_MAX at most, tried over ssh by its name there (its key must be known
+        already), one at a time, and a host once it's answered as one. Again at most every PEERS_S (look), those
+        Baude wasn't on tried again then."""
         self.peered = time.monotonic()
         exe = os.environ.get("BAUDE_TAILSCALE") or shutil.which("tailscale") or \
             (TAILSCALE_APP if os.path.exists(TAILSCALE_APP) else None)
@@ -437,19 +480,29 @@ class Network:
             peers = (json.loads(out.stdout).get("Peer") or {}).values()
         except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
             return
+        tried = 0
         for p in peers:
+            if tried >= PEERS_MAX or self.stopped.is_set():
+                break
             if not isinstance(p, dict) or not p.get("Online") or str(p.get("OS") or "").lower() in ("ios", "android"):
                 continue
             dest = str(p.get("DNSName") or "").rstrip(".") or str(p.get("HostName") or "")
-            if not wire.is_dest(dest):
+            if not wire.is_dest(dest) or "@" in dest:
                 continue
             with self.lock:
                 r = next((r for r in self.servers.values() if r.where.get("dest") == dest), None)
                 if r is None:
-                    self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest, "strict": True},
-                                                         found_by="tailscale", probe=True).start()
+                    r = self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest,
+                                                             "strict": True}, found_by="tailscale", probe=True)
+                    r.start()
                 elif r.probe and r.state != "alive":
+                    r.attempted.clear()
                     r.wake.set()
+                else:
+                    continue
+            tried += 1
+            r.attempted.wait(30)  # (one at a time: not a burst of logins)
+            r.attempted.clear()
 
     def look(self):
         """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): who's there asked at
@@ -465,7 +518,7 @@ class Network:
         with self.lock:
             servers = list(self.servers.values())
         for r in servers:
-            if r.state != "alive" and not r.probe:
+            if r.state != "alive" and not r.probe and not r.offered:
                 r.wake.set()
 
     def rekey(self, remote, key):
@@ -548,10 +601,10 @@ class Network:
                     if group is None or s.get("group") == group]
 
     def remotes(self):
-        """Every host known, there or not: those reached once, or given by hand (not a Tailscale peer that's never
-        answered as one)."""
+        """Every host known, there or not: those reached once, given by hand, or offered (found on the network, not
+        reached: Remote.offered); not a Tailscale peer that's never answered as one."""
         with self.lock:
-            return [r for r in self.servers.values() if r.info.get("id") or r.by_hand]
+            return [r for r in self.servers.values() if r.info.get("id") or r.by_hand or r.offered]
 
     def find(self, session_id):
         with self.lock:
@@ -607,7 +660,7 @@ class RemoteProc(claude.ClaudeProc):
         self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
         self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0})
-        reply = self.ch.read()
+        reply = self.ch.reply()
         if not reply or reply.get("op") != "attached":
             self.ch.close()
             raise OSError((reply or {}).get("error") or "the server didn't answer")

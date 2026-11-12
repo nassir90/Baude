@@ -60,17 +60,17 @@ authorized_keys and known_hosts, never a password asked for. reach(where) connec
     {"via": "local"}                                this machine's host process (socket_path())
     {"via": "unix", "path": P}                      one listening on another socket
     {"via": "ssh", "dest": D, "command"?, "strict"?}  ssh D (an alias in ~/.ssh/config, a host, user@host): command,
-                                                    the host process on D (default baude_server.py, found on its PATH);
-                                                    strict: a host found on the network, whose key must be known
+                                                    the host process on D, as it's given here (default
+                                                    baude_server.py, found on its PATH); strict: its key must be
+                                                    known already
 """
 import json
 import os
 import re
 import select
-import shlex
 import socket
+import stat
 import subprocess
-import tempfile
 import threading
 import time
 
@@ -131,6 +131,12 @@ class Channel:
                 return None
             return msg if isinstance(msg, dict) else None
 
+    def reply(self):
+        """The next message that isn't a ping (the other end's, which may come first, whenever it's due), or None."""
+        while (msg := self.read()) is not None and msg.get("op") == "ping":
+            pass
+        return msg
+
     def keep_alive(self):
         """A ping every PING_S till it's closed, so the other end, which takes SILENT_S of silence for gone, doesn't."""
         def run():
@@ -169,17 +175,33 @@ class Channel:
 SSH_COMMAND = "baude_server.py"  # (the host process on another machine, found on its PATH)
 _DEST = re.compile(r"[A-Za-z0-9_.@%:\[\]+-]+")
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+SUN_PATH = 104  # (macOS's room for a socket's path, and its end: Linux has 108)
+
+
+def is_id(value):
+    """Is it an id a host may give (its own, a session's): a plain word, no path in it, as files here are named by
+    them?"""
+    return isinstance(value, str) and bool(_ID.fullmatch(value))
+
+
+def safe_name(text):
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", text or "")[:64] or "host"
 
 
 def runtime_dir():
     """Where this machine's host process listens, and ssh keeps its connections to other machines' to share: its
-    user's own folder ($BAUDE_RUNTIME_DIR; else $XDG_RUNTIME_DIR/baude; else baude-<uid> in the temporary folder, which
-    on macOS is its user's own too). Short, as a socket's path must be."""
+    user's own folder ($BAUDE_RUNTIME_DIR; else $XDG_RUNTIME_DIR/baude; else ~/.local/state/baude/run, or baude-<uid>
+    in /tmp if that's too long a path for a socket). Not $TMPDIR: macOS sets it for a session at the screen but not
+    for one ssh starts, and both must find the same host process."""
     if os.environ.get("BAUDE_RUNTIME_DIR"):
         return os.environ["BAUDE_RUNTIME_DIR"]
     if os.environ.get("XDG_RUNTIME_DIR"):
         return os.path.join(os.environ["XDG_RUNTIME_DIR"], "baude")
-    return os.path.join(tempfile.gettempdir(), f"baude-{os.getuid()}")
+    path = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "baude", "run")
+    if len(os.path.join(path, "host.sock.lock").encode()) <= 100:
+        return path
+    return f"/tmp/baude-{os.getuid()}"
 
 
 def socket_path():
@@ -202,7 +224,7 @@ def _hello(ch, timeout, what):
     """(channel, the server's info) past hello, or OSError: what didn't answer."""
     ch.sock.settimeout(timeout)
     ch.send({"op": "hello", "client": "baude", "version": VERSION})
-    reply = ch.read()
+    reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()
         raise OSError((reply or {}).get("error") or f"{what} isn't a Baude host")
@@ -210,9 +232,20 @@ def _hello(ch, timeout, what):
     return ch, reply.get("server") or {}
 
 
+def own_socket(path):
+    """OSError unless a socket's this user's own, in a folder no one else may write in: one another user left where
+    this user's should be (the /tmp folder, say) is no host process of theirs, and isn't connected to."""
+    folder, me = os.lstat(os.path.dirname(path) or "."), os.getuid()
+    st = os.lstat(path)
+    if not stat.S_ISDIR(folder.st_mode) or folder.st_uid != me or folder.st_mode & 0o022 or \
+            not stat.S_ISSOCK(st.st_mode) or st.st_uid != me:
+        raise OSError(f"{path} isn't this user's own: not connected to")
+
+
 def connect_local(path=None, timeout=5.0):
     """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given)."""
     path = path or socket_path()
+    own_socket(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -236,12 +269,30 @@ def ssh_args(dest, command=None, strict=False):
     (default SSH_COMMAND, on its PATH)."""
     if not is_dest(dest):
         raise OSError(f"not somewhere ssh can go: {dest!r}")
-    control = os.path.join(own_dir(runtime_dir()), "ssh-%C")
+    control = control_path(dest)
+    share = ["-o", "ControlMaster=auto", "-o", f"ControlPath={control}", "-o", "ControlPersist=60"] if control else \
+        ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
     return [os.environ.get("BAUDE_SSH") or "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ControlMaster=auto",
-            "-o", f"ControlPath={control}", "-o", "ControlPersist=60",
+            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", *share,
             *(["-o", "StrictHostKeyChecking=yes"] if strict else []), "--", dest,
             f"{command or SSH_COMMAND} connect"]
+
+
+def control_path(dest):
+    """Where ssh keeps its shared connection to dest: short, as the socket ssh makes there first is its path and 17
+    more (".", 16 random letters); in the runtime folder, else this user's own folder in /tmp; None if neither has
+    room (each connection its own, then)."""
+    import hashlib
+    name = "c-" + hashlib.sha1(dest.encode()).hexdigest()[:12]
+    for folder in (runtime_dir(), f"/tmp/baude-{os.getuid()}"):
+        path = os.path.join(folder, name)
+        if len(path.encode()) + 17 < SUN_PATH:
+            try:
+                own_dir(folder)
+                return path
+            except OSError:
+                continue
+    return None
 
 
 def connect_ssh(dest, command=None, strict=False, timeout=25.0):
@@ -282,7 +333,7 @@ def reach(where, timeout=5.0):
     if via == "unix":
         return connect_local(where["path"], timeout)
     if via == "ssh":
-        return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")))
+        return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")), max(timeout, 3.0))
     raise OSError(f"nowhere to reach: {where!r}")
 
 
@@ -294,15 +345,6 @@ def is_local(where):
 def said_where(where):
     """Where a host process is, as people say it: user@host, or this machine."""
     return where.get("dest") if (where or {}).get("via") == "ssh" else "this machine"
-
-
-def discovered_command(path):
-    """A host's process as a host on the network says it's started (its TXT record's path): only a file of Baude's,
-    named so, at an absolute path, quoted. Anything else (what anyone on the network can say) is no command of ours."""
-    if not isinstance(path, str) or not re.fullmatch(r"/[A-Za-z0-9_./-]+", path) or "/../" in path or \
-            os.path.basename(path) not in ("baude_server.py",):
-        return None
-    return shlex.quote(path)
 
 
 def bridge(sock, rfd=0, wfd=1):

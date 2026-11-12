@@ -3,7 +3,8 @@
 machine (its sidebar lists them under their host and group: ⋮ → Hosts, Groups), on baudelib (see baudelib/server.py).
 No GTK needed.
 
-    python3 baude_server.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N] [--no-advertise]
+    python3 baude_server.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N]
+                                    [--advertise | --no-advertise]
     python3 baude_server.py connect                         # for ssh: stdin and stdout to this machine's host process
     python3 baude_server.py servers                         # the hosts found: this machine's, and on the network's
     python3 baude_server.py list   [--host DEST [--host-command CMD]]   # a host's sessions
@@ -41,10 +42,10 @@ from baudelib.server import AlreadyRunning, Server, state_home  # noqa: E402
 
 def serve(args):
     try:
-        # (BAUDE_NETWORK=0: nothing said on the network, as Baude then looks for nothing there)
-        advertise = not args.no_advertise and os.environ.get("BAUDE_NETWORK", "1") != "0"
-        server = Server(state_dir=args.state, group=args.group, name=args.name, advertise=advertise,
-                        idle_s=args.idle_minutes * 60, command=os.path.realpath(__file__), socket_path=args.socket)
+        server = Server(state_dir=args.state, group=args.group, name=args.name, advertise=args.advertise,
+                        idle_s=args.idle_minutes * 60, socket_path=args.socket)  # (--advertise, --no-advertise: kept)
+        if os.environ.get("BAUDE_NETWORK", "1") == "0" and not args.advertise:
+            server.advertise = False  # (nothing said this time, as Baude then looks for nothing there; not kept)
     except AlreadyRunning as e:
         sys.exit(f"baude-server: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
@@ -115,7 +116,7 @@ def ask(args, msg):
     except OSError as e:
         sys.exit(f"baude-server: {e}")
     ch.send({**msg, "req": 1})
-    reply = ch.read()
+    reply = ch.reply()
     ch.close()
     if not reply or reply.get("op") == "error":
         sys.exit(f"baude-server: {(reply or {}).get('error') or 'no answer'}")
@@ -141,7 +142,12 @@ def main():
         c.add_argument("--state", help="where it keeps its sessions' settings (default: ~/.local/share/baude/server)")
         c.add_argument("--socket", help=argparse.SUPPRESS)  # (another socket than this user's one: a test's)
         c.add_argument("--idle-minutes", type=float, default=30, help="a session's claude stops after this long unused")
-        c.add_argument("--no-advertise", action="store_true", help="don't say it's here on the network (mDNS)")
+        said = c.add_mutually_exclusive_group()
+        said.add_argument("--advertise", action="store_const", const=True, dest="advertise",
+                          help="say on the local network that Baude is on this host, and which user ssh would log in "
+                               "as (multicast DNS); remembered (default: not said)")
+        said.add_argument("--no-advertise", action="store_const", const=False, dest="advertise",
+                          help="don't say it on the network any more")
     serving(sub.add_parser("serve", help="serve sessions (the default)"))
     serving(p)
     sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")

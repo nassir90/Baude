@@ -66,11 +66,22 @@ and Shift or Ctrl (⌘) and a click adds or takes away one, as the Git page's br
 session was started with. Right-click a host → New Session Here starts a session there with the top bar's model, effort
 and mode, and a prompt and folder; on This Mac, its host process is started first if it isn't running.
 
-Baude finds hosts three ways. A host process says on the local network, by multicast DNS (`_baude._tcp`), that Baude is
-on its host, and which user ssh would log in as. Tailscale's peers are tried too (`tailscale status --json`, where
-Tailscale's installed), since multicast DNS doesn't cross a tailnet; one is listed once Baude answers there. And ⋮ →
-Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or `user@host`. A host found on the network or on
-Tailscale must already be in `known_hosts`. `BAUDE_NETWORK=0` stops Baude looking.
+Baude finds hosts three ways:
+- **On the local network,** a host process started with `--advertise` (remembered from then on) says by multicast DNS
+  (`_baude._tcp`) that Baude is on its host, and which user ssh would log in as. Baude lists it in ⋮ → Hosts as found,
+  but doesn't reach it till you right-click it → Connect, since anyone on a network can say anything: then it's
+  `ssh user@name.local`, with the host's key already in `known_hosts`. Nothing's said on the network unless asked.
+- **Tailscale's peers** are tried too (`tailscale status --json`, where Tailscale's installed), one at a time, since
+  multicast DNS doesn't cross a tailnet; one is listed once Baude answers there, and its key must be known already.
+- **By hand,** ⋮ → Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or `user@host`.
+
+`BAUDE_NETWORK=0` stops Baude looking.
+
+Each host shares one ssh connection among Baude's sessions there (`ControlMaster`), so sshd's `MaxSessions` (10 by
+default) is how many can be open at once. A host process started over ssh, by `connect`, has that ssh session's
+environment (its `PATH`, and on macOS no keychain, so `claude` there may need signing in another way); one started at
+the screen, by Baude there, has the screen's. A home folder shared between machines (NFS) shares their host processes'
+state, which isn't supported.
 
 ## License
 

@@ -1608,6 +1608,11 @@ CSS = """
 .bubble-record { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
 .bubble-error { background: alpha(@error_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 label.said-refs link { color: #2f8f72; }  /* (an @reference in what you wrote: as a page's @names, RecordChat._said) */
+button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 4px; color: white; box-shadow: none; }
+button.edit-accept { background: #2ec27e; }
+button.edit-accept:hover { background: #26a269; }
+button.edit-reject { background: #e01b24; }
+button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reject, on its page: EditControls) */
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
 .pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
 .quote-chip { background: alpha(@accent_bg_color, 0.10); border-left: 3px solid @accent_bg_color;
@@ -2870,6 +2875,37 @@ class PageHistory:
         return True
 
 
+class EditControls(Gtk.Box):
+    """A proposed edit's Accept and Reject, on its page where its green ends (DiaryEditor._put_greens: at its anchor):
+    a tick on green and a cross on red, as tall as the text's letters (size), in its line. Neither takes the focus: the
+    caret stays where it was in the page."""
+
+    def __init__(self, editor, p, px):
+        super().__init__(spacing=3, margin_start=4, margin_end=2)
+        self.buttons = []
+        for icon, tip, css, accept in (("object-select-symbolic", "Accept (Tab)", "edit-accept", True),
+                                       ("window-close-symbolic", "Reject (Esc)", "edit-reject", False)):
+            btn = Gtk.Button(tooltip_text=tip, focus_on_click=False, can_focus=False)
+            btn.set_child(Gtk.Image(icon_name=icon))
+            btn.add_css_class("edit-control")
+            btn.add_css_class(css)
+            pointers.hand(btn)
+            btn.connect("clicked", lambda *_, accept=accept: p in (e["p"] for e in editor.proposals) and
+                        editor.decide(p, accept))
+            self.append(btn)
+            self.buttons.append(btn)
+        self.px = None
+        self.size(px)
+
+    def size(self, px):
+        """Each button px tall (and a little wider), its mark most of that."""
+        if px != self.px:
+            self.px = px
+            for btn in self.buttons:
+                btn.set_size_request(round(px * 1.45), px)
+                btn.get_child().set_pixel_size(max(8, round(px * 0.85)))
+
+
 class DiaryEditor(Gtk.Box, FindInText):
     """A Record's glossary, its notes: pages of Markdown drawn as they read, as Self's editor draws them (headings,
     **bold**, *italic*, ==marked==, `code`, - lists, > quotes, [links](url)), the markup shown on the caret's line
@@ -2908,13 +2944,10 @@ class DiaryEditor(Gtk.Box, FindInText):
             "token": {"foreground": "#2f8f72", "weight": 600, "background": "rgba(79,138,124,0.14)"},
             "bullet": {"weight": 700},  # (a numbered item's number, coloured as bullets are: _highlight)
             # (a change the Record proposes, as tracked changes read: what it takes away struck through on red, what it
-            # puts in just after it on green, in the page's own lines, a ✓ and a ✗ at its end; none of that green the
+            # puts in just after it on green, in the page's own lines, Accept and Reject at its end; none of that green the
             # page's till it's accepted, nor to be written in: show_proposal)
             "proposal-old": {"background": "rgba(224,27,36,0.16)", "strikethrough": True},
             "proposal-new": {"background": "rgba(46,194,126,0.22)"},
-            "proposal-yes": {"foreground": "#26a269", "weight": 800, "scale": 1.1, "letter_spacing": 2 * Pango.SCALE},
-            "proposal-no": {"foreground": "#e01b24", "weight": 800, "scale": 1.1, "letter_spacing": 2 * Pango.SCALE},
-            "proposal-hot": {"background": "rgba(128,128,128,0.25)"},  # (the ✓ or ✗ the pointer's over)
             "proposal-lock": {"editable": False}}
     MARGIN = 22  # the page's text, and its title, this far in
     # a list as Baude's chat lays one out (widgets.MarkdownView): LIST_PAD in, INDENT more a level (its spaces kept,
@@ -2979,10 +3012,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.quoting = None  # (a selection's quote to the Record, once it's settled: _quote_soon)
         self.buf.connect("mark-set", lambda _b, _i, mark: mark.get_name() in ("insert", "selection_bound") and
                          not self.loading and self._quote_soon())
-        self.proposals, self.placing, self.hot = [], None, None  # (the Record's proposed changes shown on it: show_proposal)
+        self.proposals, self.placing = [], None  # (the Record's proposed changes shown on it: show_proposal)
         self.history = PageHistory(self)  # (Undo and Redo, what's proposed in none of it)
-        self.view.set_has_tooltip(True)  # (a proposal's ✓ and ✗ say their keys)
-        self.view.connect("query-tooltip", self._tooltip)
         self.view.connect("paste-clipboard", self._paste)
         self.view.connect("cut-clipboard", lambda *_: self._whole_links())
         self.view.connect("copy-clipboard", lambda *_: self._whole_links())
@@ -2998,7 +3029,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.pressed = None  # (the link a click came down on: _pressed)
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._hover)
-        motion.connect("leave", lambda *_: (setattr(self, "hovered", None), self.win.hover_left(), self._unhot()))
+        motion.connect("leave", lambda *_: (setattr(self, "hovered", None), self.win.hover_left()))
         self.view.add_controller(motion)
         self.hovered = None  # (the @name the pointer's over: _hover)
         self.following, self.follow_frames, self.follow_tries, self.follow_anim = None, 0, 0, None  # (follow_soon)
@@ -3141,9 +3172,9 @@ class DiaryEditor(Gtk.Box, FindInText):
     # ---- the text
     def text(self):
         """The buffer's text: all of it, the links' hidden marks too (the buffer's "text" leaves out what's hidden, and
-        with it every link's [[ ]]), and what a proposal puts in (green: not the page's, kept). Its offsets are the
-        buffer's."""
-        return self.buf.get_text(*self.buf.get_bounds(), True)
+        with it every link's [[ ]]), and what a proposal puts in (green: not the page's, kept), its Accept and Reject's
+        anchor a U+FFFC (a slice, not GTK's text, which leaves anchors out). Its offsets are the buffer's."""
+        return self.buf.get_slice(*self.buf.get_bounds(), True)
 
     def kept(self):
         """The page's text, as it's kept (saved, its file written, read by the Record): the buffer's without what's
@@ -3184,7 +3215,7 @@ class DiaryEditor(Gtk.Box, FindInText):
 
     def kept_between(self, a, b):
         """The page's own text between two places in the buffer (what's proposed there left out)."""
-        return "".join(self.buf.get_text(self.buf.get_iter_at_offset(x), self.buf.get_iter_at_offset(y), True)
+        return "".join(self.buf.get_slice(self.buf.get_iter_at_offset(x), self.buf.get_iter_at_offset(y), True)
                        for x, y in self._kept_pieces(a, b))
 
     def _kept_pieces(self, a, b):
@@ -3204,7 +3235,6 @@ class DiaryEditor(Gtk.Box, FindInText):
         if self.loading or self.notebook is None:
             return
         self.notebook["pages"][self.page] = self.kept()
-        self.hot = None  # (the ✓ or ✗ shaded: wherever it is now, the pointer's next move says)
         self.notebook.pop("fresh", None)  # (written in: kept, Store.is_blank)
         self.win.pages.prune()
         self.win.store.save()
@@ -3295,7 +3325,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             self._tone = tone.to_string()
             buf.get_tag_table().lookup("bullet").set_property("foreground-rgba", tone)
         self._heading_looks()
-        text = buf.get_text(start, end, True)
+        text = buf.get_slice(start, end, True)
         ins = buf.get_iter_at_mark(buf.get_insert())
         sel = buf.get_iter_at_mark(buf.get_selection_bound())
         shown = range(min(ins.get_line(), sel.get_line()), max(ins.get_line(), sel.get_line()) + 1)
@@ -3462,15 +3492,15 @@ class DiaryEditor(Gtk.Box, FindInText):
 
     # ---- a change the Record proposes (RecordChat.propose), as tracked changes read: what it takes away struck through
     # on red, where it is; what it puts in just after it, green, in the page's own lines (it wraps with them, in their
-    # font and size), and at its end a ✓ and a ✗. The green's in the buffer, but not the page's: it's left out of what's
-    # kept (kept: saved, its file, what the Record reads), it can't be edited (proposal-lock), and Undo has none of it
-    # (PageHistory). Accept (✓, Tab with the caret in it) puts it in the page in the red's place, as one edit, to undo;
-    # Reject (✗, Esc) takes it away, the red as it was.
-    YES, NO = "\u2009\u2713", "\u2009\u2717"  # (✓ and ✗, each a thin space after what's before it)
+    # font and size), and at its end its Accept and Reject (EditControls, in the line where its anchor is). The green's in
+    # the buffer, but not the page's: it's left out of what's kept (kept: saved, its file, what the Record reads), it
+    # can't be edited (proposal-lock), and Undo has none of it (PageHistory). Accept (its tick, Tab with the caret in it)
+    # puts it in the page in the red's place, as one edit, to undo; Reject (its cross, Esc) takes it away, the red as it
+    # was.
 
     def show_proposal(self, p, scroll=False, draw=True, caret=False):
         """A proposed change (one of a reply's: RecordChat.propose), shown on the page; scroll: brought into view;
-        caret: the caret put in it, just before its ✓ (Tab and Esc take it or leave it: Previous and Next)."""
+        caret: the caret put in it, just before its Accept (Tab and Esc take it or leave it: Previous and Next)."""
         shown = next((e for e in self.proposals if e["p"]["id"] == p["id"]), None)
         if shown is None:
             sel = self.buf.get_selection_bounds()  # (the passage selected, to ask: let go, the change in its place)
@@ -3505,8 +3535,8 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.delete_mark(was)
             if draw:
                 self._highlight()
-        if caret:  # (in its green, just before its ✓: Tab and Esc are its, whatever's beside it)
-            self.buf.place_cursor(self.buf.get_iter_at_offset(self._glyphs(shown)[0][0] + 1))
+        if caret:  # (in its green, just before its Accept: Tab and Esc are its, whatever's beside it)
+            self.buf.place_cursor(self.buf.get_iter_at_child_anchor(shown["anchor"]))
         if scroll:
             self._scroll_soon(shown)
 
@@ -3596,11 +3626,15 @@ class DiaryEditor(Gtk.Box, FindInText):
             trail = p["new"][len(body):]
             lead = "\n" if p["old"] and not e["gone"] and not p["old"].endswith("\n") and not body.startswith("\n") \
                 and a.starts_line() and b.ends_line() else ""
-            text, at = lead + body + self.YES + self.NO + trail, b.get_offset()
-            self.buf.insert(b, text)
+            at, words = b.get_offset(), lead + body
+            self.buf.insert(b, words)
+            e["anchor"] = self.buf.create_child_anchor(self.buf.get_iter_at_offset(at + len(words)))
+            self.buf.insert(self.buf.get_iter_at_offset(at + len(words) + 1), trail)
             e["g0"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at), False)
-            e["g1"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at + len(text)), True)
+            e["g1"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at + len(words) + 1 + len(trail)), True)
             e["lead"], e["body"] = len(lead), len(body)
+            e["controls"] = EditControls(self, p, self._control_px())
+            self.view.add_child_at_anchor(e["controls"], e["anchor"])
         for e in self.proposals:  # (a passage with nothing in it, where a green went in: its start back before that)
             a, b = self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
             if a.compare(b) > 0:
@@ -3612,11 +3646,17 @@ class DiaryEditor(Gtk.Box, FindInText):
             for k in ("g0", "g1"):
                 self.buf.delete_mark(e[k])
                 e[k] = None
-        self.hot = None
+            e["anchor"] = e["controls"] = None  # (its Accept and Reject gone with it)
+
+    def _control_px(self):
+        """How tall an edit's Accept and Reject are: the text's letters' height, its font's ascent (a widget in a line
+        stands on its baseline, so that keeps the line as it is)."""
+        return max(10, round(self.view.get_pango_context().get_metrics(None, None).get_ascent() / Pango.SCALE))
 
     def _mark_proposals(self):
-        """Each change's passage struck through on red (any other's green in it left be), what it puts in green, its ✓
-        and ✗, and none of that green to be written in (after _highlight: it takes every tag away)."""
+        """Each change's passage struck through on red (any other's green in it left be), what it puts in green, and
+        none of that green to be written in (after _highlight: it takes every tag away); its Accept and Reject the
+        text's height, as that is now."""
         if not self.proposals:
             return
         buf = self.buf
@@ -3630,20 +3670,9 @@ class DiaryEditor(Gtk.Box, FindInText):
             for x, y in self._kept_pieces(*(buf.get_iter_at_mark(e[k]).get_offset() for k in ("a", "b"))):
                 tag("proposal-old", x, y)
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
-            new = g0 + e["lead"]
-            yes = new + e["body"]
-            no = yes + len(self.YES)
-            tag("proposal-new", new, yes)
-            tag("proposal-yes", yes, no)
-            tag("proposal-no", no, no + len(self.NO))
+            tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
-        if self.hot is not None:
-            tag("proposal-hot", *self.hot)
-
-    def _glyphs(self, e):
-        """Where a shown change's ✓ and its ✗ are in the buffer: ((start, end), (start, end))."""
-        yes = self.buf.get_iter_at_mark(e["g0"]).get_offset() + e["lead"] + e["body"]
-        return (yes, yes + len(self.YES)), (yes + len(self.YES), yes + len(self.YES) + len(self.NO))
+            e["controls"].size(self._control_px())
 
     def _proposal_at(self, offset):
         """The change shown a place in the buffer is in (Tab and Esc's): the one whose green it's inside, else the
@@ -3760,7 +3789,6 @@ class DiaryEditor(Gtk.Box, FindInText):
             if e.get(k) is not None and not e[k].get_deleted():
                 self.buf.delete_mark(e[k])
             e[k] = None
-        self.hot = None
 
     def apply_steps(self, ops):
         """Undo's or Redo's edits (PageHistory): [("+" or "-", where in the page's own text, the text)], made with
@@ -3782,13 +3810,6 @@ class DiaryEditor(Gtk.Box, FindInText):
         if caret is not None:
             self.buf.place_cursor(self.buf.get_iter_at_offset(self.buf_offset(caret, past=False)))
         self._changed(self.buf)
-
-    def _tooltip(self, _view, x, y, keyboard, tip):
-        hit = None if keyboard else self._at(x, y)
-        if hit is not None and hit[0] in ("accept", "reject"):
-            tip.set_text("Accept (Tab)" if hit[0] == "accept" else "Reject (Esc)")
-            return True
-        return False
 
     # ---- ⌘F (FindInText: the bar, the matches)
     def open_search(self):
@@ -3968,7 +3989,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         end = start.copy()
         if not end.ends_line():
             end.forward_to_line_end()
-        text = self.buf.get_text(start, end, True)
+        text = self.buf.get_slice(start, end, True)
         if not (spaces := re.match(r" +", text)) or LIST_ITEM_RE.match(text):
             return None
         for up in range(line_no - 1, -1, -1):
@@ -3978,7 +3999,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             stop = at.copy()
             if not stop.ends_line():
                 stop.forward_to_line_end()
-            if not self.buf.get_text(at, stop, True).startswith(" "):
+            if not self.buf.get_slice(at, stop, True).startswith(" "):
                 return None
         return None
 
@@ -4023,7 +4044,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         end = start.copy()
         if not end.ends_line():
             end.forward_to_line_end()
-        m = LIST_ITEM_RE.match(self.buf.get_text(start, end, True))
+        m = LIST_ITEM_RE.match(self.buf.get_slice(start, end, True))
         return (start, m) if m else None
 
     def _indent_items(self, step):
@@ -4132,7 +4153,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         end = ins.copy()
         if not end.ends_line():
             end.forward_to_line_end()
-        text = self.buf.get_text(line, end, True)
+        text = self.buf.get_slice(line, end, True)
         m = LIST_ITEM_RE.match(text)
         if not m and (cont := self._continued(ins.get_line())) is not None:  # (on a line going on with an item: the
             m = cont[1]                                                        # list's next item)
@@ -4177,7 +4198,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         except GLib.Error:
             pasted = ""
         a, b = (self.buf.get_iter_at_mark(m) for m in marks)
-        chosen = self.buf.get_text(a, b, True)
+        chosen = self.buf.get_slice(a, b, True)
         url = pasted.strip()
         self.buf.begin_user_action()
         self.buf.delete(a, b)
@@ -4188,17 +4209,12 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.delete_mark(m)
 
     def _at(self, x, y):
-        """What's under the pointer: ("link", page), ("ref", name), ("url", address), or a proposed change's ✓ or ✗
-        (("accept" or "reject", the change shown)), or None."""
+        """What's under the pointer: ("link", page), ("ref", name) or ("url", address), or None."""
         bx, by = self.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
         ok, it = self.view.get_iter_at_location(bx, by)
         if not ok:
             return None
         off, text = it.get_offset(), self.text()
-        if (e := self._green_at(off)) is not None:
-            yes, no = self._glyphs(e)
-            if yes[0] <= off < yes[1] or no[0] <= off < no[1]:
-                return ("accept" if off < yes[1] else "reject"), e
         for m in LINK_RE.finditer(text):
             if m.start() <= off < m.end():
                 if m.group(1).lstrip().startswith("@"):  # ([[@name]]: a reference)
@@ -4253,10 +4269,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         hit, self.pressed = self.pressed, None
         if hit is None:
             return
-        if hit[0] in ("accept", "reject"):
-            if hit[1] in self.proposals:
-                self.decide(hit[1]["p"], hit[0] == "accept")
-        elif hit[0] == "link":
+        if hit[0] == "link":
             self.open_page(hit[1])
         elif hit[0] == "url" and hit[1].startswith(CITE_SCHEME):
             self.win.open_citation(hit[1])
@@ -4271,12 +4284,6 @@ class DiaryEditor(Gtk.Box, FindInText):
         which would cover the hand. Come over an @name, what it is (Window.hover_ref), once till it's left."""
         hit = self._at(x, y)
         GLib.idle_add(DiaryEditor._pointer, weakref.ref(self.view), pointers.HAND if hit else pointers.TEXT)
-        glyph = self._glyphs(hit[1])[hit[0] == "reject"] if hit and hit[0] in ("accept", "reject") else None
-        if glyph != self.hot:  # (the ✓ or ✗ it's over, shaded)
-            self.buf.remove_tag_by_name("proposal-hot", *self.buf.get_bounds())
-            self.hot = glyph
-            if glyph is not None:
-                self.buf.apply_tag_by_name("proposal-hot", *(self.buf.get_iter_at_offset(i) for i in glyph))
         name = hit[1] if hit and hit[0] == "ref" else None
         if name != self.hovered:
             self.hovered = name
@@ -4284,11 +4291,6 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.win.hover_ref(name, at=(self.view, x, y))
             else:
                 self.win.hover_left()
-
-    def _unhot(self):
-        if self.hot is not None:
-            self.hot = None
-            self.buf.remove_tag_by_name("proposal-hot", *self.buf.get_bounds())
 
     @staticmethod
     def _pointer(view, want):
@@ -4307,13 +4309,13 @@ class DiaryEditor(Gtk.Box, FindInText):
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
         line = ins.copy()
         line.set_line_offset(0)
-        before = self.buf.get_text(line, ins, True)
+        before = self.buf.get_slice(line, ins, True)
         start, offset = line.get_offset(), ins.get_offset()
         if self.token is not None and self.typed_at is not None and self.typed_at > self.token[0] and \
                 start < self.typed_at <= offset and ISSUE_OPENS.fullmatch(before[self.typed_at - start - 1]):
             self.token, self.pop_moved = None, False
         if self.token is not None and self.token[0] < offset:
-            typed = self.buf.get_text(self.buf.get_iter_at_offset(self.token[0]), ins, True)
+            typed = self.buf.get_slice(self.buf.get_iter_at_offset(self.token[0]), ins, True)
             if typed.startswith("#") and "\n" not in typed:
                 return self._issue_search(before, self.token[0] - start, start)
             if typed.startswith("@") and "\n" not in typed:
@@ -4659,7 +4661,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
         line = ins.copy()
         line.set_line_offset(0)
-        before = self.buf.get_text(line, ins, True)
+        before = self.buf.get_slice(line, ins, True)
         if not re.search(r"(?<=\s)--$", before) or before[:-2].count("`") % 2:
             return False
         start = self.buf.get_iter_at_offset(ins.get_offset() - 2)
@@ -4680,7 +4682,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
         line = ins.copy()
         line.set_line_offset(0)
-        m = SUBPAGE_RE.search(self.buf.get_text(line, ins, True))
+        m = SUBPAGE_RE.search(self.buf.get_slice(line, ins, True))
         if not m:
             return False
         start = self.buf.get_iter_at_offset(ins.get_offset() - len(m.group(0)))
@@ -6024,7 +6026,7 @@ class RecordChat(Gtk.Box):
 
     def _pending_bar(self):
         """Over the box asked in, while there are edits waiting: how many, and Previous and Next, each to one on its
-        page, the caret in it (Tab takes it, Esc leaves it, as its ✓ and ✗ do)."""
+        page, the caret in it (Tab takes it, Esc leaves it, as its Accept and Reject do)."""
         bar = Gtk.Box(spacing=2)
         bar.add_css_class("pending-bar")
         self.pending_label = label("", css=("caption",))

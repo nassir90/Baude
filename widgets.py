@@ -76,6 +76,9 @@ REF_ICON_SVG = {
                'cy="11.9" r="2.3" fill="{c}"/>'),  # (a graph: ArangoDB's collections)
     "file": (f'<path d="M3.5 1.5h5.8l3.2 3.2v9.8h-9zM9 1.5V5h3.5" {_REF_STROKE}/>'),
     "folder": (f'<path d="M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z" {_REF_STROKE}/>'),
+    "page": (f'<path d="M3.5 1.5h9v13h-9zM5.8 5h4.4M5.8 8h4.4M5.8 11h2.6" {_REF_STROKE}/>'),  # (Record's notes)
+    "notebook": (f'<path d="M3.5 1.5h8.2a.8.8 0 0 1 .8.8v11.4a.8.8 0 0 1-.8.8H3.5zM5.6 1.5v13M7.8 5h2.6" '
+                 f'{_REF_STROKE}/>'),
     "code": ('<path d="M6 2.5c-1.5 0-2 .6-2 2v1.6c0 .9-.5 1.4-1.5 1.4.9 0 1.5.5 1.5 1.4v1.6c0 1.4.5 2 2 2M10 2.5c1.5 0 2 '
              '.6 2 2v1.6c0 .9.5 1.4 1.5 1.4-1 0-1.5.5-1.5 1.4v1.6c0 1.4-.5 2-2 2" fill="none" stroke="{c}" '
              'stroke-width="1.6" stroke-linecap="round"/>'),

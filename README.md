@@ -56,8 +56,11 @@ python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --mo
 python3 baude_server.py list
 ```
 
-`BAUDE_SERVERS=host:port` gives Baude servers it can't find by itself; `BAUDE_NETWORK=0` stops it looking. There's no
-sign-in yet: anyone who can reach a server's port can start sessions on it and read its files.
+⋮ → Group → Add server… (or `BAUDE_SERVERS=host:port`) gives Baude a server it can't find by itself;
+`BAUDE_NETWORK=0` stops it looking. A server bound to this machine only (`--bind 127.0.0.1`) isn't said on the network,
+and wants the token in its file in `~/.local/share/baude/local-servers`, which only its owner can read: Baude, and
+`baude_server.py`'s own commands, on the same machine find it, and its token, there. There's no sign-in yet for one on
+the network: anyone who can reach its port can start sessions on it and read files in its sessions' folders.
 
 ## License
 

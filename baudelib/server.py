@@ -15,6 +15,7 @@ import itertools
 import json
 import os
 import queue
+import secrets
 import socket
 import socketserver
 import sys
@@ -32,6 +33,21 @@ RENAME_S = 15  # (what a claude asked to rename its session is given to answer: 
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
 SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mode")}
+# what start takes for claude's own flags, each run: (param, flag); and how much of an ask's input a listing shows
+CLAUDE_OPTIONS = (("system", "--append-system-prompt"), ("add_dirs", "--add-dir"), ("allowed_tools", "--allowedTools"),
+                  ("disallowed_tools", "--disallowedTools"))
+ASK_SHOWN = 400
+
+
+def _shown(value, depth=0):
+    """An ask's input as a listing shows it: long strings cut short, deep or long things summed up."""
+    if isinstance(value, str):
+        return value if len(value) <= ASK_SHOWN else value[:ASK_SHOWN] + "…"
+    if isinstance(value, dict) and depth < 3:
+        return {k: _shown(v, depth + 1) for k, v in list(value.items())[:20]}
+    if isinstance(value, list) and depth < 3:
+        return [_shown(v, depth + 1) for v in value[:20]]
+    return value if isinstance(value, (int, float, bool)) or value is None else f"({type(value).__name__})"
 
 
 def state_home():
@@ -52,6 +68,7 @@ class Conn:
     def __init__(self, channel):
         self.channel, self.out = channel, queue.Queue()
         self.subscribed = False
+        self.authed = False  # (it's said hello with the token, where one's wanted)
         threading.Thread(target=self._write, daemon=True, name="client-out").start()
 
     def send(self, msg):
@@ -138,7 +155,9 @@ class Session:
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0,
-                "subagents": max((m for _size, m in (self.agents or {}).values()), default=0)}
+                "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
+                "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
+                          "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
 
 class Server:
@@ -185,6 +204,10 @@ class Server:
 
         self.tcp = TCP((host, port), Handler)
         self.port = self.tcp.server_address[1]
+        # bound to this machine only: no one else's to use, so it wants a token only its owner can read (its file)
+        self.local = wire.is_loopback(host)
+        self.token = secrets.token_urlsafe(32) if self.local else None
+        self.file = os.path.join(wire.local_dir(), f"{self.me['id']}.json")
         self.advertiser = None
         self.stopped = threading.Event()
 
@@ -232,15 +255,34 @@ class Server:
     # ---- running
     def serve_forever(self):
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
-        if self.advertise:
+        self.say_here()
+        if self.advertise and self.local:
+            self.log("bound to this machine only: not said on the network")
+        elif self.advertise:
             self.advertiser = Advertiser(self.me["name"], self.port, {
                 "id": self.me["id"], "group": self.me["group"], "v": wire.VERSION}).start()
         self.log(f"serving {len(self.sessions)} sessions on port {self.port}, group {self.me['group']!r}")
         self.tcp.serve_forever(poll_interval=0.25)
 
+    def say_here(self):
+        """Its file in wire.local_dir(): where it is, and the token it wants, for its owner's programs on this machine
+        (and theirs only: the folder and the file are theirs to read)."""
+        os.makedirs(os.path.dirname(self.file), mode=0o700, exist_ok=True)
+        tmp = self.file + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "port": self.port,
+                       "token": self.token, "pid": os.getpid()}, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self.file)
+
     def shutdown(self):
         """Goodbye on the network, every claude stopped, the port let go."""
         self.stopped.set()
+        try:
+            os.remove(self.file)
+        except OSError:
+            pass
         if self.advertiser is not None:
             self.advertiser.stop()
         with self.lock:
@@ -281,12 +323,17 @@ class Server:
         if op == "ping":
             return None
         if op == "hello":
+            if self.token and not wire.same_token(msg.get("token"), self.token):
+                return reply("error", error="this server is this machine's only: hello needs the token in its file")
+            conn.authed = True
             return reply("hello", server=self.info())
+        if self.token and not conn.authed:
+            return reply("error", error="hello first, with the token in its file")
         if op == "subscribe":
             conn.subscribed = True
             return reply("sessions", sessions=self.listing(), server=self.info())
         if op == "start":
-            return reply("started", session=self.start(msg).listing())
+            return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
         with self.lock:
@@ -303,7 +350,8 @@ class Server:
                 s.live.discard(conn)
                 return None
             if op == "input":
-                return self.take_input(conn, s, msg.get("msg") or {})
+                self.take_input(conn, s, msg.get("msg") or {})
+                return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":
                 if s.proc is not None:
                     s.proc.stopping = True
@@ -319,21 +367,44 @@ class Server:
         return reply("error", error=f"unknown op {op!r}")
 
     # ---- sessions
-    def start(self, params):
+    def start(self, params, conn=None, req=None):
+        """A new session, as start asks (wire.py): started said to conn before its prompt's sent, conn attached live
+        to it first if it asks to be (attach)."""
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
         if not os.path.isdir(cwd):
             raise ValueError(f"not a folder here: {cwd}")
-        run = models.launch(params.get("model") or None, params.get("mode") or "default", params.get("effort") or None)
-        if not self.can_run(params.get("model") or None):
-            raise ValueError(f"{self.me['name']} can't run {params.get('model')}: it, or its program, isn't here")
-        meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": params.get("model") or None,
-                "effort": run["effort"], "mode": run["mode"],
+        model = params.get("model") or None
+        with self.lock:
+            src = self.sessions.get(params["fork_from"]) if params.get("fork_from") else None
+        if params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
+            raise ValueError(f"no conversation here to fork: {params['fork_from']}")
+        model = model or (src.meta.get("model") if src else None)
+        run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
+        if not self.can_run(model):
+            raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
+        options = {k: params[k] for k, _flag in CLAUDE_OPTIONS if params.get(k)}
+        for k in ("add_dirs", "allowed_tools", "disallowed_tools"):
+            if k in options:
+                options[k] = [str(v) for v in (options[k] if isinstance(options[k], list) else [options[k]]) if v]
+        if (options or src) and run["program"] != "claude":
+            raise ValueError(f"{', '.join([*options, *(['fork_from'] if src else [])])}: claude's, not {model}'s")
+        if params.get("ask_default") not in (None, "deny", "allow"):
+            raise ValueError("ask_default is deny or allow")
+        meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
                 "group": params.get("group") or self.me["group"], "title": params.get("title") or None,
-                "prompt": params.get("prompt") or "", "created": time.time()}
+                "prompt": params.get("prompt") or "", "created": time.time(), "options": options,
+                "fork_from": (src.meta.get("cli_id") or src.id) if src else None,
+                "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
+                "ask_default": params.get("ask_default") or "deny"}
         with self.lock:
             s = Session(self, meta)
             self.sessions[s.id] = s
             self.save(s)
+            if conn is not None:
+                if params.get("attach"):
+                    s.viewers.add(conn)
+                    s.live.add(conn)
+                conn.send({"op": "started", "req": req, "session": s.listing()})  # (before what claude says of it)
             if meta["prompt"].strip():
                 self.ensure_proc(s)
                 self.send_user(s, meta["prompt"])
@@ -354,14 +425,23 @@ class Server:
             self.drop_routes(s)
         if s.proc is not None:
             return s.proc
+        resumed = s.transcript() is not None
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
-                            s.meta.get("cli_id") or s.id, resumed=s.transcript() is not None)
+                            s.meta.get("cli_id") or s.id, resumed=resumed)
         if not self.can_run(s.meta.get("model")):
             raise OSError(f"{self.me['name']} can't run {s.meta.get('model')}: it, or its program, isn't here")
+        extra = list(run["extra"])
+        if run["program"] == "claude":
+            if s.meta.get("fork_from") and not resumed:  # (its first run: a copy of the other's conversation, which
+                run["resume"], extra = s.meta["fork_from"], ["--fork-session"]  # claude names itself: cli_id)
+            for key, flag in CLAUDE_OPTIONS:
+                value = (s.meta.get("options") or {}).get(key)
+                if value:
+                    extra += [flag, *(value if isinstance(value, list) else [value])]
         made = []  # (the claude its exit is about: claude_exited)
         s.proc = claude.ClaudeProc(
             lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
-            s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=run["extra"], env=self.env,
+            s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra, env=self.env,
             exe=run["exe"] if run["program"] != "claude" else self.exe)
         made.append(s.proc)
         s.used = time.time()
@@ -474,6 +554,8 @@ class Server:
                         "error": f"baude-server: unsupported {request.get('subtype')}"}})
                     return
                 s.asks[msg.get("request_id")] = msg
+                if s.meta.get("ask_timeout"):
+                    self.ask_timer(s, proc, msg.get("request_id"))
                 for conn in s.viewers:
                     conn.send({"op": "claude", "session": s.id, "msg": msg})
                 self.changed()
@@ -495,8 +577,35 @@ class Server:
                 s.busy, s.used = False, time.time()
                 s.asks.clear()
                 self.changed()
+                ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
+                         "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
+                         "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
+                for conn in self.conns:
+                    if conn.subscribed:  # (as it happens: a turn too short for a sessions listing to see isn't missed)
+                        conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+
+    def ask_timer(self, s, proc, rid):
+        """(lock held) A permission asked, answered as the session says (ask_default) once it's waited ask_timeout with
+        nobody attached to answer it (someone's there: they're given as long again)."""
+        def due():
+            with self.lock:
+                if rid not in s.asks or proc is not s.proc:
+                    return
+                if s.viewers:
+                    return self.ask_timer(s, proc, rid)
+                ask = s.asks.pop(rid)
+                allow = s.meta.get("ask_default") == "allow"
+                proc.respond(rid, {"behavior": "allow", "updatedInput": (ask.get("request") or {}).get("input") or {}}
+                             if allow else {"behavior": "deny",
+                                            "message": f"Nobody answered within {s.meta['ask_timeout']:g} s."})
+                self.log(f"{s.id}: {'allowed' if allow else 'denied'} {(ask.get('request') or {}).get('tool_name')}, "
+                         "nobody there to answer")
+                self.changed()
+        timer = threading.Timer(s.meta["ask_timeout"], due)
+        timer.daemon = True
+        timer.start()
 
     def keep(self, s, kind, message):
         """(lock held) A message of a session whose program keeps no transcript, kept in the server's, as Claude Code

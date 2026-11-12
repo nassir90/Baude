@@ -2,15 +2,31 @@
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
 A client's requests (a "req" it picks comes back on the reply):
-    hello {client}                                  -> hello {server: info}
-    subscribe                                       -> sessions {sessions}, then again on every change, and ping
-    start {prompt, cwd, model, effort, mode, group, title?}
-                                                    -> started {session}
+    hello {client, token?}                          -> hello {server: info} (a server bound to this machine only
+                                                       wants the token in its file, local_servers: nothing else till
+                                                       it's had it)
+    subscribe                                       -> sessions {sessions}, then again on every change, and ping;
+                                                       turn_ended {session, result, is_error, cost, turns,
+                                                       duration_ms} as each of its sessions' turns ends
+    start {prompt, cwd, model, effort, mode, group, title?, attach?, system?, add_dirs?, allowed_tools?,
+           disallowed_tools?, fork_from?, ask_timeout?, ask_default?}
+                                                    -> started {session}, before the prompt's sent: attach, and this
+                                                       connection's attached live to it first. system: more for
+                                                       claude's system prompt (--append-system-prompt); add_dirs:
+                                                       folders it may use besides its own (--add-dir);
+                                                       allowed_tools / disallowed_tools: tool rules (--allowedTools,
+                                                       --disallowedTools: ["Bash(git:*)", "Edit"]); fork_from: a
+                                                       session of this server's whose conversation this one starts
+                                                       as a copy of (--fork-session); those are claude's, for
+                                                       Claude's models. ask_timeout: seconds a permission it asks
+                                                       waits while nobody's attached, then ask_default ("deny", or
+                                                       "allow") answers it
     attach {session, live}                          -> attached {session, asks}; live: claude {session, msg} as it
                                                        speaks, exited {session, code} when it stops
     detach {session}
-    input {session, msg}                            (a stream-json message for the session's claude: started on it,
-                                                     with --resume, if it isn't running)
+    input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
+                                                       the session's claude: started on it, with --resume, if it
+                                                       isn't running)
     stop {session}                                  -> stopped {session}
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
     subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
@@ -26,12 +42,19 @@ A client's requests (a "req" it picks comes back on the reply):
                                                      and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".
 
-A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, subagents}:
-its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working" (at a
-turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
-subagents the mtime of its subagents' newest file (0 for none: what a client's copy is checked against).
+A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, subagents,
+asks}: its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working"
+(at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
+subagents the mtime of its subagents' newest file (0 for none: what a client's copy is checked against), asks what
+it's asking, not answered yet: [{request_id, tool, input}] (long strings in input cut short). An ask is answered with
+input: a control_response for its request_id, as claude's stream-json has it.
+
+A server on this machine leaves a file in local_dir() (its owner's to read, no one else's) with its address and,
+bound to this machine only, the token hello wants: how Baude here finds it, whether multicast DNS can or not.
 """
+import hmac
 import json
+import os
 import socket
 import threading
 
@@ -120,14 +143,65 @@ class Channel:
                 pass
 
 
-def connect(host, port, timeout=5.0):
-    """A Channel to a server (OSError if it can't be reached), past hello: (channel, the server's info)."""
+def connect(host, port, timeout=5.0, token=None):
+    """A Channel to a server (OSError if it can't be reached), past hello: (channel, the server's info). token: the one
+    a server bound to this machine only wants; else the one its file in local_dir() says, if it's one of those."""
     sock = socket.create_connection((host, port), timeout=timeout)
     ch = Channel.over(sock)
-    ch.send({"op": "hello", "client": "baude", "version": VERSION})
+    token = token or token_for(host, port)
+    ch.send({"op": "hello", "client": "baude", "version": VERSION, **({"token": token} if token else {})})
     reply = ch.read()
     if not reply or reply.get("op") != "hello":
         ch.close()
-        raise OSError(f"{host}:{port} isn't a Baude server")
+        raise OSError((reply or {}).get("error") or f"{host}:{port} isn't a Baude server")
     sock.settimeout(None)
     return ch, reply.get("server") or {}
+
+
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def is_loopback(host):
+    """Is an address this machine's only (a server bound to it can't be reached from another)?"""
+    return host in LOOPBACK or str(host).startswith("127.")
+
+
+def local_dir():
+    """Where servers on this machine leave their files (local_servers): its owner's only."""
+    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude",
+                        "local-servers")
+
+
+def local_servers():
+    """The servers on this machine, as their files say: [{id, name, group, port, token (None: not wanted), pid}],
+    those whose process is gone left out."""
+    out = []
+    try:
+        names = os.listdir(local_dir())
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(local_dir(), name), encoding="utf-8") as f:
+                entry = json.load(f)
+            os.kill(int(entry["pid"]), 0)  # (still running: a file a killed server left says nothing)
+        except PermissionError:
+            pass  # (running, as another user: its file wasn't ours to read anyway)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(entry, dict) and entry.get("port"):
+            out.append(entry)
+    return out
+
+
+def token_for(host, port):
+    """The token a server at host:port wants, if it's one bound to this machine only (local_servers); else None."""
+    if not is_loopback(host):
+        return None
+    return next((e.get("token") for e in local_servers() if e.get("port") == port and e.get("token")), None)
+
+
+def same_token(given, wanted):
+    return isinstance(given, str) and hmac.compare_digest(given.encode(), wanted.encode())

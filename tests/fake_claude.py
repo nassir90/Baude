@@ -48,7 +48,19 @@ def arg(flag):
 
 if os.environ.get("FAKE_CLAUDE_SESSION_IDS"):  # (opt in: the id it's given, as claude has it; baude-server's)
     SESSION = arg("--session-id") or arg("--resume") or SESSION
+    if "--fork-session" in sys.argv and arg("--resume"):  # (a fork: an id of its own, the conversation copied into it)
+        SESSION = str(uuid.uuid4())
+        FORKED_FROM = arg("--resume")
 SAID = {"text": "", "thinking": ""}  # (streamed since the last message: keep() writes it with the next)
+
+
+def fork_transcript():
+    """A fork's transcript begins as a copy of the one it was forked from, as claude's does (FAKE_CLAUDE_TRANSCRIPTS)."""
+    folder = kept_in()
+    source = os.path.join(folder or "", f"{globals().get('FORKED_FROM')}.jsonl")
+    if folder and globals().get("FORKED_FROM") and os.path.exists(source):
+        with open(source) as f, open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as out:
+            out.write(f.read())
 
 
 def kept_in():
@@ -498,6 +510,7 @@ def reader(text):
 
 def main():
     record(f"START cwd={os.getcwd()} argv={json.dumps(sys.argv[1:])}")
+    fork_transcript()
     state["model"] = arg("--model") or "opus"
     state["effort"] = arg("--effort") or ("medium" if state["model"] not in NO_EFFORT else None)
     turns = 0

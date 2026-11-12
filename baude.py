@@ -7857,6 +7857,9 @@ class SessionSidebar(Gtk.Box):
                                               GLib.Variant.new_string(self.network_group() or ""))
         shown.connect("change-state", self.on_network_group_changed)
         actions.add_action(shown)
+        add_server = Gio.SimpleAction.new("add_server", None)
+        add_server.connect("activate", lambda *_: self.win.ask_add_server())
+        actions.add_action(add_server)
         self.insert_action_group("sb", actions)
         self.actions = actions
         self.remote_keys, self.remote_ids = {}, frozenset()  # (a network group's folders: their servers; see groups)
@@ -7947,6 +7950,7 @@ class SessionSidebar(Gtk.Box):
             item = Gio.MenuItem.new(name or "Local", None)
             item.set_action_and_target_value("sb.network", GLib.Variant.new_string(name))
             self.net_menu.append_item(item)
+        self.net_menu.append("Add server…", "sb.add_server")  # (one not found by itself: ask_add_server)
 
     def on_network(self):
         """The network's servers or their sessions changed: the menu's groups, what's hidden coming back, and the list
@@ -13851,6 +13855,34 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if self.remote is not None and self.proc is not None:
             self.proc.control({"subtype": "interrupt"})
             self.note("interrupt requested")
+
+    def ask_add_server(self):
+        """⋮ → Group → Add server…: a server by its address, one Baude doesn't find by itself (where multicast DNS doesn't
+        reach, say), kept from then on, reached or not. One on this machine is found by itself, from its file."""
+        entry = Gtk.Entry(placeholder_text="host:port", activates_default=True, width_chars=30)
+        dlg = Adw.AlertDialog(heading="Add a server", extra_child=entry, default_response="add", close_response="cancel",
+                              body="Its address, as baude_server.py says it as it starts: its machine's name or address "
+                                   "on the network, and its port")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("add", "Add")
+        dlg.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+
+        def address():
+            host, _, port = entry.get_text().strip().rpartition(":")
+            host = host.strip().strip("[]")
+            return (host, int(port)) if host and port.isdigit() and 0 < int(port) < 65536 else None
+        entry.connect("changed", lambda *_: dlg.set_response_enabled("add", address() is not None))
+        dlg.set_response_enabled("add", False)
+
+        def respond(_dlg, response):
+            if response == "add" and (where := address()) is not None:
+                network().add(*where, by_hand=True)
+                toast(self.sidebar, f"Looking for {where[0]}:{where[1]}")
+        dlg.connect("response", respond)
+        self.dialog = self.add_server_dialog = dlg
+        dlg.present(self)
+        entry.grab_focus()
+        return entry
 
     def ask_remote_start(self, server=None, folder=None):
         """New session on the network (the sidebar's New session, or a server's folder's +, while a group on the network

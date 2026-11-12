@@ -46,6 +46,7 @@ class Remote:
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
         self.seen = cached.get("seen") or 0.0  # when it last said anything
+        self.by_hand = bool(cached.get("by_hand"))  # (given by address: kept, whether it's been reached or not)
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
@@ -258,7 +259,7 @@ class Remote:
             ch.close()
 
     def cached(self):
-        return {"host": self.host, "port": self.port, "info": self.info, "seen": self.seen,
+        return {"host": self.host, "port": self.port, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
                 "sessions": list(self.sessions.values())}
 
 
@@ -269,14 +270,12 @@ class Network:
         self.dispatch, self.home = dispatch, home or network_home()
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
         self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
-        try:
-            with open(os.path.join(self.home, "servers.json"), encoding="utf-8") as f:
-                cache = json.load(f)
-        except (OSError, ValueError):
-            cache = {}
-        for key, c in (cache.get("servers") or {}).items():
-            if isinstance(c, dict) and time.time() - (c.get("seen") or 0) < FORGET_S and c.get("host"):
+        self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
+        for key, c in self.saved().items():
+            if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand"):
                 self.servers[key] = Remote(self, key, c["host"], c.get("port"), c)
+            else:
+                self.forgotten.add(key)
         for address in addresses:
             host, _, port = address.strip().rpartition(":")
             if host and port.isdigit() and not any((r.host, r.port) == (host, int(port)) for r in self.servers.values()):
@@ -284,16 +283,65 @@ class Network:
         for r in list(self.servers.values()):
             r.start()
         self.browser = Browser(self.found).start() if discover else None
+        self.here()
+        threading.Thread(target=self._tick, daemon=True, name="network-tick").start()
+
+    def saved(self):
+        """servers.json as it is on disk now: {key: what was kept of the server}."""
+        try:
+            with open(os.path.join(self.home, "servers.json"), encoding="utf-8") as f:
+                cache = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return {k: c for k, c in (cache.get("servers") or {}).items()
+                if isinstance(c, dict) and c.get("host") and isinstance(c.get("port"), int)}
+
+    def _tick(self):
+        """Every few seconds: this machine's servers looked for (here), and servers.json taken up as it's edited."""
+        while not self.stopped.wait(5):
+            self.here()
+            self.take_saved()
+
+    def here(self):
+        """The servers on this machine, from their files (wire.local_servers): one bound to it only, which multicast DNS
+        doesn't say, is found too, at 127.0.0.1 (its token's read from its file as it's reached)."""
+        for e in wire.local_servers():
+            key = e.get("id")
+            if not key:
+                continue
+            with self.lock:
+                r = self.servers.get(key) or next(
+                    (r for r in self.servers.values() if wire.is_loopback(r.host) and r.port == e["port"]), None)
+                if r is None:
+                    self.servers[key] = Remote(self, key, "127.0.0.1", e["port"]).start()
+                    self.changed()
+                elif r.state != "alive" and (wire.is_loopback(r.host) or r.port != e["port"]):
+                    r.address("127.0.0.1", e["port"])
+
+    def take_saved(self):
+        """servers.json's servers that aren't known here (put in it while Baude runs): known, and tried."""
+        for key, c in self.saved().items():
+            with self.lock:
+                if key in self.servers or key in self.forgotten or \
+                        any((r.host, r.port) == (c["host"], c["port"]) for r in self.servers.values()):
+                    continue
+                self.servers[key] = Remote(self, key, c["host"], c["port"], c).start()
+            self.changed()
 
     def listen(self, fn):
         self.listeners.append(fn)
 
-    def add(self, host, port):
-        """A server given by address (not found on the network): known by its id once it's said who it is."""
+    def add(self, host, port, by_hand=False):
+        """A server given by address (not found on the network): known by its id once it's said who it is. by_hand:
+        kept in servers.json from now on, reached or not (Baude's Add server…)."""
         with self.lock:
             r = next((r for r in self.servers.values() if (r.host, r.port) == (host, port)), None)
             if r is None:
                 r = self.servers[f"{host}:{port}"] = Remote(self, f"{host}:{port}", host, port).start()
+            r.by_hand = r.by_hand or by_hand
+        if by_hand:
+            self.save()
+            self.changed()
         return r
 
     def found(self, service):
@@ -349,10 +397,17 @@ class Network:
         self.dispatch(tell)
 
     def save(self):
+        """servers.json: every server reached or given by hand, and what's in it that isn't known here (put there
+        meanwhile: take_saved takes it up), not written over."""
         self.saved_at = time.time()
+        on_disk = self.saved()
         with self.lock:
-            data = {"servers": {k: r.cached() for k, r in self.servers.items()
-                                if r.info.get("id") or r.sessions}}
+            servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
+            for key, c in on_disk.items():
+                if key not in self.servers and key not in self.forgotten and not any((r.host, r.port) == (c["host"], c["port"])
+                                                       for r in self.servers.values()):
+                    servers[key] = c
+            data = {"servers": servers}
         target = os.path.join(self.home, "servers.json")
         try:
             os.makedirs(self.home, exist_ok=True)
@@ -390,6 +445,7 @@ class Network:
             s.get("group") == group for s in r.sessions.values()), (r.info.get("name") or "").lower()))
 
     def stop(self):
+        self.stopped.set()
         if self.browser is not None:
             self.browser.stop()
         with self.lock:

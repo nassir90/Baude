@@ -8,10 +8,14 @@
     python3 baude_server.py list   [--server HOST:PORT]      # a server's sessions
     python3 baude_server.py models [--server HOST:PORT]      # the models it can run: Claude's, Apple's, this machine's
     python3 baude_server.py start  --prompt TEXT [--cwd DIR] [--model M] [--effort E] [--mode MODE]
-                                   [--group G] [--server HOST:PORT]
+                                   [--group G] [--system TEXT] [--add-dir DIR]... [--allow RULE]...
+                                   [--deny RULE]... [--fork-from SESSION] [--ask-timeout S [--ask-default allow]]
+                                   [--server HOST:PORT]
     python3 baude_server.py stop   SESSION [--server HOST:PORT]
 
-Without --server, the commands use the one server found on the network (in --group, if given). It runs a model as
+Without --server, the commands use the one server found on the network or on this machine (in --group, if given).
+A server bound to this machine only (--bind 127.0.0.1) isn't said on the network, and wants a token: the one in its
+file in ~/.local/share/baude/local-servers, which only its owner can read; these commands, and Baude, read it there. It runs a model as
 Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in apple-claude, once
 built; one on this machine in pi-claude, once pi and the model are here. There's no sign-in: anyone who can reach the port can use it.
 """
@@ -34,7 +38,8 @@ from baudelib.server import Server  # noqa: E402
 def serve(args):
     server = Server(state_dir=args.state, group=args.group, name=args.name, host=args.bind, port=args.port,
                     advertise=not args.no_advertise, idle_s=args.idle_minutes * 60)
-    print(json.dumps({"port": server.port, "id": server.me["id"], "group": server.me["group"]}), flush=True)
+    print(json.dumps({"port": server.port, "id": server.me["id"], "group": server.me["group"],
+                      "this_machine_only": server.local}), flush=True)
 
     def quit_(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
@@ -44,12 +49,13 @@ def serve(args):
 
 
 def find_servers(wait=2.0):
-    found = {}
-    browser = Browser(lambda s: found.__setitem__(s["words"].get("id") or s["instance"], s)).start()
-    if browser is None:
-        return []
-    time.sleep(wait)
-    browser.stop()
+    """The servers on this machine (their files) and on the network (multicast DNS)."""
+    found = {e["id"]: {"instance": f"{e.get('name')} (this machine)", "host": "127.0.0.1", "port": e["port"],
+                       "words": {"id": e["id"], "group": e.get("group")}} for e in wire.local_servers() if e.get("id")}
+    browser = Browser(lambda s: found.setdefault(s["words"].get("id") or s["instance"], s)).start()
+    if browser is not None:
+        time.sleep(wait)
+        browser.stop()
     return list(found.values())
 
 
@@ -107,6 +113,14 @@ def main():
     s.add_argument("--effort", help="Claude's effort (low … max), or a local model's thinking level (off … high)")
     s.add_argument("--mode", choices=[m for m, _ in MODES], default="default")
     s.add_argument("--title")
+    s.add_argument("--system", help="more for claude's system prompt (--append-system-prompt)")
+    s.add_argument("--add-dir", action="append", default=[], help="a folder it may use besides its own (again for more)")
+    s.add_argument("--allow", action="append", default=[], help="a tool rule it needn't ask about: Bash(git:*) (again "
+                                                                 "for more)")
+    s.add_argument("--deny", action="append", default=[], help="a tool rule it may not use (again for more)")
+    s.add_argument("--fork-from", help="a session of the server's whose conversation this one starts as a copy of")
+    s.add_argument("--ask-timeout", type=float, help="seconds a permission waits while nobody's attached")
+    s.add_argument("--ask-default", choices=["deny", "allow"], help="what answers it then (default deny)")
     st = client("stop", "stop a session's claude")
     st.add_argument("session")
     args = p.parse_args()
@@ -130,7 +144,10 @@ def main():
         cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) else os.path.abspath(args.cwd)
         reply = ask(args, {"op": "start", "prompt": args.prompt, "cwd": cwd, "model": args.model,
                            "effort": args.effort, "mode": args.mode, "group": args.group,
-                           "title": args.title})
+                           "title": args.title, "system": args.system,
+                           "add_dirs": [os.path.abspath(os.path.expanduser(d)) for d in args.add_dir],
+                           "allowed_tools": args.allow, "disallowed_tools": args.deny, "fork_from": args.fork_from,
+                           "ask_timeout": args.ask_timeout, "ask_default": args.ask_default})
         print(reply["session"]["id"])
         return
     if args.command == "stop":

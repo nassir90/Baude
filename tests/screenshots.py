@@ -1273,6 +1273,14 @@ def _(app):
     return win
 
 
+@scene("55k-network-add-server", "⋮ → Group → Add server…: a server by its address, for one Baude doesn't find by "
+                                 "itself; kept from then on, reached or not")
+def _(app):
+    win = network_window(app)
+    win.ask_add_server().set_text("build-box.lan:47100")
+    return win
+
+
 @scene("55g-network-session-menu", "Right-click a network session: Rename…, Archive, and Delete (it comes back if "
                                    "it's used again); one at a turn: Stop")
 def _(app):

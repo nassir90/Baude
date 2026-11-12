@@ -6004,14 +6004,17 @@ class RecordChat(Gtk.Box):
 
     def _said(self, m):
         """What you wrote, its @references in it as a page draws an @name: the logo where its @ is (LinkLabel draws
-        it), the name in the @names' colour on their patch; clicked, opened as one on a page is."""
+        it), the name in the @names' colour on their patch, a pull request or an issue by its number alone, as the page
+        shows one (ref_text); clicked, opened as one on a page is."""
         refs, text = {r["surface"]: r for r in m.get("refs") or ()}, plain_refs(m["text"])
         out, at = [], 0
         for found in REF_RE.finditer(text):
             r = refs.get(found.group(1) or found.group(2))
             if r is None:
                 continue
-            name = html.escape(r["surface"], False)
+            github = lookup.GITHUB_NAME.fullmatch(r["surface"]) if (r.get("icon") or "").startswith(("pr_", "issue")) \
+                else None  # (by its logo: a branch may be called feature/login#12)
+            name = html.escape(github[2] if github else r["surface"], False)
             out += [html.escape(text[at:found.start()], False),
                     f'<a href="ref:{urllib.parse.quote(r["surface"], safe="")}"><span foreground="#2f8f72" '
                     f'background="#4f8a7c" bgalpha="14%" weight="600" underline="none">'

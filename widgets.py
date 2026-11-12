@@ -929,12 +929,15 @@ def chat_repo():
         lookup.GITHUB.own_repository(getattr(SIGNAL, "folder", None) or MarkdownView.base_dir)
 
 
-def pr_pill(repo, number, inner, href=None, known=False):
+def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     """A pull request of repo's as a pill (pr_pill_markup), linked to href (else its page); None if repo isn't the
-    chat's (chat_repo: another's keeps its link as it was), if nothing's been read of its pull requests (no gh, or
-    signed out), or (known) if number isn't one of them as far as is known: an issue, or nothing (a bare #12 may be
-    either, or a colour)."""
-    if not repo or repo.lower() != (chat_repo() or "").lower() or lookup.PULLS.states(repo) is None:
+    chat's (chat_repo: another's keeps its link as it was) unless any_repo (a link to one, whose shape says it is: its
+    pill, in where it stands once that's read, and a link's colour till then), with no gh or gh signed out, if
+    nothing's been read of its pull requests (and not any_repo), or (known) if number isn't one of them as far as is
+    known: an issue, or nothing (a bare #12 may be either, or a colour)."""
+    if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
+        return None
+    if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
         return None
     p = lookup.PULLS.pull(repo, number)
     if p is None and known:
@@ -966,10 +969,9 @@ def pr_link_markup(url, markup=None):
     """A link to one of the chat's repository's pull requests (chat_repo) as its pill: what the link says (markup), else
     its #12. None for any other link, and with nothing read of the repository's pull requests."""
     m = _PR_URL.fullmatch(url)
-    repo = pr_unremembered() and chat_repo() if m else None
-    if not repo or m[1].lower() != repo.lower():
+    if not m or not pr_unremembered():
         return None
-    return pr_pill(repo, int(m[2]), markup or f"#{m[2]}", href=url)
+    return pr_pill(m[1], int(m[2]), markup or m[2], href=url, any_repo=True)  # (the logo says it's one: no "#")
 
 
 def ref_markup(ref, inner, icon=True):
@@ -979,7 +981,7 @@ def ref_markup(ref, inner, icon=True):
     href = html.escape(REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))
     if icon and ref.kind == "pr" and ref.status == "resolved" and not ref.data.get("issue") and \
             isinstance(ref.data.get("number"), int) and \
-            (pill := pr_pill(ref.data.get("repo"), ref.data["number"], pr_unbroken(inner),
+            (pill := pr_pill(ref.data.get("repo"), ref.data["number"], str(ref.data["number"]),
                              href=REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))) is not None:
         return pill
     if ref.status == "pending":
@@ -1065,7 +1067,7 @@ def ref_decision_markup(surface, dec, inner, icon=True):
     href = html.escape(REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])
     if icon and dec.get("kind") == "pr" and dec["verdict"] != "not_in_code" and \
             (m := re.fullmatch(r"(?:(?:PR|pull request) )?(?:([\w.-]+/[\w.-]+))?#(\d+)", surface, re.I)) and \
-            (pill := pr_pill(m[1] or chat_repo(), int(m[2]), pr_unbroken(inner), known=True,
+            (pill := pr_pill(m[1] or chat_repo(), int(m[2]), m[2], known=True,
                              href=REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])):
         return pill
     if dec["verdict"] == "not_in_code":
@@ -1186,7 +1188,7 @@ def _inline_markup(text):
             p = said.sub(lambda m: keep(unexplained_markup(m[0])), p)
     if "#" in p and _BARE_PR.search(p) and pr_unremembered() and (repo := chat_repo()):  # (a bare #12: a pill if
         # it's one of the repository's pull requests)
-        p = _BARE_PR.sub(lambda m: keep(pill) if (pill := pr_pill(repo, int(m[1]), m[0], known=True)) else m[0], p)
+        p = _BARE_PR.sub(lambda m: keep(pill) if (pill := pr_pill(repo, int(m[1]), m[1], known=True)) else m[0], p)
     if "--" in p:  # (the code spans are set aside by now: -- in them stays)
         p = EM_DASH.sub("\u2014", p)
     s = _emphasis(link_paths(html.escape(p, quote=False)))

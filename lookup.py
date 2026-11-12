@@ -2221,6 +2221,11 @@ class PullStates:
         return {"number": number, "title": k.get("title", ""), "state": state,
                 "url": f"https://github.com/{repo}/pull/{number}", "head": None}
 
+    def signed_out(self):
+        """Has gh said it's signed out (a read of any repository's)?"""
+        with self._cond:
+            return any(r["out"] for r in self._repos.values())
+
     def want(self, repo, fresh=False):
         """A read of repo's pull requests asked for, on this one's thread, if one's due (fresh: whether or not)."""
         if not repo or gh_path() is None:

@@ -952,11 +952,11 @@ class GitPullIcon(Gtk.Widget):
 
 
 def git_pull_pill(p):
-    """A pull request's pill on its own (the list at the top's): git's merge logo and its #number in the colour of
-    where it stands (.git-pr, PR_COLORS)."""
-    pill = Gtk.Box(spacing=3, valign=Gtk.Align.CENTER, css_classes=["git-pr"])
+    """A pull request's pill on its own (the list at the top's): git's merge logo and its number (the logo says it's
+    one: no "#") in the colour of where it stands (.git-pr, PR_COLORS)."""
+    pill = Gtk.Box(spacing=3, valign=Gtk.Align.START, css_classes=["git-pr"])
     pill.append(GitPullIcon())
-    pill.append(Gtk.Label(label=f"#{p['number']}"))
+    pill.append(Gtk.Label(label=str(p["number"])))
     if p.get("state") in PR_COLORS:
         pill.add_css_class(p["state"])
     return pill
@@ -964,7 +964,7 @@ def git_pull_pill(p):
 
 def git_pull_markup(p, repo):
     """A pull request's pill in a log row's line (widgets.pr_pill_markup), a link to its page, a chip's size."""
-    pill = pr_pill_markup(f"#{p['number']}", p["url"], pr_title(p, repo, p["number"]), p.get("state"))
+    pill = pr_pill_markup(str(p["number"]), p["url"], pr_title(p, repo, p["number"]), p.get("state"))
     return f'<span allow_breaks="false" size="{round(LinkLabel.CHIP_SCALE * 100)}%">{pill}</span>'
 
 
@@ -992,7 +992,8 @@ class GitGutter(Gtk.Widget):
     def do_size_allocate(self, width, height, baseline):
         w = self.child.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
         h = min(height, self.child.measure(Gtk.Orientation.VERTICAL, w)[1])
-        self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, (height - h) / 2)))
+        y = 0 if self.child.get_valign() == Gtk.Align.START else (height - h) / 2  # (with a name's first line)
+        self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, y)))
 
     def do_dispose(self):
         if self.child is not None:
@@ -1511,9 +1512,11 @@ class GitPage(Gtk.Stack):
             row.url = p and p["url"]
             line = Gtk.Box(spacing=GIT_ROW_GAP)
             line.append(GitGutter(git_pull_pill(p) if p else Gtk.Box(), self.gutter_px()))
-            # (its natural width a character's: a long name never widens the panel, it's cut off with …)
-            title = Gtk.Label(label=p["title"] if p else f"{more} more", xalign=0, hexpand=True,
-                              ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+            # (two lines, then …, as a commit's subject; its natural width a character's: a long name never widens the
+            # panel, it wraps in what the panel has)
+            title = Gtk.Label(label=p["title"] if p else f"{more} more", xalign=0, hexpand=True, wrap=True,
+                              wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2, ellipsize=Pango.EllipsizeMode.END,
+                              max_width_chars=1, valign=Gtk.Align.START)
             line.append(title)
             row.set_child(line)
             if p:

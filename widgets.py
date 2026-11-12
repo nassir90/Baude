@@ -1482,6 +1482,28 @@ def set_markup_safe(label, markup):
         label.set_text(markup)
 
 
+TASK_ENDINGS_SAID = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
+
+
+def task_note_line(note):
+    """A background task's ending (a <task-notification>: baudelib.transcripts.task_notification's), as one quiet line,
+    as Baude's chat says one whose call isn't drawn: (markup "<b>Background command</b> · what it was — finished (exit
+    0)", plain text, whether it failed)."""
+    status = note.get("status") or "completed"
+    summary = html.unescape(note.get("summary") or "")
+    what = "Agent" if summary.startswith(("Agent", "Subagent")) else "Background command"
+    quoted = re.match(r'[^"]*"(.*)"', summary, re.S)
+    desc = (quoted.group(1) if quoted else summary).strip().splitlines()[:1]
+    desc = desc[0] if desc else "a background task"
+    if len(desc) > 80:
+        desc = desc[:79] + "…"
+    ending = TASK_ENDINGS_SAID.get(status, status)
+    if (code := re.search(r"exit code (\d+)", summary)) is not None:
+        ending += f" (exit {code.group(1)})"
+    return (f"<b>{html.escape(what)}</b> · {html.escape(desc)} — {html.escape(ending)}",
+            f"{what} · {desc} — {ending}", status in ("failed", "killed", "error"))
+
+
 class ShutBar(Gtk.Revealer):
     """A revealer that, shut, is no width. Slid up or down, GTK's is as wide shut as open: a bar slid away kept what it's
     in from going any narrower than the bar (Feedback's Capture bar held Record's notes at 530px)."""

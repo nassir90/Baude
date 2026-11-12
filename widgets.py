@@ -1385,34 +1385,6 @@ def set_markup_safe(label, markup):
         label.set_text(markup)
 
 
-class Squeezable(Gtk.Widget):
-    """child, as narrow as what's beside it leaves: no least of its own, so the side bars go as far over it as they're
-    dragged. Narrower than child can be, child is laid out at its least and cut off on the right, its start still
-    seen. (The chat, Record's notes: what's in them held the side bars back at 82px and 194px.)"""
-
-    def __init__(self, child, **kw):
-        super().__init__(**kw)
-        self.child = child
-        self.set_overflow(Gtk.Overflow.HIDDEN)
-        child.set_parent(self)
-
-    def do_measure(self, orientation, for_size):
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            return 0, self.child.measure(orientation, for_size).natural, -1, -1
-        least = self.child.measure(Gtk.Orientation.HORIZONTAL, -1).minimum
-        least, natural, _, _ = self.child.measure(orientation, max(for_size, least) if for_size >= 0 else -1)
-        return least, natural, -1, -1
-
-    def do_size_allocate(self, width, height, baseline):
-        self.child.allocate(max(width, self.child.measure(Gtk.Orientation.HORIZONTAL, -1).minimum), height, baseline, None)
-
-    def do_dispose(self):
-        if self.child is not None:
-            self.child.unparent()
-            self.child = None
-        Gtk.Widget.do_dispose(self)
-
-
 class ShutBar(Gtk.Revealer):
     """A revealer that, shut, is no width. Slid up or down, GTK's is as wide shut as open: a bar slid away kept what it's
     in from going any narrower than the bar (Feedback's Capture bar held Record's notes at 530px)."""
@@ -3184,12 +3156,51 @@ COPY_LINK = "Copy Link to This Page"
 COPY_LINK_KEY = "<Meta><Shift>l" if sys.platform == "darwin" else "<Control><Shift>l"  # (<primary> is Control here, on a Mac too)
 
 
+class TabBody(Gtk.Widget):
+    """What's open in one of MainTabs' tabs, as its Adw.TabView has it: as large as what's in it while its tab is the
+    one shown, and no size at all while it isn't. (The tab view is as large as the largest of all its tabs, the ones
+    not shown too: a Feedback tab open behind the chat held the chat at the Feedback's least, 755px, and the side bars
+    beside it back, or under them it went.)"""
+
+    def __init__(self, child):
+        super().__init__()
+        self.child, self.shown = child, False
+        child.set_parent(self)
+
+    def set_shown(self, shown):
+        if shown != self.shown:
+            self.shown = shown
+            self.queue_resize()
+
+    def do_measure(self, orientation, for_size):
+        if not self.shown or self.child is None:
+            return 0, 0, -1, -1
+        least, natural, least_base, natural_base = self.child.measure(orientation, for_size)
+        return least, natural, least_base, natural_base
+
+    def do_size_allocate(self, width, height, baseline):
+        if self.child is not None:
+            self.child.allocate(width, height, baseline, None)
+
+    def do_dispose(self):
+        if self.child is not None:
+            self.child.unparent()
+            self.child = None
+        Gtk.Widget.do_dispose(self)
+
+
+def tab_child(page):
+    """What's open in a tab (an Adw.TabPage of MainTabs'): its TabBody's child."""
+    return page.get_child().child
+
+
 class MainTabs(Gtk.Box):
     """The main area's tabs, Baude's and Record's alike: what's open in it (a chat, a page of notes, a file's code),
     each in a tab of its own (Adw.TabView), and opened again, shown again, not opened twice (open: by its key). bar
     (an Adw.TabBar) is the window's to put where it wants it. A pinned one (Baude's chat) is first, and never closed;
     shown_alone False: the bar's hidden while there's nothing but that one. closed(key, child): called as one is
-    closed (its ×, close_current). copy_links (Record's): right-click on one to copy its link (copy_link).
+    closed (its ×, close_current). copy_links (Record's): right-click on one to copy its link (copy_link). Only the
+    tab shown has a size: the main area's least is that one's, not the widest of all that's open (TabBody).
 
     What's been shown is kept as a browser keeps its history (each tab shown, a link followed to it; a file's code at
     each line it was shown at: remember): back and forward show it again, reopen(key, line) asked to open it again
@@ -3209,6 +3220,7 @@ class MainTabs(Gtk.Box):
         self.pages, self.closed, self.shown_alone = {}, closed, shown_alone
         self.menu_page = None  # (the tab its menu was opened on, if it has one: copy_links)
         self.history, self.at, self.moving, self.reopen = [], -1, False, reopen
+        self.view.connect("notify::selected-page", lambda *_: self._sized())
         self.view.connect("notify::selected-page", lambda *_: self.remember())
         self.view.connect("close-page", self._close)
         for sig in ("page-attached", "page-detached"):
@@ -3219,7 +3231,7 @@ class MainTabs(Gtk.Box):
             menu.append("Copy Link", "tab.copy-link")
             self.view.set_menu_model(menu)
             self.view.connect("setup-menu", lambda _v, page: page is not None and setattr(self, "menu_page", page))
-            copy.connect("activate", lambda *_: self.menu_page is not None and self.copy_link(self.menu_page.get_child()))
+            copy.connect("activate", lambda *_: self.menu_page is not None and self.copy_link(tab_child(self.menu_page)))
             acts.add_action(copy)
             self.bar.insert_action_group("tab", acts)
 
@@ -3227,6 +3239,13 @@ class MainTabs(Gtk.Box):
         # (Adw.TabBar's own autohide never hides with a pinned tab: by hand)
         if not self.shown_alone:
             self.bar.set_visible(self.view.get_n_pages() > self.view.get_n_pinned_pages())
+
+    def _sized(self):
+        """The tab shown is the one with a size (TabBody)."""
+        shown = self.view.get_selected_page()
+        for i in range(self.view.get_n_pages()):
+            page = self.view.get_nth_page(i)
+            page.get_child().set_shown(page is shown)
 
     def open(self, key, make, title, icon=None, tooltip=None, pinned=False, select=True, quiet=False):
         """What's open under key (made by make() the first time), its tab titled title (icon: a themed icon's name),
@@ -3236,7 +3255,9 @@ class MainTabs(Gtk.Box):
         if page is None:
             child = make()
             child.tab_key = key
-            self.pages[key] = page = self.view.append_pinned(child) if pinned else self.view.append(child)
+            body = TabBody(child)
+            self.pages[key] = page = self.view.append_pinned(body) if pinned else self.view.append(body)
+            self._sized()  # (the first: shown as it's put in; another: shown once it's picked)
         page.set_title(title)
         page.set_tooltip(GLib.markup_escape_text(tooltip or title))
         if icon:
@@ -3248,17 +3269,17 @@ class MainTabs(Gtk.Box):
                 self.view.set_selected_page(page)
             finally:
                 self.moving = was
-        return page.get_child()
+        return tab_child(page)
 
     def get(self, key):
-        return page.get_child() if (page := self.pages.get(key)) is not None else None
+        return tab_child(page) if (page := self.pages.get(key)) is not None else None
 
     def current(self):
-        return page.get_child() if (page := self.view.get_selected_page()) is not None else None
+        return tab_child(page) if (page := self.view.get_selected_page()) is not None else None
 
     def children(self):
         """What's open, in the tabs' order."""
-        return [self.view.get_nth_page(i).get_child() for i in range(self.view.get_n_pages())]
+        return [tab_child(self.view.get_nth_page(i)) for i in range(self.view.get_n_pages())]
 
     def show(self, key):
         if (page := self.pages.get(key)) is not None:
@@ -3271,7 +3292,7 @@ class MainTabs(Gtk.Box):
             return
         if new_key is not None and new_key != key:
             self.pages[new_key] = self.pages.pop(key)
-            page.get_child().tab_key = new_key
+            tab_child(page).tab_key = new_key
         page.set_title(title)
         page.set_tooltip(GLib.markup_escape_text(tooltip or title))
 
@@ -3342,7 +3363,7 @@ class MainTabs(Gtk.Box):
         return True
 
     def _close(self, view, page):
-        child = page.get_child()
+        child = tab_child(page)
         key = getattr(child, "tab_key", None)
         if self.pages.get(key) is page:
             del self.pages[key]

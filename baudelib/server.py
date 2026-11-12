@@ -187,6 +187,15 @@ class Session:
             return "stopped"
         return "waiting" if self.asks else "working" if self.busy else "idle"
 
+    def note_written(self):
+        """(lock held) How long its transcript is, as its own claude left it (or this host wrote to it, with none
+        running): listed, so a head can tell a terminal's claude writing to it since (written) from its own."""
+        path = self.transcript()
+        try:
+            self.meta["written"] = os.path.getsize(path) if path else None
+        except OSError:
+            self.meta["written"] = None
+
     def kept(self):
         """Is its transcript the server's (its program keeps none)?"""
         return not models.program(self.meta.get("model"))["transcript"]
@@ -246,6 +255,7 @@ class Session:
                 "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),
                 "transcript": self.found_transcript(),
                 "archived": bool(self.meta.get("archived")), "draft": bool(self.meta.get("draft")),
+                "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -609,6 +619,10 @@ class Server:
                     self.rescan(s)
             return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time)
+            with self.lock:
+                at = [s.id for s in self.sessions.values() if s.state() in ("working", "waiting")]
+            if msg.get("if_idle") and at:  # (a head's restart of it, for later: not one that would cut a turn short)
+                return reply("busy", sessions=at)
             reply("quitting")
             threading.Thread(target=self.shutdown, daemon=True, name="quit").start()
             return None
@@ -1046,6 +1060,8 @@ class Server:
             s.proc, s.busy = None, False
             s.asks.clear()
             s.agents = None  # (what its subagents wrote as it went: looked at again)
+            s.note_written()  # (exited: all it's written is there)
+            self.save(s)
             for conn, theirs in s.waiting_init:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
@@ -1079,6 +1095,8 @@ class Server:
                     f.write(json.dumps({"type": "custom-title", "customTitle": title,
                                         "sessionId": s.meta.get("cli_id") or s.id},
                                        separators=(",", ":"), ensure_ascii=False) + "\n")
+                if s.proc is None:
+                    s.note_written()  # (this host's own line, not another writer's)
             if path:
                 s.meta.pop("title", None)  # (the transcript says it now, and whatever a /rename in it says next)
             else:

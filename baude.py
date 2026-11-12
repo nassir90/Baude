@@ -14507,22 +14507,31 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         r = local_host()
         if r is None:
             return
-        busy = [x for x in r.sessions.values() if x.get("state") in ("working", "waiting")]
-        if busy:
-            if not waited:
-                toast(self.sidebar, f"Restarting {THIS_MACHINE}'s host process once {len(busy)} session"
-                                    f"{'s are' if len(busy) > 1 else ' is'} done")
-            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
-            return
-        r.request({"op": "quit"})
-        end = time.monotonic() + 15
+        # (its listing, as last sent, and this Baude's own windows at a turn there: the listing comes on another
+        # connection than a chat's, so may not say yet what a window's just been asked; the host says last: if_idle)
+        busy = {x["id"] for x in r.sessions.values() if x.get("state") in ("working", "waiting")} | \
+            {w.session_id for w in self.get_application().windows() if w.remote is r and w.busy}
 
-        def gone():  # (the old one gone: a new one, started as any is: local_server)
-            if r.state == "alive" and time.monotonic() < end:
-                return True
-            self.local_server(lambda _r: toast(self.sidebar, f"{THIS_MACHINE}'s host process restarted"))
-            return False
-        GLib.timeout_add(250, gone)
+        def later(n):
+            if not waited:
+                toast(self.sidebar, f"Restarting {THIS_MACHINE}'s host process once {n} session"
+                                    f"{'s are' if n > 1 else ' is'} done")
+            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
+
+        def answered(reply):
+            if reply.get("op") == "busy":
+                return later(len(reply.get("sessions") or []) or 1)
+            end = time.monotonic() + 15
+
+            def gone():  # (the old one gone: a new one, started as any is: local_server)
+                if r.state == "alive" and time.monotonic() < end:
+                    return True
+                self.local_server(lambda _r: toast(self.sidebar, f"{THIS_MACHINE}'s host process restarted"))
+                return False
+            GLib.timeout_add(250, gone)
+        if busy:
+            return later(len(busy))
+        r.request({"op": "quit", "if_idle": True}, answered)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once
@@ -14690,7 +14699,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             return False
         if self.remote is not None:  # (a terminal's claude --resume on one of its sessions, its own claude not running)
             listed = self.remote.sessions.get(self.session_id) or {}
-            return self.remote.mine and listed.get("state") == "stopped" and self.tail.in_use()
+            if not (self.remote.mine and listed.get("state") == "stopped"):
+                return False
+            if (written := listed.get("written")) is not None:  # (nothing since its own claude stopped: its own
+                try:                                            # writing, a restart of its host's, say)
+                    size = os.path.getsize(self.view_path) if self.view_path else 0
+                except OSError:
+                    size = 0
+                if max(size, listed.get("size") or 0) <= written:
+                    return False
+            return self.tail.in_use()
         return self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):

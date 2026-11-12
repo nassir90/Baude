@@ -7,7 +7,9 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends. archived:
                                                        those archived listed too, and their turns' ends (default:
-                                                       not)
+                                                       not). Each session's written: its transcript's size as its
+                                                       own claude last left it (more since, with it stopped: another
+                                                       program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
            env?}
@@ -62,8 +64,10 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        with a chat of its own; then it's gone from the list and from
                                                        what the server keeps. One whose files can't be moved stays:
                                                        error, saying why
-    quit                                            -> quitting: the host process stops, its claudes too (their
-                                                       sessions kept, resumed next time)
+    quit {if_idle?}                                 -> quitting: the host process stops, its claudes too (their
+                                                       sessions kept, resumed next time). if_idle: only if no
+                                                       session's at a turn or asking, else busy {sessions: [id]}
+                                                       and it goes on (a version 1 host quits whatever it's given)
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
     subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
                                                        data (base64)}], more} (its subagents' files, in the folder

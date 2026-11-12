@@ -1130,6 +1130,48 @@ def open_network_session(win, prompt):
     T.pump(0.3)
 
 
+def models_server():
+    """A server that can run more than Claude's models, as this machine can't: gpu-mac, in a process of its own with
+    stand-ins for apple-claude and pi-claude (the fake claude) and two of pi's models said to be downloaded; given to
+    Baude by address. Its session: "Sketch the release checklist", on Claude's model."""
+    if "gpu" in NET:
+        return NET["gpu"]
+    import subprocess
+    network_fixture()
+    d = os.path.join(T.TMP, "gpu-mac")
+    hub = os.path.join(d, "hf")
+    for repo in ("mlx-community--Qwen3-8B-4bit", "mlx-community--Qwen3-4B-Instruct-2507-4bit"):
+        os.makedirs(os.path.join(hub, "models--" + repo), exist_ok=True)
+    fake = os.path.join(T.HERE, "fake_claude.py")
+    for name, body in (("apple", f"exec env -u FAKE_CLAUDE_TRANSCRIPTS {sys.executable} {fake} \"$@\""),
+                       ("pi", f"exec env -u FAKE_CLAUDE_TRANSCRIPTS {sys.executable} {fake} \"$@\""), ("agent", "exit 0")):
+        with open(os.path.join(d, name), "w") as f:
+            f.write(f"#!/bin/sh\n{body}\n")
+        os.chmod(os.path.join(d, name), 0o755)
+    env = {**os.environ, "BAUDE_APPLE_CLAUDE": os.path.join(d, "apple"), "BAUDE_PI_CLAUDE": os.path.join(d, "pi"),
+           "BAUDE_PI": os.path.join(d, "agent"), "HF_HUB_CACHE": hub, "FAKE_CLAUDE_SESSION_IDS": "1",
+           "FAKE_CLAUDE_TRANSCRIPTS": "1"}
+    proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(T.HERE), "baude_server.py"), "serve",
+                             "--bind", "127.0.0.1", "--no-advertise", "--group", "Lab", "--name", "gpu-mac",
+                             "--state", os.path.join(d, "state")], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            env=env, text=True)
+    import atexit
+    atexit.register(proc.terminate)  # (it goes with this run, its claudes with it)
+    r = baude.network().add("127.0.0.1", json.loads(proc.stdout.readline())["port"])
+    T.wait_for(lambda: r.state == "alive", "gpu-mac there")
+    got = []
+    r.request({"op": "start", "prompt": "Sketch the release checklist", "cwd": NET["folders"][1], "model": "opus",
+               "tags": ["release"]}, got.append)
+    T.wait_for(lambda: got and (r.sessions.get(got[0]["session"]["id"]) or {}).get("state") == "waiting", "its session")
+    NET["gpu"] = (proc, r, got[0]["session"]["id"])
+    return NET["gpu"]
+
+
+def popup_choices(dropdown):
+    """A ChoiceDropDown's list, open (a picture of what it offers)."""
+    next(w for w in T.walk(dropdown) if isinstance(w, Gtk.Popover)).popup()
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then Group, which sessions are listed: Local (this "
                                 "machine's) or a group servers on the network have sessions in")
 def _(app):
@@ -1190,6 +1232,18 @@ def _(app):
     f["folder"].set_text(NET["folders"][1])
     f["tags"].set_text("docs, release")
     f["prompt"].get_buffer().set_text("Check every link in the docs still resolves, and fix the ones that don't.")
+    return win
+
+
+@scene("55h-network-models", "A network session's models are its server's: gpu-mac runs Apple's model and two of "
+                             "its own, which this machine doesn't have")
+def _(app):
+    models_server()
+    win = network_window(app)
+    T.wait_for(lambda: sidebar_row(win, "Sketch the release checklist") is not None, "gpu-mac's session")
+    win.sidebar.on_activate(win.sidebar.list, sidebar_row(win, "Sketch the release checklist"))
+    T.wait_for(lambda: win.remote is not None and win.proc is not None and "apple" in win.model_dd.values, "its models")
+    popup_choices(win.model_dd)
     return win
 
 

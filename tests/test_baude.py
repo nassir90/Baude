@@ -96,6 +96,7 @@ os.environ["FAKE_CLAUDE_LOG"] = os.path.join(TMP, "fake.log")
 import baude as _baude  # noqa: E402
 import baudelib.claude  # noqa: E402
 import baudelib.transcripts  # noqa: E402
+import baudelib.models  # noqa: E402
 import codeview  # noqa: E402
 import feedback  # noqa: E402
 import fixes  # noqa: E402
@@ -111,7 +112,7 @@ import widgets  # noqa: E402
 from baude import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
 
 _MOVED = (widgets, codeview, kubeview, schemaview, gitview, feedback,  # (what was in baude.py: the viewers, what they
-          baudelib.claude, baudelib.transcripts)                         # share, and Claude Code's process and transcripts)
+          baudelib.claude, baudelib.transcripts, baudelib.models)        # share, and Claude Code's process and transcripts)
 
 
 class _Baude:

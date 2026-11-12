@@ -6,12 +6,14 @@
                                     [--idle-minutes N] [--no-advertise]
     python3 baude_server.py servers                          # the servers on the network
     python3 baude_server.py list   [--server HOST:PORT]      # a server's sessions
+    python3 baude_server.py models [--server HOST:PORT]      # the models it can run: Claude's, Apple's, this machine's
     python3 baude_server.py start  --prompt TEXT [--cwd DIR] [--model M] [--effort E] [--mode MODE]
                                    [--tag T]... [--group G] [--server HOST:PORT]
     python3 baude_server.py stop   SESSION [--server HOST:PORT]
 
-Without --server, the commands use the one server found on the network (in --group, if given). The claude it runs is
-BAUDE_CLAUDE's, else claude on PATH (as Baude's). There's no sign-in: anyone who can reach the port can use it.
+Without --server, the commands use the one server found on the network (in --group, if given). It runs a model as
+Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in apple-claude, once
+built; one on this machine in pi-claude, once pi and the model are here. There's no sign-in: anyone who can reach the port can use it.
 """
 import argparse
 import json
@@ -96,12 +98,13 @@ def main():
     serving(p)
     sub.add_parser("servers", help="the servers on the network")
     client("list", "a server's sessions")
+    client("models", "the models a server can run")
     s = client("start", "start a session")
     s.add_argument("--prompt", required=True)
     s.add_argument("--cwd", help="the folder it runs in, on the server's machine (default: its home; a relative one is "
                                  "this folder's)")
     s.add_argument("--model")
-    s.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
+    s.add_argument("--effort", help="Claude's effort (low … max), or a local model's thinking level (off … high)")
     s.add_argument("--mode", choices=[m for m, _ in MODES], default="default")
     s.add_argument("--tag", action="append", default=[], help="a tag (again for more)")
     s.add_argument("--title")
@@ -117,7 +120,12 @@ def main():
         return
     if args.command == "list":
         for s in ask(args, {"op": "subscribe"})["sessions"]:
-            print(f"{s['id']}  {s['state']:8}  {s.get('group') or '':12}  {s.get('title') or ''}  ({s.get('cwd')})")
+            print(f"{s['id']}  {s['state']:8}  {s.get('group') or '':12}  {s.get('model') or 'default':14}  "
+                  f"{s.get('title') or ''}  ({s.get('cwd')})")
+        return
+    if args.command == "models":
+        for m in ask(args, {"op": "subscribe"})["server"].get("models") or []:
+            print(f"{m['value']:24}  {m['displayName']}")
         return
     if args.command == "start":
         cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) else os.path.abspath(args.cwd)

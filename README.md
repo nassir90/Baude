@@ -45,7 +45,8 @@ python3 record.py            # Record
 ## Sessions on the network
 
 `baude_server.py` runs Claude Code sessions headless on a machine, for Baude to start, watch and steer from another
-(or the same) one. It needs only Python and `claude`, not GTK. Baude finds servers on the local network by multicast
+(or the same) one. It needs only Python, not GTK, and runs any model Baude can that its machine has: Claude's with
+`claude`, Apple's with `apple-claude` once built, and pi's with `pi-claude` (`baude_server.py models` lists them). Baude finds servers on the local network by multicast
 DNS (`_baude._tcp`); ⋮ beside the sidebar's search → Group picks Local (this machine's sessions) or a group on the
 network.
 

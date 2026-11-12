@@ -8273,10 +8273,12 @@ class SessionSidebar(Gtk.Box):
             toast(self, f"{remote_name(r)} didn't rename it: {reply.get('error')}")
             return
         listed = reply.get("session") or {}
+        if listed.get("title") in (None, info.get("title")):  # (its claude's yet to write it: as asked, till it has)
+            listed = {**listed, "title": title}
         if listed.get("id") == info["id"]:
             r.sessions[info["id"]] = listed
         if info["id"] == self.win.session_id and self.win.remote is r:
-            self.win.show_title(listed.get("title") or title)
+            self.win.show_title(listed["title"])
         self.fill()
 
     def archive(self, info):
@@ -13614,8 +13616,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.sidebar.fill()
 
     def sync_remote(self, r, sid, then=None):
-        """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after. One
-        fetch at a time: one asked for meanwhile is made after it."""
+        """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after (its
+        subagents' are fetched after that, not waited for). One fetch at a time: one asked for meanwhile is made after
+        it."""
         key = (r.key, sid)
         if (job := self.remote_syncing.get(key)) is not None:
             job["again"] = True
@@ -13624,8 +13627,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         job = self.remote_syncing[key] = {"again": False, "then": [then] if then else []}
 
         def work():
-            r.sync(sid)
-            on_main(done)
+            try:
+                r.sync(sid, subagents=False)
+            finally:  # (whatever went wrong, the next fetch isn't held up by this one)
+                on_main(done)
+            if r.subagents_behind(sid):
+                r.sync_subagents(sid)
 
         def done():
             if job["again"]:
@@ -13638,11 +13645,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         threading.Thread(target=work, daemon=True).start()
 
     def on_network(self):
-        """The network changed: the open network session's transcript fetched as it grows (its subagents' too), the
-        banner as it is now."""
+        """The network changed: the open network session's transcript fetched as it grows (its subagents' too), its
+        title as it's listed (renamed in another window, or elsewhere), the banner as it is now."""
         if getattr(self, "let_go_done", False) or self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
+        if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
+            self.show_title(listed["title"])
         if listed and self.remote.state == "alive" and \
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):

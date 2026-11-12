@@ -27,6 +27,7 @@ from baudelib.discovery import Advertiser
 IDLE_S = 30 * 60
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
+RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
 SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mode")}
@@ -512,6 +513,7 @@ class Server:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
+            s.agents = None  # (what its subagents wrote as it went: looked at again)
             for conn, theirs in s.waiting_init:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
@@ -558,6 +560,12 @@ class Server:
             s.routes[on] = (None, write)  # (one it can't do, or it's gone before it answers: written here)
             s.proc.send({"type": "control_request", "request_id": on,
                          "request": {"subtype": "rename_session", "title": title}})
+
+            def unanswered():
+                with self.lock:
+                    if s.routes.pop(on, None) is not None:
+                        write(False)
+            threading.Timer(RENAME_S, unanswered).start()
             return
         write(False)
 
@@ -636,7 +644,10 @@ class Server:
         have = have if isinstance(have, dict) else {}
         room = max(4096, min(int(limit or TRANSCRIPT_CHUNK), 16 << 20))
         files, folder, more = [], s.subagents_dir(), False
-        for name, (size, mtime) in sorted(s.subagent_files().items()):
+        if (found := s.subagent_files()) != s.agents:  # (listed as they're served: a client's checked against it)
+            s.agents = found
+            self.changed()
+        for name, (size, mtime) in sorted(found.items()):
             had = have.get(name)
             at, when = had if isinstance(had, list) and len(had) == 2 and isinstance(had[0], int) else (0, None)
             whole = name.endswith(".jsonl")

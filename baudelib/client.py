@@ -43,7 +43,8 @@ class Remote:
         self.network, self.key, self.host, self.port = network, key, host, port
         self.info = cached.get("info") or {}
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and s.get("id")}
-        self.syncing = {}  # session id -> the lock its mirror's written under (sync)
+        self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
+        self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
@@ -147,8 +148,9 @@ class Remote:
             return 0
 
     def sync(self, session_id, timeout=30, subagents=True):
-        """Bring a session's mirror up to what the server has, and its subagents' (one sync of a session at a time,
-        whichever window asks; timeout: what each request's waited for). True if its transcript's is."""
+        """Bring a session's mirror up to what the server has, then its subagents' if they're behind (one sync of a
+        session's transcript at a time, whichever window asks, and of its subagents'; timeout: what each request's
+        waited for). True if its transcript's is."""
         path = self.mirror(session_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with self.lock:
@@ -164,9 +166,9 @@ class Remote:
                     f.write(data)
                 if not data or r["next"] >= r["size"]:
                     break
-            if subagents and self.subagents_behind(session_id):
-                self.sync_subagents(session_id, timeout)
-            return True
+        if subagents and self.subagents_behind(session_id):  # (not under the transcript's lock: a window that
+            self.sync_subagents(session_id, timeout)          # waits for that, on its main loop, doesn't wait for these)
+        return True
 
     def subagents_mirror(self, session_id):
         """Where a session's subagents' files are mirrored: beside its mirror, as claude keeps them beside its
@@ -188,14 +190,25 @@ class Remote:
         return out
 
     def subagents_behind(self, session_id):
-        """Has the server changed a session's subagents' files since they were mirrored (as it last listed it)?"""
+        """Has the server changed a session's subagents' files since they were mirrored (as it last listed it)? Checked
+        against the stamp the mirror last caught up with, else (before one, this run) its files' mtimes, the server's."""
         listed = (self.sessions.get(session_id) or {}).get("subagents")
-        newest = max((m for _size, m in self.subagents_had(session_id).values()), default=0)
-        return isinstance(listed, int) and listed != newest  # (None: a server that doesn't say)
+        if not isinstance(listed, int):
+            return False  # (a server that doesn't say)
+        synced = self.agents_synced.get(session_id)
+        if synced is None:
+            synced = max((m for _size, m in self.subagents_had(session_id).values()), default=0)
+        return listed != synced
 
     def sync_subagents(self, session_id, timeout=30):
         """(sync's) A session's subagents' files mirrored as the server has them, each one's mtime set to its own
         there. True if they are."""
+        with self.lock:
+            lock = self.syncing.setdefault((session_id, "subagents"), threading.Lock())
+        with lock:
+            return self._sync_subagents(session_id, timeout)
+
+    def _sync_subagents(self, session_id, timeout):
         folder = self.subagents_mirror(session_id)
         while True:
             had = self.subagents_had(session_id)
@@ -231,6 +244,9 @@ class Remote:
                         os.remove(os.path.join(folder, name))
                     except OSError:
                         pass
+                self.agents_synced[session_id] = max(  # (what the server lists now: its files' newest)
+                    (f["mtime"] for f in r.get("files") or [] if isinstance(f, dict) and isinstance(f.get("mtime"), int)),
+                    default=0)
             return True
 
     def stop(self):

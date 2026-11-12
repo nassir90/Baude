@@ -13,14 +13,23 @@ A client's requests (a "req" it picks comes back on the reply):
                                                      with --resume, if it isn't running)
     stop {session}                                  -> stopped {session}
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
+    subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
+                                                       data (base64)}], more} (its subagents' files, in the folder
+                                                       beside its transcript: each one's transcript, from where have
+                                                       {name: [size, mtime]} says the client's copy is, in whole lines
+                                                       like transcript's; its meta.json whole, if it's changed. more:
+                                                       there's more, past limit; those it didn't reach aren't listed)
+    rename {session, title}                         -> renamed {session} (claude renames it, if it's running; else
+                                                       the server does as claude would)
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
     ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
                                                      and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".
 
-A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts}: its id a
-UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working" (at a turn),
-"waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running).
+A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, subagents}:
+its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working" (at a
+turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
+subagents the mtime of its subagents' newest file (0 for none: what a client's copy is checked against).
 """
 import json
 import socket

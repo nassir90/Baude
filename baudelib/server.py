@@ -5,7 +5,8 @@ folder, a model, an effort, a permission mode and a group, and gets a UUID that 
 --session-id,
 and what it's resumed by. Its claude keeps going between turns, so whoever attaches next carries on with it, and stops
 once nobody's used it for a while (idle_s): the next message resumes it. Clients (Baude) list the sessions, read their
-transcripts, attach to one to see what it does and to talk to it, and answer what it asks. wire.py says how.
+transcripts and their subagents', rename them, attach to one to see what it does and to talk to it, and answer what it
+asks. wire.py says how.
 
 What it keeps (state_dir: the server's id, each session's settings) is its own; a claude session's transcript is Claude
 Code's, and the server keeps one in the same form for a session whose program keeps none (apple-claude, pi-claude)."""
@@ -27,6 +28,8 @@ from baudelib.discovery import Advertiser
 IDLE_S = 30 * 60
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
+RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
+SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
 SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mode")}
 
@@ -72,8 +75,9 @@ class Session:
         self.busy = False         # at a turn
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # messages sent at a turn, kept once it's over (Server.keep)
-        self.routes = {}          # request id sent on -> (conn, its own request id)
+        self.routes = {}          # request id sent on -> (conn, its own request id or the server's callback, undo)
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
+        self.agents = None        # its subagents' files, as last looked at: {name: (size, mtime_ns)}
         self.used = time.time()
 
     @property
@@ -103,6 +107,27 @@ class Session:
             self.server.save(self)
         return path
 
+    def subagents_dir(self, path=None):
+        """The folder claude keeps its subagents' transcripts in, beside its own (path: that, if it's known); None for
+        one the server keeps (its program has no subagents)."""
+        path = None if self.kept() else path or self.transcript()
+        return path[:-len(".jsonl")] + os.sep + "subagents" if path and path.endswith(".jsonl") else None
+
+    def subagent_files(self, path=None):
+        """Its subagents' files as they are now: {name: (size, mtime_ns)}."""
+        out, folder = {}, self.subagents_dir(path)
+        if folder is None:
+            return out  # (not scandir(None): that's the folder the server's in)
+        try:
+            with os.scandir(folder) as found:
+                for e in found:
+                    if e.name.endswith(SUBAGENT_FILES) and not e.name.startswith(".") and e.is_file():
+                        st = e.stat()
+                        out[e.name] = (st.st_size, st.st_mtime_ns)
+        except (OSError, TypeError):
+            pass
+        return out
+
     def listing(self):
         info = self.info or {}
         size, mtime = self.stat or (0, None)
@@ -112,7 +137,8 @@ class Session:
                 "mode": self.meta.get("mode"), "group": self.meta.get("group"), "created": self.meta.get("created"),
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
-                "prompts": info.get("prompts") or 0}
+                "prompts": info.get("prompts") or 0,
+                "subagents": max((m for _size, m in (self.agents or {}).values()), default=0)}
 
 
 class Server:
@@ -286,6 +312,10 @@ class Server:
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))
+            if op == "subagents":
+                return reply("subagents", session=s.id, **self.read_subagents(s, msg.get("have"), msg.get("limit")))
+            if op == "rename":
+                return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
         return reply("error", error=f"unknown op {op!r}")
 
     # ---- sessions
@@ -321,6 +351,7 @@ class Server:
                 old.p.wait(5)
             except Exception:  # (still going: a claude of its own, about to go)
                 pass
+            self.drop_routes(s)
         if s.proc is not None:
             return s.proc
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
@@ -429,7 +460,11 @@ class Server:
                         s.meta[undo[0]] = undo[1]  # (refused, a mode it can't switch to say: kept as it still is)
                         self.save(s)
                         self.changed()
-                    conn.send({"op": "claude", "session": s.id, "msg": {**msg, "response": {**r, "request_id": theirs}}})
+                    if callable(theirs):  # (the server's own request: rename)
+                        theirs(r.get("subtype") == "success")
+                    else:
+                        conn.send({"op": "claude", "session": s.id,
+                                   "msg": {**msg, "response": {**r, "request_id": theirs}}})
                 return
             if kind == "control_request":
                 request = msg.get("request") or {}
@@ -482,22 +517,69 @@ class Server:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
+            s.agents = None  # (what its subagents wrote as it went: looked at again)
             for conn, theirs in s.waiting_init:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
-            s.waiting_init, s.routes = [], {}
+            s.waiting_init = []
+            self.drop_routes(s)
             if not getattr(made[0], "restarting", False):
                 for conn in s.live:
                     conn.send({"op": "exited", "session": s.id, "code": code})
             self.changed()
+
+    def drop_routes(self, s):
+        """(lock held) What was asked of a session's claude that's gone: no answer's coming (the server's own requests
+        are done without one)."""
+        routes, s.routes = s.routes, {}
+        for _conn, theirs, _undo in routes.values():
+            if callable(theirs):
+                theirs(False)
+
+    def rename(self, s, title, done):
+        """(lock held) A session's title, as Claude Code keeps it: its claude's to write in its transcript if it's
+        running (rename_session); else the record claude writes for a rename, put in its transcript here; the server's
+        own for a transcript it keeps (or before there's any). done() once it is."""
+        title = " ".join(str(title or "").split())[:200]
+        if not title:
+            raise ValueError("a title can't be empty")
+
+        def write(by_claude):
+            path = None if s.kept() else s.transcript()
+            if path and not by_claude:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "custom-title", "customTitle": title,
+                                        "sessionId": s.meta.get("cli_id") or s.id},
+                                       separators=(",", ":"), ensure_ascii=False) + "\n")
+            if path:
+                s.meta.pop("title", None)  # (the transcript says it now, and whatever a /rename in it says next)
+            else:
+                s.meta["title"] = title
+            self.save(s)
+            self.rescan(s)
+            self.changed()
+            done()
+        if not s.kept() and s.proc is not None and not getattr(s.proc, "stopping", False):
+            on = f"srv_{next(self.rids)}"
+            s.routes[on] = (None, write, None)  # (one it can't do, or it's gone before it answers: written here)
+            s.proc.send({"type": "control_request", "request_id": on,
+                         "request": {"subtype": "rename_session", "title": title}})
+
+            def unanswered():
+                with self.lock:
+                    if s.routes.pop(on, None) is not None:
+                        write(False)
+            threading.Timer(RENAME_S, unanswered).start()
+            return
+        write(False)
 
     def changed(self):
         """(lock held) Every subscriber gets the sessions as they are now (soon: a burst of changes is one)."""
         self.dirty = True
 
     def _watch(self):
-        """Once a second: transcripts that grew are read (what's listed comes from them), idle claudes are stopped, and
-        subscribers hear what changed, or a ping."""
+        """Twice a second: transcripts that grew are read (what's listed comes from them), and their subagents' files
+        looked at; idle claudes are stopped, and subscribers hear what changed, or a ping."""
         pinged = 0.0
         while not self.stopped.wait(0.5):
             try:
@@ -509,19 +591,11 @@ class Server:
         """One look (_watch): (when subscribers were last pinged)."""
         with self.lock:
             for s in list(self.sessions.values()):
-                path = s.transcript()
-                try:
-                    st = os.stat(path) if path else None
-                except OSError:
-                    st = None
-                stat = (st.st_size, st.st_mtime) if st else None
-                if stat != s.stat:
-                    if st and s.stat and st.st_size < s.stat[0]:
-                        s.scan = None  # (rewritten: read again)
-                    s.stat = stat
-                    if path and st:
-                        s.scan, s.info = transcripts.scan_session(path, s.scan)
-                    self.dirty = True
+                grew = self.rescan(s)
+                self.dirty |= grew
+                if s.agents is None or s.proc is not None or grew:  # (only a running claude's subagents work)
+                    if (agents := s.subagent_files(s.meta.get("path"))) != s.agents:
+                        s.agents, self.dirty = agents, True
                 if s.proc is not None and not s.busy and not s.asks and not s.live \
                         and time.time() - s.used > self.idle_s and not getattr(s.proc, "stopping", False) \
                         and models.program(s.meta.get("model"))["resumes"]:  # (apple-claude would forget it all)
@@ -543,21 +617,76 @@ class Server:
                 c.send({"op": "ping"})
         return pinged
 
+    def rescan(self, s):
+        """(lock held) A session's transcript read on, if it's changed since it was last read (what's listed comes from
+        it): True if it had."""
+        path = s.transcript()
+        try:
+            st = os.stat(path) if path else None
+        except OSError:
+            st = None
+        stat = (st.st_size, st.st_mtime) if st else None
+        if stat == s.stat:
+            return False
+        if st and s.stat and st.st_size < s.stat[0]:
+            s.scan = None  # (rewritten: read again)
+        s.stat = stat
+        if path and st:
+            s.scan, s.info = transcripts.scan_session(path, s.scan)
+        return True
+
     # ---- reading
     def read_transcript(self, s, offset, limit=None):
         """Whole lines of the transcript from offset: {offset, next, size, data}."""
+        return self.read_lines(s.transcript(), offset, limit)
+
+    def read_subagents(self, s, have, limit=None):
+        """Its subagents' files, each from where a client's copy of it is (have: {name: [size, mtime_ns]}): a
+        transcript's whole lines after that (read_lines), a meta.json whole if it's not as the client has it; limit,
+        all of them together, at most: {files: [{name, size, mtime, offset, next, data}], more}. more: there's more to
+        fetch (those limit didn't reach aren't listed)."""
+        have = have if isinstance(have, dict) else {}
+        room = max(4096, min(int(limit or TRANSCRIPT_CHUNK), 16 << 20))
+        files, folder, more = [], s.subagents_dir(), False
+        if (found := s.subagent_files()) != s.agents:  # (listed as they're served: a client's checked against it)
+            s.agents = found
+            self.changed()
+        for name, (size, mtime) in sorted(found.items()):
+            had = have.get(name)
+            at, when = had if isinstance(had, list) and len(had) == 2 and isinstance(had[0], int) else (0, None)
+            whole = name.endswith(".jsonl")
+            new = (at != size) if whole else (at, when) != (size, mtime)
+            if new and room <= 0:
+                more = True
+                break
+            f = {"name": name, "size": size, "mtime": mtime, "offset": at, "next": at, "data": ""}
+            if new and whole:
+                got = self.read_lines(os.path.join(folder, name), at if at < size else 0, room)
+                f.update(offset=got["offset"], next=got["next"], size=max(size, got["size"]), data=got["data"])
+                room -= got["next"] - got["offset"]
+                more |= bool(got["data"]) and got["next"] < got["size"]  # (cut short by limit: the rest next time)
+            elif new:
+                try:
+                    with open(os.path.join(folder, name), "rb") as fh:
+                        data = fh.read(FILE_LIMIT)
+                except OSError:
+                    continue  # (gone meanwhile)
+                f.update(offset=0, next=len(data), data=base64.b64encode(data).decode("ascii"))
+                room -= len(data)
+            files.append(f)
+        return {"files": files, "more": more}
+
+    def read_lines(self, path, offset, limit=None):
+        """Whole lines of a file from offset: {offset, next, size, data}."""
         limit = max(4096, min(int(limit or TRANSCRIPT_CHUNK), 16 << 20))
-        path = s.transcript()
         try:
             with open(path, "rb") as f:
                 size = f.seek(0, os.SEEK_END)
                 offset = 0 if offset > size else int(offset)
                 f.seek(offset)
-                data = f.read(limit)
-                while data and not data.endswith(b"\n") and len(data) < (64 << 20):
+                data = more = f.read(limit)
+                while more and b"\n" not in more and len(data) < (64 << 20):
                     more = f.read(limit)  # (a line longer than a chunk: all of it)
-                    if not more:
-                        break
                     data += more
         except (OSError, TypeError):
             return {"offset": 0, "next": 0, "size": 0, "data": ""}

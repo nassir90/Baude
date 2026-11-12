@@ -4,7 +4,7 @@ The same lines could go over stdin and stdout: Channel takes any pair of binary 
 A client's requests (a "req" it picks comes back on the reply):
     hello {client}                                  -> hello {server: info}
     subscribe                                       -> sessions {sessions}, then again on every change, and ping
-    start {prompt, cwd, model, effort, mode, tags, group, title?}
+    start {prompt, cwd, model, effort, mode, group, title?}
                                                     -> started {session}
     attach {session, live}                          -> attached {session, asks}; live: claude {session, msg} as it
                                                        speaks, exited {session, code} when it stops
@@ -18,7 +18,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                      and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".
 
-A session is {id, title, cwd, model, effort, mode, tags, group, created, said, updated, size, state, prompts}: its id a
+A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts}: its id a
 UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working" (at a turn),
 "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running).
 """

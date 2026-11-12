@@ -51,7 +51,7 @@ network.
 
 ```bash
 python3 baude_server.py --group Lab      # serve, in the group Lab
-python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --model opus --effort high --tag perf
+python3 baude_server.py start --prompt "Run the benchmarks" --cwd ~/src/app --model opus --effort high
 python3 baude_server.py list
 ```
 

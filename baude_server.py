@@ -7,7 +7,7 @@
     python3 baude_server.py servers                          # the servers on the network
     python3 baude_server.py list   [--server HOST:PORT]      # a server's sessions
     python3 baude_server.py start  --prompt TEXT [--cwd DIR] [--model M] [--effort E] [--mode MODE]
-                                   [--tag T]... [--group G] [--server HOST:PORT]
+                                   [--group G] [--server HOST:PORT]
     python3 baude_server.py stop   SESSION [--server HOST:PORT]
 
 Without --server, the commands use the one server found on the network (in --group, if given). The claude it runs is
@@ -103,7 +103,6 @@ def main():
     s.add_argument("--model")
     s.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     s.add_argument("--mode", choices=[m for m, _ in MODES], default="default")
-    s.add_argument("--tag", action="append", default=[], help="a tag (again for more)")
     s.add_argument("--title")
     st = client("stop", "stop a session's claude")
     st.add_argument("session")
@@ -122,7 +121,7 @@ def main():
     if args.command == "start":
         cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) else os.path.abspath(args.cwd)
         reply = ask(args, {"op": "start", "prompt": args.prompt, "cwd": cwd, "model": args.model,
-                           "effort": args.effort, "mode": args.mode, "tags": args.tag, "group": args.group,
+                           "effort": args.effort, "mode": args.mode, "group": args.group,
                            "title": args.title})
         print(reply["session"]["id"])
         return

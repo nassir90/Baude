@@ -7541,7 +7541,7 @@ def remote_info(s):
     return {"id": s["id"], "path": r.mirror(s["id"]), "title": s.get("title"), "cwd": s.get("cwd"),
             "folder": s.get("cwd"), "worktree": None, "mtime": s.get("updated") or when, "said": when,
             "prompts": s.get("prompts") or 0, "source": f"{r.info.get('name') or r.host}, on the network", "copies": 0,
-            "remote": r, "remote_state": s.get("state"), "dead": r.state == "dead", "tags": s.get("tags") or [],
+            "remote": r, "remote_state": s.get("state"), "dead": r.state == "dead",
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode")}
 
 
@@ -7924,8 +7924,8 @@ class SessionSidebar(Gtk.Box):
                 self.fill()
             return
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
-        seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, tuple(s.get("tags") or ()),
-                       s.get("cwd"), s.get("said")) for s in network().sessions(shown))
+        seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"), s.get("said"))
+                      for s in network().sessions(shown))
         if seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8044,8 +8044,7 @@ class SessionSidebar(Gtk.Box):
         groups, gone, self.remote_keys = {}, [], {}
         for info in sorted(sessions, key=last_used, reverse=True):
             r = info["remote"]
-            if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
-                                        *info["tags"]]).lower():
+            if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r)]).lower():
                 continue
             if info["id"] in archived:
                 gone.append(info)
@@ -8202,10 +8201,6 @@ class SessionSidebar(Gtk.Box):
             tag.add_css_class("worktree-tag")
             box.append(tag)
         r = info.get("remote")
-        for word in (info.get("tags") or [])[:2] if r is not None else ():  # (a network session's tags: its first two)
-            tag = Gtk.Label(label=word, ellipsize=Pango.EllipsizeMode.END, max_width_chars=10, valign=Gtk.Align.CENTER)
-            tag.add_css_class("worktree-tag")
-            box.append(tag)
         if info.get("dead"):  # (its server's gone from the network: listed as it was last seen)
             title.add_css_class("dim-label")
             tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
@@ -8216,8 +8211,7 @@ class SessionSidebar(Gtk.Box):
         tip = [info.get("title") or "", info.get("cwd") or ""]
         if r is not None:
             gone = f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
-            tip += [f"On {remote_name(r)} ({r.host}){gone}", "Group " + (info.get("group") or "?") +
-                    (" · tags " + ", ".join(info["tags"]) if info.get("tags") else "")]
+            tip += [f"On {remote_name(r)} ({r.host}){gone}", "Group " + (info.get("group") or "?")]
         if tree:
             tip.append(f"Worktree {os.path.basename(tree)} of {pretty_path(info.get('folder') or '')}")
         if info.get("source") and r is None:
@@ -13666,7 +13660,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def ask_remote_start(self, server=None, folder=None):
         """New session on the network (the sidebar's New session, or a server's folder's +, while a group on the network
-        is shown): a prompt, a folder, tags and a group, on a server that's there; the model, effort and permission mode
+        is shown): a prompt, a folder and a group, on a server that's there; the model, effort and permission mode
         the top bar has. Opened once its server's started it (remote_started)."""
         group = self.sidebar.network_group()
         servers = network().alive(group)
@@ -13679,7 +13673,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
 
         def field(n, label, widget):
-            name = Gtk.Label(label=label, xalign=1, valign=Gtk.Align.START if n == 4 else Gtk.Align.CENTER)
+            name = Gtk.Label(label=label, xalign=1, valign=Gtk.Align.START if n == 3 else Gtk.Align.CENTER)
             name.add_css_class("dim-label")
             widget.set_hexpand(True)
             grid.attach(name, 0, n, 1, 1)
@@ -13691,13 +13685,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         field(1, "Folder", where)
         group_entry = Gtk.Entry(text=group or servers[0].info.get("group") or "")
         field(2, "Group", group_entry)
-        tags = Gtk.Entry(placeholder_text="Comma-separated")
-        field(3, "Tags", tags)
         prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False, top_margin=6, bottom_margin=6,
                               left_margin=8, right_margin=8)
         frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
         frame.add_css_class("card")
-        field(4, "Prompt", frame)
+        field(3, "Prompt", frame)
         effort = self.effort if self.effort_dd.get_sensitive() else None
         runs = " · ".join(x for x in (self.model_dd.label(), self.effort_dd.label() if effort else "",
                                       self.mode_dd.label()) if x)
@@ -13722,14 +13714,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             buf = prompt.get_buffer()
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
                       "cwd": where.get_text().strip() or "~", "model": self.model, "effort": effort, "mode": self.mode,
-                      "tags": [w.strip() for w in tags.get_text().split(",") if w.strip()],
                       "group": group_entry.get_text().strip() or None}
             save_settings(remote_folders={**last, r.key: params["cwd"]})
             r.request(params, lambda reply: self.remote_started(r, reply))
         dlg.connect("response", respond)
         self.dialog = self.remote_dialog = dlg
-        self.remote_fields = {"servers": servers_dd, "folder": where, "group": group_entry, "tags": tags,
-                              "prompt": prompt}
+        self.remote_fields = {"servers": servers_dd, "folder": where, "group": group_entry, "prompt": prompt}
         dlg.present(self)
         prompt.grab_focus()
 

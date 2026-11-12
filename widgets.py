@@ -5519,6 +5519,13 @@ menubutton.git-branches > button { font-weight: normal; }
 popover.git-branches list { background: transparent; }
 popover.git-branches list > row { min-height: 0; margin: 0; padding: 5px 8px; border-radius: 6px; }
 popover.git-branches list > separator { margin: 4px 6px; }
+/* the sessions sidebar's ⋮ filters (Hosts, Groups): rows as the menu's own items are, what's listed ticked rather
+   than highlighted */
+list.filter-list { background: transparent; }
+list.filter-list > row { min-height: 0; margin: 0; padding: 6px 10px; border-radius: 6px; }
+list.filter-list > row:selected { background: none; color: inherit; }
+list.filter-list > row:hover, list.filter-list > row:selected:hover { background: alpha(currentColor, 0.07); }
+list.filter-list > row:focus-visible { outline-offset: -2px; }
 .ref-loc { padding: 2px 6px; min-height: 24px; }
 .ref-on image { color: @accent_color; }
 .ref-links image { color: alpha(@accent_color, 0.5); }

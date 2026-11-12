@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """baude-server: Claude Code sessions run headless on this machine, started and steered over the network from Baude
-(its sidebar's ⋮ → Group lists the group they're in), on baudelib (see baudelib/server.py). No GTK needed.
+(its sidebar lists them under their host and group: ⋮ → Hosts, Groups), on baudelib (see baudelib/server.py). No GTK
+needed.
 
     python3 baude_server.py [serve] [--group NAME] [--name NAME] [--port N] [--bind ADDR] [--state DIR]
                                     [--idle-minutes N] [--no-advertise]

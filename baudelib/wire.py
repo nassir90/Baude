@@ -43,10 +43,11 @@ A client's requests (a "req" it picks comes back on the reply):
 Anything wrong: error {error}, with the request's "req".
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, subagents,
-asks}: its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working"
+asks, cli_id}: its id a UUID the server made as it started it (claude's --session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 subagents the mtime of its subagents' newest file (0 for none: what a client's copy is checked against), asks what
-it's asking, not answered yet: [{request_id, tool, input}] (long strings in input cut short). An ask is answered with
+it's asking, not answered yet: [{request_id, tool, input}] (long strings in input cut short), cli_id the id claude
+has for it where that's another (a fork's: its transcript's named so), else None. An ask is answered with
 input: a control_response for its request_id, as claude's stream-json has it.
 
 A server on this machine leaves a file in local_dir() (its owner's to read, no one else's) with its address and,

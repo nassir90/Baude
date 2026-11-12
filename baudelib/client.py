@@ -381,6 +381,7 @@ class Network:
                 remote.by_hand = remote.by_hand or old.by_hand
             if remote.key != key:
                 self.forgotten.add(remote.key)  # (the address it was known by: not a server of its own in servers.json)
+                remote.was = getattr(remote, "was", set()) | {remote.key}  # (what Baude may still know it by)
             remote.key = key
             self.servers[key] = remote
 
@@ -436,6 +437,11 @@ class Network:
         with self.lock:
             return [{**s, "server": r} for r in self.servers.values() for s in r.sessions.values()
                     if group is None or s.get("group") == group]
+
+    def remotes(self):
+        """Every server known, there or not."""
+        with self.lock:
+            return list(self.servers.values())
 
     def find(self, session_id):
         with self.lock:

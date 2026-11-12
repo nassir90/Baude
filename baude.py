@@ -75,31 +75,10 @@ from lookup import (  # (⌘K's engine: the names a folder has; see lookup.py)
 
 
 def macos_fonts():
-    """On macOS, text through FreeType rather than CoreText (before Pango is loaded). Pango's CoreText path puts
-    glyphs on whole pixels, so letters are spaced unevenly and look thin; FontConfig + FreeType2 places them as on
-    Linux (https://discourse.gnome.org/t/font-antialiasing-issue-on-gtk-in-macos/28071). FontConfig's own sans-serif
-    and monospace are Verdana and Andale Mono there: a config of baude's own (not yours) makes them the system's
-    font and Menlo. PANGOCAIRO_BACKEND or FONTCONFIG_FILE set already: left as they are."""
-    if sys.platform != "darwin" or "PANGOCAIRO_BACKEND" in os.environ or "FONTCONFIG_FILE" in os.environ:
-        return
-    main = next((p for p in ("/opt/homebrew/etc/fonts/fonts.conf", "/usr/local/etc/fonts/fonts.conf")
-                 if os.path.exists(p)), None)
-    if main is None:  # (no FontConfig: CoreText it is)
-        return
-    alias = '  <alias binding="strong"><family>{}</family><prefer><family>{}</family></prefer></alias>\n'
-    conf = ('<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig>\n'
-            f'  <include ignore_missing="yes">{main}</include>\n'
-            + alias.format("sans-serif", "System Font") + alias.format(".AppleSystemUIFont", "System Font")
-            + alias.format("monospace", "Menlo") + '</fontconfig>\n')
-    folder = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "baude")
-    path = os.path.join(folder, "fonts.conf")
-    try:
-        os.makedirs(folder, exist_ok=True)
-        with open(path, "w") as f:
-            f.write(conf)
-    except OSError:
-        return
-    os.environ["PANGOCAIRO_BACKEND"], os.environ["FONTCONFIG_FILE"] = "fc", path
+    """The fonts set up before Pango's loaded: text through FontConfig and FreeType on macOS, the code font Settings ->
+    Code Font says, and the fonts bundled beside Baude (fontsetup)."""
+    import fontsetup  # (no GTK: beside this file)
+    fontsetup.setup()
 
 
 def macos_app_name():
@@ -5572,9 +5551,9 @@ def _path_label(path, extra=""):
 
 
 def _diff_block(old, new, path=""):
-    """Removed lines on red, added lines on green (no -/+ markers)."""
+    """Removed lines on red, added lines on green (no -/+ markers), highlighted as path's code."""
     lines = [("del", l) for l in (old or "").splitlines()] + [("add", l) for l in (new or "").splitlines()]
-    return CodeBlock(new or "", "", diff=lines or [("ctx", "")])
+    return CodeBlock(new or "", "", diff=lines or [("ctx", "")], path=path)
 
 
 def _value_widget(v, depth=0):
@@ -5658,23 +5637,24 @@ def tool_input_view(name, inp):
     base = name.split("__")[-1] if name.startswith("mcp__") else name
     # the header already shows the description, so the views don't repeat it
     if base in ("Bash", "BashOutput", "PowerShell") and "command" in inp:
-        add(CodeBlock(inp["command"], "bash" if base != "PowerShell" else "powershell"))
+        shell = "bash" if base != "PowerShell" else "powershell"
+        add(CodeBlock(inp["command"], shell, syntax=shell))
         rest = _kv_rows(inp, skip=("command", "description"))
     elif base == "Edit" and "file_path" in inp:
         add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
-        add(_diff_block(inp.get("old_string"), inp.get("new_string")))
+        add(_diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "MultiEdit" and "file_path" in inp:
         add(_path_label(inp["file_path"], f"{len(inp.get('edits') or [])} edits"))
         for e in inp.get("edits") or []:
-            add(_diff_block(e.get("old_string"), e.get("new_string")))
+            add(_diff_block(e.get("old_string"), e.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "Write" and "file_path" in inp:
         content = inp.get("content") or ""
         lines = content.splitlines()
         add(_path_label(inp["file_path"], f"{len(lines)} lines"))
         shown = "\n".join(lines[:2000]) + (f"\n… {len(lines) - 2000} more lines" if len(lines) > 2000 else "")
-        add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], "")))
+        add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], ""), path=inp["file_path"]))
         rest = None
     elif base == "Read" and "file_path" in inp:
         span = ""
@@ -5684,7 +5664,8 @@ def tool_input_view(name, inp):
         add(_path_label(inp["file_path"], span))
         rest = _kv_rows(inp, skip=("file_path", "offset", "limit"))
     elif base in ("Grep", "Glob") and "pattern" in inp:
-        add(CodeBlock(inp["pattern"], "regex" if base == "Grep" else "glob"))
+        grep = base == "Grep"  # (a regex drawn as one, and as it's written: a label's text, never markup or markdown)
+        add(CodeBlock(inp["pattern"], "regex" if grep else "glob", syntax="regex" if grep else None))
         rest = _kv_rows(inp, skip=("pattern",))
     elif base == "WebFetch" and "url" in inp:
         add(sel_label(f'<a href="{html.escape(inp["url"])}">{html.escape(inp["url"])}</a>'))
@@ -6075,7 +6056,14 @@ class ToolCard(Gtk.Box):
         title, source = tool_display(self.name)
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
-        self.header.set_markup(f"{src}{html.escape(s)}{tail}")
+        shown = html.escape(s)
+        if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
+            shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
+        markup = f"{src}{shown}{tail}"
+        self.header.set_markup(markup)
+        # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
+        # till its style next changes: the look given again as the label's own attributes)
+        self.header.set_attributes(Pango.parse_markup(markup, -1, "\0")[1])
 
     def show_output(self):
         self.toggles.set_visible(True)
@@ -6135,8 +6123,9 @@ class ToolCard(Gtk.Box):
 
     def build_output(self):
         pending, self.pending_output = self.pending_output, []
+        read = self.input.get("file_path") if self.base == "Read" else None  # (a file's lines: its code, numbered)
         for shown, lang in pending:
-            self.result_box.append(CodeBlock(shown, lang))
+            self.result_box.append(CodeBlock(shown, lang, path=read or "", numbered=bool(read)))
 
     def add_partial_json(self, chunk):
         self.partial_json += chunk
@@ -10439,9 +10428,10 @@ def _num(path):
 
 
 class SettingsDialog(Adw.PreferencesDialog):
-    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): full-width text, Baude in the platform's list of apps,
-    feedback, and the sizes, 1.0 the usual: the text's and the icons', all of them in every window (apply_scales), and
-    the chat's zoom that ⌘0 / Ctrl+0 goes back to. Each takes as it's changed and is kept in settings.json. (The
+    """Menu → Settings… (⌘, on macOS, Ctrl+, elsewhere): full-width text, the code font, Baude in the platform's list
+    of apps, feedback, and the sizes, 1.0 the usual: the text's and the icons', all of them in every window
+    (apply_scales), and the chat's zoom that ⌘0 / Ctrl+0 goes back to. Each takes as it's changed (the code font from
+    the next start) and is kept in settings.json. (The
     switches are the window's actions, full-width's the menu's too, so the two agree; the handlers are given the row,
     never a closure over this dialog: see discard)"""
 
@@ -10450,6 +10440,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         page = widgets.settings_page()
         group = Adw.PreferencesGroup()
         group.add(self.switch("Full-width text", None, "win.fullwidth"))
+        group.add(widgets.settings_code_font(win, "Baude"))
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)

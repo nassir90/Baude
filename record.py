@@ -66,6 +66,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pang
 import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside this file)
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
+fontsetup.setup()
 from baudelib.transcripts import task_notification  # noqa: E402  (a background task's ending, as said)
 from baudelib.claude import MODELS, ClaudeProc  # noqa: E402  (Claude Code's process, as Baude runs its chats)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
@@ -854,7 +856,7 @@ def _inline(s, names=()):
     out = []
     for part in re.split(r"(`[^`\n]+`)", s):
         if len(part) > 1 and part.startswith("`") and part.endswith("`"):
-            code = '<span font_family="monospace" background="#8882">' + html.escape(part[1:-1], False) + "</span>"
+            code = '<span font_family="monospace" size="' + widgets.code_markup_size() + '" background="#8882">' + html.escape(part[1:-1], False) + "</span>"
             name = next((n for n in (part[1:-1], lookup.ref_key(part[1:-1])) if n in names), None)
             out.append(_name_link(name, code) if name else code)
             continue
@@ -879,7 +881,7 @@ def md_markup(text, names=()):
             if code is None:
                 code = []
             else:
-                out.append('<span font_family="monospace" size="small">' + html.escape("\n".join(code), False) + "</span>")
+                out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape("\n".join(code), False) + "</span>")
                 code = None
             continue
         if code is not None:
@@ -893,7 +895,7 @@ def md_markup(text, names=()):
             ind = len(line) - len(line.lstrip())
             out.append("   " * (ind // 2) + " •  " + _inline(re.sub(r"^\s*[-*+]\s+", "", line), names))
         elif line.lstrip().startswith("|"):
-            out.append('<span font_family="monospace" size="small">' + html.escape(line, False) + "</span>")
+            out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape(line, False) + "</span>")
         elif line.startswith(">"):
             out.append("<i>" + _inline(line.lstrip("> "), names) + "</i>")
         elif re.fullmatch(r"\s*([-*_])\1{2,}\s*", line):
@@ -901,7 +903,7 @@ def md_markup(text, names=()):
         else:
             out.append(_inline(line, names))
     if code is not None:
-        out.append('<span font_family="monospace" size="small">' + html.escape("\n".join(code), False) + "</span>")
+        out.append('<span font_family="monospace" size="' + widgets.code_markup_size() + '">' + html.escape("\n".join(code), False) + "</span>")
     return "\n".join(out)
 
 
@@ -2885,8 +2887,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         widgets.no_text_drag(self.view)  # (a selection isn't dragged away: a press in it places the caret)
         widgets.word_steps(self.view)  # (Option and an arrow: as far as a closing } or a line's full stop too)
         self.buf = self.view.get_buffer()
-        for name, props in self.TAGS.items():
-            self.buf.create_tag(name, **props)
+        for name, props in self.TAGS.items():  # (code, `x` and ``` blocks, at code's size beside the notes': widgets')
+            self.buf.create_tag(name, **({**props, "scale": widgets.code_scale()} if name in ("verbatim", "pre") else props))
         for n in self.HEADING_SPACE:  # (a heading's space below, as the space above the line after it: _heading_looks)
             self.buf.create_tag(f"after-h{n}")
         self.view.restyled = self._heading_looks
@@ -6166,10 +6168,10 @@ class RecordChat(Gtk.Box):
 
 class Settings(Adw.PreferencesDialog):
     """☰ → Settings… (⌘, on macOS, Ctrl+, elsewhere), as Baude's: Intelligence (the model the Record's agent runs on,
-    Haiku unless another's chosen), Full-width text, Show in Applications, and the sizes,
-    1.0 the usual: the text's and the icons' (Baude's settings: the same in both), and the zoom Ctrl/⌘ 0 goes back
-    to; Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback… and the feedback sent.
-    Each takes at once and is kept."""
+    Haiku unless another's chosen), Full-width text, Code Font, Show in Applications, and the sizes, 1.0 the usual: the
+    text's and the icons' (Baude's settings: the same in both, Code Font too), and the zoom Ctrl/⌘ 0 goes back to;
+    Export Notebook… and Export All…, each saying what its zip comes to; Send Feedback… and the feedback sent. Each
+    takes at once (Code Font from the next start) and is kept."""
 
     def __init__(self, win):
         super().__init__(title="Settings")
@@ -6190,6 +6192,7 @@ class Settings(Adw.PreferencesDialog):
                                   selected=modes.index(win.store.markup))
         formatting.connect("notify::selected", lambda r, _p: win.set_markup(modes[r.get_selected()]))
         group.add(formatting)
+        group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
         self.version_row = update.version_row(self)  # (and the version, its changelog: Baude's too)
         group.add(self.version_row)

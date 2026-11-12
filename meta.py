@@ -966,7 +966,6 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
-button.meta-clear {{ min-height: 22px; min-width: 22px; padding: 0; }}
 """
 _CSS = []
 MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a"}  # (highlight:
@@ -1236,17 +1235,9 @@ class MetaChat(Gtk.Box):
                            margin_start=12, margin_end=12)
         self.scroll = widgets.markdown_scroller(self.box, vexpand=True)
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
-        # widgets.inside); Clear a little × over the conversation's top left corner, taking no line of its own
-        clear = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Clear conversation", halign=Gtk.Align.START,
-                           valign=Gtk.Align.START, margin_start=6, margin_top=6)
-        clear.add_css_class("flat")
-        clear.add_css_class("circular")
-        clear.add_css_class("meta-clear")
-        clear.connect("clicked", lambda *_: self._clear())
-        over = Gtk.Overlay(child=self.scroll, vexpand=True)
-        over.add_overlay(clear)
+        # widgets.inside), all of the column's height theirs (clear, or /clear, asked: cleared, submit)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
-        talk.append(over)
+        talk.append(self.scroll)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=10)
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)  # (an app's own, over the box)
@@ -1369,7 +1360,7 @@ class MetaChat(Gtk.Box):
         """Settings → Meta: the send button says the model it asks; the next message is the new model's (submit)."""
         name = dict(MODELS_OFFERED).get(model(), model())
         self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) (Enter)\n" \
-                                "New line: Shift+Enter\n@: a chat, a file…"
+                                "New line: Shift+Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
 
@@ -1806,11 +1797,16 @@ class MetaChat(Gtk.Box):
     def all_tools(self):
         return SHARED_TOOLS + self.app_tools()
 
+    CLEAR = ("clear", "/clear")  # (asked alone: the conversation cleared, not sent)
+
     def submit(self):
         buf = self.composer.get_buffer()
         text = self.writing.text().strip()
         if self.ask or not self.ready() or not (text or self.can_ask_empty()):
             return
+        if text.lower() in self.CLEAR:
+            buf.set_text("")
+            return self._clear()
         self.before_ask()
         msg = self.make_message(text or self.empty_question())
         self.messages().append(msg)

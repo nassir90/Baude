@@ -6431,10 +6431,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
                              (" ".join(m + "f" for m in widgets.ZOOM_MODS),  # (as Baude's: what's over it first)
                               lambda: self.kube.find() or self.schema.start_find() or self.find_in_code()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
-                              lambda: self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
+                              lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
                              (widgets.zoom_keys("minus", "underscore", "KP_Subtract"),
-                              lambda: self.set_zoom(self.store.zoom - widgets.ZOOM_STEP)),
-                             (widgets.zoom_keys("0", "KP_0"), lambda: self.set_zoom(self.store.zoom_default))):
+                              lambda: self.zoom_code(-1) or self.set_zoom(self.store.zoom - widgets.ZOOM_STEP)),
+                             (widgets.zoom_keys("0", "KP_0"),
+                              lambda: self.zoom_code(0) or self.set_zoom(self.store.zoom_default))):
             for trigger in triggers.split():
                 keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trigger),
                                                    Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
@@ -7456,6 +7457,17 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
             page.open_search()
             return True
         return False
+
+    def zoom_code(self, steps):
+        """Ctrl/⌘ + − 0 in a code tab (the focus anywhere but the conversation, whose text they size), or with the
+        focus on code (the Kubernetes view's YAML): the code's own size, as Baude's, steps up or down (0: 1.0 again).
+        False otherwise, where they size the notes, the chat read and the conversation."""
+        focus = self.get_focus()
+        in_chat = focus is not None and (focus is self.chat or focus.is_ancestor(self.chat))
+        if in_chat or not (isinstance(self.tabs.current(), viewers.CodePage) or viewers.in_code(focus)):
+            return False
+        viewers.CodeView.set_zoom(viewers.CodeView.zoom + steps * widgets.ZOOM_STEP if steps else 1.0)
+        return True
 
     def _last(self, kind):
         """The tab of a kind shown, else the one shown last of it, else None."""

@@ -152,7 +152,7 @@ from widgets import (  # noqa: E402,F401
 )
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
-    file_children, file_icon, git_ignored, python_context,
+    file_children, file_icon, git_ignored, in_code, python_context,
 )
 from kubeview import (  # noqa: E402,F401
     CERT_MANAGER_CERTIFICATE, CERT_MANAGER_ISSUER, KEDA_SCALED_JOB, KEDA_SCALED_OBJECT, KEDA_TRIGGER_AUTH, KUBE_CLIMB,
@@ -10372,10 +10372,13 @@ class SignalPage(Gtk.Stack):
             ref.refresh([r.surface for r in self.shown() if r.status == "not_found"], self.win.touched_paths())
 
 
-def in_code(widget):
-    """Whether a widget is on the Code page (its header too) or in another CodeView (the Kubernetes view's YAML):
-    where Ctrl+scroll and Ctrl +/−/0 size the code rather than the chat."""
-    while widget is not None and not isinstance(widget, (CodePage, CodeView)):
+def in_chat(widget):
+    """Whether a widget is in a chat on the screen, what the chat's zoom sizes (.zoomable: the chat, its box, a
+    subagent's chat in the side panel). Not the box hidden under a code tab, which the Kubernetes and database views
+    give the focus back to as they close."""
+    if widget is None or not widget.get_mapped():
+        return False
+    while widget is not None and not widget.has_css_class("zoomable"):
         widget = widget.get_parent()
     return widget is not None
 
@@ -13511,9 +13514,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         return True
 
     def zoom_code(self, steps):
-        """Ctrl +/−/0 with the focus on the Code page (or in the Kubernetes view's YAML): the code's size, steps up
-        or down (0: 100% again). False elsewhere, where they size the chat."""
-        if not in_code(self.get_focus()):
+        """Ctrl +/−/0 with the focus on code (a Code page, the Kubernetes view's YAML), or with a code tab shown and
+        the focus in no chat (the Files page's list, say): the code's size, steps up or down (0: 100% again). False
+        elsewhere, where they size the chat."""
+        focus = self.get_focus()
+        if not in_code(focus) and (not isinstance(self.tabs.current(), CodePage) or in_chat(focus)):
             return False
         CodeView.set_zoom(CodeView.zoom + steps * ZOOM_STEP if steps else 1.0)
         return True

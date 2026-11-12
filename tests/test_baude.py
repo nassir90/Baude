@@ -3242,6 +3242,7 @@ def test_resume_is_read_only_and_tails(app):
         wait_for(lambda: win.sidebar.find_info("f1f1f1f1-0000-4000-8000-000000000001"), "listed")
         digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         win.resume_session(win.sidebar.find_info("f1f1f1f1-0000-4000-8000-000000000001"))
+        win.desktop_chat = True  # (Claude Desktop's: the only chats kept from a second writer)
         pump(1.5)
         assert not any("f1f1f1f1-0000-4000-8000-000000000001" in l for l in fake_log() if l.startswith("START")), \
             "only viewing: no claude for it till it's written in"
@@ -4569,6 +4570,7 @@ def test_own_session_is_not_active_elsewhere(app):
         win.resume_session(win.sidebar.find_info("0e0e0000-0000-4000-8000-000000000002"))
         win.resume_session(win.sidebar.find_info("0e0e0000-0000-4000-8000-000000000001"))
         assert not win.live_elsewhere() and not win.banner.get_revealed() and win.composer.get_visible()
+        win.desktop_chat = True  # (were it Claude Desktop's, the only chats kept from a second writer)
         with open(mine, "a") as f:  # but if something else does write to it now, that shows
             f.write(json.dumps({"type": "user", "message": {"content": "from the terminal"}}) + "\n")
         wait_for(lambda: win.banner.get_revealed(), "written elsewhere")

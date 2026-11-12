@@ -1065,13 +1065,18 @@ NET = {}
 
 
 def network_fixture():
-    """Servers as Baude finds them on the network (baudelib.server, here on loopback, running the fake claude): lab-mac,
-    there, with sessions in the Lab and Planning groups (one asking whether it may run a command); and build-box, with
-    sessions in Lab, gone once Baude has seen them (dead). Made once, for every scene that wants it."""
+    """Servers as Baude finds them on the network (baudelib.server, here on loopback, running the fake claude, each
+    saying it's on a machine of its own): lab-mac, there, with sessions in the Lab and Planning groups (one asking
+    whether it may run a command); and build-box, with sessions in Lab, gone once Baude has seen them (dead). Made once,
+    for every scene that wants it."""
     if NET:
         return NET
     import threading
     from baudelib.server import Server
+
+    class Server(Server):  # (another machine's: its own name, not this one's, so not listed as This Mac's)
+        def _info(self):
+            return {**super()._info(), "host": f"{self.me['name']}.lan"}
     net = baude.network()
     env = {"FAKE_CLAUDE_SESSION_IDS": "1", "FAKE_CLAUDE_TRANSCRIPTS": "1"}  # (its sessions' ids and transcripts)
     parser, site = (os.path.join(T.TMP, "net", name) for name in ("parser", "site"))
@@ -1116,9 +1121,10 @@ def network_fixture():
 
 
 def network_window(app, group="Lab", sid=None):
-    """A window showing a group on the network (in Planning, sid: the session waited for)."""
+    """A window listing a group on the network, every host's (⋮ → Groups; None: every group), in Planning, sid: the
+    session waited for."""
     network_fixture()
-    baude.save_settings(sidebar_network=group)
+    baude.save_settings(sidebar_hosts=None, sidebar_groups=[group] if group else None)
     win = app.window(opts(cwd=NET["folders"][0]))
     if sid is None:
         T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "the network's sessions")
@@ -1199,8 +1205,9 @@ def popup_choices(dropdown):
     next(w for w in T.walk(dropdown) if isinstance(w, Gtk.Popover)).popup()
 
 
-@scene("55-network-group-menu", "⋮ beside the search: Group by, then Group, which sessions are listed: Local (this "
-                                "machine's) or a group servers on the network have sessions in")
+@scene("55-network-group-menu", "⋮ beside the search: Group by, then which hosts and groups are listed: This Mac "
+                                "(its own chats and its server's) and each host a server's on; each group their "
+                                "sessions are in. Here every host's, in Lab")
 def _(app):
     win = network_window(app)
     win.sidebar.view_btn.popup()
@@ -1249,10 +1256,11 @@ def _(app):
     return win
 
 
-@scene("55f-network-new-session", "New session, while a group on the network is shown: a prompt, a folder and a group, "
+@scene("55f-network-new-session", "New session, while only another host is listed: a prompt, a folder and a group, "
                                   "on a server that's there, with the top bar's model, effort and mode")
 def _(app):
     win = network_window(app)
+    win.sidebar.filtered(sidebar_hosts=[NET["lab"][1].key])
     win.sidebar.new_chat()
     T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
     f = win.remote_fields
@@ -1273,11 +1281,53 @@ def _(app):
     return win
 
 
-@scene("55k-network-add-server", "⋮ → Group → Add server…: a server by its address, for one Baude doesn't find by "
+@scene("55k-network-add-server", "⋮ → Hosts → Add server…: a server by its address, for one Baude doesn't find by "
                                  "itself; kept from then on, reached or not")
 def _(app):
     win = network_window(app)
     win.ask_add_server().set_text("build-box.lan:47100")
+    return win
+
+
+@scene("55l-network-hosts", "⋮ → Hosts, one picked (a click; Shift or Ctrl (⌘) and a click adds or takes away one): "
+                            "lab-mac's sessions, in every group; Show All puts everything back")
+def _(app):
+    win = network_window(app, None)
+    win.sidebar.filtered(sidebar_hosts=[NET["lab"][1].key])
+    win.sidebar.view_btn.popup()
+    return win
+
+
+@scene("55m-network-all", "Every host and group, as at first: This Mac's own chats, with the network's sessions")
+def _(app):
+    network_fixture()
+    for n, title in enumerate(("Tidy the changelog", "Fix the login redirect")):  # (this machine's own, in site)
+        T.write_session(NET["folders"][1], f"5555555{n}-0000-4000-8000-000000000055", title=title)
+    win = network_window(app, None)
+    T.wait_for(lambda: sidebar_row(win, "Tidy the changelog") is not None, "this machine's chats")
+    return win
+
+
+@scene("55n-network-new-session-here", "Right-click a host in ⋮ → Hosts: New Session Here")
+def _(app):
+    win = network_window(app, None)
+    win.sidebar.view_btn.popup()
+    T.pump(0.2)
+    row = next(r for r in win.sidebar.host_list.rows() if r.key == NET["lab"][1].key)
+    ok, rect = row.compute_bounds(win.sidebar.host_list)
+    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
+    return win
+
+
+@scene("55o-network-new-session-here-dialog", "New Session Here on lab-mac: its folder, a group and a prompt, with the "
+                                              "top bar's model, effort and mode")
+def _(app):
+    win = network_window(app, None)
+    win.new_session_here(NET["lab"][1].key)
+    T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
+    f = win.remote_fields
+    f["folder"].set_text(NET["folders"][0])
+    f["prompt"].get_buffer().set_text("Profile the parser on the large fixtures and write up where the time goes.")
     return win
 
 
@@ -1983,11 +2033,16 @@ def capture(win, size, path):
     # elsewhere without X: GTK draws the window itself, and the popovers open in it (surfaces of their own) where they are
     img = render_widget(win, path)
     for pop in T.find(win, Gtk.Popover, lambda p: p.get_visible() and p.get_mapped()):
-        ok, at = pop.compute_point(win, Graphene.Point())
-        if ok and pop.get_width() and pop.get_height():
+        # (each placed in the surface of what it's in: the window's, or another popover's, which is placed in its own)
+        x = y = 0
+        outer = pop
+        while isinstance(outer, Gtk.Popover) and outer.get_surface() is not None:
+            x, y = x + outer.get_surface().get_position_x(), y + outer.get_surface().get_position_y()
+            outer = outer.get_parent().get_native() if outer.get_parent() is not None else None
+        if pop.get_width() and pop.get_height():
             shot = render_widget(pop, path + ".popover.png")
             os.remove(path + ".popover.png")
-            img.paste(shot, (round(at.x), round(at.y)), shot)
+            img.paste(shot, (x, y), shot)
     img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
 
 
@@ -2024,7 +2079,8 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, hidden_remote=None)
+                        signal_reader=False, sidebar_network=None, sidebar_hosts=None, sidebar_groups=None,
+                        hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)
     T.feedback._gh_seen.update(at=None, repo=None)

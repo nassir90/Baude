@@ -437,6 +437,11 @@ class Network:
             return [{**s, "server": r} for r in self.servers.values() for s in r.sessions.values()
                     if group is None or s.get("group") == group]
 
+    def remotes(self):
+        """Every server known, there or not."""
+        with self.lock:
+            return list(self.servers.values())
+
     def find(self, session_id):
         with self.lock:
             return next((r for r in self.servers.values() if session_id in r.sessions), None)

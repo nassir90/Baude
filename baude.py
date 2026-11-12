@@ -8720,10 +8720,12 @@ class SidePanel(Gtk.Box):
             self.update_process(task)
 
     @staticmethod
-    def describe(task):
+    def describe(task, marked=False):
+        """A task's state and what it's done so far. marked: for a list row, whose spinner or ✓ already says running
+        or completed, so only the other endings (failed, killed, interrupted) are said in words."""
         status = task.get("status", "running")
         usage = task.get("usage") or {}
-        bits = [status]
+        bits = [] if marked and status in ("running", "completed") else [status]
         if task.get("subagent_type"):
             bits.insert(0, task["subagent_type"])
         if usage.get("tool_uses"):
@@ -8764,7 +8766,7 @@ class SidePanel(Gtk.Box):
             else:
                 self.agent_list.prepend(row)
         row.set_title(html.escape(task.get("description") or "Subagent"))
-        row.set_subtitle(html.escape(self.describe(task)))
+        row.set_subtitle(html.escape(self.describe(task, marked=True)))
         row.status.set_state({"running": "running", "completed": "done",
                               "interrupted": "interrupted"}.get(task.get("status"), "error"))
         if self.agent_stack.get_visible_child_name() == "detail" and self.current == tid:
@@ -8821,7 +8823,7 @@ class SidePanel(Gtk.Box):
             first = (cmd or desc or tid).strip().splitlines()[0] if (cmd or desc or tid).strip() else tid
             row.set_title(f"<tt>{html.escape(first[:300])}</tt>")
         row.set_tooltip_text(cmd or desc or None)
-        row.set_subtitle(html.escape(self.describe(task)))
+        row.set_subtitle(html.escape(self.describe(task, marked=True)))
         running = task.get("status", "running") == "running"
         row.stop.set_visible(running)
         row.status.set_state("running" if running else {"completed": "done", "interrupted": "interrupted"}

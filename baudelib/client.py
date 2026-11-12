@@ -649,7 +649,11 @@ class _Remote:
         self.proc, self.args, self.pid = proc, args, None
 
     def poll(self):
-        return None if self.proc.ch is not None and not self.proc.ch.closed else self.proc.code
+        """None while it's attached; then its claude's exit, or -1 once it's let go of (killed: the session goes on, on
+        its host, or goes with it: a side question's)."""
+        if self.proc.ch is not None and not self.proc.ch.closed:
+            return None
+        return self.proc.code if self.proc.code is not None else -1 if self.proc.killed else None
 
 
 class RemoteProc(claude.ClaudeProc):
@@ -658,14 +662,16 @@ class RemoteProc(claude.ClaudeProc):
     only what it asks (a permission) and the answers to what's asked of it (initialize: its models and commands).
     kill() lets go of it: the session goes on, on its server. OSError if it can't be reached."""
 
-    def __init__(self, on_msg, on_exit, where, session_id, live=True):
+    def __init__(self, on_msg, on_exit, where, session_id, live=True, env=None, always_allow=None):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.session, self.live, self.code, self.killed = session_id, live, None, False
         self.ch, self.server = wire.reach(where, timeout=3)
         self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
-        self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0})
+        # (env: this machine's head's environment, for its claude, as Baude's own would have had: a host here's only)
+        self.ch.send({"op": "attach", "session": session_id, "live": live, "req": 0, **({"env": env} if env else {}),
+                      **({"always_allow": list(always_allow)} if always_allow else {})})
         reply = self.ch.reply()
         if not reply or reply.get("op") != "attached":
             self.ch.close()

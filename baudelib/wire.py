@@ -7,10 +7,14 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends. archived:
                                                        those archived listed too, and their turns' ends (default:
-                                                       not)
+                                                       not). Each session's written: its transcript's size as its
+                                                       own claude last left it (more since, with it stopped: another
+                                                       program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, system?, add_dirs?,
-           allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?}
-                                                    -> started {session}, before the prompt's sent: attach, and this
+           allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
+           env?}
+                                                    -> started {session, forked}, before the prompt's sent: attach,
+                                                       and this
                                                        connection's attached live to it first. system: more for
                                                        claude's system prompt (--append-system-prompt); add_dirs:
                                                        folders it may use besides its own (--add-dir);
@@ -28,12 +32,28 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        start's): false for a head that won't answer what the session
                                                        asks (a permission): it isn't counted as there to answer, so
                                                        ask_timeout's wait still runs out and ask_default answers, as
-                                                       if nobody were attached
+                                                       if nobody were attached. draft: a new chat, listed as
+                                                       draft (a head leaves it out of its lists) and not kept till
+                                                       it's written in (its first user input), and gone if nobody's
+                                                       attached before it is. ephemeral: a side
+                                                       question's, forked from fork_from (or fresh), keeping nothing
+                                                       (--no-session-persistence), never listed, gone with its last
+                                                       head. adopt: a conversation claude has here already, by its
+                                                       id, made the host's (resumed by it; started: as it is, if
+                                                       it's the host's already). env: a head on this machine's
+                                                       environment for the session's claude (kept in memory only;
+                                                       attach takes it too)
     detach {session}
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
                                                        isn't running)
-    stop {session}                                  -> stopped {session}
+    stop {session, restart?}                        -> stopped {session} (its claude: the next message resumes it;
+                                                       restart: those attached aren't told it went)
+    set_cwd {session, cwd}                          -> cwd_set {session, cwd}: the folder its claude runs in, from its
+                                                       next message on (not at a turn)
+    always_allow {session, tools}                   -> allowed {session}: tools allowed whenever its claude asks for
+                                                       them, a head attached or not (kept in memory; attach's
+                                                       always_allow too)
     archive {session}, unarchive {session}          -> archived / unarchived {session}: its claude stopped, and it's
                                                        listed only to those subscribed with archived (unarchive: to
                                                        all again)
@@ -44,8 +64,10 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        with a chat of its own; then it's gone from the list and from
                                                        what the server keeps. One whose files can't be moved stays:
                                                        error, saying why
-    quit                                            -> quitting: the host process stops, its claudes too (their
-                                                       sessions kept, resumed next time)
+    quit {if_idle?}                                 -> quitting: the host process stops, its claudes too (their
+                                                       sessions kept, resumed next time). if_idle: only if no
+                                                       session's at a turn or asking, else busy {sessions: [id]}
+                                                       and it goes on (a version 1 host quits whatever it's given)
     transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
     subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
                                                        data (base64)}], more} (its subagents' files, in the folder
@@ -101,7 +123,7 @@ import subprocess
 import threading
 import time
 
-VERSION = 1
+VERSION = 2  # (1: #98-#123; 2: adopt, ephemeral, env, info's init)
 SERVICE = "_baude._tcp.local."  # (DNS-SD: discovery.py)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

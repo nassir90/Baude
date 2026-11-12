@@ -31,6 +31,8 @@ from baudelib.discovery import Advertiser
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
+DRAFT_S = 30  # (a new chat never written in, nobody attached this long: gone)
+EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
@@ -86,6 +88,20 @@ def running_pid(state_dir=None):
     except (OSError, subprocess.TimeoutExpired):
         return None
     return int(text) if "baude_headless.py" in ran else None
+
+
+def _said(msg):
+    """A user message's text (its text blocks', if it's more than text), for a title."""
+    content = (msg.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return content
+    return " ".join(c.get("text") or "" for c in content or [] if isinstance(c, dict) and c.get("type") == "text")
+
+
+def clean_env(env):
+    """A head's environment for a session's claude: names and values that are text, nothing else."""
+    return {k: v for k, v in env.items() if isinstance(k, str) and isinstance(v, str) and k and "=" not in k
+            and "\0" not in k + v}
 
 
 def trash(path):
@@ -158,6 +174,9 @@ class Session:
         self.agents = None        # its subagents' files, as last looked at: {name: (size, mtime_ns)}
         self.used = time.time()
         self.deleting = self.deleted = False  # (Server.delete's: nothing more taken for it; nothing more kept of it)
+        self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
+        self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
+        self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
 
     @property
     def id(self):
@@ -167,6 +186,15 @@ class Session:
         if self.proc is None:
             return "stopped"
         return "waiting" if self.asks else "working" if self.busy else "idle"
+
+    def note_written(self):
+        """(lock held) How long its transcript is, as its own claude left it (or this host wrote to it, with none
+        running): listed, so a head can tell a terminal's claude writing to it since (written) from its own."""
+        path = self.transcript()
+        try:
+            self.meta["written"] = os.path.getsize(path) if path else None
+        except OSError:
+            self.meta["written"] = None
 
     def kept(self):
         """Is its transcript the server's (its program keeps none)?"""
@@ -226,7 +254,8 @@ class Session:
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),
                 "transcript": self.found_transcript(),
-                "archived": bool(self.meta.get("archived")),
+                "archived": bool(self.meta.get("archived")), "draft": bool(self.meta.get("draft")),
+                "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -382,7 +411,8 @@ class Server:
                            for m in self.models()],
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
-                                 | {self.me["group"]})}
+                                 | {self.me["group"]}),
+                "init": self.me.get("init") or None}
 
     def delete(self, s, reply):
         """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,
@@ -435,14 +465,44 @@ class Server:
             self.changed()
         reply("deleted", session=s.id, trashed=went)
 
+    def drop_ephemeral(self, s, later=False):
+        """(lock held) A side question's session (ephemeral), or a new chat never written in (draft), with nobody
+        attached: gone, its claude too (it wrote nothing: --no-session-persistence, or nothing sent). Not at once: a
+        head attaches again as it starts its claude again (/cd, a restart of its own), or attaches for the first time
+        just after it's made it (a side question's): once nobody's been on it for DRAFT_S (a side question that had a
+        head and lost it: EPHEMERAL_S)."""
+        if not (s.meta.get("ephemeral") or s.meta.get("draft")) or s.viewers or self.sessions.get(s.id) is not s:
+            return
+        if not later:
+            if s.drop_timer is not None:
+                s.drop_timer.cancel()
+            wait = EPHEMERAL_S if s.meta.get("ephemeral") and s.attached_once else DRAFT_S
+            s.drop_timer = threading.Timer(wait, lambda: self._drop_later(s))
+            s.drop_timer.daemon = True
+            s.drop_timer.start()
+            return
+        s.drop_timer = None
+        del self.sessions[s.id]
+        if s.proc is not None:
+            s.proc.stopping = True
+            s.proc.kill()
+
+    def _drop_later(self, s):
+        with self.lock:
+            self.drop_ephemeral(s, later=True)
+            self.changed()
+
     def save(self, s):
-        if not s.deleted:  # (one deleted isn't kept, whatever its claude's last words would have had saved)
+        # (one deleted, a side question's, or a new chat's not written in yet: not kept)
+        if not s.deleted and not s.meta.get("ephemeral") and not s.meta.get("draft"):
             _write_json(os.path.join(self.state_dir, "sessions", f"{s.id}.json"), s.meta)
 
     def listing(self, archived=False):
-        """Its sessions, newest first; those archived only if asked for (archived)."""
+        """Its sessions, newest first; those archived only if asked for (archived); never a side question's
+        (ephemeral). A new chat not written in yet is, as draft (a head leaves it out of its lists)."""
         with self.lock:
-            return sorted((s.listing() for s in self.sessions.values() if archived or not s.meta.get("archived")),
+            return sorted((s.listing() for s in self.sessions.values()
+                           if (archived or not s.meta.get("archived")) and not s.meta.get("ephemeral")),
                           key=lambda i: -(i["said"] or 0))
 
     # ---- running
@@ -534,11 +594,12 @@ class Server:
         finally:
             with self.lock:
                 self.conns.discard(conn)
-                for s in self.sessions.values():
+                for s in list(self.sessions.values()):
                     s.viewers.discard(conn)
                     s.live.discard(conn)
                     s.waiting_init = [w for w in s.waiting_init if w[0] is not conn]
                     s.routes = {k: v for k, v in s.routes.items() if v[0] is not conn}
+                    self.drop_ephemeral(s)
             conn.close()
             ch.close()
 
@@ -558,6 +619,10 @@ class Server:
                     self.rescan(s)
             return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time)
+            with self.lock:
+                at = [s.id for s in self.sessions.values() if s.state() in ("working", "waiting")]
+            if msg.get("if_idle") and at:  # (a head's restart of it, for later: not one that would cut a turn short)
+                return reply("busy", sessions=at)
             reply("quitting")
             threading.Thread(target=self.shutdown, daemon=True, name="quit").start()
             return None
@@ -573,6 +638,14 @@ class Server:
                 return reply("error", error=f"session {s.id} is being deleted")
             if op == "attach":
                 conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
+                s.attached_once = True
+                if s.drop_timer is not None:  # (a head back on it: not dropped after all)
+                    s.drop_timer.cancel()
+                    s.drop_timer = None
+                if isinstance(msg.get("always_allow"), list):  # (tools a head always allows: allowed here, attached
+                    s.always_allow = {t for t in msg["always_allow"] if isinstance(t, str)}  # or not: kept in memory)
+                if isinstance(msg.get("env"), dict):  # (a head here: its claude's environment, from its next start)
+                    s.env = clean_env(msg["env"])
                 s.viewers.add(conn)
                 if msg.get("live"):
                     s.live.add(conn)
@@ -580,15 +653,33 @@ class Server:
             if op == "detach":
                 s.viewers.discard(conn)
                 s.live.discard(conn)
+                self.drop_ephemeral(s)
                 return None
             if op == "input":
                 self.take_input(conn, s, msg.get("msg") or {})
                 return reply("accepted", session=s.id) if req is not None else None
-            if op == "stop":
+            if op == "stop":  # (restart: started again with the next message, those attached not told it went)
                 if s.proc is not None:
                     s.proc.stopping = True
+                    s.proc.restarting = bool(msg.get("restart"))
                     s.proc.kill()
                 return reply("stopped", session=s.id)
+            if op == "always_allow":  # (tools a head always allows: allowed here as claude asks, with or without it)
+                s.always_allow = {t for t in msg.get("tools") or [] if isinstance(t, str)}
+                return reply("allowed", session=s.id)
+            if op == "set_cwd":  # (/cd: claude carries on there, from its next message: started again in it)
+                cwd = os.path.realpath(os.path.expanduser(msg.get("cwd") or ""))
+                if not os.path.isdir(cwd):
+                    return reply("error", error=f"not a folder here: {cwd}")
+                if s.busy:
+                    return reply("error", error="it's at a turn: stop it, or wait for its end, first")
+                s.meta["cwd"] = cwd
+                self.save(s)
+                if s.proc is not None:  # (started again in it with the next message: those attached go on)
+                    s.proc.stopping = s.proc.restarting = True
+                    s.proc.close_stdin()
+                self.changed()
+                return reply("cwd_set", session=s.id, cwd=cwd)
             if op in ("archive", "unarchive"):  # (archived: its claude stopped, and listed only if asked for)
                 if op == "archive" and s.proc is not None:
                     s.proc.stopping = True
@@ -616,9 +707,14 @@ class Server:
         started once it's begun (its claude started, its prompt sent): before claude says anything of it, which waits
         on the lock this holds. Anything wrong, and it's not kept."""
         model = params.get("model") or None
+        if params.get("adopt") is not None:
+            return self.adopt(params, conn, req)
         with self.lock:
             src = self.sessions.get(params["fork_from"]) if params.get("fork_from") else None
-        if params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
+        if params.get("fork_from") and params.get("ephemeral") and src is not None and src.transcript() is None:
+            params = {**params, "cwd": params.get("cwd") or src.meta["cwd"]}  # (a side question in a chat with
+            src = None                                                         # nothing written yet: a fresh one, there)
+        elif params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
             raise ValueError(f"no conversation here to fork: {params['fork_from']}")
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or (src.meta["cwd"] if src else "~")))
         if not os.path.isdir(cwd):
@@ -643,17 +739,21 @@ class Server:
         if params.get("ask_default") not in (None, "deny", "allow"):
             raise ValueError("ask_default is deny or allow")
         meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
-                "group": params.get("group") or self.me["group"], "title": params.get("title") or None,
+                "group": self.group_of(params), "title": params.get("title") or None,
                 "prompt": params.get("prompt") or "", "created": time.time(), "options": options,
                 "fork_from": (src.meta.get("cli_id") or src.id) if src else None,
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
-                "ask_default": params.get("ask_default") or "deny"}
+                "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
+                "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
         with self.lock:
             s = Session(self, meta)
+            if isinstance(params.get("env"), dict):
+                s.env = clean_env(params["env"])
             self.sessions[s.id] = s
             self.save(s)
             if conn is not None and params.get("attach"):
                 conn.answers = params.get("answers", True) is not False
+                s.attached_once = True
                 s.viewers.add(conn)
                 s.live.add(conn)
             try:
@@ -670,8 +770,50 @@ class Server:
                     pass
                 raise
             if conn is not None:
-                conn.send({"op": "started", "req": req, "session": s.listing()})
+                conn.send({"op": "started", "req": req, "session": s.listing(), "forked": bool(src)})
             self.log(f"started {s.id} in {cwd} ({meta['group']})")
+            self.changed()
+        return s
+
+    def group_of(self, params):
+        """A new session's group: as asked; the host's own if none's asked; none if asked for none ("": Baude's own
+        chats, which are in no group till they're put in one)."""
+        group = params.get("group")
+        return group if isinstance(group, str) and (group or "group" in params) else self.me["group"]
+
+    def adopt(self, params, conn=None, req=None):
+        """start {adopt: id}: a conversation claude has here already (a chat Baude ran itself, or a terminal's), made
+        one of this host's, by its own id, and resumed by it from then on (its transcript's where claude keeps it).
+        One that's this host's already: as it is. Its claude starts with the first message (input)."""
+        sid = params["adopt"]
+        if not wire.is_id(sid):
+            raise ValueError(f"not a session's id: {sid!r}")
+        path = transcripts.session_file(sid)
+        with self.lock:
+            s = self.sessions.get(sid)
+            if s is not None and s.deleting:
+                raise ValueError(f"session {sid} is being deleted")
+            if s is None:
+                if not path:
+                    raise ValueError(f"no conversation {sid} here to take up")
+                cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
+                if not os.path.isdir(cwd):
+                    raise ValueError(f"not a folder here: {cwd}")
+                model = params.get("model") or None
+                if not self.can_run(model):
+                    raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
+                run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
+                s = Session(self, {"id": sid, "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
+                                   "group": self.group_of(params), "title": params.get("title") or None,
+                                   "prompt": "", "created": time.time(), "options": {}, "path": path,
+                                   "said": os.path.getmtime(path), "ask_default": "deny", "adopted": True})
+                self.sessions[sid] = s
+                self.save(s)
+                self.log(f"took up {sid} in {cwd}")
+            if isinstance(params.get("env"), dict):
+                s.env = clean_env(params["env"])
+            if conn is not None:
+                conn.send({"op": "started", "req": req, "session": s.listing()})
             self.changed()
         return s
 
@@ -701,10 +843,13 @@ class Server:
                 value = (s.meta.get("options") or {}).get(key)
                 if value:
                     extra += [flag, *(value if isinstance(value, list) else [value])]
+            if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
+                extra += ["--no-session-persistence"]
         made = []  # (the claude its exit is about: claude_exited)
         s.proc = claude.ClaudeProc(
             lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
-            s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra, env=self.env,
+            s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,
+            env={**s.env, **(self.env or {})} or None,  # (a head's, as it gave it; the host's own extras over it)
             exe=run["exe"] if run["program"] != "claude" else self.exe)
         made.append(s.proc)
         s.used = time.time()
@@ -722,6 +867,8 @@ class Server:
         """(lock held) What a client sends its claude."""
         kind = msg.get("type")
         if kind == "user":
+            if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
+                s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
@@ -793,6 +940,10 @@ class Server:
                     if r.get("subtype") == "success":
                         s.meta["init"] = r.get("response") or {}
                         self.save(s)
+                        if models.model_program(s.meta.get("model")) == "claude":  # (the latest: info's, for a head's
+                            self.me["init"] = {k: v for k, v in s.meta["init"].items()  # pickers before its own)
+                                               if k in ("commands", "models", "output_style", "available_output_styles")}
+                            _write_json(os.path.join(self.state_dir, "server.json"), self.me)
                         r = {**r, "response": self.init(s.meta["init"], fresh=True)}
                     for conn, theirs in s.waiting_init:
                         conn.send({"op": "claude", "session": s.id,
@@ -800,6 +951,12 @@ class Server:
                     s.waiting_init = []
                 elif rid in s.routes:
                     conn, theirs, undo = s.routes.pop(rid)
+                    applied = (r.get("response") or {}).get("applied") if r.get("subtype") == "success" else None
+                    if isinstance(applied, dict):  # (get_settings: what claude runs with, its own defaults too: kept,
+                        for key in ("model", "effort"):  # for when it's asked again and isn't running)
+                            if applied.get(key) and not s.meta.get(key):
+                                s.meta[key] = applied[key]
+                                self.save(s)
                     if undo and r.get("subtype") == "error" and s.meta.get(undo[0]) == undo[2]:
                         s.meta[undo[0]] = undo[1]  # (refused, a mode it can't switch to say: kept as it still is)
                         self.save(s)
@@ -817,6 +974,10 @@ class Server:
                         "subtype": "error", "request_id": msg.get("request_id"),
                         "error": f"baude-server: unsupported {request.get('subtype')}"}})
                     return
+                if request.get("tool_name") in s.always_allow and models.model_program(s.meta.get("model")) == "claude":
+                    proc.respond(msg.get("request_id"), {"behavior": "allow",  # (always allowed, a head said:
+                                                         "updatedInput": request.get("input") or {}})  # whoever's here)
+                    return
                 s.asks[msg.get("request_id")] = msg
                 if s.meta.get("ask_timeout"):
                     self.ask_timer(s, proc, msg.get("request_id"))
@@ -824,6 +985,13 @@ class Server:
                     conn.send({"op": "claude", "session": s.id, "msg": msg})
                 self.changed()
                 return
+            if kind == "system" and msg.get("subtype") == "status" and msg.get("permissionMode") \
+                    and msg["permissionMode"] != s.meta.get("mode") \
+                    and not any(u and u[0] == "mode" for _c, _r, u in s.routes.values()):
+                # (claude's own: out of plan, say: kept so; not a change a head asked for before the one it's making)
+                s.meta["mode"] = msg["permissionMode"]
+                self.save(s)
+                self.changed()
             if kind == "system" and msg.get("subtype") == "init" and msg.get("session_id") \
                     and msg["session_id"] != (s.meta.get("cli_id") or s.id):
                 s.meta["cli_id"] = msg["session_id"]  # (claude went on in a transcript of another id)
@@ -892,6 +1060,8 @@ class Server:
             s.proc, s.busy = None, False
             s.asks.clear()
             s.agents = None  # (what its subagents wrote as it went: looked at again)
+            s.note_written()  # (exited: all it's written is there)
+            self.save(s)
             for conn, theirs in s.waiting_init:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
@@ -925,6 +1095,8 @@ class Server:
                     f.write(json.dumps({"type": "custom-title", "customTitle": title,
                                         "sessionId": s.meta.get("cli_id") or s.id},
                                        separators=(",", ":"), ensure_ascii=False) + "\n")
+                if s.proc is None:
+                    s.note_written()  # (this host's own line, not another writer's)
             if path:
                 s.meta.pop("title", None)  # (the transcript says it now, and whatever a /rename in it says next)
             else:

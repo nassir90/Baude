@@ -1206,6 +1206,18 @@ def popup_choices(dropdown):
     next(w for w in T.walk(dropdown) if isinstance(w, Gtk.Popover)).popup()
 
 
+@scene("56-host-older", "This Mac's host process, which runs Baude's chats, older than Baude after an update: said, with "
+                       "Restart It (once nothing's at a turn there: its sessions resume as they're next written to)")
+def _(app):
+    win = app.window()
+    r = baude.local_host()
+    r.info = {**r.info, "version": baude.baudelib.wire.VERSION - 1}  # (as one started before the update says)
+    baude._HOST_SAID.clear()
+    win.check_host_version()
+    T.pump(0.5)
+    return win
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which hosts and groups are listed: This Mac "
                                 "(its own chats and its server's) and each host a server's on; each group their "
                                 "sessions are in. Here every host's, in Lab")
@@ -1630,8 +1642,9 @@ def publish_artifact(win, tool_id="art", title="Acme Fleet Ops", icon="chart", u
 def _(app):
     proj = os.path.join(T.TMP, "btw-proj")
     os.makedirs(proj, exist_ok=True)
-    T.write_session(proj, "fake-session-0001", title="Main chat")
     win = app.window(opts(cwd=proj))
+    # (its transcript, as claude would have it, so the side questions fork it: the host process's chat's id)
+    T.write_session(proj, win.session_id, title="Main chat")
     T.type_and_send(win, "list the files")
     T.wait_for(lambda: T.button(win, "Allow"), "main turn")
     first = win.ask_side_question("what does make do here?")

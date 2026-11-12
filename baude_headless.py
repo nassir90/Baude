@@ -185,7 +185,7 @@ def main():
             print(f"{s['name']}  {s['dest'] or '-'}  group={s['words'].get('group')}  id={s['words'].get('id')}")
         return
     if args.command == "list":
-        for s in ask(args, {"op": "subscribe", "archived": args.archived})["sessions"]:
+        for s in [x for x in ask(args, {"op": "subscribe", "archived": args.archived})["sessions"] if not x.get("draft")]:
             print(f"{s['id']}  {s['state']:8}  {s.get('group') or '':12}  {s.get('model') or 'default':14}  "
                   f"{s.get('title') or ''}  ({s.get('cwd')})" + ("  [archived]" if s.get("archived") else ""))
         return

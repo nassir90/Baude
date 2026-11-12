@@ -54,6 +54,9 @@ os.environ["BAUDE_NETWORK"] = "0"  # (no servers looked for on the network: a te
 os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="bd-", dir="/tmp")
 os.environ["BAUDE_SSH"] = "false"  # (nor anywhere over ssh: a host added by hand is never reached)
 os.environ["BAUDE_MENU_BAR"] = "0"  # (nor an item in the real menu bar, from a host process a test starts)
+# this machine's host process, which runs Baude's chats, in the test's own process (its claudes the fake's, as before)
+os.environ["BAUDE_HOST_IN_PROCESS"] = "1"
+os.environ["FAKE_CLAUDE_SESSION_IDS"] = "1"  # (the fake's id the one it's given, as claude's is: the host's chats' ids)
 # the stand-in claude, run by this Python: its #!/usr/bin/env python3 can find an older one first (macOS's 3.9)
 FAKE_CLAUDE = os.path.join(TMP, "fake-claude")
 with open(FAKE_CLAUDE, "w") as f:
@@ -265,7 +268,8 @@ class App:
         if getattr(self, "next_size", None):  # screenshots: size it before it is shown
             win.set_default_size(*self.next_size)
         win.present()
-        wait_for(lambda: win.session_id == "fake-session-0001", "fake claude to start")
+        # (a new chat: in this machine's host process, a draft there, its claude the fake, ready: initialize answered)
+        wait_for(lambda: win.session_id and win.proc is not None and win.mode_dd.values, "the chat's claude to start")
         return win
 
 
@@ -389,13 +393,14 @@ def test_change_folder_resumes(app):
     try:
         other = os.path.join(TMP, "other folder")
         os.makedirs(other, exist_ok=True)
-        old_proc = win.proc
+        old_proc, sid = win.proc, win.session_id
         win.change_cwd(other)
         wait_for(lambda: win.proc is not old_proc and win.session_id, "restart")
-        wait_for(lambda: sum(l.startswith("START") for l in fake_log()) >= 2, "second process")
-        start = [l for l in fake_log() if l.startswith("START")][-1]
-        assert f"cwd={other}" in start, start
-        assert '"--resume", "fake-session-0001"' in start, start
+        # (the host process's claude: started again in the new folder with the next message, the same conversation)
+        type_and_send(win, "where am I?")
+        wait_for(lambda: any(f"cwd={other}" in l for l in fake_log() if l.startswith("START")), "its claude, there")
+        start = [l for l in fake_log() if l.startswith("START") and f"cwd={other}" in l][-1]
+        assert win.session_id == sid and sid in start, start
         assert "other folder" in win.status.get_text(), "the status bar shows the folder"
         win.change_cwd(os.path.join(TMP, "does-not-exist"))
         assert "not a directory" in labels_text(win)
@@ -428,9 +433,14 @@ def test_model_and_mode_pickers(app):
         pump(0.1)
         assert not any("set_permission_mode" in l for l in fake_log()[sent:])
 
+        # (its claude, the host process's, started again: with what was picked, from the next message on)
+        win.mode_dd.set_selected(win.mode_dd.values.index("auto"))
+        win.mode_dd.set_selected(win.mode_dd.values.index("plan"))
+        wait_for(lambda: any('"set_permission_mode"' in l and '"plan"' in l for l in fake_log()), "plan sent")
         old_proc = win.proc
-        win.restart_proc()
+        win.restart_claude()
         wait_for(lambda: win.proc is not old_proc and win.session_id, "restart")
+        type_and_send(win, "again")
         wait_for(lambda: sum(l.startswith("START") for l in fake_log()) >= 2, "second process")
         start = [l for l in fake_log() if l.startswith("START")][-1]
         assert '"--permission-mode", "plan"' in start and '"--model", "sonnet"' in start, start
@@ -1251,9 +1261,12 @@ def test_effort(app):
         assert win.effort_dd.get_sensitive()
         # a restart carries the chosen effort on the command line
         win.effort_dd.set_selected(win.effort_dd.values.index("xhigh"))
+        wait_for(lambda: any('"apply_flag_settings"' in l and '"xhigh"' in l for l in fake_log()), "xhigh sent")
         old = win.proc
-        win.restart_proc()
-        wait_for(lambda: win.proc is not old and sum(l.startswith("START") for l in fake_log()) >= 2, "restart")
+        win.restart_claude()  # (the host process's claude: started again with the next message)
+        wait_for(lambda: win.proc is not old, "restart")
+        type_and_send(win, "again")
+        wait_for(lambda: sum(l.startswith("START") for l in fake_log()) >= 2, "restart")
         assert '"--effort", "xhigh"' in [l for l in fake_log() if l.startswith("START")][-1]
     finally:
         close(win)
@@ -3230,12 +3243,12 @@ def test_resume_is_read_only_and_tails(app):
         digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         win.resume_session(win.sidebar.find_info("f1f1f1f1-0000-4000-8000-000000000001"))
         pump(1.5)
-        start = [l for l in fake_log() if l.startswith("START")][-1]
-        assert "--resume" not in start, "only viewing: claude doesn't resume it"
+        assert not any("f1f1f1f1-0000-4000-8000-000000000001" in l for l in fake_log() if l.startswith("START")), \
+            "only viewing: no claude for it till it's written in"
         assert hashlib.sha256(open(path, "rb").read()).hexdigest() == digest, "the file is untouched"
         assert not win.banner.get_revealed() and win.composer.get_visible(), "quiet: no banner, you can write"
         assert "resumed" not in labels_text(win.transcript), "no '— resumed —' until you write"
-        assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the helper's own id doesn't replace it"
+        assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the chat's own id"
         # someone else (Desktop, a terminal) carries on: it shows up live
         with open(path, "a") as f:
             f.write(json.dumps({"type": "assistant", "message": {"content": [
@@ -3451,10 +3464,10 @@ def test_sidebar_worktrees(app):
         assert group(plain) == {"New session": [], "Plain chat": []}, "a plain folder is its own (this window's)"
         feature = next(r[3] for r in sidebar_rows(win) if r[0] == "session" and r[1]["title"] == "Feature chat")
         assert "Worktree repo-feature of" in feature.get_tooltip_text()
-        # opening the worktree's chat: claude runs in the worktree, the window's folder is the repository
+        # opening the worktree's chat: it runs in the worktree (no claude till it's written in), the window's folder
+        # is the repository
         win.sidebar.list.emit("row-activated", feature)
-        wait_for(lambda: win.session_id == ids["Feature chat"] and starts()[-1].startswith(f"START cwd={wt} "),
-                 lambda: f"a helper claude in the worktree: {starts()}")
+        wait_for(lambda: win.session_id == ids["Feature chat"] and win.run_cwd == wt, "opened in the worktree")
         assert win.cwd == repo and win.run_cwd == wt and baude.MarkdownView.base_dir == wt
         assert win.ref_checkout == wt, "Signal and the Git page look in the worktree (Signal's glossary: the repo's)"
         assert "(worktree repo-feature)" in win.status.get_text() and win.status.get_tooltip_text() == wt
@@ -3462,7 +3475,7 @@ def test_sidebar_worktrees(app):
         assert rows[0][0] == "folder" and rows[0][2] == repo, "the repository's group comes first"
         assert win.sidebar.list.get_selected_row().info["id"] == ids["Feature chat"], "and the chat is selected"
         assert win.restart_state()["cwd"] == wt, "a restart runs it in the worktree again"
-        win.begin_resume()  # (what the first message does)
+        type_and_send(win, "carry on")  # (the first message: the host process takes it up, and resumes it there)
         wait_for(lambda: f'"--resume", "{ids["Feature chat"]}"' in starts()[-1], "the first message resumes it")
         assert starts()[-1].startswith(f"START cwd={wt} ")
         # collapsing is the repository's
@@ -3474,8 +3487,7 @@ def test_sidebar_worktrees(app):
         # Claude Code's own worktree: the same
         otter_row = next(r[3] for r in sidebar_rows(win) if r[0] == "session" and r[1]["title"] == "Otter chat")
         win.sidebar.list.emit("row-activated", otter_row)
-        wait_for(lambda: win.session_id == ids["Otter chat"] and starts()[-1].startswith(f"START cwd={otter} "),
-                 "a helper claude in .claude/worktrees/brave-otter")
+        wait_for(lambda: win.session_id == ids["Otter chat"] and win.run_cwd == otter, "in .claude/worktrees/brave-otter")
         assert win.cwd == repo and win.ref_checkout == otter
         # + on the group: a new session in the main checkout
         plus = next(b for r in sidebar_rows(win) if r[0] == "folder" and r[2] == repo
@@ -3486,7 +3498,7 @@ def test_sidebar_worktrees(app):
         assert "--resume" not in starts()[-1] and win.run_cwd == win.cwd == repo and win.ref_checkout is None
         # a new session from a worktree's chat starts in the main checkout too
         win.switch_to(lambda: win.resume_session(win.sidebar.find_info(ids["Feature chat"])))
-        wait_for(lambda: starts()[-1].startswith(f"START cwd={wt} "), "back in the worktree")
+        wait_for(lambda: win.session_id == ids["Feature chat"] and win.run_cwd == wt, "back in the worktree")
         win.switch_to(win.new_session)
         wait_for(lambda: starts()[-1].startswith(f"START cwd={repo} "), "Ctrl+N: the main checkout")
         # a worktree picked with Open folder… runs there, listed under its repository
@@ -4086,8 +4098,9 @@ def test_folded_copies_records():
 def test_btw_side_questions(app):
     folder = os.path.join(TMP, "btw")
     os.makedirs(folder, exist_ok=True)
-    saved = write_session(folder, "fake-session-0001", title="Main chat")  # the fake's session, so it can fork
     win = app.window(argparse.Namespace(cwd=folder, model=None, resume=None))
+    # (the chat's transcript, as claude would have it, so a side question can fork it: the host process's chat's id)
+    saved = write_session(folder, win.session_id, title="Main chat")
     try:
         assert any(c["name"] == "btw" for c in win.completer.commands), "/btw is in the / dropdown"
         type_and_send(win, "go")
@@ -4099,11 +4112,11 @@ def test_btw_side_questions(app):
         starts = lambda: [l for l in fake_log() if l.startswith("START")]  # noqa: E731
         wait_for(lambda: any("--no-session-persistence" in l for l in starts()), "a side process")
         side = [l for l in starts() if "--no-session-persistence" in l][-1]
-        for flag in ('"--resume", "fake-session-0001"', '"--fork-session"', '"--permission-mode", "plan"'):
+        for flag in (f'"--resume", "{win.session_id}"', '"--fork-session"', '"--permission-mode", "plan"'):
             assert flag in side, (flag, side)
         sqs = win.panel.side_questions()
         assert len(sqs) == 1 and win.panel.get_visible() and win.panel.stack.get_visible_child_name() == "btw"
-        wait_for(lambda: "Side answer (forked from fake-session-0001) to: what does make do?" in labels_text(sqs[0]),
+        wait_for(lambda: f"Side answer (forked from {win.session_id}) to: what does make do?" in labels_text(sqs[0]),
                  "the answer streams into its thread")
         assert labels_text(win.transcript) == main_text, "nothing added to the chat"
         type_and_send(win, "/btw and why?")
@@ -4294,10 +4307,10 @@ def test_sessions(app):
         old = time.time() - 600
         os.utime(row.info["path"], (old, old))  # finished, not running elsewhere
         win.sidebar.list.emit("row-activated", row)
-        wait_for(lambda: sum(l.startswith("START") for l in fake_log()) >= 2, "a helper claude in that folder")
-        start = [l for l in fake_log() if l.startswith("START")][-1]
-        assert f"cwd={proj}" in start and "--resume" not in start, "opened read-only: not resumed yet"
-        assert win.session_id == "11111111-1111-4111-8111-111111111111" and win.resume_pending
+        # (opened read-only: no claude for it till it's written in, when the host process takes it up)
+        wait_for(lambda: win.session_id == "11111111-1111-4111-8111-111111111111" and win.resume_pending, "opened")
+        assert win.proc is None and not any("11111111-1111-4111-8111-111111111111" in l
+                                            for l in fake_log() if l.startswith("START")), "not resumed yet"
         assert_cwd_in_sync(win, proj)
         text = labels_text(win.transcript)
         assert "Fix the" in text and "Fixed it." in text and "auth.py" in text
@@ -4972,14 +4985,14 @@ def test_sidebar_new_session_indent(app):
         try:
             sb.list.emit("row-activated", next(r[3] for r in sidebar_rows(win) if r[0] == "session"
                                                and r[1]["id"] == sid(6)))
-            wait_for(lambda: win.session_id == sid(6) and win.proc, "the saved chat opened")
+            wait_for(lambda: win.session_id == sid(6) and win.resume_pending, "the saved chat opened")
             pump(0.5)
         finally:
             del sb.fill, sb.refresh
         assert built == ["fill"], built
         check("by day, a saved chat open", new=False)
         win.new_session()
-        wait_for(lambda: win.session_id == "fake-session-0001", "a new session")
+        wait_for(lambda: win.session_id and win.proc, "a new session")  # (a draft in the host process)
         win.session_id = None
         sb.activate_action("sb.group", GLib.Variant.new_string("folder"))
         check("by folder, before the first message")

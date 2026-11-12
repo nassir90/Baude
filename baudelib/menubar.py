@@ -36,6 +36,7 @@ def can_show():
 def say(listing):
     """(title, [lines], [sessions]) for what a host process has (its listing): the title a few words; the lines, how
     many and how many running; each session at a turn, asking or between turns (claude running) as (title, state)."""
+    listing = [s for s in listing if not s.get("draft")]  # (a new chat not written in yet: not one to count)
     running = [s for s in listing if s.get("state") in ("working", "waiting", "idle")]
     asking = [s for s in running if s.get("state") == "waiting"]
     working = [s for s in running if s.get("state") == "working"]

@@ -6792,7 +6792,7 @@ class SlashCompleter:
         self.picks = widgets.PickList(anchor, self._bind, self.accept, position=Gtk.PositionType.TOP,
                                       about_ellipsis=Pango.EllipsizeMode.END)
         self.pop = self.picks.pop
-        self.pop.set_halign(Gtk.Align.START)  # (its left side on the input box's)
+        self.pop.set_halign(Gtk.Align.START)  # (its left side on the /'s: PickList.over)
         self.pop.set_offset(0, -10)  # a clear gap above the input box
         buf = textview.get_buffer()
         # (where a / was just typed: past the prompt's start, only that one starts the list, as only an @ just typed
@@ -6842,7 +6842,8 @@ class SlashCompleter:
             before.rpartition("\n")[2].count("`") % 2 == 1
 
     def refresh(self):
-        q = self.query()
+        word = self.word()
+        q = word and word[1]
         if q is None or "/" in q:  # (a path's, not a command)
             return self.hide()
         def rank(c):
@@ -6865,9 +6866,8 @@ class SlashCompleter:
         # (as wide as @'s, or the input box, if that's narrower: its padding and line either side as well)
         wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
         self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = 0, 0, self.anchor.get_width(), self.anchor.get_height()
-        self.picks.show(n, at or 0, f"{n} found" if n else "Nothing found", rect)
+        self.picks.show(n, at or 0, f"{n} found" if n else "Nothing found",
+                        widgets.PickList.over(self.view, word[0], self.anchor))
 
     def _bind(self, i, icon, name, about):
         c = self.matches[i]

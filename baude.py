@@ -13897,6 +13897,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def begin_resume(self):
         """The first message: stop viewing, start `claude --resume` on the session."""
+        if self.remote is not None and self.remote.state == "alive" and self.view_path:
+            # (a network session: what its server's written since it was last fetched, drawn now, not lost to the
+            # live chat that takes over: the end of a turn answered while it was watched, say)
+            self.remote.sync(self.session_id, timeout=3)
+            self.tail.read()
         self.resume_pending, self.view_path = False, None
         self.tail.stop()
         self.update_banner()

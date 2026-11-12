@@ -140,9 +140,9 @@ class Remote:
         except OSError:
             return 0
 
-    def sync(self, session_id):
-        """Bring a session's mirror up to what the server has (not on the main loop; one sync of a session at a time,
-        whichever window asks). True if it is."""
+    def sync(self, session_id, timeout=30):
+        """Bring a session's mirror up to what the server has (one sync of a session at a time, whichever window asks;
+        timeout: what each request's waited for). True if it is."""
         path = self.mirror(session_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with self.lock:
@@ -150,7 +150,7 @@ class Remote:
         with lock:
             while True:
                 at = self.mirrored(session_id)
-                r = self.call({"op": "transcript", "session": session_id, "offset": at})
+                r = self.call({"op": "transcript", "session": session_id, "offset": at}, timeout)
                 if r.get("op") != "transcript":
                     return False
                 data = base64.b64decode(r.get("data") or "")

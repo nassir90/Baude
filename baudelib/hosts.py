@@ -14,10 +14,13 @@ from baudelib.server import running_pid, state_home
 HEADLESS = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "baude_headless.py")
 
 
-def start_here(wait=20.0):
+def start_here(wait=20.0, follow_checkout=True, auto_update=False):
     """This machine's host process, started if it isn't running (in a process of its own, which goes on after this
     one: its output in its state folder's host.log; one started meanwhile by another head is found, as there's one
-    each). False if none's there after wait seconds."""
+    each). False if none's there after wait seconds. follow_checkout: its updater restarts it onto what's checked out,
+    which this machine's Baude keeps up to date (Baude's way; False: it fetches and fast-forwards the checkout itself,
+    for a machine with no Baude on it, connect's); auto_update: its updater's on whatever this machine's Baude
+    settings say (--auto-update)."""
     path = wire.socket_path()
     if wire.wait_for_socket(path, 0.2):
         return True
@@ -32,8 +35,9 @@ def start_here(wait=20.0):
             return True
     os.makedirs(state_home(), exist_ok=True)
     with open(os.path.join(state_home(), "host.log"), "ab") as log:
-        subprocess.Popen([sys.executable, HEADLESS, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=log, start_new_session=True)
+        subprocess.Popen([sys.executable, HEADLESS, "serve", *(["--follow-checkout"] if follow_checkout else []),
+                          *(["--auto-update"] if auto_update else [])],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
     return wire.wait_for_socket(path, wait)
 
 

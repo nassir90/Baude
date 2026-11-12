@@ -4794,6 +4794,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
                                          reveal_child=not self.store.books_folded)
         books.append(self.books_reveal)
         side.set_content(books)
+        # (at the foot, under a rule from the notebooks: Update Available, while a new version waits: update_waiting)
+        self.update_bar = widgets.UpdateBar(self.update_now)
+        side.add_bottom_bar(self.update_bar)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name
         # too long ends in …. Not an Adw.Clamp: one takes the width the column asks for and centres it in that)
@@ -5070,12 +5073,41 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
                 GLib.idle_add(lambda: focus.grab_focus() and False)
 
     def idle(self):
-        """Nothing a restart would cut short or take from under you (update.Updater): no question being answered, no
-        dialog or capture open, and quiet (not the window you're in, or nothing typed, clicked or scrolled in it for a
-        minute)."""
+        """Nothing a restart would cut short or take from under you (update.Updater): restart_blockers."""
+        return not self.restart_blockers()
+
+    def restart_blockers(self):
+        """What a restart waits for, said (the Update Available bar's tooltip), [] for none: a question being answered,
+        a dialog or capture open, and you at it (the window you're in, something typed, clicked or scrolled in it in the
+        last minute)."""
+        why = ["a question being answered"] if self.chat.ask is not None else []
         bar = getattr(self, "capture_bar", None)
-        return self.chat.ask is None and self.get_visible_dialog() is None and \
-            not (bar is not None and bar.get_reveal_child()) and update.quiet(self)
+        if self.get_visible_dialog() is not None or (bar is not None and bar.get_reveal_child()):
+            why.append("a dialog open")
+        if not update.quiet(self):
+            why.append("you, using this window")
+        return why
+
+    def update_waiting(self, waiting):
+        """(update.Updater's) A new version found and waiting on idle, or not: the bar at the notebooks' foot."""
+        self.update_bar.say(self.restart_blockers() if waiting else None)
+
+    def update_now(self):
+        """The bar clicked: restarted onto the new version now (a question being answered stopped, said and asked)."""
+        u = getattr(self.get_application(), "updater", None)
+        if u is None or not u.ready:
+            return
+        go = lambda: self.restart({"from": u.started, "to": u.ready,  # noqa: E731
+                                   "commits": update.new_commits(u.started, u.ready, u.root)})
+        if self.chat.ask is None:
+            return go()
+        dlg = Adw.AlertDialog(heading="Restart now?", body="The question being answered is stopped.",
+                              default_response="cancel", close_response="cancel")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("go", "Restart Now")
+        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda _d, r: r == "go" and go())
+        dlg.present(self)
 
     def restart(self, updated=None):
         """☰ → Restart Record, as Baude's, or a new version found (update.Updater; updated, what by): this process
@@ -6279,7 +6311,8 @@ class App(Adw.Application):
             update.restarted(self.win, state, noun())
         if self.updater is None:
             self.updater = update.Updater("record", lambda: self.win is None or self.win.idle(),
-                                          lambda updated: self.win.restart(updated))
+                                          lambda updated: self.win.restart(updated),
+                                          blocked=lambda waiting: self.win is not None and self.win.update_waiting(waiting))
         if self.chat:
             self.win.open_chat(self.chat)
         try:

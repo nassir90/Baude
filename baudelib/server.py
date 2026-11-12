@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import claude, models, transcripts, wire
+from baudelib import claude, models, selfupdate, transcripts, wire
 from baudelib.discovery import Advertiser
 
 IDLE_S = 30 * 60
@@ -44,6 +44,9 @@ SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mo
 CLAUDE_OPTIONS = (("system", "--append-system-prompt"), ("add_dirs", "--add-dir"), ("allowed_tools", "--allowedTools"),
                   ("disallowed_tools", "--disallowedTools"))
 ASK_SHOWN = 400
+COMMAND_TOOLS = ("Bash", "PowerShell")  # (a call of one running, or a background shell: a restart waits for it)
+AGENT_TOOLS = ("Agent", "Task")
+WHAT_SHOWN = 80
 
 
 def _shown(value, depth=0):
@@ -55,6 +58,14 @@ def _shown(value, depth=0):
     if isinstance(value, list) and depth < 3:
         return [_shown(v, depth + 1) for v in value[:20]]
     return value if isinstance(value, (int, float, bool)) or value is None else f"({type(value).__name__})"
+
+
+def _what(description, command=None):
+    """A command as a listing shows it: what it says it's for, else its first line; cut short."""
+    text = description if isinstance(description, str) and description.strip() else \
+        (command.strip().splitlines() or [""])[0] if isinstance(command, str) else ""
+    text = " ".join(text.split())
+    return text if len(text) <= WHAT_SHOWN else text[:WHAT_SHOWN - 1] + "…"
 
 
 def state_home():
@@ -177,6 +188,11 @@ class Session:
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
+        # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
+        # subagents' too: parent, the call they're in); its background tasks, by task_id. Not listed, its subagents:
+        # their tasks running, task_id -> their Agent call's id; each Agent call, id -> (the call it's in, run in the
+        # background); and those running in the background, by call id (what runs in one outlives a turn's result)
+        self.calls, self.tasks, self.agent_tasks, self.agent_calls, self.background_agents = {}, {}, {}, {}, set()
 
     @property
     def id(self):
@@ -195,6 +211,29 @@ class Session:
             self.meta["written"] = os.path.getsize(path) if path else None
         except OSError:
             self.meta["written"] = None
+
+    def commands(self):
+        """What its claude is running, oldest first: its calls of Bash and PowerShell (but one waiting on its own
+        permission ask: not started yet), and its background tasks other than subagents. Each {id (tool_use_id, or
+        task_id), what, since, background}."""
+        asked = {(m.get("request") or {}).get("tool_use_id") for m in self.asks.values()}
+        running = [c for c in self.calls.values() if c["id"] not in asked] + list(self.tasks.values())
+        return [{"id": c["id"], "what": c["what"], "since": c["since"], "background": c["background"]}
+                for c in sorted(running, key=lambda c: c["since"])]
+
+    def forget_commands(self):
+        """Its claude's gone: nothing of what it ran is running (its background shells went with it)."""
+        self.calls, self.tasks, self.agent_tasks, self.agent_calls, self.background_agents = {}, {}, {}, {}, set()
+
+    def in_background_agent(self, tool):
+        """Is tool (a call's parent) a subagent running in the background, or in one?"""
+        for _depth in range(10):
+            if tool is None:
+                return False
+            if tool in self.background_agents:
+                return True
+            tool = (self.agent_calls.get(tool) or (None, False))[0]
+        return False
 
     def kept(self):
         """Is its transcript the server's (its program keeps none)?"""
@@ -257,6 +296,7 @@ class Session:
                 "archived": bool(self.meta.get("archived")), "draft": bool(self.meta.get("draft")),
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
+                "commands": self.commands(), "cut": self.meta.get("cut"),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
@@ -337,6 +377,11 @@ class Server:
         self.bind()
         self.advertiser = None
         self.stopped, self.closed = threading.Event(), threading.Event()  # (closed: shutdown's done, socket and all)
+        # the commit its own code is, as it started (None: not a git checkout); what its updater has ready, waiting for
+        # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
+        self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
+        self.update, self.restarting = None, None
+        self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -412,7 +457,19 @@ class Server:
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
-                "init": self.me.get("init") or None}
+                "init": self.me.get("init") or None, "commit": self.commit, "update": self.update}
+
+    def set_update(self, update):
+        """What its updater says (info's update): None, or {to: the commit it'll restart onto, waiting: [{session,
+        what}], the commands it's waiting for}. Heads hear of a change."""
+        with self.lock:
+            if update != self.update:
+                self.update = update
+                self.changed()
+
+    def running(self):
+        """(lock held) Every command its sessions' claudes are running (Session.commands): [{session, what}]."""
+        return [{"session": s.id, "what": c["what"]} for s in self.sessions.values() for c in s.commands()]
 
     def delete(self, s, reply):
         """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,
@@ -454,6 +511,7 @@ class Server:
                     return reply("error", error=f"{p} couldn't be moved to the trash: {e}{moved}")
         with self.lock:
             s.deleted = True
+            s.meta.pop("cut", None)
             self.sessions.pop(s.id, None)
             try:
                 os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
@@ -514,7 +572,8 @@ class Server:
             self.advertiser = Advertiser(self.me["name"], 22, {
                 "id": self.me["id"], "group": self.me["group"], "v": wire.VERSION, "user": getpass.getuser()}).start()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
-                 + ("" if self.advertise else ", not said on the network"))
+                 + ("" if self.advertise else ", not said on the network")
+                 + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
             listener = self.listener
             try:
@@ -537,13 +596,48 @@ class Server:
             threading.Thread(target=self.serve, args=(sock,), daemon=True, name="client").start()
         self.listener.close()
 
-    def shutdown(self):
+    def shutdown(self, if_idle=False, restart=None):
         """Goodbye on the network, every claude stopped (asked to end, then made to: what it's written is kept, and
-        resumed next time), the socket let go. Once."""
+        resumed next time; one at a turn or asking marked cut, as that's cut short), the socket let go. Once. if_idle:
+        not while a command's running (Session.commands: those are what's returned, [{session, what}], and nothing's
+        done); else None, once it's done. restart: the commit it's to start again on, once it's shut down
+        (restarting: baude_headless.py's serve does)."""
+        busy, procs = self.halt(if_idle, restart)
+        if procs is not None:
+            self.stop_procs(procs)
+        return busy
+
+    def halt(self, if_idle=False, restart=None):
+        """(shutdown's first half, all at once, so nothing starts between the look and the stop) Nothing more taken,
+        unless (if_idle) a command's running; every session whose claude is at a turn or asking marked cut, and kept
+        so: (busy, the claudes to stop). Those: None if it's not stopping (busy) or stopping already."""
         with self.lock:
             if self.stopped.is_set():
-                return
+                if not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
+                    self.restarting = None
+                return None, None
+            if if_idle and (busy := self.running()):
+                return busy, None
             self.stopped.set()
+            self.restarting = restart
+            procs = []
+            for s in self.sessions.values():
+                if s.proc is None:
+                    continue
+                if s.busy or s.asks:  # (cut short: a head offers to carry it on)
+                    self.cut(s)
+                    if not s.asks:
+                        self.cutting.add(s.id)
+                procs.append(s.proc)
+        return None, procs
+
+    def cut(self, s):
+        """(lock held) A session's turn marked cut short by this host's stop (listed: cut), and kept so."""
+        s.meta["cut"] = time.time()
+        self.save(s)
+
+    def stop_procs(self, procs):
+        """(shutdown's second half, once halt's stopped it) Its connections, claudes and socket let go of."""
         self.woken.set()
         try:  # (one starting meanwhile waits for this one to go: Server)
             open(self.state_dir + "/.stopping", "w").close()
@@ -552,9 +646,9 @@ class Server:
         if self.advertiser is not None:
             self.advertiser.stop()
         with self.lock:
-            procs = [s.proc for s in self.sessions.values() if s.proc is not None]
             for c in list(self.conns):
                 c.close()
+            procs = procs + [s.proc for s in self.sessions.values() if s.proc is not None and s.proc not in procs]
         for p in procs:
             p.stopping = True
             p.close_stdin()  # (claude, its stdin closed, ends as it would at the end of a pipe)
@@ -618,19 +712,23 @@ class Server:
                 for s in self.sessions.values():
                     self.rescan(s)
             return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
-        if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time)
-            with self.lock:
-                at = [s.id for s in self.sessions.values() if s.state() in ("working", "waiting")]
-            if msg.get("if_idle") and at:  # (a head's restart of it, for later: not one that would cut a turn short)
-                return reply("busy", sessions=at)
-            reply("quitting")
-            threading.Thread(target=self.shutdown, daemon=True, name="quit").start()
+        if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
+            # going on cut short, and marked so)
+            with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
+                busy, procs = self.halt(bool(msg.get("if_idle")))
+                if busy:
+                    return reply("busy", sessions=sorted({b["session"] for b in busy}), commands=busy)
+                reply("quitting")
+            if procs is not None:
+                threading.Thread(target=self.stop_procs, args=(procs,), daemon=True, name="quit").start()
             return None
         if op == "start":
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
         with self.lock:
+            if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
+                return reply("error", error="the host process is stopping")
             s = self.sessions.get(msg.get("session"))
             if s is None:
                 return reply("error", error=f"no session {msg.get('session')}")
@@ -746,6 +844,8 @@ class Server:
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
         with self.lock:
+            if self.stopped.is_set():
+                raise OSError("the host process is stopping")
             s = Session(self, meta)
             if isinstance(params.get("env"), dict):
                 s.env = clean_env(params["env"])
@@ -790,6 +890,8 @@ class Server:
             raise ValueError(f"not a session's id: {sid!r}")
         path = transcripts.session_file(sid)
         with self.lock:
+            if self.stopped.is_set():
+                raise OSError("the host process is stopping")
             s = self.sessions.get(sid)
             if s is not None and s.deleting:
                 raise ValueError(f"session {sid} is being deleted")
@@ -822,6 +924,7 @@ class Server:
         resumed after. One being stopped is let go of first (what's sent now is the next one's)."""
         if s.proc is not None and getattr(s.proc, "stopping", False):
             old, s.proc, s.busy = s.proc, None, False
+            s.forget_commands()
             old.kill()
             try:
                 old.p.wait(5)
@@ -867,6 +970,7 @@ class Server:
         """(lock held) What a client sends its claude."""
         kind = msg.get("type")
         if kind == "user":
+            s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
             at_turn = s.busy
@@ -979,6 +1083,7 @@ class Server:
                                                          "updatedInput": request.get("input") or {}})  # whoever's here)
                     return
                 s.asks[msg.get("request_id")] = msg
+                self.cutting.discard(s.id)  # (asking as it stops: nobody can answer, so it stays cut, however it ends)
                 if s.meta.get("ask_timeout"):
                     self.ask_timer(s, proc, msg.get("request_id"))
                 for conn in s.viewers:
@@ -999,9 +1104,18 @@ class Server:
                 self.save(s)
             if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and not s.busy:
                 s.busy = True  # (a turn claude started itself: a background task's end, say)
+                if self.stopped.is_set():  # (one more, started as it's stopped: cut short)
+                    self.cut(s)
+                    self.cutting.add(s.id)
                 self.changed()
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
+            if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
+                self.changed()
+            if kind == "result" and s.id in self.cutting and self.stopped.is_set() and msg.get("subtype") == "success":
+                self.cutting.discard(s.id)  # (it ended as it was stopped: not cut after all)
+                s.meta.pop("cut", None)
+                self.save(s)
             if kind == "result":
                 for message in s.queued:
                     self.keep(s, "user", message)
@@ -1018,6 +1132,58 @@ class Server:
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+
+    def track(self, s, msg):
+        """(lock held) What a session's claude runs (Session.commands), from what it says: a Bash or PowerShell call
+        (its subagents' too) from its tool_use to its tool_result; a background task (not a subagent's) from
+        task_started to task_notification. A turn's result ends any call still unanswered, but one in a subagent
+        running in the background (is_backgrounded, run_in_background, or in one), which goes on past it. True if
+        that's changed."""
+        kind, changed = msg.get("type"), False
+        content = (msg.get("message") or {}).get("content")
+        blocks = [c for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+        if kind == "assistant":
+            for c in blocks:
+                if c.get("type") != "tool_use" or not isinstance(c.get("id"), str):
+                    continue
+                inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+                if c.get("name") in AGENT_TOOLS:
+                    s.agent_calls[c["id"]] = (msg.get("parent_tool_use_id"), inp.get("run_in_background") is True)
+                elif c.get("name") in COMMAND_TOOLS and c["id"] not in s.calls:
+                    s.calls[c["id"]] = {"id": c["id"], "what": _what(inp.get("description"), inp.get("command")),
+                                        "since": time.time(), "background": False,
+                                        "parent": msg.get("parent_tool_use_id")}
+                    changed = True
+        elif kind == "user":
+            for c in blocks:
+                if c.get("type") == "tool_result" and s.calls.pop(c.get("tool_use_id"), None) is not None:
+                    changed = True
+        elif kind == "system" and isinstance(tid := msg.get("task_id"), str):
+            if msg.get("subtype") == "task_started" and msg.get("task_type") == "local_agent":
+                tool = msg.get("tool_use_id")
+                s.agent_tasks[tid] = tool
+                parent, background = s.agent_calls.get(tool) or (None, False)
+                if tool is not None and (msg.get("is_backgrounded") or background or s.in_background_agent(parent)):
+                    s.background_agents.add(tool)  # (its calls go on past the turn's result)
+            elif msg.get("subtype") == "task_started" and tid not in s.tasks:
+                call = s.calls.get(msg.get("tool_use_id")) or {}  # (a Bash run in the background: its call's)
+                s.tasks[tid] = {"id": tid, "what": _what(msg.get("description")) or call.get("what") or "a task",
+                                "since": call.get("since") or time.time(), "background": True}
+                changed = True
+            elif msg.get("subtype") == "task_notification":
+                changed = s.tasks.pop(tid, None) is not None
+                if (agent := s.agent_tasks.pop(tid, None)) is not None:  # (a subagent's done: nothing in it runs)
+                    s.background_agents.discard(agent)
+                    inside = [k for k, c in s.calls.items() if c["parent"] == agent]
+                    for k in inside:
+                        del s.calls[k]
+                    changed |= bool(inside)
+        elif kind == "result":  # (a subagent in the background goes on: what it runs, too)
+            left = [k for k, c in s.calls.items() if not s.in_background_agent(c["parent"])]
+            for k in left:
+                del s.calls[k]
+            changed = bool(left)
+        return changed
 
     def ask_timer(self, s, proc, rid):
         """(lock held) A permission asked, answered as the session says (ask_default) once it's waited ask_timeout with
@@ -1059,6 +1225,7 @@ class Server:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
+            s.forget_commands()
             s.agents = None  # (what its subagents wrote as it went: looked at again)
             s.note_written()  # (exited: all it's written is there)
             self.save(s)

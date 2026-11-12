@@ -1484,6 +1484,28 @@ def set_markup_safe(label, markup):
         label.set_text(markup)
 
 
+class UpdateBar(Gtk.Box):
+    """At the foot of a sidebar, under a rule from what's listed above it: Update Available, while a new version's
+    waiting to be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now, asked)."""
+
+    def __init__(self, on_click):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.add_css_class("update-bar")
+        self.append(Gtk.Separator())
+        self.button = Gtk.Button(label="Update Available", halign=Gtk.Align.START, margin_start=6, margin_end=6,
+                                 margin_top=4, margin_bottom=4)
+        self.button.add_css_class("flat")
+        self.button.connect("clicked", lambda *_: on_click())
+        self.append(self.button)
+
+    def say(self, waiting):
+        """waiting: what the restart waits for (shown in the tooltip), or None: no update waiting, no bar."""
+        self.set_visible(waiting is not None)
+        if waiting is not None:
+            self.button.set_tooltip_text("Waiting for:\n" + "\n".join(f"• {w}" for w in waiting) if waiting else
+                                         "A new version is ready")
+
+
 TASK_ENDINGS_SAID = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
 
@@ -5384,6 +5406,9 @@ def empty_label(text):
 # Baude's stylesheet: the chat's, and the viewers' (kubeview, schemaview, gitview, codeview), so wherever they run
 # (Record's viewers.ViewerWindow too) they look as they do in Baude. Its classes are its own: none is Record's.
 CSS = """
+.update-bar button { font-weight: bold; color: @accent_color; }
+.cut-note { margin-top: 2px; }
+.cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
 /* One look for Baude and Record: the frame round the work (the bars, the lists on the left, the panels on the
    right: one colour, no lines between them), the inside where it's read and written (a box set into the frame),
    one rule for every edge (the inside's, a card's, a table's), and one fill for what's raised inside it (a code

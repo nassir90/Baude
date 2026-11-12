@@ -951,7 +951,7 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     chat's (chat_repo: another's keeps its link as it was) unless any_repo (a link to one, whose shape says it is: its
     pill, in where it stands once that's read, and a link's colour till then), with no gh or gh signed out, if
     nothing's been read of its pull requests (and not any_repo), or (known) if number isn't one of them as far as is
-    known: an issue, or nothing (a bare #12 may be either, or a colour)."""
+    known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered)."""
     if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
         return None
     if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
@@ -959,8 +959,18 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     p = lookup.PULLS.pull(repo, number)
     if p is None and known:
         return None
-    return pr_pill_markup(inner, href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
+    return pr_pill_markup(pr_numbered(inner, number),
+                          href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
                           pr_title(p, repo, number), (p or {}).get("state"))
+
+
+_PR_NAMED = re.compile(r"(?<![\w&;#/.-])(?:(?:PR|pull request) ?)?(?:[\w.-]+/[\w.-]+)?#(\d+)(?![\w-])(?![^<]*>)", re.I)
+
+
+def pr_numbered(markup, number):
+    """markup with what names pull request number in it (#12, PR #12, pull request #12, owner/name#12) as the number
+    alone, for after its logo: the logo says it's one, so a # would say it twice. Its tags' own left alone."""
+    return _PR_NAMED.sub(lambda m: m[1] if int(m[1]) == number else m[0], markup)
 
 
 def pr_unbroken(markup):
@@ -983,8 +993,8 @@ _BARE_PR = re.compile(r"(?<![\w&#/.-])#(\d{1,7})(?![\w-])")  # (#12; not &#12; n
 
 
 def pr_link_markup(url, markup=None):
-    """A link to one of the chat's repository's pull requests (chat_repo) as its pill: what the link says (markup), else
-    its #12. None for any other link, and with nothing read of the repository's pull requests."""
+    """A link to a pull request, any repository's (pr_pill's any_repo), as its pill: what the link says (markup), its
+    #12 or PR #12 the number alone, else its number. None for any other link, and when pr_pill makes none."""
     m = _PR_URL.fullmatch(url)
     if not m or not pr_unremembered():
         return None
@@ -994,13 +1004,15 @@ def pr_link_markup(url, markup=None):
 def ref_markup(ref, inner, icon=True):
     """inner (markup) as a Signal link, drawn by how far its lookup got: plain when found, a count
     when there are several matches, faint while pending, grey when not found, amber and wavy when stale. A pull
-    request found is its pill (pr_pill), if its repository's have been read."""
+    request found is its pill (pr_pill), if its repository's have been read; else its logo and its number."""
     href = html.escape(REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))
-    if icon and ref.kind == "pr" and ref.status == "resolved" and not ref.data.get("issue") and \
-            isinstance(ref.data.get("number"), int) and \
-            (pill := pr_pill(ref.data.get("repo"), ref.data["number"], str(ref.data["number"]),
-                             href=REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))) is not None:
+    pr = icon and ref.kind == "pr" and ref.status == "resolved" and not ref.data.get("issue") and \
+        isinstance(ref.data.get("number"), int)
+    if pr and (pill := pr_pill(ref.data.get("repo"), ref.data["number"], str(ref.data["number"]),
+                               href=REF_SCHEME + urllib.parse.quote(ref.surface, safe=""))) is not None:
         return pill
+    if pr:  # (after its logo, as on a pill: PR #12 and owner/name#12 read 12)
+        inner = pr_numbered(inner, ref.data["number"])
     if ref.status == "pending":
         inner = f'<span alpha="55%">{inner}</span>'
     elif ref.status == "not_found":
@@ -1080,13 +1092,15 @@ REF_ABSENT_WHY = {"proposed": "Proposed, not written yet", "external": "An outsi
 def ref_decision_markup(surface, dec, inner, icon=True):
     """inner linked to where the reader (or the evidence) placed this name in this reply; or, for one it says isn't
     in the code, to what it is: an outside tool as a link, anything else grey, like a name not found. A pull request
-    it placed is its pill (pr_pill), if its repository's have been read."""
+    it placed is its pill (pr_pill), if its repository's have been read; else its logo and its number."""
     href = html.escape(REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])
-    if icon and dec.get("kind") == "pr" and dec["verdict"] != "not_in_code" and \
-            (m := re.fullmatch(r"(?:(?:PR|pull request) )?(?:([\w.-]+/[\w.-]+))?#(\d+)", surface, re.I)) and \
-            (pill := pr_pill(m[1] or chat_repo(), int(m[2]), m[2], known=True,
-                             href=REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])):
+    pr = icon and dec.get("kind") == "pr" and dec["verdict"] != "not_in_code" and \
+        re.fullmatch(r"(?:(?:PR|pull request) )?(?:([\w.-]+/[\w.-]+))?#(\d+)", surface, re.I)
+    if pr and (pill := pr_pill(pr[1] or chat_repo(), int(pr[2]), pr[2], known=True,
+                               href=REF_SCHEME + urllib.parse.quote(surface, safe="") + "#" + dec["message"])):
         return pill
+    if pr:  # (after its logo, as on a pill: PR #12 reads 12)
+        inner = pr_numbered(inner, int(pr[2]))
     if dec["verdict"] == "not_in_code":
         why = REF_ABSENT_WHY.get(dec.get("why"), REF_ABSENT_WHY["not_found"])
         title = html.escape(" · ".join(x for x in (why, dec.get("note")) if x))

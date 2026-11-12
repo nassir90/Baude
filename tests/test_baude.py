@@ -9651,8 +9651,8 @@ def test_git_page(app):
         wait_for(lambda: "Committed it." in labels_text(win.transcript), "the chat drawn")
         win.show_panel(True, "git")
         wait_for(lambda: page.commits and page.state.get("rev") == "feature", "the chat's branch", 20)
-        picked = page.picker.get_model().get_string(page.picker.get_selected())
-        assert picked == "feature — feature-wt  (this chat)", picked
+        picked = [row.rev for row in page.branch_rows() if row.is_selected()]
+        assert picked == ["feature"] and page.picked_name.get_label() == "feature", picked
         info = page.info.get_text()
         assert "Tracks origin/feature: 1 commit ahead" in info, info
         assert f"From main at {r['merge'][:7]}: 2 commits ahead, 1 commit behind" in info, info
@@ -9732,8 +9732,7 @@ def test_git_page(app):
         wait_for(lambda: "#7 The feature (open)" in labels_text(page.detail_body), "the commit's pull request")
         page.show_list()
         # another branch, by hand; every branch
-        main = next(i for i, c in enumerate(page.checkouts) if c["rev"] == "main")
-        page.picker.set_selected(main)
+        page.pick(["main"])
         wait_for(lambda: page.state.get("rev") == "main" and page.commits[0]["subject"] == "Main moves on", "main")
         assert "Tracks origin/main: up to date" in page.info.get_text() and "From " not in page.info.get_text()
         win.follow_checkout()  # (the chat goes on: the branch picked by hand stays)
@@ -9792,8 +9791,8 @@ def test_git_page_chat_worktree(app):
         assert win.ref_checkout == os.path.realpath(r["wt"])
         win.show_panel(True, "git")
         wait_for(lambda: page.state.get("rev") == "feature" and page.commits, "the worktree's branch", 20)
-        picked = page.picker.get_model().get_string(page.picker.get_selected())
-        assert picked == "feature — feature-wt  (this chat)", picked
+        picked = [row.rev for row in page.branch_rows() if row.is_selected()]
+        assert picked == ["feature"], picked
         rows = {row.commit["subject"]: row for row in find(page.list, Gtk.ListBoxRow) if hasattr(row, "commit")}
         assert find(rows["Feature: second"], baude.GitLane)[0].chat, "the commit its command made, violet"
     finally:
@@ -10646,7 +10645,7 @@ def test_git_branch_list_compact(app):
     page = win.panel.git_page
 
     def rows(root):
-        listview = next(w for w in walk(root) if w.get_css_name() == "listview")
+        listview = next(w for w in walk(root) if w.get_css_name() in ("listview", "list"))
         return [w for w in walk(listview) if w.get_parent() is listview and w.get_css_name() == "row"], listview
 
     def gaps(found, to):
@@ -10663,12 +10662,12 @@ def test_git_branch_list_compact(app):
         want = gaps(*rows(palette.table))
         palette.close()
         pump(0.5)
-        page.picker.emit("activate")
-        pop = find(page.picker, Gtk.Popover)[0]
+        page.picker.popup()
+        pop = page.branch_list
         wait_for(lambda: pop.get_mapped() and len(rows(pop)[0]) >= 8, "the branch list")
         pump(0.3)
         found, listview = rows(pop)
-        got = gaps(found, listview)
+        got = gaps(found[-8:], listview)  # (below the rule after this chat's branches)
         assert got == want and len(got) == 1, f"the branch list's rows {got} apart, ⌘K's {want}"
         height = find(pop, Gtk.ScrolledWindow)[0].get_height()
         assert height / min(got) >= 15, f"{height / min(got)} branches in {height}"

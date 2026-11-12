@@ -5270,8 +5270,12 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .git-own { font-weight: 500; }
 .git-log row.git-found { background: alpha(@accent_bg_color, 0.2); box-shadow: inset 3px 0 @accent_bg_color; }
 .git-log row.git-hover { background: alpha(@accent_bg_color, 0.14); }
-/* the branch picker's list: rows 26px apart, as ⌘K's are, instead of libadwaita's 34 */
-dropdown.git-branches popover listview > row { min-height: 0; margin: 0; padding: 5px 8px; }
+/* the branch picker: its button's names as a choice's are (not a button's bold); its list's rows 26px apart, as
+   ⌘K's are, instead of libadwaita's 34, the rule between this chat's branches and the rest a faint one */
+menubutton.git-branches > button { font-weight: normal; }
+popover.git-branches list { background: transparent; }
+popover.git-branches list > row { min-height: 0; margin: 0; padding: 5px 8px; border-radius: 6px; }
+popover.git-branches list > separator { margin: 4px 6px; }
 .ref-loc { padding: 2px 6px; min-height: 24px; }
 .ref-on image { color: @accent_color; }
 .ref-links image { color: alpha(@accent_color, 0.5); }

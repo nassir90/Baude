@@ -30,6 +30,7 @@ $XDG_DATA_HOME/record/records.json (macOS: ~/Library/Application Support/Record;
 else).
 """
 import codecs
+import contextlib
 import glob
 import html
 import json
@@ -939,10 +940,11 @@ You see the notebook they have open: its pages, the folders attached to it, and 
 tools only read: Read, Grep and Glob, over the notebook's pages (each one a file, read-only) and its folders.
 
 You never write the notes yourself. To change a page (fill a passage in, rewrite one, add to it), call propose_edit \
-with the page, the exact text it replaces and what replaces it: the user sees it as a diff on the page, and accepts or \
+with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
 rejects it. When they've selected a passage on a page and ask you to fill it in or change it, the text it replaces is \
-that selection, exactly. Write in the page's Markdown and its voice, and only what was asked. Once it's proposed, say \
-in a sentence what you proposed; don't repeat the change in your reply. You'll be told what they decide.
+that selection, exactly. Write in the page's Markdown and its voice, and only what was asked. Don't announce, \
+describe or sum up an edit: the user sees it. After one, say nothing unless there's something they need to know (a \
+guess you made, a TODO you left). You'll be told whether they accepted it.
 
 What the user @-references comes with their message: its text, or where to read it. Use it and the conversation as \
 what you know of the subject, and read more with your tools when that helps. Don't make facts up: where something \
@@ -977,8 +979,7 @@ AGENT_MCP_TOOLS = [
      "selection. An empty old_text adds new_text at the page's end. Returns whether it was shown, or why not.",
      "inputSchema": {"type": "object", "required": ["page", "old_text", "new_text"], "properties": {
          "page": {"type": "string", "description": "the page's name (Spec, or Spec:Auth for a sub-page) or its file"},
-         "old_text": {"type": "string"}, "new_text": {"type": "string"},
-         "summary": {"type": "string", "description": "a few words saying what the change does"}}}},
+         "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
 ]
 AGENT_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
@@ -1109,7 +1110,7 @@ def earlier_said(messages, limit=EARLIER_LIMIT):
         if m.get("quote"):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
-            body += f"\n(proposed a change to {p['page']}: {p.get('status', 'pending')})"
+            body += f"\n(edited {p['page']}: {p.get('status', 'pending')})"
         size += len(body)
         if size > limit and lines:
             break
@@ -1222,6 +1223,15 @@ def page_named(notebook, name, store):
     path = os.path.realpath(os.path.join(pages_root(), name)) if name else ""
     return next((page for file, page in files.items() if os.path.realpath(file) == path or
                  file.endswith(os.sep + name.lstrip(os.sep))), None)
+
+
+def pending_edits(notebook, agent=None):
+    """The edits the agent's proposed to a notebook's pages that wait for you, in the order it made them (the reply
+    still coming's, agent's, last)."""
+    live = agent.turn["proposals"] if agent is not None and agent.turn is not None and agent.notebook is notebook \
+        else ()
+    props = [p for m in notebook.get("messages") or () for p in m.get("proposals") or ()]
+    return [p for p in props + [p for p in live if p not in props] if p.get("status") == "pending"]
 
 
 def place_change(text, old, near=None):
@@ -1526,13 +1536,9 @@ CSS = """
 .bubble-user { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 .bubble-record { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
 .bubble-error { background: alpha(@error_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
-.ref-chip { background: rgba(79,138,124,0.14); color: #2f8f72; border-radius: 99px; padding: 2px 8px;
-            font-size: 0.9em; font-weight: 600; }  /* (what a message referenced: as the notes' @names look) */
-.proposal-line { border-top: 1px solid alpha(@view_fg_color, 0.1); padding-top: 6px; }
-.proposal-card { background: @baude_raised; border: 1px solid alpha(@success_color, 0.45); border-radius: 10px;
-                 padding: 10px 12px; }  /* (a change proposed, on its page: DiaryEditor.show_proposal) */
-.proposal-new { background: alpha(@success_color, 0.14); border-left: 3px solid @success_color; border-radius: 4px;
-                padding: 6px 8px; }
+label.said-refs link { color: #2f8f72; }  /* (an @reference in what you wrote: as a page's @names, RecordChat._said) */
+.pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
+.pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
 .quote-chip { background: alpha(@accent_bg_color, 0.10); border-left: 3px solid @accent_bg_color;
               border-radius: 6px; padding: 6px 8px; }
 .quote-in-bubble { border-left: 3px solid alpha(@view_fg_color, 0.25); padding-left: 8px; font-size: 0.92em;
@@ -2582,7 +2588,7 @@ class NotesView(Gtk.TextView):
         super().__init__(**kw)
         self.logos, self.marks, self.blocks = [], [], []
         self.restyled = None  # (told when its style's changed: the text's size or colour, DiaryEditor._heading_looks)
-        self.resized, self.width_was = None, None  # (told when its width's changed: DiaryEditor._place_soon)
+        self.resized, self.width_was = None, None  # (told when its width's changed)
 
     def do_size_allocate(self, width, height, baseline):
         Gtk.TextView.do_size_allocate(self, width, height, baseline)
@@ -2705,36 +2711,92 @@ class NotesView(Gtk.TextView):
 UNSEEN = "rgba(0,0,0,0.002)"
 
 
-class ProposalCard(Gtk.Widget):
-    """A proposed change's card on its page (DiaryEditor.show_proposal): its box (box) as wide as the text (wanted),
-    the card itself asking the text view for no width. (A text view's overlay is given its least width, and that, where
-    it is and the view's margins are the view's least: a card that asked for the text's width made the text wider, so
-    the card, again each time it was placed, and the page could never be narrowed.) Its box is laid out past it."""
+class PageHistory:
+    """A page's Undo and Redo (⌘Z and ⇧⌘Z; Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y), kept here, GTK's buffer's own off: what
+    a change the Record proposes puts in is in the buffer, green, but isn't the page's (DiaryEditor.kept), so it's in
+    none of what's undone, and one shown or taken away since moves nothing. A step is what one of the text view's
+    actions did (a key, a paste, an edit of many steps), as places in the page's own text; letters typed one after
+    another are one step to a word, and a Backspace or Delete held down is one, as GTK's own Undo has them."""
+    LIMIT = 1000
 
-    def __init__(self):
-        super().__init__()
-        self.wanted, self.proposal = 0, None
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.box.add_css_class("proposal-card")
-        self.box.set_parent(self)
+    def __init__(self, editor):
+        self.editor, self.undos, self.redos = editor, [], []
+        self.paused, self.open = 0, None  # (edits not the page's: not kept; the action being kept: its edits so far)
+        buf = editor.buf
+        buf.set_enable_undo(False)
+        buf.connect("insert-text", self._inserting)
+        buf.connect("delete-range", self._deleting)
+        buf.connect("begin-user-action", lambda *_: self.paused or setattr(self, "open", []))
+        buf.connect("end-user-action", lambda *_: self._ended())
 
-    def _width(self):
-        return max(self.wanted, self.box.measure(Gtk.Orientation.HORIZONTAL, -1)[0])
+    def clear(self):
+        self.undos, self.redos, self.open = [], [], None
 
-    def do_measure(self, orientation, for_size):
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            return 0, 0, -1, -1
-        least, natural, _b1, _b2 = self.box.measure(Gtk.Orientation.VERTICAL, self._width())
-        return least, natural, -1, -1
+    def _inserting(self, _buf, at, text, _n):
+        if not self.paused and text:
+            self._add("+", self.editor.kept_offset(at.get_offset()), text)
 
-    def do_size_allocate(self, width, height, baseline):
-        self.box.allocate(self._width(), height, -1, None)
+    def _deleting(self, _buf, a, b):
+        if not self.paused:
+            x, y = sorted((a.get_offset(), b.get_offset()))
+            if text := self.editor.kept_between(x, y):
+                self._add("-", self.editor.kept_offset(x), text)
 
-    def do_dispose(self):
-        if self.box is not None:
-            self.box.unparent()
-            self.box = None
-        Gtk.Widget.do_dispose(self)
+    def _add(self, kind, at, text):
+        if self.open is not None:
+            self.open.append((kind, at, text))
+        else:
+            self._push([(kind, at, text)])
+
+    def _ended(self):
+        ops, self.open = self.open, None
+        if ops:
+            self._push(ops)
+
+    def _push(self, ops):
+        self.redos.clear()
+        if self.undos and self._merged(self.undos[-1], ops):
+            return
+        self.undos.append({"ops": ops, "typed": len(ops) == 1 and len(ops[0][2]) == 1})
+        del self.undos[:-self.LIMIT]
+
+    @staticmethod
+    def _merged(step, ops):
+        """A letter typed, or deleted, onto the step before's, that one letters too, just where it left off: the same
+        step. A word after a space starts one (the space goes with the word before it); a new line is one of its own."""
+        if not step["typed"] or len(ops) != 1 or len(ops[0][2]) != 1 or "\n" in ops[0][2]:
+            return False
+        (kind, at, text), (was_kind, was_at, was) = ops[0], step["ops"][0]
+        if kind != was_kind or "\n" in was:
+            return False
+        if kind == "+":
+            if at != was_at + len(was) or not text.isspace() and was[-1].isspace():
+                return False
+            step["ops"][0] = ("+", was_at, was + text)
+        elif at + 1 == was_at:  # (Backspace: the letter before)
+            step["ops"][0] = ("-", at, text + was)
+        elif at == was_at:  # (Delete: the one after)
+            step["ops"][0] = ("-", at, was + text)
+        else:
+            return False
+        return True
+
+    def undo(self):
+        return self._step(self.undos, self.redos, back=True)
+
+    def redo(self):
+        return self._step(self.redos, self.undos, back=False)
+
+    def _step(self, source, target, back):
+        if not source:
+            return False
+        step = source.pop()
+        ops = [("-" if kind == "+" else "+", at, text) for kind, at, text in reversed(step["ops"])] if back else \
+            step["ops"]
+        self.editor.apply_steps(ops)
+        step["typed"] = False  # (what's typed next, there, is a step of its own)
+        target.append(step)
+        return True
 
 
 class DiaryEditor(Gtk.Box, FindInText):
@@ -2774,8 +2836,15 @@ class DiaryEditor(Gtk.Box, FindInText):
             # (@'s search as it's typed, spaces and all: as an @name looks, _mark_token)
             "token": {"foreground": "#2f8f72", "weight": 600, "background": "rgba(79,138,124,0.14)"},
             "bullet": {"weight": 700},  # (a numbered item's number, coloured as bullets are: _highlight)
-            # (what a change the Record proposes would take away: struck through, on red, its card under it)
-            "proposal-old": {"background": "rgba(224,27,36,0.16)", "strikethrough": True}}
+            # (a change the Record proposes, as tracked changes read: what it takes away struck through on red, what it
+            # puts in just after it on green, in the page's own lines, a ✓ and a ✗ at its end; none of that green the
+            # page's till it's accepted, nor to be written in: show_proposal)
+            "proposal-old": {"background": "rgba(224,27,36,0.16)", "strikethrough": True},
+            "proposal-new": {"background": "rgba(46,194,126,0.22)"},
+            "proposal-yes": {"foreground": "#26a269", "weight": 800, "scale": 1.1, "letter_spacing": 2 * Pango.SCALE},
+            "proposal-no": {"foreground": "#e01b24", "weight": 800, "scale": 1.1, "letter_spacing": 2 * Pango.SCALE},
+            "proposal-hot": {"background": "rgba(128,128,128,0.25)"},  # (the ✓ or ✗ the pointer's over)
+            "proposal-lock": {"editable": False}}
     MARGIN = 22  # the page's text, and its title, this far in
     # a list as Baude's chat lays one out (widgets.MarkdownView): LIST_PAD in, INDENT more a level (its spaces kept,
     # unseen), its text MARKER_GAP after its marker's column (NotesView.marker_col)
@@ -2839,8 +2908,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.quoting = None  # (a selection's quote to the Record, once it's settled: _quote_soon)
         self.buf.connect("mark-set", lambda _b, _i, mark: mark.get_name() in ("insert", "selection_bound") and
                          not self.loading and self._quote_soon())
-        self.proposals, self.placing = [], None  # (the Record's proposed changes shown on it; their placing: show_proposal)
-        self.spare_cards = []  # (theirs, hidden once decided, for the next: GTK 4.24 takes no overlay out of a text view)
+        self.proposals, self.placing, self.hot = [], None, None  # (the Record's proposed changes shown on it: show_proposal)
+        self.history = PageHistory(self)  # (Undo and Redo, what's proposed in none of it)
+        self.view.set_has_tooltip(True)  # (a proposal's ✓ and ✗ say their keys)
+        self.view.connect("query-tooltip", self._tooltip)
         self.view.connect("paste-clipboard", self._paste)
         self.view.connect("cut-clipboard", lambda *_: self._whole_links())
         self.view.connect("copy-clipboard", lambda *_: self._whole_links())
@@ -2856,7 +2927,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.pressed = None  # (the link a click came down on: _pressed)
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._hover)
-        motion.connect("leave", lambda *_: (setattr(self, "hovered", None), self.win.hover_left()))
+        motion.connect("leave", lambda *_: (setattr(self, "hovered", None), self.win.hover_left(), self._unhot()))
         self.view.add_controller(motion)
         self.hovered = None  # (the @name the pointer's over: _hover)
         self.following, self.follow_frames, self.follow_tries, self.follow_anim = None, 0, 0, None  # (follow_soon)
@@ -2880,17 +2951,16 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.pop_moved, self.pop_query = False, None  # (moved in with the arrows, while this was what's searched for)
         self.waiting = None
         self.place = DiaryPlace(self)  # (through the zoom: Window.zoom_tab)
-        self.view.resized = self._place_soon  # (a change's card as wide as the text: _place_proposals)
-        adj = self.scroll.get_vadjustment()  # (and where its line is, laid out as it's scrolled to)
-        adj.connect("value-changed", lambda *_: self.proposals and self._place_soon())
-        adj.connect("changed", lambda *_: self.proposals and self._place_soon())
         self.load()
 
     # ---- its page
     def load(self):
-        """Its page's text, drawn, the caret at the start (made; renamed)."""
+        """Its page's text, drawn, the caret at the start (made; renamed), nothing to undo."""
+        self._drop_all()
         self.loading = True
-        self.buf.set_text(self.notebook["pages"].get(self.page, ""))
+        with self._quiet():
+            self.buf.set_text(self.notebook["pages"].get(self.page, ""))
+        self.history.clear()
         self.buf.place_cursor(self.buf.get_start_iter())
         self.loading = False
         self._highlight()
@@ -2972,11 +3042,15 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.win.note_renamed(moved)
 
     def reload(self):
-        """The page changed elsewhere (a word added to To learn, a link renamed): shown again, the caret kept."""
-        if self.notebook and self.text() != self.notebook["pages"].get(self.page, ""):
-            at = self.buf.get_property("cursor-position")
+        """The page changed elsewhere (a word added to To learn, a link renamed): shown again, the caret kept, nothing
+        to undo (as GTK's own Undo had it)."""
+        if self.notebook and self.kept() != self.notebook["pages"].get(self.page, ""):
+            at = self.kept_offset(self.buf.get_property("cursor-position"))
+            self._drop_all()
             self.loading = True
-            self.buf.set_text(self.notebook["pages"].get(self.page, ""))
+            with self._quiet():
+                self.buf.set_text(self.notebook["pages"].get(self.page, ""))
+            self.history.clear()
             self.buf.place_cursor(self.buf.get_iter_at_offset(min(at, self.buf.get_char_count())))
             self.loading = False
             self._highlight()
@@ -2995,14 +3069,70 @@ class DiaryEditor(Gtk.Box, FindInText):
 
     # ---- the text
     def text(self):
-        """The page's text, as it's kept: all of it, the links' hidden marks too (the buffer's "text" leaves out what's
-        hidden, and with it every link's [[ ]])."""
+        """The buffer's text: all of it, the links' hidden marks too (the buffer's "text" leaves out what's hidden, and
+        with it every link's [[ ]]), and what a proposal puts in (green: not the page's, kept). Its offsets are the
+        buffer's."""
         return self.buf.get_text(*self.buf.get_bounds(), True)
+
+    def kept(self):
+        """The page's text, as it's kept (saved, its file written, read by the Record): the buffer's without what's
+        proposed in it."""
+        text, out, at = self.text(), [], 0
+        for x, y in self._greens():
+            out.append(text[at:x])
+            at = y
+        out.append(text[at:])
+        return "".join(out)
+
+    def _greens(self):
+        """Where what's proposed is in the buffer, in order: [(start, end)] (none while it's taken out: _greens_out)."""
+        if not self.proposals:
+            return []
+        return sorted((self.buf.get_iter_at_mark(e["g0"]).get_offset(), self.buf.get_iter_at_mark(e["g1"]).get_offset())
+                      for e in self.proposals if e.get("g0") is not None)
+
+    def kept_offset(self, offset):
+        """A place in the buffer as one in the page's own text (kept): what's proposed before it left out."""
+        at = offset
+        for x, y in self._greens():
+            if x >= offset:
+                break
+            at -= min(y, offset) - x
+        return at
+
+    def buf_offset(self, at, past=True):
+        """A place in the page's own text (kept) as one in the buffer; past: after what's proposed there, if anything
+        is (where a passage starts), else before it (where one ends)."""
+        offset = at
+        for x, y in self._greens():
+            if x < offset or past and x == offset:
+                offset += y - x
+            else:
+                break
+        return offset
+
+    def kept_between(self, a, b):
+        """The page's own text between two places in the buffer (what's proposed there left out)."""
+        return "".join(self.buf.get_text(self.buf.get_iter_at_offset(x), self.buf.get_iter_at_offset(y), True)
+                       for x, y in self._kept_pieces(a, b))
+
+    def _kept_pieces(self, a, b):
+        """The stretches between two places in the buffer that are the page's own: [(start, end)]."""
+        pieces, at = [], a
+        for x, y in self._greens():
+            if y <= at or x >= b:
+                continue
+            if x > at:
+                pieces.append((at, x))
+            at = max(at, y)
+        if at < b:
+            pieces.append((at, b))
+        return pieces
 
     def _changed(self, _buf):
         if self.loading or self.notebook is None:
             return
-        self.notebook["pages"][self.page] = self.text()
+        self.notebook["pages"][self.page] = self.kept()
         self.notebook.pop("fresh", None)  # (written in: kept, Store.is_blank)
         self.win.pages.prune()
         self.win.store.save()
@@ -3252,185 +3382,222 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.quoting = None
         bounds = self.buf.get_selection_bounds()
         if bounds and self.win.get_focus() is self.view and self.notebook is self.win.current:
-            a, b = bounds
-            text = self.buf.get_text(a, b, True)
+            x = self.kept_offset(bounds[0].get_offset())
+            text = self.kept_between(bounds[0].get_offset(), bounds[1].get_offset())  # (what's proposed in it left out)
             if len(text.strip()) > 2:
-                self.win.chat.set_selection(self.notebook, self.page, a.get_offset(), b.get_offset(), text)
+                self.win.chat.set_selection(self.notebook, self.page, x, x + len(text), text)
         return False
 
-    # ---- a change the Record proposes (RecordChat.propose): on the page, what it takes away struck through on red, and
-    # under it a card with what it puts in, on green, Accept and Reject. The card's in the text (an overlay, at the line's
-    # foot: the line has room below it for it), so it scrolls with it; nothing's in the page's text till it's accepted.
-    PROPOSAL_GAP = 8
+    # ---- a change the Record proposes (RecordChat.propose), as tracked changes read: what it takes away struck through
+    # on red, where it is; what it puts in just after it, green, in the page's own lines (it wraps with them, in their
+    # font and size), and at its end a ✓ and a ✗. The green's in the buffer, but not the page's: it's left out of what's
+    # kept (kept: saved, its file, what the Record reads), it can't be edited (proposal-lock), and Undo has none of it
+    # (PageHistory). Accept (✓, Tab with the caret in it) puts it in the page in the red's place, as one edit, to undo;
+    # Reject (✗, Esc) takes it away, the red as it was.
+    YES, NO = "\u2009\u2713", "\u2009\u2717"  # (✓ and ✗, each a thin space after what's before it)
 
-    def show_proposal(self, p, scroll=False):
-        """A proposed change (one of a reply's: RecordChat.propose), shown on the page; scroll: brought into view."""
+    def show_proposal(self, p, scroll=False, draw=True, caret=False):
+        """A proposed change (one of a reply's: RecordChat.propose), shown on the page; scroll: brought into view;
+        caret: the caret put in it, at its passage's end (Tab and Esc take it or leave it: Previous and Next)."""
         shown = next((e for e in self.proposals if e["p"]["id"] == p["id"]), None)
         if shown is None:
-            text, start, old = self.text(), p.get("start", 0), p["old"]
+            text, start, old = self.kept(), p.get("start", 0), p["old"]
             if not old:
                 start = len(text)  # (one that adds: at the page's end, as it is now)
             elif text[start:start + len(old)] != old:
                 start, found = place_change(text, old, start)
                 if start is not None:
                     old = p["old"] = found  # (as it's on the page now: its spaces either side gone, say)
-            gone = start is None  # (what it changes isn't on the page any more)
+            gone = start is None  # (what it changes isn't on the page any more: shown at its end)
             start = len(text) if gone else start
+            a = self.buf_offset(start)
+            b = a if gone or not old else self.buf_offset(start + len(old), past=False)
+            sel = self.buf.get_selection_bounds()
+            asked = bool(sel) and sel[0].get_offset() < b and a <= sel[1].get_offset()  # (the passage selected, to ask)
             # (marks, the text changing around them: one on the passage's start, kept there as text's typed before it;
-            # one on its end, kept there as text's typed after it)
-            a = self.buf.create_mark(None, self.buf.get_iter_at_offset(start), False)
-            b = self.buf.create_mark(None, self.buf.get_iter_at_offset(start + (0 if gone else len(old))), True)
-            card = self.spare_cards.pop() if self.spare_cards else None
-            shown = {"p": p, "a": a, "b": b, "room": self.buf.create_tag(None), "card": self._proposal_card(p, gone, card),
-                     "at": None, "room_px": None}
+            # one on its end, kept there as text's typed after it; the green's, put in after that: _put_green)
+            shown = {"p": p, "a": self.buf.create_mark(None, self.buf.get_iter_at_offset(a), False),
+                     "b": self.buf.create_mark(None, self.buf.get_iter_at_offset(b), True), "g0": None, "g1": None,
+                     "gone": gone}
             self.proposals.append(shown)
-            if card is None:
-                self.view.add_overlay(shown["card"], 0, 0)
-            else:
-                self.view.move_overlay(card, 0, 0)
-                card.set_visible(True)
-            if (sel := self.buf.get_selection_bounds()) and sel[0].get_offset() < start + len(p["old"]) and \
-                    start <= sel[1].get_offset():  # (the passage selected, to ask: let go, the change in its place)
-                self.buf.place_cursor(sel[1])
-            self._mark_proposals()
-        shown["scroll"] = scroll
-        self._place_soon()
+            with self._quiet():
+                self._put_greens()
+            if asked:  # (let go, the change in its place)
+                self.buf.place_cursor(self.buf.get_iter_at_mark(shown["b"]))
+            if draw:
+                self._highlight()
+        if caret:
+            self.buf.place_cursor(self.buf.get_iter_at_mark(shown["b"]))
+        if scroll:
+            self._scroll_soon(shown)
 
     def show_pending(self):
         """The changes proposed to this page that wait for you, shown on it (made; its text new)."""
-        for e in list(self.proposals):
-            self._drop_proposal(e)
+        self._drop_all()
         if self.notebook is None:
             return
-        live = getattr(getattr(self.win, "chat", None), "agent", None)
-        turns = [m.get("proposals") or () for m in self.notebook.get("messages") or ()] + \
-            [live.turn["proposals"] if live is not None and live.turn is not None and live.notebook is self.notebook
-             else ()]
-        for props in turns:
-            for p in props:
-                if p.get("page") == self.page and p.get("status") == "pending":
-                    self.show_proposal(p)
+        for p in pending_edits(self.notebook, getattr(getattr(self.win, "chat", None), "agent", None)):
+            if p.get("page") == self.page:
+                self.show_proposal(p, draw=False)
+        self._highlight()
 
-    def _proposal_card(self, p, gone=False, card=None):
-        """A change's card (card: a spare one, filled afresh): who suggests it, what it puts in, Reject and Accept."""
-        card = card or ProposalCard()
-        box = card.box
-        while (child := box.get_first_child()) is not None:
-            box.remove(child)
-        card.proposal = p
-        head = Gtk.Box(spacing=6)
-        head.append(widgets.RefIcon("page"))
-        words = [label(f"{noun()} suggests" + (f": {p['summary']}" if p.get("summary") else ""),
-                       css=("caption-heading",)),
-                 label("What it changes isn't on the page any more.", css=("dim-label", "caption")) if gone else None,
-                 label(p["new"].strip("\n") or "(nothing: what's struck through goes)", select=True,
-                       css=("proposal-new",))]
-        for w in filter(None, words):
-            w.set_hexpand(True)
-        head.append(words[0])
-        box.append(head)
-        for w in filter(None, words[1:]):
-            box.append(w)
-        row = Gtk.Box(spacing=6, halign=Gtk.Align.END)
-        for text, accept in (("Reject", False), ("Accept", True)):
-            btn = Gtk.Button(label=text)
-            if accept:
-                btn.add_css_class("suggested-action")
-                btn.set_sensitive(not gone)
-            btn.connect("clicked", lambda *_, accept=accept: self.decide(p, accept))
-            row.append(btn)
-        box.append(row)
-        return card
+    def _drop_all(self):
+        for e in list(self.proposals):
+            self._drop_proposal(e)
 
-    def _room_line(self, e):
-        """The line a change's card goes under: the last its passage is on (where it goes in, for one that only adds);
-        for the empty last line, the one before it (a line's room below is a tag's, and an empty last line has no
-        character to take one)."""
-        it = self.buf.get_iter_at_mark(e["b"])
-        if it.compare(self.buf.get_iter_at_mark(e["a"])) > 0 and it.starts_line():
-            it.backward_char()  # (a passage ending with its line's end: that line)
-        it.set_line_offset(0)
-        if it.is_end() and it.get_line() > 0:
-            it.backward_line()
-        return it
+    @contextlib.contextmanager
+    def _quiet(self):
+        """Edits that aren't the page's (what's proposed, put in or taken out; the page's text set afresh): not kept,
+        not undone, nothing drawn for them till they're done."""
+        was, self.loading = self.loading, True
+        self.history.paused += 1
+        try:
+            yield
+        finally:
+            self.history.paused -= 1
+            self.loading = was
 
-    def _rooms(self):
-        """The changes shown, by the line their cards go under, in order: [(the line, [changes])]. Cards under one line
-        are stacked, the line's room theirs together: one tag's (a line has the last made of its tags' room)."""
-        rooms = {}
+    @contextlib.contextmanager
+    def _greens_out(self):
+        """What's proposed taken out of the buffer for what's done in it (an Undo, an Accept, a heading moved), so the
+        page's own text is all there is, and its offsets are the page's; put back after, each just after its passage,
+        where that is then. Nothing's kept or drawn in it (loading): whoever does it draws it after (_changed)."""
+        with self._quiet():
+            for e in self.proposals:
+                self._take_green(e)
+        was, self.loading = self.loading, True
+        try:
+            yield
+        finally:
+            self.loading = was
+            with self._quiet():
+                self._replace_passages()
+                self._put_greens()
+
+    def _replace_passages(self):
+        """Each change's passage where it is now, its green out (_greens_out): found again near where it was if what
+        was done moved it (a heading's section moved, say), and one that adds at the page's end again."""
+        text = self.text()
         for e in self.proposals:
-            line = self._room_line(e)
-            rooms.setdefault(line.get_offset(), (line, []))[1].append(e)
-        return list(rooms.values())
+            p, a = e["p"], self.buf.get_iter_at_mark(e["a"]).get_offset()
+            b = self.buf.get_iter_at_mark(e["b"]).get_offset()
+            if not p["old"]:
+                at, old = len(text), ""
+            elif text[a:b] == p["old"]:
+                continue
+            else:
+                at, old = place_change(text, p["old"], a)
+                if at is None or old != p["old"]:
+                    continue  # (not on the page as it was: left where it is)
+            self.buf.move_mark(e["a"], self.buf.get_iter_at_offset(at))
+            self.buf.move_mark(e["b"], self.buf.get_iter_at_offset(at + len(old)))
+
+    def _put_greens(self):
+        """Each change shown without its green: that put in, just after its passage (the last first, so two at one
+        place are in their order). A whole line, or lines, replaced: the green on a line of its own, under it."""
+        for e in reversed(self.proposals):
+            if e["g0"] is not None:
+                continue
+            p, a, b = e["p"], self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
+            body = p["new"].rstrip("\n")
+            trail = p["new"][len(body):]
+            lead = "\n" if p["old"] and not e["gone"] and not p["old"].endswith("\n") and not body.startswith("\n") \
+                and a.starts_line() and b.ends_line() else ""
+            text, at = lead + body + self.YES + self.NO + trail, b.get_offset()
+            self.buf.insert(b, text)
+            e["g0"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at), False)
+            e["g1"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at + len(text)), True)
+            e["lead"], e["body"] = len(lead), len(body)
+        for e in self.proposals:  # (a passage with nothing in it, where a green went in: its start back before that)
+            a, b = self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
+            if a.compare(b) > 0:
+                self.buf.move_mark(e["a"], b)
+
+    def _take_green(self, e):
+        if e["g0"] is not None:
+            self.buf.delete(self.buf.get_iter_at_mark(e["g0"]), self.buf.get_iter_at_mark(e["g1"]))
+            for k in ("g0", "g1"):
+                self.buf.delete_mark(e[k])
+                e[k] = None
+        self.hot = None
 
     def _mark_proposals(self):
-        """Each change's passage struck through, and room under its line for its card (after _highlight: it takes every
-        tag away)."""
+        """Each change's passage struck through on red (any other's green in it left be), what it puts in green, its ✓
+        and ✗, and none of that green to be written in (after _highlight: it takes every tag away)."""
         if not self.proposals:
             return
+        buf = self.buf
+
+        def tag(name, x, y):
+            if y > x:
+                buf.apply_tag_by_name(name, buf.get_iter_at_offset(x), buf.get_iter_at_offset(y))
         for e in self.proposals:
-            a, b = self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
-            if b.compare(a) > 0:
-                self.buf.apply_tag_by_name("proposal-old", a, b)
-        for line, group in self._rooms():
-            end = line.copy()
-            end.forward_line()
-            for e in group:
-                e["roomed"] = e is group[0] and end.compare(line) > 0  # (an empty page's line: no room, none needed)
-            if group[0]["roomed"]:
-                self.buf.apply_tag(group[0]["room"], line, end)
-        self._place_soon()
+            if e["g0"] is None:
+                continue
+            for x, y in self._kept_pieces(*(buf.get_iter_at_mark(e[k]).get_offset() for k in ("a", "b"))):
+                tag("proposal-old", x, y)
+            g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
+            new = g0 + e["lead"]
+            yes = new + e["body"]
+            no = yes + len(self.YES)
+            tag("proposal-new", new, yes)
+            tag("proposal-yes", yes, no)
+            tag("proposal-no", no, no + len(self.NO))
+            tag("proposal-lock", g0, g1)
+        if self.hot is not None:
+            tag("proposal-hot", *self.hot)
 
-    def _place_soon(self):
-        """The cards placed once what's changed is laid out: the next frames (the text's height, a line's, only then)."""
-        if self.proposals and self.placing is None:
+    def _glyphs(self, e):
+        """Where a shown change's ✓ and its ✗ are in the buffer: ((start, end), (start, end))."""
+        yes = self.buf.get_iter_at_mark(e["g0"]).get_offset() + e["lead"] + e["body"]
+        return (yes, yes + len(self.YES)), (yes + len(self.YES), yes + len(self.YES) + len(self.NO))
+
+    def _proposal_at(self, offset):
+        """The change shown whose passage, or green, a place in the buffer is in (from its passage's start to its green's
+        end), or None."""
+        for e in self.proposals:
+            if e["g0"] is not None and self.buf.get_iter_at_mark(e["a"]).get_offset() <= offset <= \
+                    self.buf.get_iter_at_mark(e["g1"]).get_offset():
+                return e
+        return None
+
+    def _edits_green(self, keyval, state):
+        """Whether a key would change what's proposed (it's not the page's yet): a letter typed in it, a new line, a
+        paste or a cut there, a Backspace or Delete into it. Kept from the text view, and from what this editor does
+        for those keys itself (a list's next item, Tab's indent...)."""
+        greens = self._greens()
+        if not greens:
+            return False
+        mod = state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)
+        back, forth = keyval == Gdk.KEY_BackSpace, keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete)
+        if not (back or forth or Gdk.keyval_to_unicode(keyval) and not mod or mod and keyval in (
+                Gdk.KEY_v, Gdk.KEY_V, Gdk.KEY_x, Gdk.KEY_X) or keyval in (
+                Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab)):
+            return False
+        if self.buf.get_has_selection():
+            s, t = (i.get_offset() for i in self.buf.get_selection_bounds())
+            return any(s < y and t > x for x, y in greens)
+        at = self.buf.get_property("cursor-position")
+        return any(x < at < y or back and at == y or forth and at == x for x, y in greens)
+
+    def _scroll_soon(self, e):
+        """A change brought into view, once it's laid out (the next frames: its lines' heights only then)."""
+        self.scroll_to = e
+        if self.placing is None:
             self.place_frames = 3
-            self.placing = self.view.add_tick_callback(self._place_tick)
-        return False
+            self.placing = self.view.add_tick_callback(self._scroll_tick)
 
-    def _place_tick(self, _view, _clock):
-        self._place_proposals()
+    def _scroll_tick(self, _view, _clock):
         self.place_frames -= 1
-        if self.place_frames > 0 and self.proposals:
+        if self.place_frames > 0:
             return GLib.SOURCE_CONTINUE
         self.placing = None
+        e, self.scroll_to = self.scroll_to, None
+        if e in self.proposals and e["g0"] is not None:
+            top = self.view.get_iter_location(self.buf.get_iter_at_mark(e["a"]))
+            end = self.view.get_iter_location(self.buf.get_iter_at_mark(e["g1"]))
+            self._scroll_into_view(top.y, end.y + end.height - top.y)
         return GLib.SOURCE_REMOVE
-
-    def _place_proposals(self):
-        """Each card the text's width, at its line's foot (more than one: one under another), the line as much room
-        below it as they're tall."""
-        view, gap = self.view, self.PROPOSAL_GAP
-        left = view.get_left_margin()
-        width = view.get_width() - left - view.get_right_margin()
-        if width < 80:
-            return
-        rooms = self._rooms()
-        for line, group in rooms:
-            heights = []
-            for e in group:
-                if e["card"].wanted != width:
-                    e["card"].wanted = width
-                    e["card"].queue_resize()
-                heights.append(e["card"].measure(Gtk.Orientation.VERTICAL, width)[1])
-            room, first = sum(heights) + gap * (len(group) + 1), group[0]
-            if first["room_px"] != room:
-                first["room_px"] = room
-                first["room"].set_property("pixels-below-lines", room)
-            y, height = view.get_line_yrange(line)  # (its room in it, if it has it)
-            top = y + height - (room if first.get("roomed") else 0) + gap
-            for e, h in zip(group, heights):
-                if (left, top) != e["at"]:
-                    e["at"] = (left, top)
-                    view.move_overlay(e["card"], left, top)
-                if e.get("scroll"):
-                    e["scroll"] = False
-                    self._scroll_into_view(y, top + h - y)
-                top += h + gap
-        firsts = {id(group[0]) for _line, group in rooms}
-        for e in self.proposals:  # (one moved under another's line since: its own tag's room none)
-            if id(e) not in firsts and e["room_px"]:
-                e["room_px"] = 0
-                e["room"].set_property("pixels-below-lines", 0)
 
     def _scroll_into_view(self, y, height):
         """The page scrolled, if it needs to be, to show from y, in the text, height pixels down."""
@@ -3446,42 +3613,79 @@ class DiaryEditor(Gtk.Box, FindInText):
             adj.set_value(min(max(adj.get_value() + by, 0), adj.get_upper() - adj.get_page_size()))
 
     def decide(self, p, accept):
-        """Accept: the change made, as one step (undone at once with Ctrl+Z), where its passage is now; Reject: left.
-        Either way it goes from the page, and the Record's told (RecordChat.decided)."""
+        """Accept: what's proposed put in the page in its passage's place, as one edit (undone at once with ⌘Z), where
+        its passage is now; Reject: the page left as it is. Either way it goes from the page, and the Record's told
+        (RecordChat.decided)."""
         e = next((e for e in self.proposals if e["p"]["id"] == p["id"]), None)
         if e is None:
             return
         if accept:
-            a, b = self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
-            if self.buf.get_text(a, b, True) != p["old"]:
-                start, old = place_change(self.text(), p["old"], a.get_offset())
-                if start is None or old != p["old"]:
+            a, b = (self.buf.get_iter_at_mark(e[k]).get_offset() for k in ("a", "b"))
+            at, old = self.kept_offset(a), self.kept_between(a, b)
+            if old != p["old"]:
+                at, old = place_change(self.kept(), p["old"], at)
+                if at is None or old != p["old"]:
                     return self.win.toast("What it changes isn't on the page as it was: nothing's changed")
-                a, b = self.buf.get_iter_at_offset(start), self.buf.get_iter_at_offset(start + len(old))
-            self.proposals.remove(e)
-            self.buf.begin_user_action()
-            self.buf.delete(a, b)
-            self.buf.insert(a, p["new"])
-            self.buf.end_user_action()
-            self.buf.place_cursor(a)
-            self.proposals.append(e)  # (dropped next: its marks were needed till now)
+            with self._greens_out():
+                self._forget(e)
+                self.buf.begin_user_action()
+                self.buf.delete(self.buf.get_iter_at_offset(at), self.buf.get_iter_at_offset(at + len(old)))
+                self.buf.insert(self.buf.get_iter_at_offset(at), p["new"])
+                self.buf.end_user_action()
+            self.buf.place_cursor(self.buf.get_iter_at_offset(self.buf_offset(at + len(p["new"]), past=False)))
+        else:
+            self._drop_proposal(e)
         p["status"] = "accepted" if accept else "rejected"
-        self._drop_proposal(e)
+        self._changed(self.buf) if accept else self._highlight()
         self.win.chat.decided(p)
 
     def _drop_proposal(self, e):
+        """A change no longer shown (decided; the page drawn afresh): its green taken out, its marks gone. One that's
+        still waiting keeps where its passage is, for the next time it's shown. (Drawn again by whoever drops it.)"""
+        if e not in self.proposals:
+            return
+        if e["p"].get("status") == "pending" and not e["a"].get_deleted():
+            e["p"]["start"] = self.kept_offset(self.buf.get_iter_at_mark(e["a"]).get_offset())
+        with self._quiet():
+            self._take_green(e)
+        self._forget(e)
+
+    def _forget(self, e):
         if e in self.proposals:
             self.proposals.remove(e)
-        if not e["a"].get_deleted() and e["p"].get("status") == "pending":  # (where it is now, for the next time it's shown)
-            e["p"]["start"] = self.buf.get_iter_at_mark(e["a"]).get_offset()
-        e["card"].set_visible(False)  # (kept, for the next: TextView.remove doesn't take an overlay out)
-        e["card"].proposal = None
-        self.spare_cards.append(e["card"])
-        for mark in (e["a"], e["b"]):
-            if not mark.get_deleted():
-                self.buf.delete_mark(mark)
-        self.buf.get_tag_table().remove(e["room"])
-        self._highlight() if not self.loading else None
+        for k in ("a", "b", "g0", "g1"):
+            if e.get(k) is not None and not e[k].get_deleted():
+                self.buf.delete_mark(e[k])
+            e[k] = None
+        self.hot = None
+
+    def apply_steps(self, ops):
+        """Undo's or Redo's edits (PageHistory): [("+" or "-", where in the page's own text, the text)], made with
+        what's proposed taken out a moment; the caret after the last."""
+        caret = None
+        self.history.paused += 1
+        try:
+            with self._greens_out():
+                for kind, at, text in ops:
+                    it = self.buf.get_iter_at_offset(at)
+                    if kind == "+":
+                        self.buf.insert(it, text)
+                        caret = at + len(text)
+                    else:
+                        self.buf.delete(it, self.buf.get_iter_at_offset(at + len(text)))
+                        caret = at
+        finally:
+            self.history.paused -= 1
+        if caret is not None:
+            self.buf.place_cursor(self.buf.get_iter_at_offset(self.buf_offset(caret, past=False)))
+        self._changed(self.buf)
+
+    def _tooltip(self, _view, x, y, keyboard, tip):
+        hit = None if keyboard else self._at(x, y)
+        if hit is not None and hit[0] in ("accept", "reject"):
+            tip.set_text("Accept (Tab)" if hit[0] == "accept" else "Reject (Esc)")
+            return True
+        return False
 
     # ---- ⌘F (FindInText: the bar, the matches)
     def open_search(self):
@@ -3855,6 +4059,8 @@ class DiaryEditor(Gtk.Box, FindInText):
             return
         view.stop_emission_by_name("paste-clipboard")
         a, b = self.buf.get_selection_bounds()
+        if any(a.get_offset() < y and b.get_offset() > x for x, y in self._greens()):
+            return  # (over what's proposed: it isn't the page's to paste over)
         marks = (self.buf.create_mark(None, a, True), self.buf.create_mark(None, b, False))
         view.get_clipboard().read_text_async(None, self._pasted, marks)
 
@@ -3875,12 +4081,17 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.delete_mark(m)
 
     def _at(self, x, y):
-        """What's under the pointer: ("link", page), ("ref", name) or ("url", address), or None."""
+        """What's under the pointer: ("link", page), ("ref", name), ("url", address), or a proposed change's ✓ or ✗
+        (("accept" or "reject", the change shown)), or None."""
         bx, by = self.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
         ok, it = self.view.get_iter_at_location(bx, by)
         if not ok:
             return None
         off, text = it.get_offset(), self.text()
+        if (e := self._proposal_at(off)) is not None:
+            yes, no = self._glyphs(e)
+            if yes[0] <= off < yes[1] or no[0] <= off < no[1]:
+                return ("accept" if off < yes[1] else "reject"), e
         for m in LINK_RE.finditer(text):
             if m.start() <= off < m.end():
                 if m.group(1).lstrip().startswith("@"):  # ([[@name]]: a reference)
@@ -3935,7 +4146,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         hit, self.pressed = self.pressed, None
         if hit is None:
             return
-        if hit[0] == "link":
+        if hit[0] in ("accept", "reject"):
+            if hit[1] in self.proposals:
+                self.decide(hit[1]["p"], hit[0] == "accept")
+        elif hit[0] == "link":
             self.open_page(hit[1])
         elif hit[0] == "url" and hit[1].startswith(CITE_SCHEME):
             self.win.open_citation(hit[1])
@@ -3950,6 +4164,12 @@ class DiaryEditor(Gtk.Box, FindInText):
         which would cover the hand. Come over an @name, what it is (Window.hover_ref), once till it's left."""
         hit = self._at(x, y)
         GLib.idle_add(DiaryEditor._pointer, weakref.ref(self.view), pointers.HAND if hit else pointers.TEXT)
+        glyph = self._glyphs(hit[1])[hit[0] == "reject"] if hit and hit[0] in ("accept", "reject") else None
+        if glyph != self.hot:  # (the ✓ or ✗ it's over, shaded)
+            self.buf.remove_tag_by_name("proposal-hot", *self.buf.get_bounds())
+            self.hot = glyph
+            if glyph is not None:
+                self.buf.apply_tag_by_name("proposal-hot", *(self.buf.get_iter_at_offset(i) for i in glyph))
         name = hit[1] if hit and hit[0] == "ref" else None
         if name != self.hovered:
             self.hovered = name
@@ -3957,6 +4177,11 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.win.hover_ref(name, at=(self.view, x, y))
             else:
                 self.win.hover_left()
+
+    def _unhot(self):
+        if self.hot is not None:
+            self.hot = None
+            self.buf.remove_tag_by_name("proposal-hot", *self.buf.get_bounds())
 
     @staticmethod
     def _pointer(view, want):
@@ -4103,6 +4328,19 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval == Gdk.KEY_Escape and self.search_bar.get_search_mode() and not self.pop.get_visible():
             FindInText.close_search(self)  # (the find bar open as you write: closed, the caret left where it is)
             return True
+        primary = state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)
+        if primary and keyval in (Gdk.KEY_z, Gdk.KEY_Z, Gdk.KEY_y, Gdk.KEY_Y):  # (the page's own Undo: PageHistory)
+            again = keyval in (Gdk.KEY_y, Gdk.KEY_Y) or state & Gdk.ModifierType.SHIFT_MASK
+            self.history.redo() if again else self.history.undo()
+            return True
+        if keyval in (Gdk.KEY_Tab, Gdk.KEY_Escape) and not self.pop.get_visible() and not state & (
+                Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK
+                | Gdk.ModifierType.SHIFT_MASK) and \
+                (e := self._proposal_at(self.buf.get_property("cursor-position"))) is not None:
+            self.decide(e["p"], keyval == Gdk.KEY_Tab)  # (the caret in a change proposed: Tab takes it, Esc leaves it)
+            return True
+        if self._edits_green(keyval, state):
+            return True  # (what's proposed isn't the page's: nothing typed into it)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab) and \
                 self.pop.get_visible() and self._issue_list() and not self.pop_moved and not self._exact():
             # (#'s list, and nothing asked of it: what was typed stays as typed. Enter's a new line, as it always is)
@@ -4110,7 +4348,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
                 return True
         if state & Gdk.ModifierType.ALT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) \
-                and not self.pop.get_visible() and self._heading_key(keyval, bool(state & Gdk.ModifierType.SHIFT_MASK)):
+                and not self.pop.get_visible() and self._moved_heading(keyval, bool(state & Gdk.ModifierType.SHIFT_MASK)):
             return True
         if keyval in (Gdk.KEY_BackSpace, Gdk.KEY_Delete, Gdk.KEY_KP_Delete) or (
                 Gdk.keyval_to_unicode(keyval) and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)):
@@ -4166,6 +4404,21 @@ class DiaryEditor(Gtk.Box, FindInText):
             self._insert_ref()
             return True
         return False
+
+    def _moved_heading(self, keyval, shift):
+        """_heading_key, with what's proposed taken out first if it's on a heading's line it could move (or the
+        selection's): moved with what's proposed in it, that would be the page's."""
+        if not self._greens() or keyval not in (Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_Left, Gdk.KEY_Right):
+            return self._heading_key(keyval, shift)
+        ins, sel = (self.buf.get_iter_at_mark(m).get_line() for m in (self.buf.get_insert(),
+                                                                       self.buf.get_selection_bound()))
+        lines = self.text().split("\n")
+        if not any(re.match(r"#{1,6}\s", lines[n]) for n in range(min(ins, sel), max(ins, sel) + 1)):
+            return self._heading_key(keyval, shift)
+        with self._greens_out():
+            done = self._heading_key(keyval, shift)
+        self._changed(self.buf) if done else self._highlight()
+        return done
 
     def _heading_key(self, keyval, shift):
         """Alt and an arrow on a heading, as Org's: up or down, swapped with its sibling that way, all under it going
@@ -5420,6 +5673,14 @@ class RefCompleter:
         return True
 
 
+class SaidLabel(widgets.LinkLabel):
+    """What you wrote to the Record (RecordChat._said): a LinkLabel whose logos are in the @names' colour, as a page
+    draws them (NotesView.COLOR), not the text's. (LinkLabel draws them in get_color()'s; the text's own is GTK's.)"""
+
+    def get_color(self):
+        return NotesView.COLOR
+
+
 class RecordChat(Gtk.Box):
     """Your conversation with the Record, the notebook's agent (Agent): a passage picked in a chat read, or selected on
     a page, quoted with what's asked; @ in the box lists what's to reference (RefCompleter), and what's referenced goes
@@ -5441,9 +5702,16 @@ class RecordChat(Gtk.Box):
                            margin_start=12, margin_end=12)
         self.scroll = widgets.markdown_scroller(self.box, vexpand=True)  # (as Baude's chat: widgets)
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.apply_zoom)
-        self.append(self.scroll)
+        # the conversation and the box asked in, set into the column as a chat is into Baude's window, and a subagent's
+        # into its side panel (the inside: widgets.inside), Clear above it on the frame. No gap of its own on the
+        # page's side: the page's is the one between them, as thin as the window's edges are
+        talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
+        talk.append(self.scroll)
+        self.append(talk)
         # composer
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10, margin_bottom=10)
+        self.pending_box = self._pending_bar()
+        comp.append(self.pending_box)
         self.quote_box = Gtk.Box(spacing=6)
         self.quote_box.add_css_class("quote-chip")
         self.quote_label = label("", css=("caption",))
@@ -5469,7 +5737,7 @@ class RecordChat(Gtk.Box):
         self.composer.add_controller(keys)
         self.send.connect("clicked", lambda *_: self.ask.stop() if self.ask else self.submit())
         comp.append(self.writing)
-        self.append(comp)
+        talk.append(comp)
         self.model_changed()
 
     def show(self, notebook):
@@ -5564,6 +5832,7 @@ class RecordChat(Gtk.Box):
             self.box.append(self.live_widget)
             for card in self.asking:
                 self.box.append(card)
+        self.show_pending_bar()
         GLib.timeout_add(60, self._to_bottom)
 
     def _to_bottom(self):
@@ -5584,9 +5853,12 @@ class RecordChat(Gtk.Box):
                 where = f"{short_page(m['selection']['page'])} · " if m.get("selection") else ""
                 b.append(label(where + "“" + (" ".join(q.split())[:400] + ("…" if len(q) > 400 else "")) + "”",
                                css=("quote-in-bubble",), select=True))
-            b.append(label(m["text"], select=True))
-            if m.get("refs"):
-                b.append(self._ref_chips(m["refs"]))
+            b.append(self._said(m))
+        elif m.get("proposals") and not m["text"] and not m.get("error"):  # (it only edited: no more than that said)
+            pages = list(dict.fromkeys(short_page(p["page"]) for p in m["proposals"]))
+            b.append(label("Edited " + ", ".join(pages), css=("dim-label", "caption")))
+            b.set_margin_start(12)
+            b.prose = b.status = label("")
         else:
             b.add_css_class("bubble-error" if m.get("error") else "bubble-record")
             outer.set_margin_end(28)
@@ -5600,55 +5872,80 @@ class RecordChat(Gtk.Box):
             b.status = label("", css=("dim-label", "caption"))
             b.status.set_visible(False)
             b.append(b.status)
-            for p in m.get("proposals") or ():
-                b.append(self._proposal_line(p))
             if m.get("unknown"):
                 b.append(self._unknown_chips(m))
         outer.append(b)
         outer.bubble = b
         return outer
 
-    def _ref_chips(self, refs):
-        """What a message referenced, each with its logo, as the notes' @names look."""
-        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=8, row_spacing=4,
-                           column_spacing=4)
-        for r in refs:
-            chip = Gtk.Box(spacing=4)
-            chip.add_css_class("ref-chip")
-            chip.append(widgets.RefIcon(r.get("icon")))
-            chip.append(label(r["surface"], wrap=False))
-            chip.set_tooltip_text(r.get("what"))
-            flow.append(chip)
-        return flow
+    def _said(self, m):
+        """What you wrote, its @references in it as a page draws an @name: the logo where its @ is (LinkLabel draws
+        it), the name in the @names' colour on their patch; clicked, opened as one on a page is."""
+        refs, text = {r["surface"]: r for r in m.get("refs") or ()}, plain_refs(m["text"])
+        out, at = [], 0
+        for found in REF_RE.finditer(text):
+            r = refs.get(found.group(1) or found.group(2))
+            if r is None:
+                continue
+            name = html.escape(r["surface"], False)
+            out += [html.escape(text[at:found.start()], False),
+                    f'<a href="ref:{urllib.parse.quote(r["surface"], safe="")}"><span foreground="#2f8f72" '
+                    f'background="#4f8a7c" bgalpha="14%" weight="600" underline="none">'
+                    f'{widgets.ref_icon_slot(r.get("icon")) or "@"}{name}</span></a>']
+            at = found.end()
+        out.append(html.escape(text[at:], False))
+        said = SaidLabel(xalign=0.0, wrap=True, selectable=True)
+        said.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        said.add_css_class("said-refs")
+        said.set_markup("".join(out))
+        said.connect("activate-link", lambda _l, uri: self.win.follow(uri, from_chat=True))
+        on_name_hover(said, self.win)
+        return said
 
-    STATUS = {"pending": "Waiting for you to accept or reject it", "accepted": "Accepted", "rejected": "Rejected"}
+    def pending(self, notebook):
+        return pending_edits(notebook, self.agent)
 
-    def _proposal_line(self, p):
-        """A change the agent proposed: to which page, what's become of it, and Show, to see it there."""
-        line = Gtk.Box(spacing=8)
-        line.add_css_class("proposal-line")
-        line.append(widgets.RefIcon("page"))
-        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-        words.append(label(f"Change to {short_page(p['page'])}" + (f": {p['summary']}" if p.get("summary") else ""),
-                           css=("heading",)))
-        words.append(label(self.STATUS.get(p.get("status"), p.get("status", "")), css=("dim-label", "caption")))
-        line.append(words)
-        if p.get("status") == "pending":
-            show = Gtk.Button(label="Show", valign=Gtk.Align.CENTER)
-            show.connect("clicked", lambda *_: self.show_proposal(p))
-            line.append(show)
-        return line
+    def _pending_bar(self):
+        """Over the box asked in, while there are edits waiting: how many, and Previous and Next, each to one on its
+        page, the caret in it (Tab takes it, Esc leaves it, as its ✓ and ✗ do)."""
+        bar = Gtk.Box(spacing=2)
+        bar.add_css_class("pending-bar")
+        self.pending_label = label("", css=("caption",))
+        self.pending_label.set_hexpand(True)
+        bar.append(self.pending_label)
+        for icon, tip, by in (("go-up-symbolic", "Previous edit", -1), ("go-down-symbolic", "Next edit", 1)):
+            btn = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER)
+            btn.add_css_class("flat")
+            btn.add_css_class("circular")
+            btn.connect("clicked", lambda *_, by=by: self.next_edit(by))
+            bar.append(btn)
+        bar.set_visible(False)
+        self.at_edit = None  # (the edit Previous and Next last went to: its id)
+        return bar
 
-    def show_proposal(self, p):
-        if self.notebook is not None and p["page"] in self.notebook["pages"]:
-            editor = self.win.open_note(p["page"])
-            if editor is not None:
-                editor.show_proposal(p, scroll=True)
+    def show_pending_bar(self):
+        n = len(self.pending(self.notebook)) if self.notebook is not None else 0
+        self.pending_label.set_text(f"{n} edit{'s' if n != 1 else ''} pending")
+        self.pending_box.set_visible(n > 0)
+
+    def next_edit(self, by):
+        """Previous (by -1) or Next (1): the edit before or after the one last gone to (the first, or the last), shown
+        on its page, scrolled to, the caret in it."""
+        waiting = self.pending(self.notebook) if self.notebook is not None else []
+        if not waiting:
+            return self.show_pending_bar()
+        ids = [p["id"] for p in waiting]
+        at = (ids.index(self.at_edit) + by) % len(ids) if self.at_edit in ids else (0 if by > 0 else len(ids) - 1)
+        p = waiting[at]
+        self.at_edit = p["id"]
+        if p["page"] in self.notebook["pages"] and (editor := self.win.open_note(p["page"])) is not None:
+            editor.show_proposal(p, scroll=True, caret=True)
+            editor.view.grab_focus()
 
     def decided(self, p):
-        """A proposed change accepted or rejected on its page: said so here, and to the agent with the next message."""
+        """A proposed edit accepted or rejected on its page: kept so, and told the agent with the next message."""
         self.win.store.save()
-        self.render()
+        self.show_pending_bar()
 
     def _unknown_chips(self, m):
         flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=6, row_spacing=4,
@@ -5825,21 +6122,22 @@ class RecordChat(Gtk.Box):
         if old == new:
             return {"error": "new_text is old_text: that changes nothing."}
         editor = self.win.tabs.get(("note", page))
-        text = editor.text() if editor is not None else notebook["pages"].get(page, "")
+        text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
         sel = turn.get("selection")
         start, old = place_change(text, old, sel["start"] if sel and sel["page"] == page else None)
         if start is None:
             return {"error": old}
         if not old and text and not text.endswith("\n") and not new.startswith("\n"):
             new = "\n" + new  # (added at the end: on a line of its own)
-        p = {"id": uuid.uuid4().hex[:10], "page": page, "old": old, "new": new, "start": start,
-             "summary": " ".join(str(args.get("summary") or "").split())[:120], "status": "pending", "t": time.time()}
+        p = {"id": uuid.uuid4().hex[:10], "page": page, "old": old, "new": new, "start": start, "status": "pending",
+             "t": time.time()}
         turn["proposals"].append(p)
-        self._status(self.agent, f"Proposed a change to {short_page(page)}")
+        self._status(self.agent, f"Edited {short_page(page)}")
         if (editor := self.win.open_note(page)) is not None:
             editor.show_proposal(p, scroll=True)
-        return {"text": f"Shown to the user on the page {page} as a diff, to accept or reject. Nothing is written "
-                        "until they accept; you'll be told what they decide."}
+        self.show_pending_bar()
+        return {"text": f"Shown on the page {page} for the user to accept or reject. Nothing is written until they "
+                        "accept; you'll be told which."}
 
     def _done(self, agent, text, error, turn):
         notebook, props = agent.notebook, turn.get("proposals") or []
@@ -6965,7 +7263,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         self.tabs.show(editor.tab_key)
         buf = editor.buf
         end = buf.get_end_iter()
-        text = editor.text()
+        text = editor.kept()
         buf.insert(end, ("" if not text or text.endswith("\n") else "\n") + f"- {ref_text(surface, label)}: ")
         buf.place_cursor(buf.get_end_iter())
         editor.view.grab_focus()

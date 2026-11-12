@@ -67,17 +67,14 @@ class Mcp:
 
 
 def fill(text, selection):
-    """A passage selected on a page, filled in from the page referenced with it: (the change's input, the reply)."""
+    """A passage selected on a page, filled in from the page referenced with it: (the edit's input, the reply: none)."""
     page, passage = selection
     refs = re.findall(r'<page notebook="[^"]*" name="([^"]+)" file="[^"]*">\n(.*?)\n</page>', text, re.S)
     facts = [re.sub(r"^- ", "", line).rstrip(".") for _name, body in refs for line in body.splitlines()
              if line.startswith("- ")]
     facts = [f[0].lower() + f[1:] for f in facts]
     new = ("It decides bed by bed: " + "; ".join(facts) + ".") if facts else "TODO: how it decides."
-    said = " and ".join(f"**{name}**" for name, _ in refs) or "what you've told me"
-    return ({"page": page, "old_text": passage, "new_text": new, "summary": "how it decides"},
-            f"I've proposed filling in that passage on **{page}** from {said}: it's on the page for you to accept "
-            "or reject.")
+    return {"page": page, "old_text": passage, "new_text": new}, ""  # (the edit says itself: nothing more said)
 
 
 def session():

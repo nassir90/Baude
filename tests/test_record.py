@@ -2540,14 +2540,14 @@ def test_ask_says_what_project_names_are(app):
     assert "--model" in q["argv"] and q["argv"][q["argv"].index("--model") + 1] == "haiku"
     sysprompt = q["argv"][q["argv"].index("--system-prompt") + 1]
     assert "golden files" in sysprompt and "C++, CLI, HTTP" in sysprompt, "the computer science it takes as known"
-    assert sysprompt.startswith("You are Record.")
+    assert sysprompt.startswith("You are Meta,")
     p = q["prompt"]
     assert "[project names in it]\n- RelayRunner: Code symbol, src/relay_jobs.py\n- relay_jobs.py: File, " \
            "src/relay_jobs.py\n[/project names]" in p, p
-    assert p.count("\nUser: ") + p.count("\nRecord: ") + p.startswith("User: ") == 3, "three messages"
+    assert p.count("\nUser: ") + p.count("\nMeta: ") + p.startswith("User: ") == 3, "three messages"
     assert "--- page: Home ---" in p and "- **function**: a recipe" in p
     last = by_id(win, "a")["messages"][-1]
-    assert last["role"] == "record" and last["unknown"] == ["stream protocol", "idempotency"], last
+    assert last["role"] == "meta" and last["unknown"] == ["stream protocol", "idempotency"], last
     shot(win, "record-3-answered")
 
 
@@ -3506,7 +3506,7 @@ def test_restart_waits_for_keys_and_presses(app):
     win.is_active = lambda: True
     try:
         win.right_slide.set_shown(True)
-        win.right_stack.set_visible_child_name("record")  # (another test's may be up: the box isn't, then)
+        win.right_stack.set_visible_child_name("meta")  # (another test's may be up: the box isn't, then)
         box.get_buffer().set_text("")
         box.grab_focus()
         pump(0.3)
@@ -5311,7 +5311,7 @@ def _feedback_note_box(app):
     widgets.save_settings(text_scale=None, icon_scale=None)
     widgets.apply_scales(win.get_display())
     win.right_slide.set_shown(True)  # (and the chat's box there to measure against: a test before may have closed it,
-    win.right_stack.set_visible_child_name("record")  # or left another page showing)
+    win.right_stack.set_visible_child_name("meta")  # or left another page showing)
     select(win, "a")
     win.feedback_draft = None
     style = Adw.StyleManager.get_default()

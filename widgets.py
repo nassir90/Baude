@@ -2401,9 +2401,6 @@ BAUDE_ICONS = {
     "baude-claude-symbolic": ('<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95"/>'
                               '<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95" transform="rotate(60 8 8)"/>'
                               '<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95" transform="rotate(-60 8 8)"/>'),
-    # Record's logo's speech bubble: the Record (your conversation with it), in Record's right bar
-    "baude-record-symbolic": '<path d="M3 2.5h10A1.5 1.5 0 0 1 14.5 4v6a1.5 1.5 0 0 1-1.5 1.5H7.5L4.5 14v-2.5H3A1.5 '
-                             '1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z"/>',
     # open: a box, its top right corner left open for an arrow out of it
     "baude-open-symbolic": '<path d="M2 3h6v2H4v7h7V8h2v6H2z"/><path d="M9 1h6v6l-2.2-2.2-4.1 4.1-1.6-1.6 4.1-4.1z"/>',
     # Enter / return: a stem down from the top right, then left to an arrowhead
@@ -2412,6 +2409,10 @@ BAUDE_ICONS = {
     "baude-map-symbolic": '<path fill-rule="evenodd" d="M8 1a5.5 5.5 0 0 1 5.5 5.5C13.5 10.4 8 15.5 8 15.5S2.5 '
                           '10.4 2.5 6.5A5.5 5.5 0 0 1 8 1zm0 2a3.5 3.5 0 0 0-3.5 3.5c0 2.3 2.3 5.2 3.5 6.5 '
                           '1.2-1.3 3.5-4.2 3.5-6.5A3.5 3.5 0 0 0 8 3z"/><circle cx="8" cy="6.5" r="1.5"/>',
+    # Meta's: a spanner, filled (Material's build icon, Apache-2.0, its 24-px drawing scaled to 16), in the right bar
+    "baude-meta-symbolic": '<g transform="scale(0.666667)"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4'
+                           '-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 '
+                           '0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></g>',
     # a log: four lines of text of different lengths (a pod's logs, in the Kubernetes view)
     "baude-logs-symbolic": '<rect x="1" y="1" width="14" height="2" rx="1"/><rect x="1" y="5" width="9" height="2" '
                            'rx="1"/><rect x="1" y="9" width="12" height="2" rx="1"/><rect x="1" y="13" width="7" '
@@ -3598,7 +3599,8 @@ class MainTabs(Gtk.Box):
     each in a tab of its own (Adw.TabView), and opened again, shown again, not opened twice (open: by its key). bar
     (an Adw.TabBar) is the window's to put where it wants it. A pinned one (Baude's chat) is first, and never closed;
     shown_alone False: the bar's hidden while there's nothing but that one. closed(key, child): called as one is
-    closed (its ×, close_current). copy_links (Record's): right-click on one to copy its link (copy_link). Only the
+    closed (its ×, close_current). copy_links (Record's): right-click on one to copy its link (copy_link); rename
+    (Record's, with it): (can(child), ask(child)), Rename… on those it can rename (a chat's). Only the
     tab shown has a size: the main area's least is that one's, not the widest of all that's open (TabBody).
 
     What's been shown is kept as a browser keeps its history (each tab shown, a link followed to it; a file's code at
@@ -3607,7 +3609,7 @@ class MainTabs(Gtk.Box):
 
     HISTORY = 100
 
-    def __init__(self, closed=None, shown_alone=True, reopen=None, copy_links=False):
+    def __init__(self, closed=None, shown_alone=True, reopen=None, copy_links=False, rename=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.view = Adw.TabView(vexpand=True, hexpand=True)
         self.bar = Adw.TabBar(view=self.view, autohide=False)
@@ -3632,6 +3634,14 @@ class MainTabs(Gtk.Box):
             self.view.connect("setup-menu", lambda _v, page: page is not None and setattr(self, "menu_page", page))
             copy.connect("activate", lambda *_: self.menu_page is not None and self.copy_link(tab_child(self.menu_page)))
             acts.add_action(copy)
+            if rename is not None:
+                can, ask = rename
+                menu.append("Rename…", "tab.rename")
+                named = Gio.SimpleAction(name="rename")
+                named.connect("activate", lambda *_: self.menu_page is not None and ask(tab_child(self.menu_page)))
+                acts.add_action(named)
+                self.view.connect("setup-menu", lambda _v, page: page is not None and named.set_enabled(
+                    bool(can(tab_child(page)))))
             self.bar.insert_action_group("tab", acts)
 
     def _bar_shown(self):
@@ -5973,7 +5983,6 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 /* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed */
 .side-panel { background: transparent; }
 .side-question { border: 1px solid @baude_rule; border-radius: 10px; padding: 10px 12px; }
-.side-question .side-followup { font-weight: bold; opacity: 0.8; margin-top: 4px; }
 .side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */
@@ -6638,7 +6647,9 @@ def settings_code_font(win, app):
         fonts.append(running)
     row = Adw.ComboRow(title="Code Font", model=Gtk.StringList.new(fonts), selected=fonts.index(fontsetup.code_font()))
     restart = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
-    restart.connect("clicked", lambda b: (b.get_ancestor(Adw.Dialog).close(), win.activate_action("win.restart", None)))
+    # (in Settings, closed first; under a reply of Meta's, there's no dialog to close)
+    restart.connect("clicked", lambda b: ((d := b.get_ancestor(Adw.Dialog)) is not None and d.close(),
+                                          win.activate_action("win.restart", None)))
     row.add_suffix(restart)
 
     def show(font):
@@ -6860,3 +6871,224 @@ def watch_github(win, folders, changed=None):
                 changed(win)
         return True
     GLib.timeout_add_seconds(GITHUB_TICK_S, tick)
+
+
+# ---------------------------------------------------------------- a tool call's card
+# (Baude's chat's and Meta's: a tool card's toggles and status, and what moves while something works)
+
+class Ticker:
+    """What moves while something works: a working session's dot pulsing (its opacity eased between 1 and 0.25 and
+    back every 0.9 s) and the spinners of calls still running (Spinner). One timer moves them all, FPS times a
+    second: each frame GTK draws costs 1.5-3 ms of CPU on a Mac (most of it GSK readying the window's surface), and
+    a CSS animation or an Adw.Spinner draws 60 a second, so one working session's dot, or one long-running command,
+    took a sixth of a core. In a window you aren't looking at they hold still."""
+
+    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, 0.9, 0.25, 0.6
+    # (held, not weakly: a widget Python keeps no wrapper of, Signal's button's icon, lost its own at once; let go of
+    # as each is unmapped, which taking it out of the window does, and taken back as it's mapped again)
+    pulsing, spinning, source, interval, start = set(), set(), None, 0, 0.0
+
+    @classmethod
+    def run(cls, ms=None):
+        """The timer: FPS times a second while something it moves is seen, else every IDLE_MS (to notice when it is)."""
+        ms = ms or 1000 // cls.FPS
+        if cls.source is not None:
+            if cls.interval == ms:
+                return
+            GLib.source_remove(cls.source)
+        else:
+            cls.start = time.monotonic()
+        cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
+
+    @classmethod
+    def pulse(cls, widget):
+        cls.pulsing.add(widget)
+        cls.run()
+
+    @classmethod
+    def still(cls, widget):
+        cls.pulsing.discard(widget)
+        widget.set_opacity(1.0)
+
+    @staticmethod
+    def seen(widget):
+        """Mapped, in the window you're looking at."""
+        root = widget.get_root() if widget.get_mapped() else None
+        return isinstance(root, Gtk.Window) and root.is_active()
+
+    @classmethod
+    def tick(cls):
+        for held in (cls.pulsing, cls.spinning):
+            held.difference_update([w for w in held if not w.get_mapped()])
+        if not cls.pulsing and not cls.spinning:
+            cls.source = None
+            return False
+        phase = ((time.monotonic() - cls.start) / cls.PERIOD) % 2
+        ease = (1 - math.cos(math.pi * (phase if phase < 1 else 2 - phase))) / 2  # (CSS's ease-in-out, near enough)
+        level, seen = round(1 - (1 - cls.LOW) * ease, 2), False
+        for w in cls.pulsing:
+            here = cls.seen(w)
+            seen = seen or here
+            w.set_opacity(level if here else cls.STILL)
+        for w in cls.spinning:
+            if cls.seen(w):
+                seen = True
+                w.queue_draw()
+        if (ms := 1000 // cls.FPS if seen else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
+            cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
+            return False
+        return True
+
+
+class Spinner(Gtk.Widget):
+    """Adw.Spinner's look (a faint ring, and an arc going round it that grows and shrinks), moved by Ticker at its
+    frame rate rather than by a frame-clock animation of its own (see Ticker)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        # (plain functions, given the spinner by the signal: a closure over it would be a cycle PyGObject can't free)
+        self.connect("map", Spinner._mapped)
+        self.connect("unmap", Spinner._unmapped)
+
+    def _mapped(self):
+        Ticker.spinning.add(self)
+        Ticker.run()
+
+    def _unmapped(self):
+        Ticker.spinning.discard(self)
+
+    def do_measure(self, orientation, for_size):
+        return scales["icon_px"], scales["icon_px"], -1, -1  # (an icon's size: Settings → Size)
+
+    def do_snapshot(self, snapshot):
+        w, h = self.get_width(), self.get_height()
+        width = max(1.5, min(w, h) / 8)
+        r = min(w, h) / 2 - width / 2
+        if r <= 0:
+            return
+        cx, cy, color = w / 2, h / 2, self.get_color()
+        track = color.copy()
+        track.alpha *= 0.15
+        stroke = Gsk.Stroke.new(width)
+        ring = Gsk.PathBuilder.new()
+        ring.add_circle(Graphene.Point().init(cx, cy), r)
+        snapshot.append_stroke(ring.to_path(), stroke, track)
+        t = time.monotonic()
+        a = (t % 1.0) * 2 * math.pi  # (a turn a second, the arc a fifth to two thirds of the ring, and back)
+        span = (0.2 + 0.47 * (1 - math.cos(2 * math.pi * t / 1.6)) / 2) * 2 * math.pi
+        arc = Gsk.PathBuilder.new()
+        arc.move_to(cx + r * math.cos(a), cy + r * math.sin(a))
+        arc.svg_arc_to(r, r, 0, span > math.pi, True, cx + r * math.cos(a + span), cy + r * math.sin(a + span))
+        stroke.set_line_cap(Gsk.LineCap.ROUND)
+        snapshot.append_stroke(arc.to_path(), stroke, color)
+
+
+ICON_SLOT = 16  # status icon and disclosure arrow share one square column
+
+
+def _slot(widget):
+    widget.set_size_request(ICON_SLOT, ICON_SLOT)  # (at least: an image is at the icons' size, Settings → Size)
+    widget.set_halign(Gtk.Align.CENTER)
+    widget.set_valign(Gtk.Align.CENTER)
+    return widget
+
+
+class Disclosure:
+    """What a toggle opens under a line, built when it's first opened (on_expand). The toggle is a button after a tool
+    card's name, Command (button=True), or an arrow and its label, › 5 tool calls; it goes in toggles, a box on that
+    line. What it opens goes in grid's row, under the line."""
+
+    def __init__(self, toggles, grid, row, label="details", button=False):
+        self.on_expand = []  # run on every opening: content built only once someone looks
+        self.grid, self.row = grid, row
+        self.revealer, self.expanded = None, False  # (the revealer: once there's something in it)
+        text = self.text = Gtk.Label(label=label, xalign=0.5 if button else 0)
+        if button:
+            self.arrow = None
+            # (a click leaves the focus where it was, in what you're typing)
+            self.button = Gtk.ToggleButton(child=text, valign=Gtk.Align.CENTER, focus_on_click=False)
+            self.button.add_css_class("tool-toggle")
+            self.button.connect("toggled", lambda b: b.get_active() != self.expanded and self.clicked(b.get_active()))
+        else:
+            self.arrow = _slot(Gtk.Image.new_from_icon_name("pan-end-symbolic"))
+            self.arrow.add_css_class("soft-icon")
+            text.add_css_class("dim-label")
+            self.button = Gtk.Box(spacing=4)
+            self.button.append(self.arrow)
+            self.button.append(text)
+            click = Gtk.GestureClick()
+            click.connect("released", lambda *_: self.clicked(not self.expanded))
+            self.button.add_controller(click)
+            pointers.hand(self.button)
+        toggles.append(self.button)
+
+    def clicked(self, expanded):
+        """Opened or closed by the reader: the toggle stays where it is on screen, and what's under it moves down or up
+        (the chat's hold_toggle: following its end, the end would stay put and the toggle move instead)."""
+        hold = getattr(self.button.get_root(), "hold_toggle", None)
+        if hold is not None:
+            hold(self)
+        self.set_expanded(expanded)
+
+    def sliding(self):
+        """Still sliding open or closed."""
+        return self.revealer is not None and self.revealer.get_child_revealed() != self.revealer.get_reveal_child()
+
+    def set_child(self, child):
+        if self.revealer is None:  # (a long session has thousands of these, most never opened: made when needed)
+            self.revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+                                         transition_duration=120, visible=self.button.get_visible(),
+                                         reveal_child=self.expanded)
+            self.grid.attach(self.revealer, 0, self.row, 1, 1)
+        self.revealer.set_child(child)
+
+    def set_label(self, label):
+        self.text.set_label(label)
+
+    def set_visible(self, visible):
+        for w in (self.button, self.revealer):
+            if w is not None:
+                w.set_visible(visible)
+
+    def get_visible(self):
+        return self.button.get_visible()
+
+    def get_child(self):
+        return self.revealer.get_child() if self.revealer is not None else None
+
+    def get_expanded(self):
+        return self.expanded
+
+    def set_expanded(self, expanded):
+        self.expanded = expanded
+        if expanded:
+            for fn in self.on_expand:
+                fn()
+        if self.revealer is not None:  # (nothing to show yet: what comes is shown as it comes, set_child)
+            self.revealer.set_reveal_child(expanded)
+        if self.arrow is not None:
+            self.arrow.set_from_icon_name("pan-down-symbolic" if expanded else "pan-end-symbolic")
+        elif self.button.get_active() != expanded:
+            self.button.set_active(expanded)
+
+
+def _status_icon(state):
+    """The 16px status mark shared by tool cards and groups."""
+    if state in ("running", "background"):
+        return _slot(Spinner())  # (not Adw.Spinner, nor Gtk.Spinner: see Ticker)
+    if state == "interrupted":  # a saved call that never finished: no spinner forever
+        icon = _slot(Gtk.Image.new_from_icon_name("process-stop-symbolic"))
+        icon.add_css_class("dim-label")
+        return icon
+    icon = _slot(Gtk.Image.new_from_icon_name(
+        "window-close-symbolic" if state == "error" else "object-select-symbolic"))
+    icon.add_css_class("error" if state == "error" else "success")
+    return icon
+
+
+def _card_status(state):
+    """What a tool card shows of its state at the end of its line: a spinner while it runs, a stop for one that never
+    finished; nothing once it's done (most are), nor for a failed one, whose border is red."""
+    if state in ("running", "background", "interrupted"):
+        return _status_icon(state)
+    return None

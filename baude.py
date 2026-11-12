@@ -8997,9 +8997,10 @@ class SidePanel(Gtk.Box):
         self.detail_info.add_css_class("caption")
         detail.append(self.detail_info)
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
-        # button, title and caption above it on the panel's own background
+        # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
+        # side: the main chat's is the one between them, as thin as the window's edges are
         self.detail_holder = widgets.inside(Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                                               margin_top=6))
+                                                               margin_top=6), start=False)
         detail.append(self.detail_holder)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_stack, "agents", "Subagents")

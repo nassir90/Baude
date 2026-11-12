@@ -17,6 +17,7 @@ import html
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -25,6 +26,7 @@ sys.path.insert(0, HERE)
 
 import test_baude as T  # noqa: E402  (sets up the throwaway env: fake claude, temp config dirs)
 from test_baude import Adw, Gdk, GdkPixbuf, GLib, Gtk, baude  # noqa: E402
+from gi.repository import Graphene  # noqa: E402
 
 from PIL import Image, ImageDraw, ImageGrab  # noqa: E402
 
@@ -1057,6 +1059,148 @@ def _(app):
     return win
 
 
+# ---------------------------------------------------------------- network --
+
+NET = {}
+
+
+def network_fixture():
+    """Servers as Baude finds them on the network (baudelib.server, here on loopback, running the fake claude): lab-mac,
+    there, with sessions in the Lab and Planning groups (one asking whether it may run a command); and build-box, with
+    sessions in Lab, gone once Baude has seen them (dead). Made once, for every scene that wants it."""
+    if NET:
+        return NET
+    import threading
+    from baudelib.server import Server
+    net = baude.network()
+    env = {"FAKE_CLAUDE_SESSION_IDS": "1", "FAKE_CLAUDE_TRANSCRIPTS": "1"}  # (its sessions' ids and transcripts)
+    parser, site = (os.path.join(T.TMP, "net", name) for name in ("parser", "site"))
+    for d in (parser, site):
+        os.makedirs(d, exist_ok=True)
+    servers = {}
+    for name in ("lab-mac", "build-box"):
+        s = Server(state_dir=os.path.join(T.TMP, "servers", name), group="Lab", name=name, host="127.0.0.1",
+                   advertise=False, log=lambda _text: None, env=env)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        servers[name] = (s, net.add("127.0.0.1", s.port))
+    started = {}
+    for name, params, answer in [
+            ("build-box", {"prompt": "Run the nightly benchmarks", "cwd": parser, "tags": ["bench"]}, True),
+            ("build-box", {"prompt": "Bisect the flaky login test", "cwd": site, "tags": ["ci"]}, True),
+            ("lab-mac", {"prompt": "Plan the Q1 roadmap", "cwd": site, "group": "Planning"}, True),
+            ("lab-mac", {"prompt": "Write the release notes for 2.4", "cwd": site, "tags": ["docs"]}, True),
+            ("lab-mac", {"prompt": "Speed up the tokenizer's hot loop", "cwd": parser, "tags": ["perf", "parser"],
+                         "model": "opus", "effort": "high"}, True),
+            ("lab-mac", {"prompt": "List the files in the build folder", "cwd": parser, "tags": ["ci"]}, False)]:
+        server = servers[name][0]
+        s = server.start(params)
+        started[params["prompt"]] = s.id
+        T.wait_for(lambda: s.asks, f"{params['prompt']}: asking")
+        if answer:
+            with server.lock:
+                rid, ask = next(iter(s.asks.items()))
+                server.take_input(None, s, {"type": "control_response", "response": {
+                    "subtype": "success", "request_id": rid,
+                    "response": {"behavior": "allow", "updatedInput": ask["request"]["input"]}}})
+            T.wait_for(lambda: s.state() == "idle", f"{params['prompt']}: done")
+        time.sleep(0.05)  # (in order: each said a little after the one before)
+    box, box_r = servers["build-box"]
+    T.wait_for(lambda: len(net.sessions()) == 6 and all(
+        x.get("size") for x in net.sessions() if x["server"] is box_r), "the network's sessions")
+    for sid in box_r.sessions:
+        box_r.sync(sid)  # (what Baude had of them, from before it went)
+    box.shutdown()
+    T.wait_for(lambda: box_r.state == "dead", "build-box gone", 20)
+    NET.update(net=net, lab=servers["lab-mac"], box=servers["build-box"], ids=started, folders=(parser, site))
+    return NET
+
+
+def network_window(app, group="Lab"):
+    network_fixture()
+    baude.save_settings(sidebar_network=group)
+    win = app.window(opts(cwd=NET["folders"][0]))
+    T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "the network's sessions")
+    return win
+
+
+def open_network_session(win, prompt):
+    win.sidebar.on_activate(win.sidebar.list, sidebar_row(win, prompt))
+    T.wait_for(lambda: win.remote is not None and win.session_id == NET["ids"][prompt] and win.proc is not None,
+               f"{prompt}: opened")
+    T.pump(0.3)
+
+
+@scene("55-network-group-menu", "⋮ beside the search: Group by, then Group, which sessions are listed: Local (this "
+                                "machine's) or a group servers on the network have sessions in")
+def _(app):
+    win = network_window(app)
+    win.sidebar.view_btn.popup()
+    return win
+
+
+@scene("55b-network-group", "A group on the network: its sessions from every server that has some, by folder, their "
+                            "tags beside them; those of a server that's gone (build-box) kept, marked dead")
+def _(app):
+    return network_window(app)
+
+
+@scene("55c-network-session-asking", "A session on lab-mac, opened: its transcript, fetched; what it's asking, to "
+                                     "answer here; the banner says it's waiting on lab-mac, with Stop")
+def _(app):
+    win = network_window(app)
+    open_network_session(win, "List the files in the build folder")
+    T.wait_for(lambda: T.button(win, "Allow"), "its question")
+    return win
+
+
+@scene("55d-network-session-steered", "Allowed, and written to: Baude takes it up on lab-mac, and what it does comes "
+                                      "as it's done")
+def _(app):
+    win = network_window(app)
+    open_network_session(win, "List the files in the build folder")
+    if T.button(win, "Allow"):
+        T.button(win, "Allow").emit("clicked")
+    T.wait_for(lambda: (NET["lab"][1].sessions.get(win.session_id) or {}).get("state") == "idle", "its turn over")
+    T.wait_for(lambda: not win.live_elsewhere(), "the banner gone")
+    T.type_and_send(win, "Now count them")
+    T.wait_for(lambda: T.button(win, "Allow"), "asked again")
+    T.button(win, "Allow").emit("clicked")
+    T.wait_for(lambda: not win.busy, "turn end")
+    return win
+
+
+@scene("55e-network-dead-session", "A session of a server that's gone: as it was last seen, nothing to write in")
+def _(app):
+    win = network_window(app)
+    row = sidebar_row(win, "Run the nightly benchmarks")
+    win.sidebar.on_activate(win.sidebar.list, row)
+    T.wait_for(lambda: win.remote is not None and win.session_id == NET["ids"]["Run the nightly benchmarks"],
+               "opened")
+    T.pump(0.3)
+    return win
+
+
+@scene("55f-network-new-session", "New session, while a group on the network is shown: a prompt, a folder, a group and "
+                                  "tags, on a server that's there, with the top bar's model, effort and mode")
+def _(app):
+    win = network_window(app)
+    win.sidebar.new_chat()
+    T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
+    f = win.remote_fields
+    f["folder"].set_text(NET["folders"][1])
+    f["tags"].set_text("docs, release")
+    f["prompt"].get_buffer().set_text("Check every link in the docs still resolves, and fix the ones that don't.")
+    return win
+
+
+@scene("55g-network-session-menu", "Right-click a network session: Archive, and Delete (it comes back if it's used "
+                                   "again); one at a turn: Stop")
+def _(app):
+    win = network_window(app)
+    win.sidebar.show_menu(sidebar_row(win, "Write the release notes for 2.4"), 120, 14)
+    return win
+
+
 @scene("53c-folder-collapse", "Folders collapse: the arrow appears beside the name when the pointer is near "
                               "(and stays while collapsed); archived sessions sit in a collapsed group at the end")
 def _(app):
@@ -1712,16 +1856,30 @@ def capture(win, size, path):
         img.crop((0, 0, *size)).save(path)
         return
     if sys.platform == "darwin":
-        img = capture_macos(win)
-        img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
-        return
-    # elsewhere without X: GTK draws the window itself; popovers, being separate surfaces, aren't in it
-    paintable = Gtk.WidgetPaintable.new(win)
-    snap = Gtk.Snapshot()
-    paintable.snapshot(snap, win.get_width(), win.get_height())
-    win.get_native().get_renderer().render_texture(snap.to_node(), None).save_to_png(path)
-    img = Image.open(path)
+        try:
+            img = capture_macos(win)
+            img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
+            return
+        except subprocess.CalledProcessError:  # (no Screen Recording for this process: GTK draws it, as elsewhere)
+            pass
+    # elsewhere without X: GTK draws the window itself, and the popovers open in it (surfaces of their own) where they are
+    img = render_widget(win, path)
+    for pop in T.find(win, Gtk.Popover, lambda p: p.get_visible() and p.get_mapped()):
+        ok, at = pop.compute_point(win, Graphene.Point())
+        if ok and pop.get_width() and pop.get_height():
+            shot = render_widget(pop, path + ".popover.png")
+            os.remove(path + ".popover.png")
+            img.paste(shot, (round(at.x), round(at.y)), shot)
     img.crop((0, 0, min(img.width, size[0]), min(img.height, size[1]))).save(path)
+
+
+def render_widget(widget, path):
+    """A widget as GTK draws it (its own surface's renderer), as an RGBA image (saved at path on the way)."""
+    paintable = Gtk.WidgetPaintable.new(widget)
+    snap = Gtk.Snapshot()
+    paintable.snapshot(snap, widget.get_width(), widget.get_height())
+    widget.get_native().get_renderer().render_texture(snap.to_node(), None).save_to_png(path)
+    return Image.open(path).convert("RGBA")
 
 
 def capture_macos(win):
@@ -1748,7 +1906,7 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False)
+                        signal_reader=False, sidebar_network=None, hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)
     T.feedback._gh_seen.update(at=None, repo=None)

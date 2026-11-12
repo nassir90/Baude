@@ -49,6 +49,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(TMP, "xdg-cache")
 os.environ["BAUDE_GH"] = ""  # (no issue filed on GitHub for the feedback saved here)
 os.environ["BAUDE_KEEP_FILING"] = "0"  # (nor a note going up by itself, to a stand-in gh, mid-test)
 os.environ["BAUDE_UPDATE"] = "0"  # (no git fetched, no restart onto a new version)
+os.environ["BAUDE_NETWORK"] = "0"  # (no servers looked for on the network: a test gives its own, by address)
 # the stand-in claude, run by this Python: its #!/usr/bin/env python3 can find an older one first (macOS's 3.9)
 FAKE_CLAUDE = os.path.join(TMP, "fake-claude")
 with open(FAKE_CLAUDE, "w") as f:

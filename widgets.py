@@ -497,7 +497,8 @@ def on_label_link(label, uri):
         if (hit := resolve_link(uri)) is not None:  # (a path that wasn't there yet when the reply was drawn)
             open_code(*hit, label)
             return True
-        return False
+        win = label.get_root()  # (a file on the server of a session on the network: Baude's open_remote_link)
+        return bool(hasattr(win, "open_remote_link") and win.open_remote_link(uri))
     path, _, line = uri[len(FILE_SCHEME):].partition("#")
     open_code(urllib.parse.unquote(path), int(line) if line.isdigit() else None, label)
     return True

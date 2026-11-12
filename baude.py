@@ -58,6 +58,7 @@ from baudelib.transcripts import (  # (Claude Code's transcripts, without GTK: s
     read_history, read_session_info, record_key, scan_session, session_file, SESSION_SOURCES, task_notification,
     transcript_model,
 )
+import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 from lookup import (  # (⌘K's engine: the names a folder has; see lookup.py)
     CATALOGUE_TTL, GITHUB, Names, PG_LISTS, REF_KINDS, REF_LOC_FIELDS, Ref, _CATALOGUE_TOKEN, _KUBE_ACTION, _KUBE_NAME,
     _git, _km, _ks, _kube_args, arango_eval, at_once, catalogue_hits, catalogue_ref, catalogue_shaped, db_index,
@@ -7507,6 +7508,57 @@ class ClaudeProc(claudelib.ClaudeProc):
     dispatch = staticmethod(GLib.idle_add)
 
 
+class RemoteProc(baudelib.client.RemoteProc):
+    """A session on a server on the network, talked to as a ClaudeProc's claude is (baudelib.client's), its callbacks
+    on the GTK main loop too."""
+
+    dispatch = staticmethod(GLib.idle_add)
+
+
+def on_main(fn):
+    """Run fn on the GTK main loop, once (whatever it returns)."""
+    GLib.idle_add(lambda: fn() and False)
+
+
+_NETWORK = []
+
+
+def network():
+    """The servers on the network Baude knows, and their sessions (baudelib.client.Network): one for the app, started
+    when it's first wanted. BAUDE_NETWORK=0: none looked for on the network; BAUDE_SERVERS=host:port,…: these too."""
+    if not _NETWORK:
+        _NETWORK.append(baudelib.client.Network(
+            on_main, discover=os.environ.get("BAUDE_NETWORK", "1") != "0",
+            addresses=[a for a in os.environ.get("BAUDE_SERVERS", "").split(",") if a.strip()]))
+    return _NETWORK[0]
+
+
+def remote_info(s):
+    """A session on the network (Network.sessions) as the sidebar and resume_session take a chat: its transcript's
+    mirror here (baudelib.client.Remote.mirror) as its path."""
+    r = s["server"]
+    when = s.get("said") or s.get("created") or 0.0
+    return {"id": s["id"], "path": r.mirror(s["id"]), "title": s.get("title"), "cwd": s.get("cwd"),
+            "folder": s.get("cwd"), "worktree": None, "mtime": s.get("updated") or when, "said": when,
+            "prompts": s.get("prompts") or 0, "source": f"{r.info.get('name') or r.host}, on the network", "copies": 0,
+            "remote": r, "remote_state": s.get("state"), "dead": r.state == "dead", "tags": s.get("tags") or [],
+            "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode")}
+
+
+def remote_name(r):
+    return r.info.get("name") or r.host
+
+
+def remote_path(path, r):
+    """A folder on a server as people say it there: its home folder is ~ (this machine's own: pretty_path)."""
+    if baudelib.client.is_here(r.info):
+        return pretty_path(path)
+    home = (r.info.get("home") or "").rstrip("/")
+    if home and path and (path == home or path.startswith(home + "/")):
+        return "~" + path[len(home):]
+    return path
+
+
 # ------------------------------------------------------- sessions dialog --
 
 class Ticker:
@@ -7725,8 +7777,7 @@ class SessionSidebar(Gtk.Box):
         self.clock, self.day, self.midnight = time.time, None, None  # see track_days
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=8, margin_end=8,
                       margin_top=8, margin_bottom=4)
-        self.new_btn = self._action("document-new-symbolic", "New session", "Ctrl+N",
-                                    lambda: win.switch_to(win.new_session))
+        self.new_btn = self._action("document-new-symbolic", "New session", "Ctrl+N", self.new_chat)
         self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
                                        lambda: win.pick_folder())
         top.append(self.new_btn)
@@ -7739,6 +7790,8 @@ class SessionSidebar(Gtk.Box):
         by.append("Folder", "sb.group::folder")
         by.append("Date", "sb.group::date")
         view.append_section("Group by", by)
+        self.net_menu, self.menu_groups = Gio.Menu(), None  # (Local and the network's groups: fill_group_menu)
+        view.append_section("Group", self.net_menu)
         self.view_btn = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=view, tooltip_text="Group by",
                                        valign=Gtk.Align.CENTER)
         self.view_btn.add_css_class("flat")
@@ -7755,7 +7808,7 @@ class SessionSidebar(Gtk.Box):
         self.list.add_controller(keys)
         actions = Gio.SimpleActionGroup()
         for name, fn in (("rename", self.ask_rename), ("archive", self.archive), ("unarchive", self.unarchive),
-                         ("trash", self.ask_trash)):
+                         ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote)):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))
             actions.add_action(act)
@@ -7763,7 +7816,15 @@ class SessionSidebar(Gtk.Box):
                                               GLib.Variant.new_string("date" if self.by_date() else "folder"))
         group.connect("change-state", self.on_group_changed)
         actions.add_action(group)
+        shown = Gio.SimpleAction.new_stateful("network", GLib.VariantType.new("s"),
+                                              GLib.Variant.new_string(self.network_group() or ""))
+        shown.connect("change-state", self.on_network_group_changed)
+        actions.add_action(shown)
         self.insert_action_group("sb", actions)
+        self.actions = actions
+        self.remote_keys, self.remote_ids = {}, frozenset()  # (a network group's folders: their servers; see groups)
+        self.fill_group_menu()
+        network().listen(self.on_network)
         win.connect("notify::is-active", lambda *_: self.by_date() and self.day != self.today() and self.fill())
         self.connect("unrealize", lambda *_: self.drop_midnight())  # (the window is closed: no more midnights)
         self.refresh()
@@ -7824,6 +7885,72 @@ class SessionSidebar(Gtk.Box):
         """Grouped by day (⋮ → Group by → Date), not by folder."""
         return load_settings().get("sidebar_group") == "date"
 
+    # ---- ⋮ → Group: which sessions are listed. Local, this machine's (Claude Code's and Claude Desktop's, as ever), or
+    # a group on the network: the sessions servers there (baudelib.server) were started in it with, from every server
+    # that has some, those of a server that's gone kept, and marked dead
+    def network_group(self):
+        """The network group shown (⋮ → Group), or None for Local."""
+        return load_settings().get("sidebar_network") or None
+
+    def on_network_group_changed(self, action, value):
+        action.set_state(value)
+        save_settings(sidebar_network=value.get_string() or None)
+        self.fill()
+
+    def fill_group_menu(self):
+        """⋮ → Group: Local, then each group on the network (the one shown too, if the network's lost it)."""
+        groups = network().groups()
+        if (shown := self.network_group()) and shown not in groups:
+            groups = sorted(groups + [shown], key=str.lower)
+        if groups == self.menu_groups:
+            return
+        self.menu_groups = groups
+        self.net_menu.remove_all()
+        for name in [""] + groups:
+            item = Gio.MenuItem.new(name or "Local", None)
+            item.set_action_and_target_value("sb.network", GLib.Variant.new_string(name))
+            self.net_menu.append_item(item)
+
+    def on_network(self):
+        """The network's servers or their sessions changed: the menu's groups, what's hidden coming back, and the list
+        (a network group's; Local's only when which sessions are a server's changed, as those aren't Local's)."""
+        if self.closed():
+            return
+        self.fill_group_menu()
+        self.unhide_remote()
+        ids = frozenset(s["id"] for s in network().sessions())
+        if (shown := self.network_group()) is None:
+            if ids != self.remote_ids:
+                self.fill()
+            return
+        # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
+        seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, tuple(s.get("tags") or ()),
+                       s.get("cwd"), s.get("said")) for s in network().sessions(shown))
+        if seen != getattr(self, "remote_seen", None):
+            self.remote_seen = seen
+            self.fill()
+
+    def hidden_remote(self):
+        """{session id: what it was as it was deleted} for the network's sessions deleted here (hide_remote)."""
+        hidden = load_settings().get("hidden_remote")
+        return hidden if isinstance(hidden, dict) else {}
+
+    def unhide_remote(self):
+        """A deleted session that shows up again is listed again: it's been used since, it's at a turn, or its server,
+        gone as it was deleted, is back."""
+        hidden = self.hidden_remote()
+        if not hidden:
+            return
+        back = set()
+        for s in network().sessions():
+            if (h := hidden.get(s["id"])) is None:
+                continue
+            if (s.get("updated") or 0) > (h.get("updated") or 0) + 1 or s.get("state") in ("working", "waiting") or \
+                    h.get("dead") and s["server"].state == "alive":
+                back.add(s["id"])
+        if back:
+            save_settings(hidden_remote={k: v for k, v in hidden.items() if k not in back} or None)
+
     def on_group_changed(self, action, value):
         action.set_state(value)
         save_settings(sidebar_group=value.get_string())
@@ -7840,13 +7967,17 @@ class SessionSidebar(Gtk.Box):
         where a session and those under it (its forks, a Desktop chat's side sessions) go together, by the latest
         activity of any of them, as Claude Desktop's sidebar has them: a fork used today brings the session it came from
         into today, with it."""
+        if (shown := self.network_group()) is not None:
+            return self.remote_groups(shown)
         q = self.search.get_text().strip().lower()
         here = session_group(self.win.cwd)[0]
         by_date, now = self.by_date(), self.clock()
         groups, listed = {}, []
         archived = self.archived_ids()
+        # (a server's sessions aren't Local's, though one on this machine keeps their transcripts here)
+        remote = self.remote_ids = frozenset(s["id"] for s in network().sessions())
         for info in sorted(self.sessions, key=last_used, reverse=True):  # (the last typed in first)
-            if info["id"] in archived:
+            if info["id"] in archived or info["id"] in remote:
                 continue
             folder = info.get("folder", info.get("cwd"))
             key, label = session_group(folder)
@@ -7894,8 +8025,43 @@ class SessionSidebar(Gtk.Box):
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
             last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
-        gone = [i for i in self.sessions if i["id"] in archived
+        gone = [i for i in self.sessions if i["id"] in archived and i["id"] not in remote
                 and (not q or q in (i.get("title") or "").lower())]
+        if gone:
+            out.append(("archived", "Archived", None, fork_tree(gone)))
+        return out
+
+    def remote_groups(self, group):
+        """groups(), for a group on the network: its sessions, from every server that has some, by folder (each server's
+        own: "remote:<server>:<folder>", the server's name with it when there's more than one) or by day. Archived:
+        under Archived; deleted (hide_remote): not listed till they show up again."""
+        q = self.search.get_text().strip().lower()
+        by_date, now = self.by_date(), self.clock()
+        archived, hidden = self.archived_ids(), self.hidden_remote()
+        sessions = [remote_info(s) for s in network().sessions(group)]
+        several = len({i["remote"].key for i in sessions}) > 1
+        groups, gone, self.remote_keys = {}, [], {}
+        for info in sorted(sessions, key=last_used, reverse=True):
+            r = info["remote"]
+            if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
+                                        *info["tags"]]).lower():
+                continue
+            if info["id"] in archived:
+                gone.append(info)
+                continue
+            if info["id"] in hidden:
+                continue
+            if by_date:
+                key, label = date_group(last_used(info), now)
+                groups.setdefault(key, [label, None, []])[2].append(info)
+                continue
+            folder = info.get("cwd") or "?"
+            key = f"remote:{r.key}:{folder}"
+            label = remote_path(folder, r) + (f" on {remote_name(r)}" if several else "")
+            self.remote_keys[key] = r
+            groups.setdefault(key, [label, folder, []])[2].append(info)
+        order = sorted(groups.items(), key=lambda kv: -max(last_used(i) for i in kv[1][2]))
+        out = [(k, label, folder, fork_tree(items)) for k, (label, folder, items) in order]
         if gone:
             out.append(("archived", "Archived", None, fork_tree(gone)))
         return out
@@ -8000,6 +8166,9 @@ class SessionSidebar(Gtk.Box):
         plus = ("list-add-symbolic", f"New session in {label}",
                 lambda: self.win.switch_to(lambda: self.win.start_in_folder(folder))) \
             if folder and os.path.isdir(folder) else None
+        if (r := self.remote_keys.get(key)) is not None:  # (a folder on a server: a session there, on it, if it's there)
+            plus = ("list-add-symbolic", f"New session in {label}, on {remote_name(r)}",
+                    lambda: self.win.ask_remote_start(server=r, folder=folder)) if r.state == "alive" else None
         box = widgets.group_header(short_group_label(key, label), collapsed, lambda: self.toggle_folder(key), plus,
                                    tooltip=label, current=is_here)
         box.set_margin_top(6)
@@ -8031,11 +8200,26 @@ class SessionSidebar(Gtk.Box):
                             valign=Gtk.Align.CENTER)
             tag.add_css_class("worktree-tag")
             box.append(tag)
+        r = info.get("remote")
+        for word in (info.get("tags") or [])[:2] if r is not None else ():  # (a network session's tags: its first two)
+            tag = Gtk.Label(label=word, ellipsize=Pango.EllipsizeMode.END, max_width_chars=10, valign=Gtk.Align.CENTER)
+            tag.add_css_class("worktree-tag")
+            box.append(tag)
+        if info.get("dead"):  # (its server's gone from the network: listed as it was last seen)
+            title.add_css_class("dim-label")
+            tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
+            tag.add_css_class("worktree-tag")
+            tag.add_css_class("dead-tag")
+            box.append(tag)
         box.append(dot)
         tip = [info.get("title") or "", info.get("cwd") or ""]
+        if r is not None:
+            gone = f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
+            tip += [f"On {remote_name(r)} ({r.host}){gone}", "Group " + (info.get("group") or "?") +
+                    (" · tags " + ", ".join(info["tags"]) if info.get("tags") else "")]
         if tree:
             tip.append(f"Worktree {os.path.basename(tree)} of {pretty_path(info.get('folder') or '')}")
-        if info.get("source"):
+        if info.get("source") and r is None:
             tip.append(info["source"])
         if info.get("copies"):
             tip.append(f"{info['copies']} earlier cop{'y' if info['copies'] == 1 else 'ies'} of this conversation hidden")
@@ -8049,15 +8233,20 @@ class SessionSidebar(Gtk.Box):
 
     # ---- right-click menu / F2: rename, archive, move to trash
     def find_info(self, sid):
-        return next((i for i in self.sessions if i["id"] == sid), None)
+        return next((i for i in self.sessions if i["id"] == sid), None) or \
+            next((remote_info(s) for s in network().sessions() if s["id"] == sid), None)
 
     def show_menu(self, row, x, y):
         info, sid = row.info, GLib.Variant.new_string(row.info["id"])
         menu = Gio.Menu()
-        for label, action in (("Rename…", "rename"),
-                              ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
-                               "unarchive" if info["id"] in self.archived_ids() else "archive"),
-                              ("Move to Trash…", "trash")):
+        items = [("Rename…", "rename"),
+                 ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
+                  "unarchive" if info["id"] in self.archived_ids() else "archive"),
+                 ("Move to Trash…", "trash")]
+        if info.get("remote") is not None:  # (on a server: stopped there, or deleted here, never trashed from here)
+            active = not info.get("dead") and info.get("remote_state") in ("working", "waiting")
+            items = items[1:2] + ([("Stop", "stop")] if active else [("Delete", "hide")])
+        for label, action in items:
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", sid)
             menu.append_item(item)
@@ -8073,7 +8262,8 @@ class SessionSidebar(Gtk.Box):
     def on_key(self, _ctl, keyval, _code, _state):
         if keyval == Gdk.KEY_F2:
             row = self.list.get_focus_child() or self.list.get_selected_row()
-            if row is not None and getattr(row, "info", None) and not row.info.get("unsaved"):
+            if row is not None and getattr(row, "info", None) and not row.info.get("unsaved") \
+                    and row.info.get("remote") is None:  # (a network session's transcript isn't here to rename)
                 self.ask_rename(row.info)
                 return True
         return False
@@ -8155,6 +8345,30 @@ class SessionSidebar(Gtk.Box):
             self.win.new_session()
         self.refresh()
 
+    def new_chat(self):
+        """New session: here, or, while a group on the network is shown, on a server there (ask_remote_start)."""
+        if self.network_group() is not None:
+            self.win.ask_remote_start()
+        else:
+            self.win.switch_to(self.win.new_session)
+
+    def hide_remote(self, info):
+        """Delete a network session that isn't at a turn: its transcript is its server's, so it's only not listed here
+        till it shows up again (unhide_remote). Archive keeps it out of the list for good."""
+        if info is None or info.get("remote") is None:
+            return
+        hidden = self.hidden_remote()
+        hidden[info["id"]] = {"updated": info.get("mtime") or 0, "dead": bool(info.get("dead")), "at": time.time()}
+        save_settings(hidden_remote=hidden)
+        if info["id"] == self.win.session_id:
+            self.win.new_session()
+        self.fill()
+
+    def stop_remote(self, info):
+        """Stop a network session's claude, at its turn or not (its server keeps it, to be carried on with)."""
+        if info is not None and info.get("remote") is not None:
+            info["remote"].request({"op": "stop", "session": info["id"]})
+
     def set_state(self, state):
         """The open session's dot (the others follow their files: see file_state)."""
         row = self.list.get_selected_row()
@@ -8167,6 +8381,9 @@ class SessionSidebar(Gtk.Box):
         claude going on in the background: working, or waiting while it asks you something."""
         if (p := background_proc(info.get("id"))) is not None:
             return "waiting" if p.asks else "working"
+        if info.get("remote") is not None:  # (a network session: as its server last said)
+            return "inactive" if info.get("dead") else \
+                {"working": "working", "waiting": "waiting"}.get(info.get("remote_state"), "inactive")
         path = info.get("path")
         try:
             mtime = os.stat(path).st_mtime
@@ -8183,7 +8400,7 @@ class SessionSidebar(Gtk.Box):
     def watch_rows(self):
         """File events for the listed sessions, so a dot changes the moment its session does
         (no polling); a timer only runs while some dot needs to expire after its writes stop."""
-        rows = {r.info["path"]: r for r in self.session_rows()}
+        rows = {r.info["path"]: r for r in self.session_rows() if r.info.get("remote") is None}
         for path in set(self.monitors) - set(rows):
             self.monitors.pop(path).cancel()
         for path in set(rows) - set(self.monitors):
@@ -8229,6 +8446,9 @@ class SessionSidebar(Gtk.Box):
             return
         info = getattr(row, "info", None)
         if info is None or info.get("unsaved") or info["id"] == self.win.session_id:
+            return
+        if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
+            self.win.open_remote_soon(info)
             return
         self.win.switch_to(lambda: self.win.resume_session(info))
 
@@ -9882,6 +10102,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.cwd = self.run_cwd = None  # set through set_cwd() once the header button exists
         self.proc = None
         self.session_id = opts.resume
+        self.remote = None  # the open chat's server, when it's a session on the network (open_remote)
+        self.remote_syncing = {}  # (server key, session id) -> the fetch of its transcript under way (sync_remote)
         self.busy = False
         self.total_cost = 0.0
         self.always_allow = set()
@@ -10101,6 +10323,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.tabs.open("chat", lambda: root, "Chat", icon="baude-claude-symbolic", pinned=True)  # (Claude's logo)
         widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         self.banner = Adw.Banner(revealed=False)
+        self.banner.connect("button-clicked", lambda *_: self.stop_remote_turn())  # (a network session's: Stop)
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
@@ -10124,6 +10347,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.panel_slide.closed_by_drag = self.panel_closed_by_drag
         self.panel.connect("notify::visible", lambda *_: self.panel.get_visible() and self.place_split())
         self.sidebar = SessionSidebar(self)
+        network().listen(self.on_network)
         self.outer = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.sidebar,
                                           end_child=self.split, resize_start_child=False, resize_end_child=True,
                                           shrink_start_child=False, shrink_end_child=False, wide_handle=False))
@@ -10626,6 +10850,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def session_state(self):
         """working / waiting / done / inactive, for the sidebar's dot."""
+        if self.resume_pending and self.remote is not None:  # (a network session viewed: as its server says)
+            listed = self.remote.sessions.get(self.session_id) or {}
+            return "inactive" if self.remote.state == "dead" else \
+                {"working": "working", "waiting": "waiting"}.get(listed.get("state"), "inactive")
         if self.resume_pending:  # only viewing: what the program writing it is doing
             return self.tail.state()
         if self.waiting_cards:
@@ -11021,6 +11249,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     # ---- process lifecycle
     def start_proc(self):
+        if self.remote is not None:
+            return self.start_remote_proc()
         try:
             # while a session is only being viewed, claude runs fresh (it supplies models and commands
             # but writes nothing); it resumes the session when the first message is sent
@@ -11045,6 +11275,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.note(f"failed to start claude: {e}")
             self.proc = None
         self.update_status()
+
+    def start_remote_proc(self):
+        """A network session's claude, on its server (RemoteProc): while it's only viewed, what it asks and its models
+        and commands (its transcript, fetched as it grows, is the rest: sync_remote); once you write in it, all it
+        says, as it says it. Nothing if its server's gone."""
+        r = self.remote
+        self.proc = None
+        if r.state == "alive":
+            try:
+                self.proc = RemoteProc(self.on_msg, self.on_exit, r.host, r.port, self.session_id,
+                                       live=not self.resume_pending)
+            except OSError as e:
+                self.note(f"couldn't reach {remote_name(r)}: {e}")
+        if self.proc is not None:
+            self.proc.mode = self.proc.listing.get("mode")
+            self.pending.clear()
+            for msg in list(self.proc.asks.values()):  # (what it's waiting on an answer to)
+                self.h_control_request(msg)
+        self.update_status()
+        self.update_banner()
 
     def restart_proc(self, resume=True):
         if self.proc:
@@ -11184,7 +11434,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         self.remember_own_writes()
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)
-        self.resume_pending, self.view_path = False, None
+        self.resume_pending, self.view_path, self.remote = False, None, None
+        MarkdownView.base_dir = self.run_cwd  # (a network session's folder is its server's: open_remote)
         self.tail.stop()
         self.update_banner()
         self.clear_transcript()
@@ -11219,6 +11470,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             self.scroller.grab_focus()
 
     def on_exit(self, code):
+        if self.remote is not None:
+            self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
+                                                         f"claude exited ({code})") + ". Send a message to carry on.")
+            self.proc = None
+            self.set_busy(False)
+            self.update_banner()
+            return
         self.note(f"claude exited ({code}). Send a message to restart / resume.")
         self.proc = None
         self.set_busy(False)
@@ -11591,6 +11849,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
             TOOL_NAMES.update(t for t in msg.get("tools") or [] if isinstance(t, str))  # (what Signal can name)
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
+        if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)
+            self.update_status(f"{msg.get('model', '')}  ·  on {remote_name(self.remote)}")
+            return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
             self.session_id = msg.get("session_id")
@@ -12004,6 +12265,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                     if GLib.MainContext.default().find_source_by_id(source):
                         GLib.source_remove(source)
         self.tail.stop()
+        for fn in (self.on_network, self.sidebar.on_network):  # (the network's news isn't this window's any more)
+            if fn in network().listeners:
+                network().listeners.remove(fn)
         for mon in self.sidebar.monitors.values():
             mon.cancel()
         self.sidebar.monitors.clear()
@@ -13271,11 +13535,213 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                 self.panel.update_task(task)
         self.update_tasks_indicator()
 
+    # ---- sessions on the network (baudelib.server): opened from their transcripts' mirrors here, steered through
+    # their servers (start_remote_proc), started from the sidebar while a group on the network is shown
+    def open_remote_soon(self, info):
+        """Open a network session once its transcript's here, what's new in it fetched from its server (sync_remote);
+        as it was last seen if its server's gone."""
+        r = info["remote"]
+        self.opening_remote = info["id"]
+        if r.state != "alive":
+            self.switch_to(lambda: self.resume_session(info))
+            return
+
+        def fetched():
+            if self.opening_remote == info["id"] and not getattr(self, "let_go_done", False):
+                self.switch_to(lambda: self.resume_session(info))
+        self.sync_remote(r, info["id"], fetched)
+
+    def open_remote(self, info):
+        """A session on a server on the network: shown from its transcript's mirror here (Remote.mirror) as a chat
+        Baude isn't running is, followed as its server writes it (on_network: sync_remote), and talked to through its
+        server (start_remote_proc) as Baude's own claude is. Its folder is this window's only when its server is on
+        this machine: links to files elsewhere are fetched from it (open_remote_link)."""
+        r = info["remote"]
+        self.remember_own_writes()
+        if self.busy and self.proc is not None:
+            self.detach_proc()  # (the turn goes on: detach_proc)
+        if (left := self.take_background(info["id"])) is not None:
+            left.on_msg, left.on_exit = (lambda *_: False), (lambda *_: None)
+            left.kill()  # (left mid-turn here: its turn goes on on its server, and what it asks is asked again below)
+        self.clear_transcript()
+        self.switching_chat = True
+        cwd = info.get("cwd")
+        if baudelib.client.is_here(r.info) and cwd and os.path.isdir(cwd):
+            self.set_cwd(cwd)
+        elif cwd:
+            MarkdownView.base_dir = cwd  # (its relative links are its server's: not one of this machine's files)
+        self.reset_stream_state()
+        self.session_id, self.remote = info["id"], r
+        path = r.mirror(info["id"])
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "a").close()
+        self.apply_chat_model({**info, "path": path})
+        self.signal_pending, self.switching_chat = None, False
+        self.ref_checkout = None
+        self.apply_chat_signal()
+        self.view_session(path)
+        self.show_title(info.get("title"))
+        self.read_only_mode()
+        self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
+        self.apply_read_only()
+        self.sidebar.fill()
+
+    def sync_remote(self, r, sid, then=None):
+        """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after. One
+        fetch at a time: one asked for meanwhile is made after it."""
+        key = (r.key, sid)
+        if (job := self.remote_syncing.get(key)) is not None:
+            job["again"] = True
+            job["then"] += [then] if then else []
+            return
+        job = self.remote_syncing[key] = {"again": False, "then": [then] if then else []}
+
+        def work():
+            r.sync(sid)
+            on_main(done)
+
+        def done():
+            if job["again"]:
+                job["again"] = False
+                threading.Thread(target=work, daemon=True).start()
+                return
+            self.remote_syncing.pop(key, None)
+            for fn in job["then"]:
+                fn()
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_network(self):
+        """The network changed: the open network session's transcript fetched as it grows, the banner as it is now."""
+        if getattr(self, "let_go_done", False) or self.remote is None:
+            return
+        listed = self.remote.sessions.get(self.session_id)
+        if listed and self.remote.state == "alive" and \
+                (listed.get("size") or 0) != self.remote.offsets.get(self.session_id, 0):
+            self.sync_remote(self.remote, self.session_id)
+        self.update_banner()
+        self.update_session_state()
+
+    def stop_remote_turn(self):
+        """The banner's Stop: a network session at a turn on its server, interrupted there."""
+        if self.remote is not None and self.proc is not None:
+            self.proc.control({"subtype": "interrupt"})
+            self.note("interrupt requested")
+
+    def ask_remote_start(self, server=None, folder=None):
+        """New session on the network (the sidebar's New session, or a server's folder's +, while a group on the network
+        is shown): a prompt, a folder, tags and a group, on a server that's there; the model, effort and permission mode
+        the top bar has. Opened once its server's started it (remote_started)."""
+        group = self.sidebar.network_group()
+        servers = network().alive(group)
+        if server in servers:
+            servers.remove(server)
+            servers.insert(0, server)
+        if not servers:
+            toast(self.sidebar, "No server is on the network")
+            return
+        grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
+
+        def field(n, label, widget):
+            name = Gtk.Label(label=label, xalign=1, valign=Gtk.Align.START if n == 4 else Gtk.Align.CENTER)
+            name.add_css_class("dim-label")
+            widget.set_hexpand(True)
+            grid.attach(name, 0, n, 1, 1)
+            grid.attach(widget, 1, n, 1, 1)
+        servers_dd = Gtk.DropDown.new_from_strings([f"{remote_name(r)} ({r.host})" for r in servers])
+        field(0, "Server", servers_dd)
+        last = load_settings().get("remote_folders") or {}
+        where = Gtk.Entry(text=folder or last.get(servers[0].key) or servers[0].info.get("home") or "~")
+        field(1, "Folder", where)
+        group_entry = Gtk.Entry(text=group or servers[0].info.get("group") or "")
+        field(2, "Group", group_entry)
+        tags = Gtk.Entry(placeholder_text="Comma-separated")
+        field(3, "Tags", tags)
+        prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False, top_margin=6, bottom_margin=6,
+                              left_margin=8, right_margin=8)
+        frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        frame.add_css_class("card")
+        field(4, "Prompt", frame)
+        effort = self.effort if self.effort_dd.get_sensitive() else None
+        runs = " · ".join(x for x in (self.model_dd.label(), self.effort_dd.label() if effort else "",
+                                      self.mode_dd.label()) if x)
+        dlg = Adw.AlertDialog(heading="New session on the network", extra_child=grid, default_response="start",
+                              close_response="cancel", body=f"With the top bar's {runs}" if runs else "")
+        if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
+            dlg.set_prefer_wide_layout(True)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("start", "Start")
+        dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
+
+        def picked(*_):  # (another server: the folder last used on it, else its home)
+            r = servers[servers_dd.get_selected()]
+            if not folder:
+                where.set_text(last.get(r.key) or r.info.get("home") or "~")
+        servers_dd.connect("notify::selected", picked)
+
+        def respond(_dlg, response):
+            if response != "start":
+                return
+            r = servers[servers_dd.get_selected()]
+            buf = prompt.get_buffer()
+            params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
+                      "cwd": where.get_text().strip() or "~", "model": self.model, "effort": effort, "mode": self.mode,
+                      "tags": [w.strip() for w in tags.get_text().split(",") if w.strip()],
+                      "group": group_entry.get_text().strip() or None}
+            save_settings(remote_folders={**last, r.key: params["cwd"]})
+            r.request(params, lambda reply: self.remote_started(r, reply))
+        dlg.connect("response", respond)
+        self.dialog = self.remote_dialog = dlg
+        self.remote_fields = {"servers": servers_dd, "folder": where, "group": group_entry, "tags": tags,
+                              "prompt": prompt}
+        dlg.present(self)
+        prompt.grab_focus()
+
+    def remote_started(self, r, reply):
+        """A server started a session asked for here: its group shown, and it opened."""
+        if reply.get("op") != "started":
+            self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
+            return
+        r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
+        if (group := reply["session"].get("group")) and group != self.sidebar.network_group():
+            self.sidebar.actions.lookup_action("network").change_state(GLib.Variant.new_string(group))
+        self.sidebar.fill_group_menu()
+        self.sidebar.fill()
+        self.open_remote_soon(remote_info({**reply["session"], "server": r}))
+
+    def open_remote_link(self, uri):
+        """A link in a network session to a file on its server, not this machine: fetched from it and shown in a tab, as
+        a file here is (show_code). False for anything else (a web address, a session on this machine)."""
+        r = self.remote
+        if r is None or baudelib.client.is_here(r.info) or \
+                re.match(r"[a-z][a-z0-9+.-]*:", uri, re.I) and not uri.startswith("file:"):
+            return False
+        m = re.fullmatch(r"(?:file://)?(.+?)(?:#L?(\d+)(?:-L?\d+)?|:(\d+)(?::\d+)?)?", uri)
+        if not m:
+            return False
+        home = r.info.get("home") or "/"
+        raw = urllib.parse.unquote(m[1])
+        raw = home + raw[1:] if raw == "~" or raw.startswith("~/") else raw
+        cwd = (r.sessions.get(self.session_id) or {}).get("cwd") or home
+        path, line = os.path.normpath(os.path.join(cwd, raw)), int(m[2] or m[3]) if m[2] or m[3] else None
+
+        def shown(reply):
+            data = base64.b64decode(reply.get("data") or "") if reply.get("op") == "file" else b""
+            if reply.get("op") != "file" or reply.get("error") or b"\0" in data[:8192]:
+                self.note(f"{path} on {remote_name(r)}: {reply.get('error') or 'not text to read here'}")
+                return
+            self.show_code(path, line, text=data.decode("utf-8", "replace"), note=f"on {remote_name(r)}")
+        r.request({"op": "read_file", "path": path}, shown)
+        return True
+
     def show_sessions(self):
         self.sidebar_slide.set_shown(True)
         self.sidebar.focus_search()
 
     def resume_session(self, info):
+        if info.get("remote") is not None:
+            return self.open_remote(info)
+        self.remote = None
         self.remember_own_writes()  # before the view switches to the other session
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)
@@ -13342,15 +13808,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
 
     def live_elsewhere(self):
         """Is the viewed session in use by another program (Claude Desktop, a terminal)? Not Baude's own claude, at a turn
-        in it for a chat left mid-turn: written to here, that's the one that goes on with it (begin_resume)."""
+        in it for a chat left mid-turn: written to here, that's the one that goes on with it (begin_resume). A network
+        session: at a turn on its server, or its server gone."""
+        if self.remote is not None:
+            listed = self.remote.sessions.get(self.session_id) or {}
+            return self.resume_pending and (self.remote.state == "dead" or listed.get("state") in ("working", "waiting"))
         return self.resume_pending and self.tail.in_use() and background_proc(self.session_id) is None
 
     def update_banner(self):
         """While another program has the session, say so and keep the input off: two writers
         would interleave two conversations in one transcript."""
         live = self.live_elsewhere()
-        if live:
+        stop = None
+        if live and self.remote is not None:
+            name = remote_name(self.remote)
+            if self.remote.state == "dead":
+                self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen")
+            else:
+                listed = self.remote.sessions.get(self.session_id) or {}
+                waiting = listed.get("state") == "waiting"
+                self.banner.set_title(f"Waiting for an answer on {name}" if waiting else f"Working on {name}")
+                stop = "Stop"
+        elif live:
             self.banner.set_title("This session is currently active elsewhere")
+        self.banner.set_button_label(stop)
         self.banner.set_revealed(live)
         self.composer_box.set_sensitive(not live)
 
@@ -13560,6 +14041,8 @@ class BaudeApp(Adw.Application):
 
     def do_shutdown(self):
         save_info_cache(force=True)
+        if _NETWORK:
+            _NETWORK[0].save()  # (the network's sessions as last seen: dead ones are shown from it next time)
         Adw.Application.do_shutdown(self)
 
     def do_startup(self):

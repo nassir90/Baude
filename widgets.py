@@ -44,6 +44,7 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: E402,F401
 import pointers  # noqa: E402
+import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
 from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
 
 
@@ -1162,7 +1163,8 @@ def _inline_markup(text):
         return f"\x00{len(marks) - 1}\x00"
 
     def code(m):
-        markup = f'<span font_family="monospace" bgcolor="#7f7f7f" bgalpha="22%">{html.escape(m[1], quote=False)}</span>'
+        markup = (f'<span font_family="monospace" size="{code_markup_size()}" bgcolor="#7f7f7f" bgalpha="22%">'
+                  f'{html.escape(m[1], quote=False)}</span>')
         hit = resolve_path(m[1])
         return keep(f'<a href="{html.escape(file_href(*hit))}" title="{html.escape(hit[0])}">{markup}</a>' if hit
                     else ref_link(m[1], markup, True) or markup, markup)
@@ -2740,9 +2742,9 @@ class ComposerMarkdown:
         self.view, self.buf = view, view.get_buffer()
         t = self.buf.create_tag
         left = view.get_left_margin()
-        t("code", family="monospace", left_margin=left + 8)
-        t("fence", family="monospace", left_margin=left + 8)
-        t("inline", family="monospace")
+        t("code", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("fence", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("inline", family="monospace", scale=code_scale())
         t("bold", weight=Pango.Weight.BOLD)
         t("italic", style=Pango.Style.ITALIC)
         for level, scale in HEADING_SCALE.items():
@@ -6335,12 +6337,71 @@ def scale_setting(key):
     return round(min(SCALE_MAX, max(SCALE_MIN, float(load_settings().get(key) or 1.0))), 2)
 
 
+# ---- code's size beside the prose: the code font's own, the size it looks the prose's at (fontsetup's, measured once
+# and for all for the fonts it offers; matched_code_scale's otherwise). What's drawn asks code_scale()
+CODE_SAMPLE = "The table's built in price_table and cached; check it with the tests, then push the branch."
+CODE_HEIGHT_WEIGHT = 2 / 3  # (the lowercase's height counts twice what the letters' width does: it's what size reads as)
+_code = {"scale": None, "css": None, "provider": None}
+
+
+def matched_code_scale():
+    """The size the code font ("monospace": fontsetup's) looks the prose's size at, measured, as a share of the
+    prose's: its lowercase as tall as the prose's (x-height), and its letters, which are all one width, as wide as the
+    prose's are on average, met between: a geometric mean of the two that weighs the height twice the width
+    (CODE_HEIGHT_WEIGHT), as size reads mostly by the lowercase's height. Menlo's, beside macOS's system font, is about
+    0.83; Courier New's 1.0."""
+    ctx = Gtk.Label().get_pango_context()  # (the prose's: the app's font)
+
+    def measure(desc):
+        desc = desc.copy()
+        desc.set_size(100 * Pango.SCALE)
+        layout = Pango.Layout.new(ctx)
+        layout.set_font_description(desc)
+        layout.set_text("x", -1)
+        x = layout.get_extents()[0].height
+        layout.set_text(CODE_SAMPLE, -1)
+        return x, layout.get_extents()[1].width / len(CODE_SAMPLE)
+    (px, pw), (mx, mw) = measure(ctx.get_font_description()), measure(Pango.FontDescription.from_string("monospace"))
+    if not (px > 0 and pw > 0 and mx > 0 and mw > 0):
+        return 1.0
+    a = CODE_HEIGHT_WEIGHT
+    return round(min(1.2, max(0.6, (px / mx) ** a * (pw / mw) ** (1 - a))), 3)
+
+
+def code_scale():
+    """What code is drawn at, beside the prose: the code font's matched size, fontsetup's for the fonts it offers,
+    measured here (once) for any other."""
+    if _code["scale"] is None:
+        _code["scale"] = fontsetup.known_scale() or matched_code_scale()
+    return _code["scale"]
+
+
+def code_markup_size():
+    """Code's size in markup, beside the text around it: a span's size="…%"."""
+    return f"{round(code_scale() * 100)}%"
+
+
+def apply_code_size(display):
+    """Code's sizes in the CSS (code blocks, the code viewer and its gutter, a member's chip a little under):
+    code_scale's."""
+    s = code_scale()
+    css = (f".mono, .code-view, .code-gutter {{ font-size: {s:.3f}em; }}\n"
+           f".code-member {{ font-size: {s * 0.94:.3f}em; }}\n")
+    if _code["provider"] is None:
+        _code["provider"] = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(display, _code["provider"], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    if css != _code["css"]:
+        _code["css"] = css
+        _code["provider"].load_from_string(css)
+
+
 def apply_scales(display, also=()):
     """The text's size and the icons' (Settings → Size), app-wide. The text's is the display's font resolution, so all
     of it follows, libadwaita's headings, the panes' headers and its rem-sized labels too (a font size on a pane reaches
     none of those); the icons' is their usual 16px and libadwaita's 32px .large-icons. Only what changed is set: either
     restyles every window."""
     settings = Gtk.Settings.get_for_display(display)
+    apply_code_size(display)
     scale = scale_setting("text_scale")
     if scale != 1.0:
         if _scales["dpi"] is None:
@@ -6435,6 +6496,32 @@ def settings_size(title, subtitle, size, apply, low=SCALE_MIN, high=SCALE_MAX):
     row.set_subtitle(subtitle or "")
     row.set_value(size)
     row.connect("notify::value", lambda r, _p: apply(round(r.get_value(), 2)))
+    return row
+
+
+def settings_code_font(win, app):
+    """Settings → Code Font: the font code's drawn in (fontsetup.code_fonts), kept in settings.json, from app's next
+    start ("Baude", "Record": Pango's fonts are set up before it starts); picked other than the one it's drawing with,
+    a Restart button (win's ☰ → Restart). It's drawn at its own size beside the prose (code_scale)."""
+    fonts, running = list(fontsetup.code_fonts()), fontsetup.running_font()
+    if fontsetup.code_font() not in fonts:  # (one named in settings.json by hand)
+        fonts.append(fontsetup.code_font())
+    if running not in fonts:
+        fonts.append(running)
+    row = Adw.ComboRow(title="Code Font", model=Gtk.StringList.new(fonts), selected=fonts.index(fontsetup.code_font()))
+    restart = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
+    restart.connect("clicked", lambda b: (b.get_ancestor(Adw.Dialog).close(), win.activate_action("win.restart", None)))
+    row.add_suffix(restart)
+
+    def show(font):
+        restart.set_visible(font != running)
+        row.set_subtitle("" if font == running else f"{font} from {app}'s next start")
+
+    def changed(r, _p):
+        save_settings(code_font=fonts[r.get_selected()])
+        show(fonts[r.get_selected()])
+    row.connect("notify::selected", changed)
+    show(fontsetup.code_font())
     return row
 
 

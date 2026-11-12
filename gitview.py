@@ -1414,7 +1414,12 @@ class GitPage(Gtk.Stack):
             chip.add_css_class("git-ref")
             chip.add_css_class("chat")
             first.append(chip)
-        subject = Gtk.Label(label=c["title"], xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+        for chip in iter(first):  # (with the subject's first line, however many lines it takes)
+            chip.set_valign(Gtk.Align.START)
+        # (two lines, then …: a pull request's name is often what a commit's called, and seldom fits on one. Its
+        # natural width one character, so a long one never widens the panel: it wraps in what the panel has)
+        subject = Gtk.Label(label=c["title"], xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
+                            lines=2, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1, valign=Gtk.Align.START)
         if own:
             subject.add_css_class("git-own")
         first.append(subject)

@@ -8465,9 +8465,9 @@ class SessionSidebar(Gtk.Box):
         return panel.meta.ghosts() if panel is not None else []
 
     def session_row(self, info, depth=0, last=True):
-        """Title ··· [worktree] [dot] — one line; the worktree's name for a worktree's chat, the dot only when
-        something's happening (working, waiting for an answer, finished and waiting for input). Forks sit under their
-        session like files in a tree. One Meta's changed: marked, with Keep and Undo (meta.mark_row)."""
+        """Title ··· [dot] — one line; the dot only when something's happening (working, waiting for an answer,
+        finished and waiting for input). Forks sit under their session like files in a tree. One Meta's changed:
+        marked, with Keep and Undo (meta.mark_row)."""
         box = Gtk.Box(spacing=6, margin_start=6 + depth * TreeList.INDENT, margin_end=4)
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
@@ -8477,17 +8477,11 @@ class SessionSidebar(Gtk.Box):
         if depth:
             title.add_css_class("fork-title")
         box.append(title)
-        if tree := info.get("worktree"):  # (a worktree's chat, listed under its repository)
-            tag = Gtk.Label(label=os.path.basename(tree), ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=14,
-                            valign=Gtk.Align.CENTER)
-            tag.add_css_class("worktree-tag")
-            box.append(tag)
         r = info.get("remote")
         if info.get("dead"):  # (its server's gone from the network: listed as it was last seen)
             title.add_css_class("dim-label")
             tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
-            tag.add_css_class("worktree-tag")
-            tag.add_css_class("dead-tag")
+            tag.add_css_class("row-tag")
             box.append(tag)
         box.append(dot)
         tip = [info.get("title") or "", info.get("cwd") or ""]
@@ -8496,7 +8490,7 @@ class SessionSidebar(Gtk.Box):
             tip.append(f"On {remote_name(r)} ({r.host}){gone}")
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")
-        if tree:
+        if tree := info.get("worktree"):
             tip.append(f"Worktree {os.path.basename(tree)} of {pretty_path(info.get('folder') or '')}")
         if info.get("source") and r is None:
             tip.append(info["source"])

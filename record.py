@@ -948,6 +948,12 @@ that selection, exactly. Write in the page's Markdown and its voice, and only wh
 describe or sum up an edit: the user sees it. After one, say nothing unless there's something they need to know (a \
 guess you made, a TODO you left). You'll be told whether they accepted it.
 
+Your edits stay pending, across turns and sessions, until the user accepts or rejects them: a draft over the page, \
+which they may keep writing in meanwhile. Work on that draft. list_edits shows what's pending; propose_edit's old_text \
+is found in the page as it reads with your pending edits applied, so a change to text one of them puts in revises \
+that edit, and one to text an edit replaces replaces it, rather than adding a second; revise_edit changes an edit \
+outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
+
 What the user @-references comes with their message: its text, or where to read it. Use it and the conversation as \
 what you know of the subject, and read more with your tools when that helps. Don't make facts up: where something \
 isn't known, say so, or leave a clear TODO in what you propose.
@@ -975,13 +981,29 @@ Be brief and plain, with no headings unless you're asked for them. Talk like a p
 AGENT_MCP_TOOLS = [
     {"name": "propose_edit",
      "description": "Propose a change to a page of the user's notes, in the notebook open. The user sees it on the "
-     "page as a diff and accepts or rejects it; nothing is written until they accept. old_text is the page's text that "
-     "new_text replaces, copied exactly (whitespace and Markdown too), and found once in the page: give more of what's "
-     "around it if it's there more than once. To fill in or change a passage the user selected, old_text is that "
-     "selection. An empty old_text adds new_text at the page's end. Returns whether it was shown, or why not.",
+     "page as a diff and accepts or rejects it; nothing is written until they accept. old_text is the text that "
+     "new_text replaces, copied exactly (whitespace and Markdown too), and found once in the page as it reads with "
+     "your pending edits applied (list_edits): give more of what's around it if it's there more than once. Text one "
+     "of your pending edits puts in, or text it replaces: that edit is revised to take this in, not a second one made. "
+     "To fill in or change a passage the user selected, old_text is that selection. An empty old_text adds new_text "
+     "at the page's end. Returns the edit's id, or why nothing was shown.",
      "inputSchema": {"type": "object", "required": ["page", "old_text", "new_text"], "properties": {
          "page": {"type": "string", "description": "the page's name (Spec, or Spec:Auth for a sub-page) or its file"},
          "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
+    {"name": "list_edits",
+     "description": "Your edits still waiting for the user to accept or reject, in the notebook open (or on one "
+     "page), in page order: each one's id, page, old_text (what it replaces, as the page has it now) and new_text.",
+     "inputSchema": {"type": "object", "properties": {
+         "page": {"type": "string", "description": "only this page's (its name or its file)"}}}},
+    {"name": "revise_edit",
+     "description": "Change one of your pending edits (list_edits): new_text is what it puts in now; old_text, if "
+     "given, what it replaces now (found once in the page, not in another pending edit's passage). It stays one "
+     "edit, waiting for the user. new_text the same as what it replaces takes it back.",
+     "inputSchema": {"type": "object", "required": ["id", "new_text"], "properties": {
+         "id": {"type": "string"}, "new_text": {"type": "string"}, "old_text": {"type": "string"}}}},
+    {"name": "withdraw_edit",
+     "description": "Take back one of your pending edits (list_edits): it goes from the page, the page as it is.",
+     "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
 ]
 AGENT_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
@@ -1112,7 +1134,7 @@ def earlier_said(messages, limit=EARLIER_LIMIT):
         if m.get("quote"):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
-            body += f"\n(edited {p['page']}: {p.get('status', 'pending')})"
+            body += f"\n(an edit to {p['page']}: {p.get('status', 'pending')})"
         size += len(body)
         if size > limit and lines:
             break
@@ -1236,6 +1258,50 @@ def pending_edits(notebook, agent=None):
     return [p for p in props + [p for p in live if p not in props] if p.get("status") == "pending"]
 
 
+def staged(text, edits):
+    """A page's text as it reads with edits applied: (that text, its pieces). edits: [(start, old, new, edit)], in the
+    page's own places; one that overlaps one before it is left out. At one place an insertion (old empty) comes before
+    a replacement, and edits otherwise in the order they were made. A piece: (its start and end in the staged text,
+    its start and end in the page's, the edit it's of or None)."""
+    out, pieces, at, pos = [], [], 0, 0
+    order = lambda x: (x[0], bool(x[1]), x[3].get("t", 0) if isinstance(x[3], dict) else 0)  # noqa: E731
+    for start, old, new, edit in sorted(edits, key=order):
+        if start < at:
+            continue
+        if start > at:
+            out.append(text[at:start])
+            pieces.append((pos, pos + start - at, at, start, None))
+            pos += start - at
+        out.append(new)
+        pieces.append((pos, pos + len(new), start, start + len(old), edit))
+        pos, at = pos + len(new), start + len(old)
+    out.append(text[at:])
+    pieces.append((pos, pos + len(text) - at, at, len(text), None))
+    return "".join(out), pieces
+
+
+def staged_at(pieces, at):
+    """A place in the page's own text as one in its staged text (in a passage an edit replaces: that edit's start)."""
+    for ss, se, ks, ke, edit in pieces:
+        if ks <= at <= ke:
+            return ss + (at - ks) if edit is None else ss
+    return at
+
+
+def kept_at(pieces, at, pick=min):
+    """A place in the staged text as one in the page's own (where an edit's new text starts or ends: its passage's
+    start or end). Where it's more than one (an edit that puts nothing in is all of its passage at one place): pick's
+    of them, min the first, max the last."""
+    places = []
+    for ss, se, ks, ke, edit in pieces:
+        if edit is None and ss <= at <= se:
+            places.append(ks + (at - ss))
+        elif edit is not None and at in (ss, se):
+            places += [ks] if at == ss else []
+            places += [ke] if at == se else []
+    return pick(places) if places else None
+
+
 def place_change(text, old, near=None):
     """Where a proposed change goes in a page's text: (offset, the text it replaces), or (None, why not). old there once,
     or, if more than once, the one nearest near (where the selection was); with its spaces either side left out, if it's
@@ -1281,6 +1347,10 @@ def tool_said(name, inp):
         return f"Looking for {inp.get('pattern', '')}…"
     if name == "mcp__record__propose_edit":
         return f"Proposing a change to {short_page(str(inp.get('page', '')))}…"
+    if name == "mcp__record__list_edits":
+        return "Looking at the edits waiting…"
+    if name in ("mcp__record__revise_edit", "mcp__record__withdraw_edit"):
+        return "Revising an edit…" if name.endswith("revise_edit") else "Taking back an edit…"
     return f"{name}…"
 
 
@@ -1393,7 +1463,8 @@ class Agent:
         relay = {"mcpServers": {"record": {"command": sys.executable, "args": ["-I", "-c", AGENT_RELAY, tools.path]}}}
         args = ["--system-prompt", SYSTEM.format(name=noun(), to_learn=TO_LEARN), "--tools", ",".join(AGENT_TOOLS),
                 "--mcp-config", json.dumps(relay), "--strict-mcp-config",
-                "--allowedTools", "mcp__record__propose_edit",  # (it changes nothing: asking for it would be noise)
+                "--allowedTools", ",".join(f"mcp__record__{t['name']}" for t in AGENT_MCP_TOOLS),  # (they write
+                # nothing: asking for them would be noise)
                 "--no-session-persistence",  # (no transcript: it would be listed with your chats, for @ and ⌘K)
                 "--disable-slash-commands", "--setting-sources", ""]
         for folder in self.folders:
@@ -3426,6 +3497,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                      "b": self.buf.create_mark(None, self.buf.get_iter_at_offset(end), True), "g0": None, "g1": None,
                      "gone": gone}
             self.proposals.append(shown)
+            self.proposals.sort(key=lambda e: (not e["p"]["old"], e["p"].get("t", 0)))  # (as staged has them)
             was = self.buf.create_mark(None, self.buf.get_iter_at_offset(ins), True)  # (the caret: kept where it was)
             with self._quiet():
                 self._put_greens()
@@ -3454,6 +3526,20 @@ class DiaryEditor(Gtk.Box, FindInText):
     def _drop_all(self):
         for e in list(self.proposals):
             self._drop_proposal(e)
+
+    def edit_start(self, p):
+        """Where a shown change's passage is now, in the page's own text, or None (not shown, or not there as it was)."""
+        e = next((e for e in self.proposals if e["p"] is p), None)
+        if e is None or e["a"].get_deleted():
+            return None
+        a, b = (self.buf.get_iter_at_mark(e[k]).get_offset() for k in ("a", "b"))
+        return self.kept_offset(a) if self.kept_between(a, b) == p["old"] else None
+
+    def unshow(self, p):
+        """A change taken off the page (to be shown again as it's revised, or taken back), the page drawn again."""
+        if (e := next((e for e in self.proposals if e["p"] is p), None)) is not None:
+            self._drop_proposal(e)
+            self._highlight()
 
     @contextlib.contextmanager
     def _quiet(self):
@@ -5887,9 +5973,13 @@ class RecordChat(Gtk.Box):
                 b.append(label(where + "“" + (" ".join(q.split())[:400] + ("…" if len(q) > 400 else "")) + "”",
                                css=("quote-in-bubble",), select=True))
             b.append(self._said(m))
-        elif m.get("proposals") and not m["text"] and not m.get("error"):  # (it only edited: no more than that said)
-            pages = list(dict.fromkeys(short_page(p["page"]) for p in m["proposals"]))
-            b.append(label("Edited " + ", ".join(pages), css=("dim-label", "caption")))
+        elif (m.get("proposals") or m.get("revised") or m.get("withdrew")) and not m["text"] and not m.get("error"):
+            edited = list(dict.fromkeys([short_page(p["page"]) for p in m.get("proposals") or ()] +
+                                        [short_page(page) for page in m.get("revised") or ()]))  # (as it was then)
+            gone = [short_page(page) for page in m.get("withdrew") or () if short_page(page) not in edited]
+            said = ["Edited " + ", ".join(edited)] if edited else []
+            said += ["Took back an edit to " + ", ".join(gone)] if gone else []
+            b.append(label(" · ".join(said), css=("dim-label", "caption")))  # (it only edited)
             b.set_margin_start(12)
             b.prose = b.status = label("")
         else:
@@ -6022,6 +6112,10 @@ class RecordChat(Gtk.Box):
                     if not agent.fresh:
                         parts.append(f"(The change you proposed to {p['page']} was {p['status']} by the user.)")
                     p["told"] = True
+        if waiting := pending_edits(notebook):
+            pages = list(dict.fromkeys(p["page"] for p in waiting))
+            parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
+                         "shows them.)")
         left, said = REFS_LIMIT, []
         for item in referenced(msg["text"], space):
             text, paths = ref_said(item, store, space, min(REF_LIMIT, max(2000, left)))
@@ -6133,54 +6227,207 @@ class RecordChat(Gtk.Box):
                 self.box.remove(card)
         self.asking = []
 
+    TOOLS = ("propose_edit", "list_edits", "revise_edit", "withdraw_edit")
+
     def _tool(self, tool, args):
         """The agent's own tools (ToolSocket), on the main loop."""
         agent = self.agent
-        if tool != "propose_edit":
+        if tool not in self.TOOLS:
             return {"error": f"There's no tool {tool}."}
         if agent is None or agent.turn is None or agent.notebook is not self.notebook:
-            return {"error": "That notebook isn't open any more: nothing was proposed."}
-        return self.propose(agent.turn, args)
+            return {"error": "That notebook isn't open any more: nothing was done."}
+        return self.run_tool(agent.turn, tool, args)
 
-    def propose(self, turn, args):
-        """propose_edit: a change to a page of the notebook's, checked (the page there, the text it replaces in it once,
-        or where the selection was), and shown on the page (DiaryEditor.show_proposal) to accept or reject. Nothing's
-        written here."""
+    def run_tool(self, turn, tool, args):
+        """One of the agent's tools, in a turn of its (turn: what its reply's made of, the edits it made among it)."""
+        return {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
+                "withdraw_edit": self.withdraw_edit}[tool](turn, args)
+
+    def _page(self, args):
+        """The page a tool's call names, or (None, the error to answer it with)."""
         notebook = self.notebook
         page = page_named(notebook, str(args.get("page") or ""), self.win.store)
         if page is None:
             names = ", ".join(sorted(notebook["pages"])[:40])
-            return {"error": f"There's no page {args.get('page')!r} in this notebook. Its pages: {names}."}
+            return None, {"error": f"There's no page {args.get('page')!r} in this notebook. Its pages: {names}."}
+        return page, None
+
+    def _spans(self, page):
+        """A page's own text, and the edits waiting on it, where each is in that text now: [(start, old, new, edit)]
+        (one whose passage isn't on the page as it was: left out)."""
+        notebook, editor = self.notebook, self.win.tabs.get(("note", page))
+        text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
+        out = []
+        for p in pending_edits(notebook, self.agent):
+            if p["page"] != page:
+                continue
+            at = editor.edit_start(p) if editor is not None else None
+            if at is None and not p["old"]:
+                at = len(text)
+            elif at is None:
+                at = p.get("start", 0) if text[p.get("start", 0):p.get("start", 0) + len(p["old"])] == p["old"] else \
+                    place_change(text, p["old"], p.get("start"))[0]
+            if at is not None:
+                out.append((at, p["old"], p["new"], p))
+        return text, out
+
+    def _edited(self, turn, p):
+        """A turn's edit to a page, made or changed: kept with the turn (said under its reply), shown on its page."""
+        if p["status"] != "pending":
+            if p["page"] not in turn.setdefault("withdrew", []):
+                turn["withdrew"].append(p["page"])
+        elif p not in turn["proposals"] and p["page"] not in turn.setdefault("revised", []):
+            turn["revised"].append(p["page"])
+        self._status(self.agent, f"{'Edited' if p['status'] == 'pending' else 'Took back an edit to'} "
+                                 f"{short_page(p['page'])}")
+        if p["status"] == "pending" and (editor := self.win.open_note(p["page"])) is not None:
+            editor.show_proposal(p, scroll=True)
+        self.show_pending_bar()
+
+    def _restage(self, turn, p, **fields):
+        """A pending edit changed (old, new, start) or taken back (status): off its page, changed, and shown again."""
+        if (editor := self.win.tabs.get(("note", p["page"]))) is not None:
+            editor.unshow(p)
+        p.update(fields)
+        if p["status"] == "pending" and p["old"] == p["new"]:
+            p["status"] = "withdrawn"  # (what it puts in is what's there: no edit)
+        self._edited(turn, p)
+
+    def propose(self, turn, args):
+        """propose_edit: a change to a page of the notebook's, its old text found once (or where the selection was) in
+        the page as it reads with the agent's pending edits applied (staged). Text only in such an edit's new text, or
+        in what it replaces: that edit revised to take this in, one edit for the passage they all cover (the others in
+        it taken back); else a new one. Shown on the page (DiaryEditor.show_proposal) to accept or reject: nothing's
+        written here."""
+        page, error = self._page(args)
+        if error:
+            return error
         old, new = str(args.get("old_text") or ""), str(args.get("new_text") or "")
         if old == new:
             return {"error": "new_text is old_text: that changes nothing."}
-        editor = self.win.tabs.get(("note", page))
-        text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
+        text, spans = self._spans(page)
         sel = turn.get("selection")
-        start, old = place_change(text, old, sel["start"] if sel and sel["page"] == page else None)
-        if start is None:
-            return {"error": old}
-        if not old and text and not text.endswith("\n") and not new.startswith("\n"):
-            new = "\n" + new  # (added at the end: on a line of its own)
+        near = sel["start"] if sel and sel["page"] == page and sel.get("start") is not None else None
+        view, pieces = staged(text, spans)
+        if not old:
+            if view and not view.endswith("\n") and not new.startswith("\n"):
+                new = "\n" + new  # (added at the end, after what's there and what's waiting: on a line of its own)
+            return self._new_edit(turn, page, len(text), "", new)
+        at, found = place_change(view, old, staged_at(pieces, near) if near is not None else None)
+        if at is None and any(want and want in view for want in (old, old.strip())):
+            return {"error": found}  # (in the page as the edits have it, more than once)
+        if at is None:  # (not in the page as the edits have it: text one of them replaces, perhaps)
+            k, kept_found = place_change(text, old, near)
+            if k is None:
+                return {"error": found}
+            end = k + len(kept_found)
+            hit = [x for x in spans if x[0] < end and x[0] + len(x[1]) > k]
+            if not hit:
+                return self._new_edit(turn, page, k, kept_found, new)
+            k0, k1 = min(k, hit[0][0]), max(end, max(x[0] + len(x[1]) for x in hit))
+            return self._merged(turn, [x[3] for x in hit], k0, text[k0:k1], text[k0:k] + new + text[end:k1])
+        end = at + len(found)
+        hit = [piece for piece in pieces if piece[4] is not None and
+               (piece[0] < end and piece[1] > at or piece[0] == piece[1] and at < piece[0] < end)]
+        if not hit:  # (none of a pending edit's passage in it: one of its own)
+            k0, k1 = kept_at(pieces, at, max), kept_at(pieces, end, min)
+            return self._new_edit(turn, page, k0, text[k0:k1], new)
+        s0, s1 = min(at, hit[0][0]), max(end, hit[-1][1])  # (all of theirs in it, and none of another's)
+        k0 = hit[0][2] if s0 == hit[0][0] else kept_at(pieces, at, max)
+        k1 = hit[-1][3] if s1 == hit[-1][1] else kept_at(pieces, end, min)
+        return self._merged(turn, [piece[4] for piece in hit], k0, text[k0:k1], view[s0:at] + new + view[end:s1])
+
+    def _new_edit(self, turn, page, start, old, new):
         p = {"id": uuid.uuid4().hex[:10], "page": page, "old": old, "new": new, "start": start, "status": "pending",
              "t": time.time()}
         turn["proposals"].append(p)
-        self._status(self.agent, f"Edited {short_page(page)}")
-        if (editor := self.win.open_note(page)) is not None:
-            editor.show_proposal(p, scroll=True)
-        self.show_pending_bar()
-        return {"text": f"Shown on the page {page} for the user to accept or reject. Nothing is written until they "
-                        "accept; you'll be told which."}
+        self._edited(turn, p)
+        return {"text": f"Edit {p['id']} shown on the page {page} for the user to accept or reject. Nothing is written "
+                        "until they accept; you'll be told which."}
+
+    def _merged(self, turn, edits, start, old, new):
+        """Pending edits a change reaches into, as one: the first revised to replace old with new, the others taken
+        back."""
+        first = edits[0]
+        for p in edits[1:]:
+            self._restage(turn, p, status="withdrawn")
+        self._restage(turn, first, old=old, new=new, start=start)
+        if first["status"] == "withdrawn":
+            return {"text": f"That puts back what's on the page: your edit {first['id']} is taken back."}
+        joined = f" (and took in {', '.join(p['id'] for p in edits[1:])}, now taken back)" if edits[1:] else ""
+        return {"text": f"Revised your pending edit {first['id']}{joined}: it replaces {old!r} with {new!r} now, still "
+                        "waiting for the user."}
+
+    def list_edits(self, turn, args):
+        """list_edits: the agent's edits waiting for the user, page by page, each as the page has its passage now."""
+        pages = sorted({p["page"] for p in pending_edits(self.notebook, self.agent)})
+        if args.get("page"):
+            page, error = self._page(args)
+            if error:
+                return error
+            pages = [page] if page in pages else []
+        listed = []
+        for page in pages:
+            spans = self._spans(page)[1]
+            listed += [{"id": p["id"], "page": page, "old_text": old, "new_text": new}
+                       for _at, old, new, p in sorted(spans, key=lambda x: x[0])]
+            placed = {id(x[3]) for x in spans}
+            listed += [{"id": p["id"], "page": page, "old_text": p["old"], "new_text": p["new"],
+                        "note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
+                       for p in pending_edits(self.notebook, self.agent) if p["page"] == page and id(p) not in placed]
+        if not listed:
+            return {"text": "No edits of yours are waiting" + (f" on {pages[0] if pages else args['page']}."
+                                                               if args.get("page") else ".")}
+        return {"text": json.dumps(listed, ensure_ascii=False, indent=1)}
+
+    def _pending_named(self, args):
+        p = next((p for p in pending_edits(self.notebook, self.agent) if p["id"] == str(args.get("id") or "")), None)
+        return p, None if p is not None else {"error": f"No edit of yours with the id {args.get('id')!r} is waiting: "
+                                                         "list_edits shows those that are."}
+
+    def revise_edit(self, turn, args):
+        """revise_edit: a pending edit's new text (and the passage it replaces, if given) changed; it stays one edit."""
+        p, error = self._pending_named(args)
+        if error:
+            return error
+        new, fields = str(args.get("new_text") or ""), {}
+        if not p["old"] and not ("old_text" in args and args["old_text"]) and not new.startswith("\n"):
+            text, spans = self._spans(p["page"])  # (an addition: after what's there and what's waiting before it)
+            before = staged(text, [x for x in spans if x[3] is not p and (x[1] or x[3].get("t", 0) < p.get("t", 0))])[0]
+            if before and not before.endswith("\n"):
+                new = "\n" + new
+        if "old_text" in args and str(args["old_text"]) != p["old"]:
+            text, spans = self._spans(p["page"])
+            near = next((x[0] for x in spans if x[3] is p), p.get("start"))
+            at, old = place_change(text, str(args["old_text"]), near)
+            if at is None:
+                return {"error": old}
+            if any(x[3] is not p and x[0] < at + len(old) and x[0] + len(x[1]) > at for x in spans):
+                return {"error": "That's in the passage another of your pending edits replaces: revise that one."}
+            fields = {"old": old, "start": at}
+        self._restage(turn, p, new=new, **fields)
+        if p["status"] == "withdrawn":
+            return {"text": f"That puts back what's on the page: your edit {p['id']} is taken back."}
+        return {"text": f"Edit {p['id']} revised, still waiting for the user."}
+
+    def withdraw_edit(self, turn, args):
+        """withdraw_edit: a pending edit taken back, from its page."""
+        p, error = self._pending_named(args)
+        if error:
+            return error
+        self._restage(turn, p, status="withdrawn")
+        return {"text": f"Edit {p['id']} taken back."}
 
     def _done(self, agent, text, error, turn):
-        notebook, props = agent.notebook, turn.get("proposals") or []
+        notebook, props, revised = agent.notebook, turn.get("proposals") or [], turn.get("revised") or []
+        withdrew = turn.get("withdrew") or []
         if agent is self.ask:
             self.ask, self.live_widget = None, None
             self.writing.set_busy(False)
             self._drop_asking()
         if error:
             m = {"role": "record", "text": error, "error": True, "t": time.time()}
-        elif text.strip() or props:
+        elif text.strip() or props or revised or withdrew:
             reply, unknown = split_unknown(text)
             m = {"role": "record", "text": reply, "unknown": unknown, "t": time.time()}
         else:
@@ -6188,6 +6435,10 @@ class RecordChat(Gtk.Box):
         if m is not None:
             if props:
                 m["proposals"] = props  # (the same ones the pages show: what's decided there is kept here)
+            if revised:
+                m["revised"] = revised  # (pages whose edits waiting it changed: said as edited)
+            if withdrew:
+                m["withdrew"] = withdrew  # (and those it took one back from)
             notebook["messages"].append(m)
         self.win.store.save_now()
         if notebook is self.notebook:

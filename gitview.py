@@ -58,6 +58,19 @@ def _gh_json(*args, timeout=20):
         return None
 
 
+def git_fetch(top):
+    """Every remote fetched (the Git page's refresh: origin/… where it is now), True if it went. Never a password asked:
+    no terminal and no prompt, only what git has already (its credentials, a keychain's, an agent's), and given up on
+    after a minute."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
+    try:
+        return subprocess.run([lookup.git_exe(), "-C", top, "fetch", "--all", "--quiet"], env=env,
+                              stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
+                              start_new_session=True).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def github_repo(top):
     """owner/name of the GitHub repository `origin` points at, if it does."""
     url = (_git(top, "remote", "get-url", "origin") or "").strip()
@@ -959,7 +972,7 @@ class GitPage(Gtk.Stack):
         self.all_btn.add_css_class("flat")
         self.all_btn.connect("toggled", lambda *_: self.load())
         head.append(self.all_btn)
-        self.refresh_btn = RefreshButton(tooltip_text="Read the history again (and ask GitHub)")
+        self.refresh_btn = RefreshButton(tooltip_text="Fetch, and read the history again (and ask GitHub)")
         self.refresh_btn.connect("clicked", lambda *_: self.load(gh=True))
         head.append(self.refresh_btn)
         top.append(head)
@@ -1162,6 +1175,7 @@ class GitPage(Gtk.Stack):
         top = (_git(folder, "rev-parse", "--show-toplevel") or "").strip() if folder else ""
         if not top:
             return {"top": None, "folder": folder}
+        fetched = git_fetch(top) if gh else None  # (asked for, the refresh button: the remotes' branches as they are now)
         checkouts = git_checkouts(top)
         entries = checkouts + git_remote_branches(top)
         mine = next((c for c in checkouts if c["worktree"] == os.path.realpath(top)), None)
@@ -1198,7 +1212,7 @@ class GitPage(Gtk.Stack):
                                    {rev: parent["name"]} if b and parent else None)
         return {"top": top, "folder": folder, "checkouts": checkouts, "branches": branches, "rev": rev,
                 "picked": picked, "branch": b, "parent": parent, "commits": commits, "own": own, "theirs": theirs,
-                "repo": repo, "gh_refresh": gh, "pr": None, "every": every, "found": found,
+                "repo": repo, "gh_refresh": gh, "fetched": fetched, "pr": None, "every": every, "found": found,
                 "revs": revs, "chat": chat, "then": then, "mine": mine["rev"] if mine else None}
 
     # ---- drawing (main loop)
@@ -1234,6 +1248,8 @@ class GitPage(Gtk.Stack):
             self.opened, self.opened_for = {}, shown
         if res["gh_refresh"]:
             AVATARS.again()
+        if res.get("fetched") is False:
+            toast(self.win, "Couldn't fetch: the remotes' branches are as last fetched")
         self.fill(self.commits)
         self.more.set_visible(len(self.commits) >= GIT_LOG_LIMIT)
         if (found := res.get("found")) and found["merge"]:  # (in a merge: opened, then highlighted)

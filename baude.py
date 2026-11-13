@@ -12,7 +12,7 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
 
 Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
-Ctrl+. (⌘.) Send Feedback over whatever's open.
+Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused.
 Images and PDFs can also be attached with the paperclip or dropped onto the window.
 
 Set BAUDE_CLAUDE=/path/to/claude to use a specific claude binary (else claude on PATH, else, on macOS,
@@ -11434,6 +11434,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
                              # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
+                             (widgets.META_KEY, self.show_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
                              (PALETTE_KEY, lambda: RefPalette(self).present(self)),
                              (SETTINGS_KEY, self.open_settings),
@@ -13394,6 +13395,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
         if show:
             self.panel.show_page(page or ("agents" if any(t.get("task_type") == "local_agent"
                                                           for t in self.running_tasks()) else "processes"))
+
+    def show_meta(self):
+        """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta's page of the side panel, the panel shown if it
+        was hidden, and the focus in Meta's box."""
+        self.show_panel(True, "meta")
+        self.panel.meta.composer.grab_focus()
 
     def h_stream_event(self, msg):
         ev, parent = msg.get("event", {}), msg.get("parent_tool_use_id")

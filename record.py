@@ -6383,7 +6383,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
     code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
-    side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B)."""
+    side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
+    focused."""
 
     def __init__(self, app):
         super().__init__(application=app, title=noun(), default_width=1320, default_height=860)
@@ -6508,6 +6509,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.right_slide.toggle()),
+                             (widgets.META_KEY, lambda: self.show_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
                              (widgets.NAV_KEYS["forward"], lambda: self.tabs.forward()),  # back, forward, up)
@@ -7337,6 +7339,13 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
         else:
             self.right_slide.set_shown(True)
             self.right_stack.set_visible_child_name(page)
+
+    def show_meta(self):
+        """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta's page of the
+        right bar, the bar shown if it was hidden, and the focus in Meta's box."""
+        self.right_slide.set_shown(True)
+        self.right_stack.set_visible_child_name("meta")
+        self.chat.composer.grab_focus()
 
     def open_palette(self):
         """⌘K / Ctrl+K, as Baude's: every name the notebook's folders have, and the notebooks and their pages, searched

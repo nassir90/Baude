@@ -1,0 +1,455 @@
+"""Inference providers: where the models besides Claude's run, and what each has. Claude isn't one: claude runs
+Claude's models on the machine it's on, wherever its models are served.
+
+On this machine (found): Apple's on-device model (apple-claude; on macOS), MLX (pi-claude's own server, on the models
+pi-claude/models.json names that are downloaded), Ollama (its server: settings.json's ollama_url, else OLLAMA_HOST,
+else 127.0.0.1:11434), and the OpenAI-compatible servers settings.json lists as endpoints (LM Studio, llama.cpp's
+llama-server, vLLM, ...: [{"id", "name", "url" (its /v1), "key"?: "$NAME" for an environment variable's, or the key,
+"window"?: its context window}]). Ollama's models and the endpoints' run in pi-claude, as MLX's do: pi speaks their API
+(openai-completions). Another Baude's are those its host process lists (wire's hello: models, each with its provider).
+
+A model's value says its provider: "apple", an MLX one's own (mlx-qwen3-4b), "ollama/<name>", and
+"openai/<endpoint id>/<model id>"; Claude's are the rest (provider_of).
+
+What's found is kept MAX_AGE seconds and looked for again on a thread of its own (found), so a window asking never
+waits on a server that doesn't answer; listen(fn) hears when it changes."""
+import json
+import os
+import re
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from baudelib import models as modelslib
+from baudelib.selfupdate import settings_path
+
+OLLAMA_PORT = 11434
+MAX_AGE = 15  # (seconds what's found is kept before it's looked for again)
+TIMEOUT = 2.0  # (a server's answer to a look: a server on this machine answers at once, or isn't there)
+WAIT = 4.0  # (what found(wait=True) waits for a look, the first time)
+DEFAULT_WINDOW = 32768  # (an OpenAI-compatible server's context window, till it or settings.json say)
+# Ollama's own context window where nothing sets one (OLLAMA_CONTEXT_LENGTH, the Ollama app's slider, a model's
+# num_ctx): 4k on a machine with less than 24 GB for models. A loaded model's (its /api/ps) is what it has
+OLLAMA_WINDOW = 4096
+NAMES = {"apple": "Apple", "mlx": "MLX", "ollama": "Ollama"}
+ORDER = ("apple", "mlx", "ollama")  # (then the endpoints, as settings.json lists them)
+EMBED_RE = re.compile(r"embed|rerank|whisper|tts", re.I)  # (an endpoint's models that aren't for talking to)
+ENDPOINT_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,30}")
+
+
+def provider_of(value):
+    """A model's provider, by its value: "apple", "mlx", "ollama", "openai/<id>"; None for Claude's."""
+    if not isinstance(value, str) or not value:
+        return None
+    if value == modelslib.APPLE_MODEL["value"]:
+        return "apple"
+    if any(m["value"] == value for m in modelslib.LOCAL_MODELS):
+        return "mlx"
+    if value.startswith("ollama/"):
+        return "ollama"
+    if value.startswith("openai/") and value.count("/") >= 2:
+        return "openai/" + value.split("/")[1]
+    return None
+
+
+def provider_name(pid, settings=None):
+    """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name."""
+    if pid in NAMES:
+        return NAMES[pid]
+    if isinstance(pid, str) and pid.startswith("openai/"):
+        ep = next((e for e in endpoints(settings) if e["id"] == pid[len("openai/"):]), None)
+        return ep["name"] if ep else pid[len("openai/"):]
+    return str(pid)
+
+
+def model_name(value):
+    """A model's name, known or not: "qwen3:4b (Ollama)" for "ollama/qwen3:4b"."""
+    for p in found():
+        for m in p["models"]:
+            if m["value"] == value:
+                return m["displayName"]
+    pid = provider_of(value)
+    if pid == "ollama":
+        return f"{value[len('ollama/'):]} (Ollama)"
+    if pid and pid.startswith("openai/"):
+        return f"{value.split('/', 2)[2]} ({provider_name(pid)})"
+    return value
+
+
+def rank(pid):
+    """Where a provider's listed: Apple's, MLX, Ollama, then the endpoints."""
+    return (ORDER.index(pid), "") if pid in ORDER else (len(ORDER), str(pid))
+
+
+# ---- settings.json's
+
+def settings():
+    try:
+        with open(settings_path()) as f:
+            out = json.load(f)
+        return out if isinstance(out, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def endpoints(st=None):
+    """settings.json's endpoints, those with an id and a url: [{"id", "name", "url", "key"?, "window"?}]."""
+    st = settings() if st is None else st
+    out = []
+    for e in st.get("endpoints") or []:
+        if isinstance(e, dict) and isinstance(e.get("id"), str) and ENDPOINT_ID_RE.fullmatch(e["id"]) and \
+                isinstance(e.get("url"), str) and e["url"].startswith(("http://", "https://")):
+            out.append({"id": e["id"], "name": str(e.get("name") or e["id"]), "url": e["url"].rstrip("/"),
+                        "key": e.get("key") if isinstance(e.get("key"), str) else None,
+                        "window": e["window"] if isinstance(e.get("window"), int) and e["window"] > 0 else None})
+    return out
+
+
+def key_of(ep):
+    """An endpoint's key: "$NAME" or "${NAME}", that environment variable's; else as it's written; None for none."""
+    k = (ep or {}).get("key")
+    if not k:
+        return None
+    m = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", k)
+    return os.environ.get(m[1]) if m else k
+
+
+def ollama_url(st=None):
+    """Where Ollama is: settings.json's ollama_url, else OLLAMA_HOST (as Ollama takes it: host, host:port, or a URL;
+    0.0.0.0, where it listens on every address, reached at 127.0.0.1), else 127.0.0.1:11434."""
+    st = settings() if st is None else st
+    raw = (st.get("ollama_url") if isinstance(st.get("ollama_url"), str) else None) or os.environ.get("OLLAMA_HOST") or ""
+    raw = raw.strip().rstrip("/")
+    if not raw:
+        return f"http://127.0.0.1:{OLLAMA_PORT}"
+    u = urllib.parse.urlsplit(raw if "://" in raw else "http://" + raw)
+    host = u.hostname or "127.0.0.1"
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    try:
+        port = u.port or OLLAMA_PORT
+    except ValueError:
+        port = OLLAMA_PORT
+    return f"{u.scheme or 'http'}://{'[' + host + ']' if ':' in host else host}:{port}"
+
+
+# ---- talking to a server
+
+_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # (this machine's: never through a proxy)
+
+
+def local_url(url):
+    host = urllib.parse.urlsplit(url).hostname or ""
+    return host in ("127.0.0.1", "localhost", "::1") or host.endswith(".localhost")
+
+
+def fetch(url, body=None, timeout=TIMEOUT, key=None, method=None):
+    """A server's JSON answer to url (body: JSON POSTed; method: another verb), or OSError (ValueError: not JSON).
+    An HTTP error's raised as OSError saying what the server said."""
+    req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), method=method,
+                                 headers={"Content-Type": "application/json",
+                                          **({"Authorization": f"Bearer {key}"} if key else {})})
+    try:
+        with (_DIRECT if local_url(url) else urllib.request.build_opener()).open(req, timeout=timeout) as r:
+            data = r.read()
+    except urllib.error.HTTPError as e:
+        try:
+            said = json.loads(e.read() or b"{}").get("error")
+        except (ValueError, AttributeError, OSError):
+            said = None
+        said = said.get("message") if isinstance(said, dict) else said
+        raise OSError(f"{e.code}: {said or e.reason}") from None
+    except urllib.error.URLError as e:
+        raise OSError(str(e.reason)) from None
+    return json.loads(data) if data.strip() else None
+
+
+def unreachable(url, e):
+    """Why a server didn't answer, said after its name: "isn't running at http://…"."""
+    text = str(e)
+    if "refused" in text.lower():
+        return f"isn't running at {url}"
+    if "timed out" in text.lower():
+        return f"isn't answering at {url}"
+    return f"at {url} said: {text}"
+
+
+# ---- Ollama
+
+_SHOWN = {}  # (Ollama's /api/show of a model, by its digest: what it can do, its window)
+
+
+def ollama_show(url, name, digest=None, timeout=TIMEOUT):
+    """Ollama's /api/show for a model (kept by digest), {} if it didn't say."""
+    if digest and digest in _SHOWN:
+        return _SHOWN[digest]
+    try:
+        shown = fetch(url + "/api/show", {"model": name}, timeout=timeout) or {}
+    except (OSError, ValueError):
+        return {}
+    if digest:
+        _SHOWN[digest] = shown
+    return shown
+
+
+def ollama_loaded(url, timeout=TIMEOUT):
+    """The models Ollama has loaded now (/api/ps): {name: its context window}."""
+    try:
+        ps = fetch(url + "/api/ps", timeout=timeout) or {}
+    except (OSError, ValueError):
+        return {}
+    return {m.get("name") or m.get("model"): m.get("context_length") for m in ps.get("models") or []
+            if isinstance(m, dict)}
+
+
+def ollama_window(shown, loaded=None):
+    """A model's context window in Ollama: the one it's loaded with; else its own num_ctx; else
+    OLLAMA_CONTEXT_LENGTH where it's set here; else Ollama's least (OLLAMA_WINDOW): no more than it was trained on."""
+    trained = next((v for k, v in (shown.get("model_info") or {}).items()
+                    if k.endswith(".context_length") and isinstance(v, int)), None)
+    if isinstance(loaded, int) and loaded > 0:
+        return loaded
+    m = re.search(r"^num_ctx\s+(\d+)", shown.get("parameters") or "", re.M)
+    env = os.environ.get("OLLAMA_CONTEXT_LENGTH", "")
+    window = int(m[1]) if m else int(env) if env.isdigit() and int(env) > 0 else OLLAMA_WINDOW
+    return min(window, trained) if trained else window
+
+
+def ollama_entry(name, shown, loaded=None, size=None):
+    """An Ollama model as a model entry (initialize's, with its provider, whether it calls tools, what it sees and its
+    window); None for one that only embeds."""
+    caps = shown.get("capabilities") or ["completion"]
+    if "completion" not in caps:
+        return None
+    entry = {"value": f"ollama/{name}", "resolvedModel": name, "displayName": f"{name} (Ollama)",
+             "provider": "ollama", "providerName": "Ollama", "tools": "tools" in caps,
+             "input": ["text", "image"] if "vision" in caps else ["text"], "window": ollama_window(shown, loaded)}
+    if "thinking" in caps:
+        entry |= {"thinking": True, "supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}
+    if size:
+        entry["size"] = size
+    return entry
+
+
+def ollama(st=None, timeout=TIMEOUT):
+    """Ollama on this machine: {"id": "ollama", "name", "url", "version", "models", "error"} (error: why it isn't
+    there, None if it is)."""
+    url = ollama_url(st)
+    out = {"id": "ollama", "name": "Ollama", "url": url, "version": None, "models": [], "error": None}
+    try:
+        out["version"] = (fetch(url + "/api/version", timeout=timeout) or {}).get("version")
+        tags = fetch(url + "/api/tags", timeout=timeout) or {}
+    except (OSError, ValueError) as e:
+        out["error"] = unreachable(url, e)
+        return out
+    loaded = ollama_loaded(url, timeout)
+    for m in tags.get("models") or []:
+        name = isinstance(m, dict) and (m.get("name") or m.get("model"))
+        if not name:
+            continue
+        entry = ollama_entry(name, ollama_show(url, name, m.get("digest"), timeout), loaded.get(name), m.get("size"))
+        if entry is not None:
+            out["models"].append(entry)
+    return out
+
+
+# ---- OpenAI-compatible servers
+
+def endpoint_window(listed, ep, props=None):
+    """A model's window at an endpoint: settings.json's for it; else what the server says of the model (vLLM's
+    max_model_len, LM Studio's loaded_context_length, ...), or of itself (llama-server's /props n_ctx); else
+    DEFAULT_WINDOW."""
+    if ep.get("window"):
+        return ep["window"]
+    for k in ("loaded_context_length", "max_model_len", "context_length", "context_window", "max_context_length"):
+        if isinstance(listed.get(k), int) and listed[k] > 0:
+            return listed[k]
+    n = ((props or {}).get("default_generation_settings") or {}).get("n_ctx")
+    return n if isinstance(n, int) and n > 0 else DEFAULT_WINDOW
+
+
+def endpoint(ep, timeout=TIMEOUT):
+    """An OpenAI-compatible server settings.json lists: {"id": "openai/<id>", "name", "url", "models", "error"}."""
+    pid = f"openai/{ep['id']}"
+    out = {"id": pid, "name": ep["name"], "url": ep["url"], "models": [], "error": None}
+    try:
+        listed = fetch(ep["url"] + "/models", key=key_of(ep), timeout=timeout) or {}
+    except (OSError, ValueError) as e:
+        out["error"] = unreachable(ep["url"], e)
+        return out
+    props = None
+    try:  # (llama-server says its window at /props, beside /v1)
+        props = fetch(re.sub(r"/v1$", "", ep["url"]) + "/props", timeout=timeout) if ep["url"].endswith("/v1") \
+            and not ep.get("window") else None
+    except (OSError, ValueError):
+        pass
+    for m in listed.get("data") or []:
+        mid = isinstance(m, dict) and m.get("id")
+        if not isinstance(mid, str) or not mid or EMBED_RE.search(mid):
+            continue
+        out["models"].append({"value": f"openai/{ep['id']}/{mid}", "resolvedModel": mid,
+                              "displayName": f"{mid} ({ep['name']})", "provider": pid, "providerName": ep["name"],
+                              "tools": True, "input": ["text"], "window": endpoint_window(m, ep, props)})
+    return out
+
+
+# ---- this machine's providers
+
+def pi_installed():
+    pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
+    return os.access(pi, os.X_OK)
+
+
+def look():
+    """This machine's providers, looked for now: [{"id", "name", "models", "error", ...}], in ORDER, the endpoints
+    last. One with models and no error can run them (pi-claude needs pi, for all but Apple's)."""
+    st = settings()
+    out = []
+    if sys.platform == "darwin":
+        out.append({"id": "apple", "name": "Apple", "models": [modelslib.APPLE_MODEL | {"provider": "apple",
+                                                                                         "providerName": "Apple"}],
+                    "error": None if modelslib.apple_exe() else "apple-claude isn't built"})
+    pi = pi_installed()
+    mlx = [m | {"provider": "mlx", "providerName": "MLX"} for m in modelslib.local_models()]
+    out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": None if pi else "pi isn't installed"})
+    found, threads = {}, []
+    eps = endpoints(st)
+
+    def one(key, fn, *args):
+        found[key] = fn(*args)
+    for key, fn, args in [("ollama", ollama, (st,)), *((e["id"], endpoint, (e,)) for e in eps)]:
+        t = threading.Thread(target=one, args=(key, fn, *args), daemon=True)
+        t.start()
+        threads.append(t)
+    deadline = time.monotonic() + TIMEOUT * 3 + 1
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+    for key in ["ollama", *(e["id"] for e in eps)]:
+        p = found.get(key)
+        if p is None:
+            continue
+        if not p["error"] and not pi and p["models"]:
+            p["error"] = "pi isn't installed"
+        out.append(p)
+    return out
+
+
+_STATE = {"at": None, "providers": None, "looking": None}
+_LOCK = threading.Lock()
+_LISTENERS = []
+
+
+def listen(fn):
+    """fn() whenever what's found changes (on the thread that looked)."""
+    _LISTENERS.append(fn)
+
+
+def unlisten(fn):
+    if fn in _LISTENERS:
+        _LISTENERS.remove(fn)
+
+
+def _look():
+    try:
+        now = look()
+    except Exception:  # noqa: BLE001 (a look that fails is tried again next time)
+        now = None
+    with _LOCK:
+        was = _STATE["providers"]
+        if now is not None:
+            _STATE["providers"] = now
+        _STATE["at"], _STATE["looking"] = time.monotonic(), None
+    if now is not None and _shape(now) != _shape(was):
+        for fn in list(_LISTENERS):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 (one listener's failure isn't another's)
+                pass
+
+
+def _shape(providers):
+    return [(p["id"], p["error"], [(m["value"], m.get("tools"), m.get("window")) for m in p["models"]])
+            for p in providers or []]
+
+
+def found(wait=False, max_age=MAX_AGE):
+    """This machine's providers as last found (look), looked for again on a thread once they're max_age old (0: now).
+    wait: for that look, if nothing's been found yet or it's asked to be now (max_age 0), at most WAIT seconds (or as
+    many as it says: a window waits a moment, then hears the rest, listen)."""
+    with _LOCK:
+        stale = _STATE["at"] is None or max_age == 0 or time.monotonic() - _STATE["at"] >= max_age
+        if stale and _STATE["looking"] is None:
+            t = _STATE["looking"] = threading.Thread(target=_look, daemon=True, name="providers")
+            t.start()
+        looking, have = _STATE["looking"], _STATE["providers"]
+    if wait and looking is not None and (have is None or max_age == 0):
+        looking.join(WAIT if wait is True else wait)
+    return list(_STATE["providers"] or [])
+
+
+def usable(providers=None, tools=False):
+    """The providers that run models now: with models and no error (tools: those models only that call tools)."""
+    out = []
+    for p in found() if providers is None else providers:
+        models = [m for m in p["models"] if not tools or m.get("tools", True)]
+        if models and not p["error"]:
+            out.append({**p, "models": models})
+    return out
+
+
+def group(models):
+    """Models (initialize's, or a host's hello's) by provider: [(provider id, its name, [models])], Claude's left
+    out, in ORDER."""
+    out = {}
+    for m in models or []:
+        if not isinstance(m, dict) or not m.get("value"):
+            continue
+        pid = m.get("provider") or provider_of(m["value"])
+        if not pid:
+            continue
+        name = m.get("providerName") or provider_name(pid)
+        out.setdefault(pid, (name, []))[1].append(m)
+    return [(pid, name, ms) for pid, (name, ms) in sorted(out.items(), key=lambda kv: rank(kv[0]))]
+
+
+# ---- what pi-claude runs a model with
+
+def resolve(value, timeout=TIMEOUT):
+    """How pi-claude runs a model of Ollama's or an endpoint's (value): {"value", "repo" (the id its server knows it
+    by), "displayName", "input", "thinking", "tools", "window", "provider", "kind" ("ollama", "openai"), "url" (its
+    server), "baseUrl" (its /v1), "apiKey"}; "error" too where its server isn't there, or doesn't have it. None for
+    any other model."""
+    pid = provider_of(value)
+    if pid == "ollama":
+        name, url = value[len("ollama/"):], ollama_url()
+        out = {"value": value, "repo": name, "displayName": f"{name} (Ollama)", "input": ["text"], "thinking": False,
+               "tools": True, "window": OLLAMA_WINDOW, "provider": "ollama", "kind": "ollama", "url": url,
+               "baseUrl": url + "/v1", "apiKey": "ollama", "error": None}
+        try:
+            shown = fetch(url + "/api/show", {"model": name}, timeout=timeout) or {}
+        except (OSError, ValueError) as e:
+            text = str(e)
+            out["error"] = f"Ollama doesn't have {name}" if "not found" in text else f"Ollama {unreachable(url, e)}"
+            return out
+        entry = ollama_entry(name, shown, ollama_loaded(url, timeout).get(name))
+        if entry is None:
+            out["error"] = f"{name} only embeds: there's nothing to talk to"
+            return out
+        return out | {k: entry[k] for k in ("input", "tools", "window")} | {"thinking": bool(entry.get("thinking"))}
+    if pid and pid.startswith("openai/"):
+        _, eid, mid = value.split("/", 2)
+        ep = next((e for e in endpoints() if e["id"] == eid), None)
+        if ep is None:
+            return {"value": value, "repo": mid, "displayName": mid, "input": ["text"], "thinking": False,
+                    "tools": True, "window": DEFAULT_WINDOW, "provider": pid, "kind": "openai", "url": "",
+                    "baseUrl": "", "apiKey": "none", "error": f"there's no endpoint {eid} in settings.json"}
+        there = endpoint(ep, timeout)
+        listed = next((m for m in there["models"] if m["resolvedModel"] == mid), {})
+        return {"value": value, "repo": mid, "displayName": f"{mid} ({ep['name']})", "input": ["text"],
+                "thinking": False, "tools": True, "window": listed.get("window") or ep.get("window") or DEFAULT_WINDOW,
+                "provider": pid, "kind": "openai", "url": ep["url"], "baseUrl": ep["url"],
+                "apiKey": key_of(ep) or "none", "error": there["error"] and f"{ep['name']} {there['error']}"}
+    return None

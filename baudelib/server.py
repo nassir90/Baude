@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import claude, mesh, models, selfupdate, transcripts, wire
+from baudelib import claude, mesh, models, providers, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -351,6 +351,7 @@ class Server:
         self.me["group"] = group or self.me.get("group") or self.me["name"]
         self.me.pop("advertise", None)  # (said on the network, once: nothing is now)
         _write_json(me, self.me)
+        providers.found()  # (this machine's inference providers looked for now: there by the time a head says hello)
         self.sessions = {}
         folder = os.path.join(self.state_dir, "sessions")
         for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
@@ -425,14 +426,15 @@ class Server:
         with self.lock:
             return self._info()
 
-    def models(self, said=None, fresh=False):
+    def models(self, said=None, fresh=False, wait=True):
         """Every model it can run, as initialize lists them: Claude's (as claude last said; said, if it's just said it:
-        fresh), then Apple's and those on this machine that it has."""
+        fresh), then those of this machine's inference providers (baudelib.providers: Apple's, MLX's, Ollama's, an
+        endpoint's), each with its provider. wait: for the providers to be found, the first time."""
         claudes = [m for m in said or [] if models.model_program(m.get("value")) == "claude"] if fresh else []
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
-        return (claudes or self.me.get("claude_models") or []) + models.runnable_models()
+        return (claudes or self.me.get("claude_models") or []) + models.runnable_models(wait=wait)
 
     def init(self, said, fresh=False):
         """What a session's program said to initialize (fresh: just now, not kept from before), with every model this
@@ -444,12 +446,14 @@ class Server:
         pi's, the model itself here)?"""
         if models.model_program(model) == "claude":
             return not models.launch(model, None, None)["missing"]
-        return any(m["value"] == model for m in models.runnable_models())
+        return any(m["value"] == model for m in models.runnable_models()) or \
+            any(m["value"] == model for m in models.runnable_models(fresh=True))  # (pulled since it last looked)
 
     def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
-                "models": [{"value": m["value"], "displayName": m.get("displayName") or m["value"]}
-                           for m in self.models()],
+                "models": [{"value": m["value"], "displayName": m.get("displayName") or m["value"]} |
+                           {k: m[k] for k in ("provider", "providerName", "tools") if k in m}
+                           for m in self.models(wait=False)],  # (with their providers: a head's provider picker)
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),

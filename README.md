@@ -41,7 +41,8 @@ chats into a group, archive or rename them, list only some hosts or groups, or, 
 and propose edits to them. Every change it makes shows under its reply with undo, and is marked in the left bar (green
 added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
 own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model. Code mode has it
-act by writing up to 10 lines of Python against the app's tools (`meta.py`).
+act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
+anywhere in the window, shows it and puts the focus in its box.
 
 ## Running it
 

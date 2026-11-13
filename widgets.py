@@ -6411,6 +6411,7 @@ ZOOM_MODS = ("<Control>", "<Meta>") if sys.platform == "darwin" else ("<Control>
 
 SETTINGS_KEY = "<Meta>comma" if sys.platform == "darwin" else "<Control>comma"  # (⌘, as a Mac app's Settings…)
 FEEDBACK_KEY = "<Meta>period" if sys.platform == "darwin" else "<Control>period"  # (Send Feedback…, over whatever's open)
+META_KEY = "<Control>m"  # (Meta shown, its box focused, from anywhere; Control on macOS too: ⌘M is Minimize)
 
 
 def zoom_keys(*keys):

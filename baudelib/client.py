@@ -1,8 +1,8 @@
-"""Hosts as Baude sees them: this machine's host process (its socket), another machine's over ssh, found on the network
-(discovery.Browser: a host that says Baude is on it, and its ssh user), among Tailscale's peers, given by hand, or
-remembered from before; the sessions each lists; a session's transcript, read where it is on this machine, else mirrored
-here, its subagents' beside it, so what reads a transcript reads it as it reads a local one; and a session's claude,
-talked to as Baude talks to its own (RemoteProc). wire.py says how each is reached.
+"""Hosts as Baude sees them: this machine's host process (its socket), and another machine's over ssh, given by hand
+(Add Host…, BAUDE_HOSTS) or remembered from before: none looked for on the network; the sessions each lists; a
+session's transcript, read where it is on this machine, else mirrored here, its subagents' beside it, so what reads a
+transcript reads it as it reads a local one; and a session's claude, talked to as Baude talks to its own (RemoteProc).
+wire.py says how each is reached.
 
 A host that goes (its connection drops, or it says nothing for wire.SILENT_S) isn't forgotten: it's "dead", its
 sessions still listed as they were, until it's back or it's been gone for FORGET_S. Calls to what's given (on_change,
@@ -11,22 +11,15 @@ import base64
 import itertools
 import json
 import os
-import shutil
 import socket
-import subprocess
 import threading
 import time
 
 from baudelib import claude, wire
-from baudelib.discovery import Browser
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
 RETRY_SSH_S = (2, 10, 30, 120, 300)  # (one over ssh: a login each time, on another machine)
-PEERS_S = 5 * 60  # Tailscale's peers looked at again, and those Baude wasn't on tried again, at most this often
-PEERS_MAX = 16  # (of them, those tried, one at a time)
-OFFERED_MAX = 32  # hosts found on the network, offered till one's taken up (Network.accept)
-TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"  # (macOS's, where tailscale isn't on PATH)
 
 
 def network_home():
@@ -46,11 +39,11 @@ def is_here(info):
 
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
-    whether it's there. found_by: "local" (this machine's socket), "network" (multicast DNS), "tailscale", "hand";
-    probe: one not reached yet that may not be one (a Tailscale peer): tried when the network's looked at, not again
-    and again. command: its host process's command, as given here (what it's said to be otherwise)."""
+    whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
+    "tailscale", as it was found then). command: its host process's command, as given here (what it's said to be
+    otherwise)."""
 
-    def __init__(self, network, key, where, cached=None, found_by="hand", probe=False):
+    def __init__(self, network, key, where, cached=None, found_by="hand"):
         cached = cached or {}
         self.network, self.key, self.where = network, key, dict(where)
         self.info = cached.get("info") or {}
@@ -61,9 +54,7 @@ class Remote:
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
         self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
-        self.probe, self.tried, self.error = probe and not self.info, 0.0, None
-        self.attempted = threading.Event()  # (set as each try's done: peers waits for one before the next)
-        self.offered = False  # (found on the network: listed, not reached, till it's taken up: Network.accept)
+        self.tried, self.error = 0.0, None
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
@@ -113,20 +104,15 @@ class Remote:
                 ch.close()
                 break
             if ch is not None:
-                tries, self.probe = 0, False
-                self.attempted.set()
+                tries = 0
                 self._serve(ch, info)
-            self.attempted.set()
             if self.stopped:
                 break
             if self.state != "dead":
                 self.state = "dead"
                 self.network.changed()
-            if self.probe:  # (not one, or not yet: tried again when the network's next looked at, not before)
-                self.wake.wait()
-            else:
-                retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
-                self.wake.wait(retry[min(tries, len(retry) - 1)])
+            retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
+            self.wake.wait(retry[min(tries, len(retry) - 1)])
             self.wake.clear()
             tries += 1
 
@@ -335,12 +321,13 @@ class Remote:
 
 class Network:
     """Every host Baude knows, and the sessions they list. listen(fn): fn() (through dispatch) when they change.
-    discover: look on the network (multicast DNS) and among Tailscale's peers; hosts: ssh destinations to know too."""
+    hosts: ssh destinations to know too. None is looked for on the network: this machine's is found by its socket,
+    another's is given by where ssh goes."""
 
-    def __init__(self, dispatch, home=None, discover=True, hosts=()):
+    def __init__(self, dispatch, home=None, hosts=()):
         self.dispatch, self.home = dispatch, home or network_home()
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
-        self.saved_at, self.pending, self.looked, self.peered = 0.0, False, float("-inf"), float("-inf")
+        self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
         for key, c in self.saved().items():
             if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand"):
@@ -352,11 +339,7 @@ class Network:
                 self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest})
         for r in list(self.servers.values()):
             r.start()
-        self.discover = discover
-        self.browser = Browser(self.found, self.lost).start() if discover else None
         self.here()
-        if discover:
-            threading.Thread(target=self.peers, daemon=True, name="tailscale-peers").start()
         threading.Thread(target=self._tick, daemon=True, name="network-tick").start()
 
     def saved(self):
@@ -426,105 +409,16 @@ class Network:
         r.wake.set()
         self.save()
 
-    def found(self, service):
-        """A host on the network said Baude is on it: offered (listed, as found), not reached: anyone on the network
-        can say anything, so it's reached only once it's taken up (accept), over ssh, by its own name on the network
-        (name.local) and as the user it says, its key known already. None's command is taken from what it says."""
-        words = service["words"]
-        key, user = words.get("id"), words.get("user")
-        target = (service.get("target") or "").rstrip(".")
-        if not wire.is_id(key) or not target.lower().endswith(".local") or not wire.is_dest(target) or "@" in target \
-                or user is not None and not wire._NAME.fullmatch(str(user)):
-            return
-        where = {"via": "ssh", "dest": f"{user}@{target}" if user else target, "strict": True}
-        with self.lock:
-            r = self.servers.get(key)
-            if r is not None:
-                if r.offered:
-                    r.where, r.seen, r.instance = where, time.time(), service.get("instance")
-                return  # (one known already is reached as it was: not wherever the network now says)
-            if sum(x.offered for x in self.servers.values()) >= OFFERED_MAX:
-                return
-            r = self.servers[key] = Remote(self, key, where, found_by="network")
-            r.offered, r.seen, r.instance = True, time.time(), service.get("instance")
-            r.info = {"name": str(service.get("instance") or target).split(".")[0][:64]}
-            r.state = "dead"  # (not reached)
-        self.changed()
-
-    def lost(self, instance):
-        """A host on the network said it's gone: if it was only offered, not offered any more."""
-        with self.lock:
-            gone = [k for k, r in self.servers.items() if r.offered and getattr(r, "instance", None) == instance]
-            for k in gone:
-                del self.servers[k]
-        if gone:
-            self.changed()
-
-    def accept(self, r):
-        """A host offered (found on the network) taken up: reached from now on, and kept, as one given by hand is."""
-        with self.lock:
-            if not r.offered:
-                return
-            r.offered, r.by_hand, r.info = False, True, {}
-            r.state = "connecting"
-        r.start()
-        self.save()
-        self.changed()
-
-    def peers(self):
-        """Tailscale's peers (`tailscale status --json`, where it's installed), as multicast DNS doesn't cross a tailnet:
-        each one online that isn't a phone, PEERS_MAX at most, tried over ssh by its name there (its key must be known
-        already), one at a time, and a host once it's answered as one. Again at most every PEERS_S (look), those
-        Baude wasn't on tried again then."""
-        self.peered = time.monotonic()
-        exe = os.environ.get("BAUDE_TAILSCALE") or shutil.which("tailscale") or \
-            (TAILSCALE_APP if os.path.exists(TAILSCALE_APP) else None)
-        if not exe:
-            return
-        try:
-            out = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=10)
-            peers = (json.loads(out.stdout).get("Peer") or {}).values()
-        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
-            return
-        tried = 0
-        for p in peers:
-            if tried >= PEERS_MAX or self.stopped.is_set():
-                break
-            if not isinstance(p, dict) or not p.get("Online") or str(p.get("OS") or "").lower() in ("ios", "android"):
-                continue
-            dest = str(p.get("DNSName") or "").rstrip(".") or str(p.get("HostName") or "")
-            if not wire.is_dest(dest) or "@" in dest:
-                continue
-            with self.lock:
-                r = next((r for r in self.servers.values() if r.where.get("dest") == dest), None)
-                if r is None:
-                    r = self.servers[f"ssh:{dest}"] = Remote(self, f"ssh:{dest}", {"via": "ssh", "dest": dest,
-                                                             "strict": True}, found_by="tailscale", probe=True)
-                    r.start()
-                elif r.probe and r.state != "alive":
-                    r.attempted.clear()
-                    r.wake.set()
-                else:
-                    continue
-            tried += 1
-            r.attempted.wait(30)  # (one at a time: not a burst of logins)
-            r.attempted.clear()
-
     def look(self):
-        """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): who's there asked at
-        once, not at the next discovery.QUERY_S, every host that's gone tried again, not at its next retry, and
-        Tailscale's peers, if it's been PEERS_S."""
+        """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): every host that's gone
+        tried again, not at its next retry."""
         if time.monotonic() - self.looked < 2:
             return
         self.looked = time.monotonic()
-        if self.browser is not None:
-            self.browser.ask_soon()
-        if self.discover and time.monotonic() - self.peered > PEERS_S:
-            threading.Thread(target=self.peers, daemon=True, name="tailscale-peers").start()
         with self.lock:
             servers = list(self.servers.values())
         for r in servers:
-            if r.state != "alive" and not r.probe and not r.offered:
+            if r.state != "alive":
                 r.wake.set()
 
     def rekey(self, remote, key):
@@ -607,10 +501,9 @@ class Network:
                     if group is None or s.get("group") == group]
 
     def remotes(self):
-        """Every host known, there or not: those reached once, given by hand, or offered (found on the network, not
-        reached: Remote.offered); not a Tailscale peer that's never answered as one."""
+        """Every host known, there or not: those reached once, or given by hand."""
         with self.lock:
-            return [r for r in self.servers.values() if r.info.get("id") or r.by_hand or r.offered]
+            return [r for r in self.servers.values() if r.info.get("id") or r.by_hand]
 
     def find(self, session_id):
         with self.lock:
@@ -625,8 +518,6 @@ class Network:
 
     def stop(self):
         self.stopped.set()
-        if self.browser is not None:
-            self.browser.stop()
         with self.lock:
             servers = list(self.servers.values())
         for r in servers:

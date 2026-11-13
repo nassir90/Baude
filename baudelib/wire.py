@@ -139,7 +139,6 @@ import threading
 import time
 
 VERSION = 2  # (1: #98-#123; 2: adopt, ephemeral, env, info's init)
-SERVICE = "_baude._tcp.local."  # (DNS-SD: discovery.py)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word
@@ -329,7 +328,7 @@ def ssh_args(dest, command=None, strict=False):
     """ssh's command line for a host's process: no password or passphrase ever asked (BatchMode: its keys and agent,
     as ~/.ssh/config has them), a connection to each host kept for a minute and shared (ControlMaster), so a
     session's own connection doesn't wait for another handshake. strict: the host's key must be in known_hosts
-    already (a host found on the network, which anyone can say they are). command: the host's process, a command line
+    already (as a host taken up once from what the network said was kept). command: the host's process, a command line
     (default SSH_COMMAND, on its PATH)."""
     if not is_dest(dest):
         raise OSError(f"not somewhere ssh can go: {dest!r}")

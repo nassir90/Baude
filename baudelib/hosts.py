@@ -1,14 +1,12 @@
 """A head's way to a host process (baude_headless.py): this machine's, started if it isn't running, or another
-machine's over ssh; and the hosts there are (this machine's, and those on the local network). For the command-line
+machine's over ssh. For the command-line
 heads, baude_oneshot.py and baude_headless.py's own commands; Baude has its own (client.Network)."""
 import os
 import signal
 import subprocess
 import sys
-import time
 
 from baudelib import wire
-from baudelib.discovery import Browser
 from baudelib.server import running_pid, state_home
 
 HEADLESS = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "baude_headless.py")
@@ -56,39 +54,17 @@ def reach(dest=None, command=None):
     return wire.connect_local()
 
 
-def find(wait=2.0):
-    """The hosts found: this machine's (its socket, if it's running), and those on the local network that say Baude
-    is on them (multicast DNS, for wait seconds), each {name, dest (where ssh goes; None: this machine), words}."""
-    found = {}
-    try:
-        ch, info = wire.connect_local(timeout=2)
-        ch.close()
-        found[info.get("id")] = {"name": f"{info.get('name')} (this machine)", "dest": None,
-                                 "words": {"id": info.get("id"), "group": info.get("group")}}
-    except OSError:
-        pass
-
-    def seen(s):
-        user, host = s["words"].get("user"), (s.get("target") or "").rstrip(".") or s["host"]
-        found.setdefault(s["words"].get("id") or s["instance"], {
-            "name": s["instance"].split(".")[0], "dest": f"{user}@{host}" if user else host, "words": s["words"]})
-    browser = Browser(seen).start()
-    time.sleep(wait)
-    browser.stop()
-    return list(found.values())
-
-
 _HERE = []
 
 
 def _in_process(path, wait):
     """(BAUDE_HOST_IN_PROCESS=1, the tests') This machine's host process in this one, on a thread: as one started
-    would be, its claudes this process's children, nothing said on the network."""
+    would be, its claudes this process's children."""
     import threading
     from baudelib.server import AlreadyRunning, Server
     if not _HERE:
         try:
-            server = Server(advertise=False, socket_path=path, log=lambda _text: None)
+            server = Server(socket_path=path, log=lambda _text: None)
         except AlreadyRunning:
             return wire.wait_for_socket(path, wait)
         _HERE.append(server)

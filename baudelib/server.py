@@ -746,6 +746,10 @@ class Server:
                                                           else None, msg.get("id")))
         if op == "infer":
             return self.mesh.infer(conn, msg)
+        if op in ("deactivate", "activate"):  # (a member, by its id or where a link from here goes: mesh.deactivate)
+            where = msg.get("where") if wire.is_where(msg.get("where")) else None
+            done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
+            return reply(op + "d", any=done)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")

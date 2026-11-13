@@ -7531,7 +7531,7 @@ def remote_info(s):
             "prompts": s.get("prompts") or 0, "source": f"{r.info.get('name') or r.host}, on the network", "copies": 0,
             # (this machine's host process, asleep: its sessions' claudes went with it, whatever was last listed)
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),
-            "dead": r.state == "dead" and not r.mine,
+            "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
             "archived": bool(s.get("archived"))}
 
@@ -7715,8 +7715,9 @@ class FilterList(Gtk.ListBox):
             row = row.get_next_sibling()
 
     def fill(self, items, shown):
-        """items: [(key, label, note)], in order (note: a word, dim, after its name); shown: the keys ticked, or None
-        for all of them. Built again only when the items change (a refill drops the keys' place in it)."""
+        """items: [(key, label, note)] or [(key, label, note, dim)], in order (note: a word, dim, after its name;
+        dim: its name grayed too); shown: the keys ticked, or None for all of them. Built again only when the items
+        change (a refill drops the keys' place in it)."""
         if self.soon is not None:  # (a click not said yet: said first, which fills this again if it changed it)
             GLib.source_remove(self.soon)
             if self._picked():
@@ -7725,13 +7726,16 @@ class FilterList(Gtk.ListBox):
             self.filling = True
             for row in list(self.rows()):  # (rows only: a right-click's menu on it is a child of the list too)
                 self.remove(row)
-            for key, label, note in items:
+            for key, label, note, *dim in items:
                 # (the tick where a menu's check items have theirs, its name where theirs is)
                 box = Gtk.Box(spacing=2)
                 tick = Gtk.Image(icon_name="object-select-symbolic", opacity=0)
                 box.append(tick)
-                box.append(Gtk.Label(label=label, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                                     max_width_chars=24))
+                name = Gtk.Label(label=label, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
+                                 max_width_chars=24)
+                if dim and dim[0]:
+                    name.add_css_class("dim-label")
+                box.append(name)
                 if note:
                     said = Gtk.Label(label=note)
                     said.add_css_class("dim-label")
@@ -7900,6 +7904,9 @@ class SessionSidebar(Gtk.Box):
         command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
         command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
         actions.add_action(command)
+        off = Gio.SimpleAction.new("deactivate_host", GLib.VariantType.new("(sb)"))
+        off.connect("activate", lambda _a, v: self.deactivate_host(*v.unpack()))
+        actions.add_action(off)
         actions.add_action(add_server)
         # (groups: a chat right-clicked → Move to Group, its group ticked (the action's state: (its id, its group));
         # New Group… (a chat's id, to be moved to it; "": none); a group right-clicked in ⋮ → Rename Group…, Delete)
@@ -7983,15 +7990,15 @@ class SessionSidebar(Gtk.Box):
     # own, whatever host they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group).
     # Everything's listed till some are picked (FilterList)
     def known_hosts(self):
-        """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
-        is; "through" the member of the mesh it's reached through, for one this machine's host process isn't linked
-        to itself)."""
+        """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
+        one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
+        machine's host process isn't linked to itself)."""
         out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
-                out.append((key, remote_name(r), "gone" if r.state == "dead" else
-                            f"through {r.through}" if r.through else ""))
+                out.append((key, remote_name(r), "deactivated" if r.deactivated else "gone" if r.state == "dead"
+                            else f"through {r.through}" if r.through else ""))
         return out
 
     def known_groups(self):
@@ -8039,14 +8046,15 @@ class SessionSidebar(Gtk.Box):
         not left out either, till it's back)."""
         if (old := load_settings().get("sidebar_network")) is not None:  # (⋮ → Group's one group, from before)
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
-        self.host_list.fill(self.known_hosts(), self.host_filter())
+        off = {host_key(r) for r in network().remotes() if r.deactivated}  # (grayed)
+        self.host_list.fill([(*h, h[0] in off) for h in self.known_hosts()], self.host_filter())
         self.group_list.fill(self.known_groups(), self.group_filter())
         self.actions.lookup_action("show_all").set_enabled(  # (as it is after both: a fill can change what's picked)
             self.host_filter() is not None or self.group_filter() is not None)
 
     def host_menu(self, row, x, y):
         """Right-click a host (⋮ → Hosts): New Session Here (not on one that's gone); Host Command… for one reached
-        over ssh."""
+        over ssh; Deactivate, or Activate for one that's deactivated (another machine's)."""
         r = next((r for r in network().remotes() if host_key(r) == row.key), None)
         menu = Gio.Menu()
         item = Gio.MenuItem.new("New Session Here", None)
@@ -8059,7 +8067,18 @@ class SessionSidebar(Gtk.Box):
             item = Gio.MenuItem.new("Host Command…", None)
             item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(row.key))
             menu.append_item(item)
+        if r is not None and row.key != HERE_HOST:
+            item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
+            item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (row.key, not r.deactivated)))
+            menu.append_item(item)
         self.host_menu_shown = self.menu_at(menu, self.host_list, x, y)
+
+    def deactivate_host(self, key, off):
+        """A host right-clicked → Deactivate (off), or Activate: Network.deactivate, its row and chats grayed while
+        it is."""
+        if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
+            network().deactivate(r, off)
+            toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
 
     def group_menu(self, row, x, y):
         """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
@@ -8493,15 +8512,17 @@ class SessionSidebar(Gtk.Box):
             title.add_css_class("fork-title")
         box.append(title)
         r = info.get("remote")
-        if info.get("dead"):  # (its server's gone from the network: listed as it was last seen)
+        if info.get("dead"):  # (its server's gone from the network, or deactivated: listed as it was last seen)
             title.add_css_class("dim-label")
+        if info.get("dead") and not info.get("off"):
             tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
             tag.add_css_class("row-tag")
             box.append(tag)
         box.append(dot)
         tip = [info.get("title") or "", info.get("cwd") or ""]
         if r is not None:
-            gone = f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
+            gone = ", deactivated" if info.get("off") else \
+                f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
             tip.append(f"On {remote_name(r)} ({r.host}){gone}")
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")

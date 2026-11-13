@@ -49,6 +49,7 @@ import urllib.request
 from baudelib import models, wire
 
 RETRY_S = (2, 10, 30, 120, 300)  # a link that's dropped, or couldn't be made, is tried again after these
+OFF_S = 30  # (one the other end's deactivated this host on: tried again this often)
 OPEN_S = 20  # a tunnel's far end has this long to say it's there
 TTL = 16  # hosts a tunnel's passed through at most
 PROVIDERS_S = 60  # this machine's providers looked at again this often, while it's linked
@@ -76,8 +77,9 @@ def endpoint_id(member, provider):
 
 def endpoints(path=None):
     """Other members' providers that serve HTTP, as OpenAI-compatible endpoints on this machine (its host process's
-    Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, url, key, models: [{id,
-    displayName, window, tools, input}]}], from the file this machine's host process keeps in its runtime folder.
+    Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, provider, provider_name, host
+    (the member's id), host_name, url, key, models: [{id, displayName, window, tools, input}]}], from the file this
+    machine's host process keeps in its runtime folder.
     [] if it isn't running."""
     try:
         with open(path or os.path.join(wire.runtime_dir(), ENDPOINTS), encoding="utf-8") as f:
@@ -242,6 +244,7 @@ class Here:
         self.mesh, self.ch = mesh, ch
         self.out = _Out(ch, "tunnel-out")
         self.link = self.key = None
+        self.origin = self.to = None  # (the member that opened it, to here; the member it's to, from here)
         self.up, self.error, self.pumping = threading.Event(), None, False
 
     def ready(self):
@@ -291,13 +294,14 @@ class Passed:
 
 
 class Out:
-    """A link this host process makes (links.json's): to where (wire.reach's), made again whenever it drops."""
+    """A link this host process makes (links.json's): to where (wire.reach's), made again whenever it drops, while
+    it's active (deactivated: not made, and let go of if it is, till it's activated again)."""
 
-    def __init__(self, mesh, where, id=None, name=None):
+    def __init__(self, mesh, where, id=None, name=None, active=True):
         self.mesh, self.where = mesh, dict(where)
         self.id, self.name = id, name  # (the member it's to, once it's said)
         self.state, self.error, self.link = "connecting", None, None
-        self.stopped, self.wake = False, threading.Event()
+        self.stopped, self.wake, self.active = False, threading.Event(), active
 
     def start(self):
         threading.Thread(target=self._run, daemon=True, name=f"link-to-{wire.said_where(self.where)}").start()
@@ -309,9 +313,27 @@ class Out:
         if self.link is not None:
             self.link.close()
 
+    def pause(self):
+        """Deactivated: let go of, and not made again till it's resumed."""
+        self.active = False
+        self.wake.set()
+        if self.link is not None:
+            self.link.close()
+
+    def resume(self):
+        if not self.active:
+            self.active = True
+            self.wake.set()
+
     def _run(self):
         tries = 0
         while not self.stopped:
+            if not self.active:
+                self.state, self.error, tries = "inactive", None, 0
+                self.mesh.changed()
+                self.wake.wait()
+                self.wake.clear()
+                continue
             try:
                 ch, info = wire.reach(self.where, timeout=10)
             except OSError as e:
@@ -327,8 +349,9 @@ class Out:
             if self.stopped:
                 break
             self.mesh.changed()
-            self.wake.wait(RETRY_S[min(tries, len(RETRY_S) - 1)])
-            self.wake.clear()
+            off = (self.error or "").startswith("deactivated on")  # (it's left this one out: tried every OFF_S, so
+            self.wake.wait(OFF_S if off else RETRY_S[min(tries, len(RETRY_S) - 1)])  # it's back soon once it's
+            self.wake.clear()                                                         # activated there)
             tries += 1
 
     def take(self, ch, info):
@@ -340,6 +363,11 @@ class Out:
             self.state = "dropped"
             ch.close()
             return
+        if peer["id"] in self.mesh.inactive:  # (deactivated here by its id: not linked to, wherever it's reached)
+            self.id, self.name, self.active = peer["id"], peer["name"], False
+            ch.close()
+            self.mesh.save()
+            return
         ch.sock.settimeout(OPEN_S)
         ch.send({"op": "join", "req": 0, "host": self.mesh.hello()})
         reply = ch.reply()
@@ -350,7 +378,8 @@ class Out:
             return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
         self.link = Link(self.mesh, ch, theirs, made=True)
-        if self.stopped:  # (unlinked as it was made: stop saw no link to close, or closed this one)
+        if self.stopped or not self.active:  # (unlinked or deactivated as it was made: stop or pause saw no link to
+            # close, or closed this one)
             self.link, self.state = None, "dropped"
             ch.close()
             return
@@ -361,7 +390,7 @@ class Out:
         self.error = f"the link to {peer['name']} dropped"
 
     def kept(self):
-        return {"where": self.where, "id": self.id, "name": self.name}
+        return {"where": self.where, "id": self.id, "name": self.name, **({} if self.active else {"active": False})}
 
 
 def same_place(a, b):
@@ -392,13 +421,16 @@ class Mesh:
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
         try:
             with open(os.path.join(server.state_dir, LINKS), encoding="utf-8") as f:
-                kept = json.load(f).get("links") or []
+                saved = json.load(f)
+            kept, off = saved.get("links") or [], saved.get("inactive") or []
         except (OSError, ValueError, AttributeError):
-            kept = []
+            kept, off = [], []
+        self.inactive = {x for x in off if wire.is_id(x)}  # (members deactivated here: deactivate)
         for k in kept:
             if isinstance(k, dict) and wire.is_where(k.get("where")) and k["where"].get("via") != "mesh":
                 self.outs.append(Out(self, k["where"], k.get("id") if wire.is_id(k.get("id")) else None,
-                                     k.get("name") if isinstance(k.get("name"), str) else None))
+                                     k.get("name") if isinstance(k.get("name"), str) else None,
+                                     k.get("active") is not False))
 
     def start(self):
         for o in self.outs:
@@ -498,13 +530,60 @@ class Mesh:
             self.changed()
         return bool(gone)
 
+    def deactivate(self, id=None, where=None):
+        """A member deactivated here (by its id, or by where a link from here goes): its links let go of, those made
+        from here not made again, and its joins and tunnels refused, till it's activated. Kept in links.json. True if
+        there was one to deactivate."""
+        id = id if wire.is_id(id) else None
+        with self.lock:
+            outs = [o for o in self.outs if where is not None and same_place(o.where, where) or id and o.id == id]
+            # (an id given is taken as one, unless it's only what a link's said to be where it goes: an alias)
+            ids = {o.id for o in outs if o.id} | ({id} if id and (self.known(id) or not outs) else set())
+            self.inactive |= ids
+            links = [x for i in ids for x in self.links.get(i) or []]
+            tunnels = [(x, key, end) for ls in self.links.values() for x in ls for key, end in x.tunnels.items()
+                       if isinstance(end, Here) and (end.origin in ids or end.to in ids)]
+        for o in outs:
+            o.pause()
+        for x in links:
+            x.close()
+        for x, key, end in tunnels:  # (those it opened to here through others, and those from here to it)
+            if self.forget(x, key) is not None:
+                x.tsend(key, {"op": "close", "error": f"deactivated on {self.server.me['name']}"})
+                end.closed(f"deactivated on {self.server.me['name']}")
+        if outs or ids:
+            self.save()
+            with self.lock:
+                self.reroute()
+            self.changed()
+        return bool(outs or ids)
+
+    def activate(self, id=None, where=None):
+        """A member deactivated here activated again: its links made again, its joins taken. True if there was one."""
+        id = id if wire.is_id(id) else None
+        with self.lock:
+            outs = [o for o in self.outs if where is not None and same_place(o.where, where) or id and o.id == id]
+            ids = ({id} | {o.id for o in outs}) & self.inactive
+            self.inactive -= ids
+            self.reroute()  # (reached again through others at once, its record kept meanwhile)
+        for o in outs:
+            o.resume()
+        if outs or ids:
+            self.save()
+            self.changed()
+        return bool(outs or ids)
+
+    def known(self, member):
+        """(lock held) Is it a member's id this host has heard of?"""
+        return member in self.records or member in self.links or any(o.id == member for o in self.outs)
+
     def save(self):
         """links.json: the links made from here (one save at a time)."""
         path = os.path.join(self.server.state_dir, LINKS)
         with self.lock:
             try:
                 with open(path + ".tmp", "w", encoding="utf-8") as f:
-                    json.dump({"links": [o.kept() for o in self.outs]}, f)
+                    json.dump({"links": [o.kept() for o in self.outs], "inactive": sorted(self.inactive)}, f)
                 os.replace(path + ".tmp", path)
             except OSError as e:
                 self.log(f"mesh: {path}: {e}")
@@ -513,8 +592,9 @@ class Mesh:
         """A link made to here (join {host}, on a connection to this host process's socket): run on this thread, till
         it drops."""
         peer = _hello_of(msg.get("host"))
-        if peer is None or peer["id"] == self.id:
-            ch.send({"op": "error", "req": msg.get("req"), "error": "that's this host" if peer else "no host given"})
+        if peer is None or peer["id"] == self.id or peer["id"] in self.inactive:
+            ch.send({"op": "error", "req": msg.get("req"), "error": "no host given" if peer is None else
+                     "that's this host" if peer["id"] == self.id else f"deactivated on {self.server.me['name']}"})
             return
         if not ch.send({"op": "joined", "req": msg.get("req"), "host": self.hello()}):
             return
@@ -526,6 +606,9 @@ class Mesh:
     def add(self, link):
         """A link up: it's told every record there is, and the mesh this host's new record."""
         with self.lock:
+            if link.id in self.inactive:  # (deactivated as it joined)
+                link.close()
+                return
             self.links.setdefault(link.id, []).append(link)
             self.linked.set()
             link.send({"op": "mesh", "records": [r["rec"] for k, r in self.records.items() if k != self.id]})
@@ -584,20 +667,21 @@ class Mesh:
             return [v for v in mine if u in ((self.records.get(v) or {}).get("rec", {}).get("links") or [])]
         hops, via, frontier = {self.id: 0}, {}, []
         for v in sorted(self.links):
-            hops[v], via[v] = 1, v
-            frontier.append(v)
+            if v not in self.inactive:
+                hops[v], via[v] = 1, v
+                frontier.append(v)
         while frontier:
             ahead = []
             for u in frontier:
                 for v in linked(u):
-                    if v not in hops:
+                    if v not in hops and v not in self.inactive:  # (one deactivated here: neither reached nor through)
                         hops[v], via[v] = hops[u] + 1, via[u]
                         ahead.append(v)
             frontier = ahead
         self.routes, self.hops = via, {k: n for k, n in hops.items() if k != self.id}
         now = time.time()
         for k, r in list(self.records.items()):
-            if k in hops:
+            if k in hops or k in self.inactive:  # (one deactivated here: kept, for when it's activated)
                 r.pop("lost", None)
             elif now - r.setdefault("lost", now) > FORGET_S:
                 del self.records[k]
@@ -623,7 +707,8 @@ class Mesh:
         self.server.mesh_changed()
         view = self.view()
         proxy = view["proxy"]
-        eps = [{"id": endpoint_id(m["id"], p["id"]), "name": f"{p['name']} on {m['name']}",
+        eps = [{"id": endpoint_id(m["id"], p["id"]), "name": f"{p['name']} on {m['name']}", "provider": p["id"],
+                "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
                 "url": f"{proxy['url']}/{m['id']}/{urllib.parse.quote(p['id'], safe='')}", "key": proxy["key"],
                 "models": [{k: x[k] for k in ("id", "displayName", "window", "tools", "input") if k in x}
                            for x in p["models"]]}
@@ -677,14 +762,17 @@ class Mesh:
 
     def open_here(self, link, f):
         """open from a link: served here, if it's to here; else passed on toward the member it's to."""
-        t, to, ttl = f.get("t"), f.get("to"), f.get("ttl")
+        t, to, ttl, origin = f.get("t"), f.get("to"), f.get("ttl"), f.get("from")
         if not isinstance(t, int):
             return
         key = ("in", t)
+        if to == self.id and origin in self.inactive:  # (from a member deactivated here)
+            link.tsend(key, {"op": "close", "error": f"deactivated on {self.server.me['name']}"})
+            return
         if to == self.id:
             mine, theirs = socket.socketpair()
             end = Here(self, wire.Channel.over(mine))
-            end.link, end.key = link, key
+            end.link, end.key, end.origin = link, key, origin if wire.is_id(origin) else None
             with self.lock:
                 link.tunnels[key] = end
             threading.Thread(target=self.server.serve, args=(theirs,), daemon=True, name="tunnel-served").start()
@@ -699,7 +787,7 @@ class Mesh:
         with self.lock:
             link.tunnels[key] = Passed(self, ahead, okey)
             ahead.tunnels[okey] = Passed(self, link, key)
-        ahead.tsend(okey, {"op": "open", "to": to, "ttl": ttl - 1})
+        ahead.tsend(okey, {"op": "open", "to": to, "ttl": ttl - 1, **({"from": origin} if wire.is_id(origin) else {})})
 
     def connect(self, end, to):
         """A tunnel opened from here to member to, for end (a Here): None once it's there, else what's wrong."""
@@ -707,14 +795,16 @@ class Mesh:
             return "no such host"
         if to == self.id:
             return "that's this host"
+        if to in self.inactive:
+            return f"{self.name_of(to)} is deactivated here"
         ahead = self.next_link(to)
         if ahead is None:
             return f"{self.name_of(to)} isn't in the mesh now"
         key = ahead.new_key()
-        end.link, end.key = ahead, key
+        end.link, end.key, end.to = ahead, key, to
         with self.lock:
             ahead.tunnels[key] = end
-        ahead.tsend(key, {"op": "open", "to": to, "ttl": TTL})
+        ahead.tsend(key, {"op": "open", "to": to, "ttl": TTL, "from": self.id})
         if not end.up.wait(OPEN_S):
             if self.forget(ahead, key) is not None:
                 ahead.tsend(key, {"op": "close"})
@@ -742,16 +832,18 @@ class Mesh:
     # ---- what heads are told
     def view(self):
         """info's mesh: {members: [{id, name, group, host, version, providers, hops, through (the member it's reached
-        through, by name; None for one linked to here)}], links: [{where, id, name, state, error}] (those made from
-        here), proxy: {url, key} (Proxy's: None till a member has a provider it serves)}."""
+        through, by name; None for one linked to here)}], links: [{where, id, name, state ("linked", "connecting",
+        "dropped", "inactive"), error, active}] (those made from here), proxy: {url, key} (Proxy's: None till a member
+        has a provider it serves), inactive: [the ids of members deactivated here]}."""
         with self.lock:
             members = []
             for k, n in sorted(self.hops.items(), key=lambda kv: (kv[1], self.name_of(kv[0]).lower())):
                 rec = (self.records.get(k) or {}).get("rec")
                 info = rec["info"] if rec else {**(self.links.get(k) or [None])[0].peer, "providers": []}
                 members.append({**info, "hops": n, "through": None if n == 1 else self.name_of(self.routes.get(k))})
-            links = [{"where": o.where, "id": o.id, "name": o.name, "state": o.state, "error": o.error}
-                     for o in self.outs]
+            links = [{"where": o.where, "id": o.id, "name": o.name, "state": o.state, "error": o.error,
+                      "active": o.active} for o in self.outs]
+            inactive = sorted(self.inactive)
             if self.proxy is None and any(p.get("http") for m in members for p in m["providers"]):
                 try:
                     self.proxy = Proxy(self).start()
@@ -759,7 +851,7 @@ class Mesh:
                     self.log(f"mesh: no proxy for other members' models: {e}")
                     self.proxy = False
             proxy = {"url": self.proxy.url, "key": self.proxy.key} if self.proxy else None
-        return {"members": members, "links": links, "proxy": proxy}
+        return {"members": members, "links": links, "proxy": proxy, "inactive": inactive}
 
     def providers_here(self):
         """This machine's providers, for its info: as local_providers has them, with no key."""

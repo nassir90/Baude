@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """pi-claude: stands in for `claude -p --input-format stream-json --output-format stream-json ...` for Baude, running
-pi (the coding agent, in its RPC mode) on a model on this Mac.
+pi (the coding agent, in its RPC mode) on a model on this Mac: one MLX serves (models.json), or one Ollama or an
+OpenAI-compatible server serves (ollama/<name>, openai/<endpoint>/<id>: baudelib.providers says where, and what it can
+do), pi talking to the server's API (openai-completions).
 
-Of the flags Baude passes it uses --model (a value in models.json), --resume (pi's session of that id, kept in
+Of the flags Baude passes it uses --model (a value in models.json, or a served model's), --resume (pi's session of that id, kept in
 ~/.local/share/baude/pi/sessions), --effort (the thinking level, for a model that thinks) and --permission-mode. pi
 starts with the first message and stops with this. Each of pi's tool calls is put to Baude as a permission question,
 through ask.ts (a pi extension), and shown to it as Claude's tool of that kind (bash as Bash, read as Read, ...).
@@ -11,10 +13,17 @@ As claude does for Meta, it also takes --system-prompt (pi's, in place of its ow
 --mcp-config (stdio servers, whose tools pi calls through its own MCP support, named mcp__<server>__<tool> as
 Claude's are) and --no-session-persistence (a session pi doesn't keep).
 
-Every chat, in every Baude window, shares one server: `pi-claude --serve` keeps mlx_vlm.server, which holds one model at
-a time (16 GB holds no more), behind a gate on PORT: a request for the model it has goes ahead, one for another waits
-for those running to finish (a swap stops what's generating). The first chat to need it starts it; it unloads the
-model after UNLOAD_AFTER without a request, and stops IDLE after the last chat on a local model has gone.
+Every chat on an MLX model, in every Baude window, shares one server: `pi-claude --serve` keeps mlx_vlm.server, which
+holds one model at a time (16 GB holds no more), behind a gate on PORT: a request for the model it has goes ahead, one
+for another waits for those running to finish (a swap stops what's generating). The first chat to need it starts it;
+it unloads the model after UNLOAD_AFTER without a request, and stops IDLE after the last chat on a local model has gone.
+
+A served model's server is its own: Ollama's or the endpoint's, there or not (said as the turn's error). Ollama's model
+is loaded as the session starts, and its window is then the one Ollama loaded it with (/api/ps): pi's, and what
+get_context_usage says. Asked that before it's started, it says the window the model would have (its num_ctx, else
+Ollama's least), and, for a caller that gives the whole system prompt (Meta: its first message is made to fit the
+window, and comes next), it starts first, so the window's the one it has. A model that can't call tools only talks: pi
+gets none, and the chat's told.
 """
 import contextlib
 import fcntl
@@ -34,6 +43,8 @@ import urllib.request
 import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))  # (baudelib, beside pi-claude/: where a served model is)
+from baudelib import providers  # noqa: E402
 HOME = os.path.expanduser("~/.local/share/baude/pi")
 PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "pi")
 MODELS = {m["value"]: m for m in json.load(open(os.path.join(HERE, "models.json")))}
@@ -45,6 +56,7 @@ RUN = os.path.join(HOME, "run")  # (the server's keeper: server.json; the chats 
 IDLE = 60
 UNLOAD_AFTER = 600
 LEVELS = ("off", "minimal", "low", "medium", "high")
+SMALL_WINDOW = 8192  # (a served model's window with less than this has no room for pi's instructions and tools)
 
 
 def flag(name):
@@ -52,7 +64,9 @@ def flag(name):
     return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
 
 
-model = MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
+model = providers.resolve(flag("--model") or "") or MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
+kind = model.get("kind") or "mlx"  # (mlx; or ollama, openai: a served model, its server its own)
+window = model.get("window") or CONTEXT  # (its context window: a served model's, Ollama's once it's loaded)
 session_id = flag("--resume") or str(uuid.uuid4())
 
 
@@ -358,6 +372,61 @@ def leave_server():
         os.remove(os.path.join(RUN, "users", str(os.getpid())))
 
 
+def use_served():
+    """A served model's server there (asked again: it may have started, or the model come, since), and Ollama's model
+    loaded, its window the one it's loaded with (window)."""
+    global window
+    model.update(providers.resolve(model["value"]) or {})
+    window = model.get("window") or window
+    if model.get("error"):
+        raise RuntimeError(model["error"])
+    if kind != "ollama":
+        return
+    loaded = providers.ollama_loaded(model["url"]).get(model["repo"])
+    if not loaded:
+        say(f"loading {model['repo']} in Ollama…")
+        try:  # (a request with no prompt loads it, and says so)
+            providers.fetch(model["url"] + "/api/generate", {"model": model["repo"], "stream": False}, timeout=600)
+        except (OSError, ValueError) as e:
+            raise RuntimeError(f"Ollama didn't load {model['repo']}: {e}") from None
+        loaded = providers.ollama_loaded(model["url"]).get(model["repo"])
+    if isinstance(loaded, int) and loaded > 0:
+        window = loaded
+    if window < SMALL_WINDOW:
+        say(f"{model['repo']} has {window:,} tokens in Ollama, too few for pi's instructions and tools: give Ollama a "
+            "longer context length (its Settings, or OLLAMA_CONTEXT_LENGTH) and start it again")
+
+
+def out_room(thinking):
+    """The tokens a reply may have: MAX_OUT (MAX_OUT_THINKING, for one that thinks), no more than a quarter of a small
+    window (half, thinking and answer together)."""
+    return min(MAX_OUT_THINKING, window // 2) if thinking else min(MAX_OUT, window // 4)
+
+
+def provider_config():
+    """(pi's provider, its entry in pi's models.json) for the model: MLX's server, or the one serving it."""
+    cost = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+    if kind == "mlx":
+        return "mlx", {
+            "baseUrl": f"http://127.0.0.1:{PORT}/v1", "api": "openai-completions", "apiKey": "local",
+            "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False, "supportsStore": False,
+                       "maxTokensField": "max_tokens"},
+            "models": [{"id": model["repo"], "name": model["displayName"], "input": model["input"],
+                        "contextWindow": CONTEXT, "cost": cost} |
+                       ({"reasoning": True, "maxTokens": MAX_OUT_THINKING,  # (enable_thinking, and a budget)
+                         "compat": {"thinkingFormat": "qwen", "thinkingTokenBudgetField": "thinking_budget"}}
+                        if model.get("thinking") else {"maxTokens": MAX_OUT})]}
+    thinks = bool(model.get("thinking"))  # (Ollama's thinking models: reasoning_effort, "none" for off)
+    key = (model.get("apiKey") or "none").replace("$", "$$")  # (as it is: pi reads $NAME and a leading ! itself)
+    return kind, {
+        "baseUrl": model["baseUrl"], "api": "openai-completions", "apiKey": "$!" + key[1:] if key.startswith("!") else key,
+        "compat": {"supportsDeveloperRole": False, "supportsStore": False, "maxTokensField": "max_tokens",
+                   "supportsReasoningEffort": thinks} | ({"thinkingFormat": "openai"} if thinks else {}),
+        "models": [{"id": model["repo"], "name": model["displayName"], "input": model.get("input") or ["text"],
+                    "contextWindow": window, "maxTokens": out_room(thinks), "cost": cost} |
+                   ({"reasoning": True, "thinkingLevelMap": {"off": "none"}} if thinks else {})]}
+
+
 # ---- pi
 
 class Engine:
@@ -385,38 +454,36 @@ class Engine:
 
     def _boot(self):
         try:
-            use_server()
+            use_server() if kind == "mlx" else use_served()
             self._pi()
         except Exception as e:  # noqa: BLE001 (any failure ends up as the turn's error)
             self.failed = str(e)
         self.ready.set()
         for item in self.queue:
-            self.prompt(*item)
+            self.prompt(*item, again=False)
         self.queue.clear()
 
     def _pi(self):
         if not os.access(PI, os.X_OK):
             raise RuntimeError(f"pi isn't installed (npm install @earendil-works/pi-coding-agent, in {HOME})")
         self.agent_dir = tempfile.mkdtemp(prefix="baude-pi-")
+        provider, config = provider_config()
         with open(os.path.join(self.agent_dir, "models.json"), "w") as f:
-            json.dump({"providers": {"mlx": {
-                "baseUrl": f"http://127.0.0.1:{PORT}/v1", "api": "openai-completions", "apiKey": "local",
-                "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False, "supportsStore": False,
-                           "maxTokensField": "max_tokens"},
-                "models": [{"id": model["repo"], "name": model["displayName"], "input": model["input"],
-                            "contextWindow": CONTEXT, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}} |
-                           ({"reasoning": True, "maxTokens": MAX_OUT_THINKING,  # (enable_thinking, and a budget)
-                             "compat": {"thinkingFormat": "qwen", "thinkingTokenBudgetField": "thinking_budget"}}
-                            if model.get("thinking") else {"maxTokens": MAX_OUT})]}}}, f)
+            json.dump({"providers": {provider: config}}, f)
+        if window < CONTEXT:  # (a small window: pi summarises once three quarters of it's used, keeping a quarter as
+            # it is, so what's left after is well under where it summarises again)
+            with open(os.path.join(self.agent_dir, "settings.json"), "w") as f:
+                json.dump({"compaction": {"reserveTokens": max(out_room(model.get("thinking")), window // 4),
+                                          "keepRecentTokens": window // 4}}, f)
         node = which("node", os.path.expanduser("~/.local/node/bin/node"), "/opt/homebrew/bin/node")
         sessions = os.path.join(HOME, "sessions")
         os.makedirs(sessions, exist_ok=True)
-        args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", "mlx", "--model", model["repo"],
+        args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", provider, "--model", model["repo"],
                 *(("--session-dir", sessions, "--session-id", session_id) if keep_session else ("--no-session",)),
                 "--thinking", thinking, "--no-extensions",
                 "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes",
                 "--no-approve", "--offline"]
-        servers = mcp_servers()
+        servers = mcp_servers() if model.get("tools", True) else {}
         if servers:  # (pi's own MCP support, its tools declared to the model as they are, not through codemode)
             with open(os.path.join(self.agent_dir, "mcp.json"), "w") as f:
                 json.dump({"mcpServers": {name: {k: v for k, v in server.items() if k in ("command", "args", "env")} |
@@ -424,7 +491,9 @@ class Engine:
             args += ["-e", "builtin:mcp"]
         else:
             args += ["--no-mcp"]
-        tools = pi_tools(servers)
+        tools = pi_tools(servers) if model.get("tools", True) else []
+        if not model.get("tools", True):
+            say(f"{model['displayName']} can't call tools: it only talks here")
         if tools is not None:
             args += ["--tools", ",".join(tools)] if tools else ["--no-tools"]
         if system_prompt is not None:  # (the caller's instructions, all of them: no AGENTS.md or CLAUDE.md added)
@@ -464,7 +533,10 @@ class Engine:
             self.pi.stdin.write((json.dumps(cmd | {"id": cid}) + "\n").encode())
             self.pi.stdin.flush()
 
-    def prompt(self, text, images):
+    def prompt(self, text, images, again=True):
+        if again and self.failed and kind != "mlx" and self.pi is None and self.turn is None:  # (its server wasn't
+            self.failed, self.started = None, False  # there, or the model wouldn't load: tried again with this message)
+            self.ready.clear()
         if not self.ready.is_set():
             self.queue.append((text, images))
             self.start()
@@ -660,11 +732,14 @@ def handle(msg):
         elif sub == "get_context_usage":
             def usage(r):
                 u = (r.get("data") or {}).get("contextUsage") or {}
-                used, size = u.get("tokens") or 0, u.get("contextWindow") or CONTEXT
+                used, size = u.get("tokens") or 0, u.get("contextWindow") or window
                 reply(rid, {"categories": [], "totalTokens": used, "maxTokens": size,
                             "percentage": used * 100 / size if size else 0})
             if engine.ready.is_set() and not engine.failed:
                 engine.send({"type": "get_session_stats"}, usage)
+            elif kind == "ollama" and system_prompt is not None and not engine.ready.is_set():
+                engine.start()  # (Meta's: its first message is next, made to fit the window Ollama loads it with)
+                threading.Thread(target=lambda: (engine.ready.wait(), usage({})), daemon=True).start()
             else:
                 usage({})
         elif sub == "get_settings":

@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import claude, mesh, models, selfupdate, transcripts, wire
+from baudelib import claude, mesh, models, providers, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -351,6 +351,7 @@ class Server:
         self.me["group"] = group or self.me.get("group") or self.me["name"]
         self.me.pop("advertise", None)  # (said on the network, once: nothing is now)
         _write_json(me, self.me)
+        providers.found()  # (this machine's inference providers looked for now: there by the time a head says hello)
         self.sessions = {}
         folder = os.path.join(self.state_dir, "sessions")
         for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
@@ -427,7 +428,8 @@ class Server:
 
     def models(self, said=None, fresh=False):
         """Every model it can run, as initialize lists them: Claude's (as claude last said; said, if it's just said it:
-        fresh), then Apple's and those on this machine that it has."""
+        fresh), then those of this machine's inference providers (baudelib.providers: Apple's, MLX's, Ollama's, an
+        endpoint's), each with its provider."""
         claudes = [m for m in said or [] if models.model_program(m.get("value")) == "claude"] if fresh else []
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
@@ -440,10 +442,13 @@ class Server:
         return {**said, "models": self.models(said.get("models"), fresh)}
 
     def can_run(self, model):
-        """Can this machine run a model: Claude's (claude's own say), or one of runnable_models (its program and, for
-        pi's, the model itself here)?"""
+        """Can this machine run a model: Claude's (claude's own say); one Ollama or an endpoint serves, with pi here
+        (its server's say comes with the first message: pi-claude's); or one of runnable_models (its program and, for
+        MLX's, the model itself here)?"""
         if models.model_program(model) == "claude":
             return not models.launch(model, None, None)["missing"]
+        if isinstance(model, str) and model.startswith(models.SERVED):
+            return providers.pi_installed()
         return any(m["value"] == model for m in models.runnable_models())
 
     def _info(self):

@@ -6012,6 +6012,9 @@ levelbar block.ctx-high { background-color: @error_color; }
 .session-sidebar list.navigation-sidebar > row:first-child > box.sidebar-header { margin-top: 0; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
 dropdown.choice > button { font-weight: normal; }
+/* a provider picker with one provider to pick (Baude's beside its model picker, Meta's in Settings): there, a little
+   greyed, as there's nothing to choose */
+.one-provider { opacity: 0.55; }
 banner label.heading { font-weight: normal; }
 .session-sidebar .sidebar-folder { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
 /* the Files page's tree: as compact as the sessions list */

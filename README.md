@@ -41,11 +41,32 @@ chats into a group, archive or rename them, list only some hosts or groups, or, 
 and propose edits to them. Every change it makes shows under its reply with undo, and is marked in the left bar (green
 added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
 own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model: any model your
-claude lists, Apple's on-device model once `apple-claude` is built, or one pi runs on this Mac, each given Meta's tools.
+claude lists, or one of this machine's inference providers' that can call tools (Settings → Meta → Provider picks
+whose are listed), each given Meta's tools.
 Switched to a model whose context window can't hold the conversation, it's given as much as fits and says so ("Context
 window exhausted"), as it does when a conversation outgrows the window, or a reply is cut short. Code mode has it
 act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
 anywhere in the window, shows it and puts the focus in its box.
+
+## Local models
+
+Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model
+(`apple-claude`, once it's built), MLX (`pi-claude`'s own server, on the models in `pi-claude/models.json` you've
+downloaded), [Ollama](https://ollama.com) (`settings.json`'s `ollama_url`, else `OLLAMA_HOST`, else 127.0.0.1:11434), or any OpenAI-compatible server
+listed in `settings.json`:
+
+```json
+"endpoints": [{"id": "lmstudio", "name": "LM Studio", "url": "http://127.0.0.1:1234/v1", "key": "$LMSTUDIO_KEY"}]
+```
+
+All but Apple's run in [pi](https://pi.dev), which speaks their API, through `pi-claude` (pi installed in
+`~/.local/share/baude/pi`). The picker left of the model picker chooses the provider, by host: this machine's, and
+those of the other members of the mesh (Ollama · studio, say); the model picker lists Claude's models, then the
+provider's. Picking a provider changes the list; picking a model changes the chat. Claude isn't a provider: `claude`
+runs Claude's models on the machine it's on. Another member's Ollama or OpenAI-compatible server runs here through
+the mesh's proxy, so Meta can use it too; its Apple or MLX model starts a new conversation there. With one provider
+the picker is greyed a little; with none it's gone. An Ollama model gets the context window Ollama loads it with (4k
+unless its context length is raised), which is too small for pi's instructions and tools: the chat says so.
 
 ## Running it
 
@@ -63,7 +84,8 @@ python3 record.py            # Record
 `baude_headless.py` is a machine's host process for Claude Code sessions: one for each user, which owns that user's
 sessions there and their claude processes, for Baude to start, watch and steer from that machine or another. It needs
 only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`, Apple's with
-`apple-claude` once built, and pi's with `pi-claude` (`baude_headless.py models` lists them). It listens only on a Unix
+`apple-claude` once built, and MLX's, Ollama's and an OpenAI-compatible server's with `pi-claude` (`baude_headless.py
+models` lists them). It listens only on a Unix
 socket in a folder of its user's own, with no port on the network. Baude on the same machine uses the socket, and reads
 its sessions' transcripts where they are; Baude on another reaches it over ssh, as `ssh HOST baude_headless.py
 connect`, which carries the protocol between ssh and the socket and starts the host process if it isn't running. So

@@ -45,6 +45,7 @@ import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
+from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
 from baudelib.models import model_program  # noqa: E402
 
@@ -76,28 +77,70 @@ REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
+HERE_NAME = "This Mac" if sys.platform == "darwin" else "This computer"
+PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
+
+
 def models():
-    """What Intelligence offers, as (value, label, effort levels or None): the models this machine's claude listed last
-    (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude), in its order
-    (MODELS_OFFERED till it has); then those this Mac runs besides (baudelib.models.runnable_models: Apple's once
-    apple-claude's built, and pi's that are downloaded), as Baude's chats offer them."""
+    """What Intelligence offers, as (value, label, effort levels or None, provider or None): the models this machine's
+    claude listed last (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude),
+    in its order (MODELS_OFFERED till it has); then those of this machine's inference providers that call tools
+    (baudelib.models.runnable_models: Apple's once apple-claude's built, MLX's that are downloaded, Ollama's, an
+    OpenAI-compatible server's), as Baude's chats offer them; and those of other hosts' in the mesh that serve HTTP
+    (providers.mesh_endpoints: run here, through the mesh's proxy, so Meta's tools stay this app's). Claude's have no
+    provider: claude runs them, wherever it is."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     out = [(m["value"], m.get("displayName") or m["value"],
-            list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None) for m in listed] or \
-        [(value, lbl, None) for value, lbl in MODELS_OFFERED]
-    out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None)
-            for m in modelslib.runnable_models()]
+            list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
+        [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
+    out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None,
+             m.get("provider") or providerslib.provider_of(m["value"]))
+            for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
+    out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"], None, f"openai/{e['id']}")
+            for e in providerslib.mesh_endpoints() for m in e["models"] if m.get("tools", True)]
     chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list, or a model this Mac
     if isinstance(chosen, str) and chosen and model_entry(chosen, out) is None:  # ran then: still there to see)
-        out.append((chosen, local_name(chosen), None))
+        out.append((chosen, local_name(chosen), None, providerslib.provider_of(chosen)))
     return out
 
 
 def local_name(value):
-    """A model's name where it's one this Mac runs besides Claude's (Apple's, pi's), else value."""
+    """A model's name where it's one this Mac runs besides Claude's (Apple's, MLX's, Ollama's, an endpoint's), else
+    value."""
     found = [modelslib.APPLE_MODEL, *modelslib.LOCAL_MODELS]
-    return next((m["displayName"] for m in found if m["value"] == value), value)
+    return next((m["displayName"] for m in found if m["value"] == value), None) or providerslib.model_name(value)
+
+
+def providers_offered(offered=None):
+    """[(provider id, its name)]: the providers whose models Intelligence offers (models), in their order."""
+    seen = {}
+    for m in models() if offered is None else offered:
+        if m[3] and m[3] not in seen:
+            seen[m[3]] = providerslib.provider_name(m[3])
+    return sorted(seen.items(), key=lambda kv: providerslib.rank(kv[0]))
+
+
+def provider(offered=None):
+    """The provider whose models Intelligence lists after Claude's: the one picked (settings.json's meta_provider,
+    which a provider's model picked is too); else Meta's model's, else the first."""
+    offered = models() if offered is None else offered
+    ids = [pid for pid, _ in providers_offered(offered)]
+    kept = widgets.load_settings().get("meta_provider")
+    if kept in ids:
+        return kept
+    entry = model_entry(model(), offered)
+    return entry[3] if entry and entry[3] in ids else ids[0] if ids else None
+
+
+def listed_models(offered=None):
+    """What Intelligence lists: Claude's models, then the provider's (provider); and Meta's own, if it's another
+    provider's (it goes on with it till another's picked)."""
+    offered = models() if offered is None else offered
+    pid = provider(offered)
+    out = [m for m in offered if m[3] is None or m[3] == pid]
+    entry = model_entry(model(), offered)
+    return out + [entry] if entry and entry not in out else out
 
 
 def listed(found, seed=False):
@@ -151,9 +194,19 @@ def effort():
 
 
 def window(value):
-    """How many tokens a model's session holds, till it says (WINDOWS)."""
+    """How many tokens a model's session holds, till it says: its provider's say (Ollama's, an endpoint's), else
+    WINDOWS'."""
     program = model_program(value)
-    return 1_000_000 if program == "claude" and "[1m]" in value else WINDOWS[program]
+    if program == "claude":
+        return 1_000_000 if "[1m]" in value else WINDOWS[program]
+    return modelslib.window_of(value) or WINDOWS[program]
+
+
+def window_hint(value):
+    """How to give a model a bigger window, where it's its provider's to give (Ollama's), else ""."""
+    if providerslib.provider_of(value) == "ollama":
+        return ", or give Ollama a longer context length (its Settings, or OLLAMA_CONTEXT_LENGTH)"
+    return ""
 
 
 def weight(text):
@@ -589,29 +642,87 @@ class Setting:
 
 
 EFFORT_ROWS = weakref.WeakSet()  # (the Effort rows up: each offers the model's levels, model_picked)
+MODEL_ROWS = weakref.WeakSet()  # (the Intelligence and Provider rows up: each lists what's picked now)
+
+
+def sync_rows():
+    """Every Provider, Intelligence and Effort row up as it is now (after the row picked in has had its say)."""
+    def sync():
+        for row in [*MODEL_ROWS, *EFFORT_ROWS]:
+            row.sync()
+        return False
+    GLib.idle_add(sync)
+
+
+providerslib.listen(sync_rows)  # (this machine's providers found again, and changed: the rows as they are now)
 
 
 def model_picked(chat, value):
-    """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, and every Effort row
-    offers its levels."""
-    widgets.save_settings(meta_model=value)
-    for row in list(EFFORT_ROWS):
-        row.sync()
+    """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, every Effort row
+    offers its levels, and a provider's model puts Provider on its provider."""
+    changes = {"meta_model": value}
+    if pid := providerslib.provider_of(value):
+        changes["meta_provider"] = pid
+    widgets.save_settings(**changes)
+    sync_rows()
     if chat is not None:
         chat.model_changed()
 
 
-def model_row(chat):
-    """Settings → Meta → Intelligence: the model Meta thinks with, from its next message."""
-    offered = models()
-    values = [m[0] for m in offered]
-    entry = model_entry(model(), offered)
-    row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with",
-                       model=Gtk.StringList.new([m[1] for m in offered]),
-                       selected=offered.index(entry) if entry else 0)
+def provider_picked(chat, pid):
+    """Provider set to pid: Intelligence lists its models after Claude's (Meta goes on with its own till one's
+    picked)."""
+    widgets.save_settings(meta_provider=pid)
+    sync_rows()
 
-    row.connect("notify::selected", lambda r, _p: r.get_selected() < len(values) and
-                model_picked(chat, values[r.get_selected()]))
+
+def model_row(chat):
+    """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then the
+    provider's (provider_row). Its sync() lists them as they are now (sync_rows)."""
+    row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
+    state = {"values": [], "syncing": False}
+
+    def sync():
+        offered = listed_models()
+        entry = model_entry(model(), offered)
+        state["values"], state["syncing"] = [m[0] for m in offered], True
+        row.set_model(Gtk.StringList.new([m[1] for m in offered]))
+        row.set_selected(offered.index(entry) if entry else 0)
+        state["syncing"] = False
+
+    def picked(r, _p):
+        if not state["syncing"] and r.get_selected() < len(state["values"]):
+            model_picked(chat, state["values"][r.get_selected()])
+    row.connect("notify::selected", picked)
+    row.sync = sync
+    sync()
+    MODEL_ROWS.add(row)
+    return row
+
+
+def provider_row(chat):
+    """Settings → Meta → Provider: the inference provider whose models Intelligence lists after Claude's (Ollama, MLX,
+    Apple's, an OpenAI-compatible server), on this machine; dimmed when there's only one, gone when there's none."""
+    row = Adw.ComboRow(title="Provider", subtitle="Where the models after Claude's run")
+    state = {"ids": [], "syncing": False}
+
+    def sync():
+        found = providers_offered()
+        current = provider()
+        state["ids"], state["syncing"] = [pid for pid, _ in found], True
+        row.set_model(Gtk.StringList.new([name if " · " in name else f"{name} · {HERE_NAME}" for _, name in found]))
+        row.set_selected(state["ids"].index(current) if current in state["ids"] else 0)
+        state["syncing"] = False
+        row.set_visible(bool(found))
+        (row.add_css_class if len(found) == 1 else row.remove_css_class)("one-provider")
+
+    def picked(r, _p):
+        if not state["syncing"] and r.get_selected() < len(state["ids"]):
+            provider_picked(chat, state["ids"][r.get_selected()])
+    row.connect("notify::selected", picked)
+    row.sync = sync
+    sync()
+    MODEL_ROWS.add(row)
     return row
 
 
@@ -653,8 +764,10 @@ def code_mode_row(chat):
 
 
 def settings_group(chat):
-    """Settings → Meta, in Baude's and Record's Settings: Intelligence, Effort and Code mode."""
+    """Settings → Meta, in Baude's and Record's Settings: Provider, Intelligence, Effort and Code mode. They follow
+    this machine's providers as they're found (Ollama started, a model pulled)."""
     group = Adw.PreferencesGroup(title=NAME)
+    group.add(provider_row(chat))
     group.add(model_row(chat))
     group.add(effort_row(chat))
     group.add(code_mode_row(chat))
@@ -2644,7 +2757,7 @@ class MetaChat(Gtk.Box):
                 raise Exhausted(
                     f"Context window exhausted: {name} holds {size} tokens, and {NAME}'s instructions and tools, this "
                     f"message and room for a reply need about {widgets.fmt_tokens(total)}. Pick a model with a bigger "
-                    f"window (Settings → {NAME} → Intelligence), or put less in the message.")
+                    f"window (Settings → {NAME} → Intelligence){window_hint(agent.model)}, or put less in the message.")
             left = room - need
             earlier, given, of = usual = earlier_said(before)
             notice = None

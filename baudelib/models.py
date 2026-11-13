@@ -1,6 +1,8 @@
-"""What runs a model. Claude's run in claude; Apple's on-device one in apple-claude (apple-claude/); those on this machine
-in pi-claude (pi-claude/: pi on a model mlx serves). Each speaks claude's stream-json on stdin and stdout, and each is
-started, given an id and carried on differently: PROGRAMS says how, for Baude and the headless server alike (launch)."""
+"""What runs a model. Claude's run in claude; Apple's on-device one in apple-claude (apple-claude/); those MLX, Ollama
+or an OpenAI-compatible server serves on this machine in pi-claude (pi-claude/: pi on the server's API). Each speaks
+claude's stream-json on stdin and stdout, and each is started, given an id and carried on differently: PROGRAMS says
+how, for Baude and the headless server alike (launch). Where the models besides Claude's are, and which there are:
+baudelib.providers."""
 import json
 import os
 
@@ -44,10 +46,15 @@ def local_models():
             if os.path.isdir(os.path.join(hub, "models--" + m["resolvedModel"].replace("/", "--")))]
 
 
+SERVED = ("ollama/", "openai/")  # (the values of models Ollama or an OpenAI-compatible server serves: baudelib.providers)
+
+
 def model_program(value):
-    """What runs a model: "apple" (apple-claude), "pi" (pi-claude), or "claude"."""
+    """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude"."""
     if value == APPLE_MODEL["value"]:
         return "apple"
+    if isinstance(value, str) and value.startswith(SERVED):
+        return "pi"
     return "pi" if any(m["value"] == value for m in LOCAL_MODELS) else "claude"
 
 
@@ -75,9 +82,23 @@ def program(value):
     return {**PROGRAMS[name], "name": name}
 
 
-def runnable_models():
-    """The models besides Claude's this machine can run now: Apple's once apple-claude's built, and pi's that are here."""
-    return ([APPLE_MODEL] if apple_exe() else []) + local_models()
+def runnable_models(fresh=False, tools=False, wait=True):
+    """The models besides Claude's this machine can run now, each with its provider (baudelib.providers): Apple's
+    once apple-claude's built, MLX's that are downloaded, Ollama's, and the endpoints'; with pi installed for all but
+    Apple's. As last found (fresh: looked for now); tools: only those that call tools; wait: for a look, the first
+    time (providers.found's)."""
+    from baudelib import providers
+    found = providers.found(wait=wait, max_age=0 if fresh else providers.MAX_AGE)
+    return [m for p in providers.usable(found, tools) for m in p["models"]]
+
+
+def window_of(value):
+    """A model's context window as its provider says it (Ollama's, an endpoint's, another host's in the mesh), None
+    where it hasn't."""
+    from baudelib import providers
+    return next((m.get("window") for p in providers.found() for m in p["models"] if m["value"] == value), None) or \
+        next((m.get("window") for e in providers.mesh_endpoints() for m in e["models"]
+              if f"openai/{e['id']}/{m['id']}" == value), None)
 
 
 def launch(model, mode, effort, session_id=None, resumed=False):

@@ -6666,7 +6666,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         launcher = Gio.SimpleAction.new_stateful("launcher", None, GLib.Variant.new_boolean(installed()))
         launcher.connect("change-state", Window._launcher_toggled)
         self.add_action(launcher)
-        self.meta_from = None  # (where the focus was as Ctrl+M showed Meta: close_meta)
+        self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.right_slide.toggle()),
@@ -6742,6 +6742,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.paned.add_css_class("inside-before")
         split.append(self.paned)
         self.right_slide = widgets.PaneSlide(self.paned, right, [self.right_toggle])
+        self.connect("notify::focus-widget", Window._focus_moved)
         self.left_slide = ColumnSlide(column, side, [side_toggle])
         column.slide = self.left_slide
         self.left_slide.moving = self.right_slide.moving = self._side_moving
@@ -7543,33 +7544,39 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.show_meta()
 
     def show_meta(self):
-        """Meta's page of the right bar, the bar shown if it was hidden, and the focus in Meta's box: where it was is
-        kept for close_meta."""
+        """Meta's page of the right bar, the bar shown if it was hidden, and the focus in Meta's box."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
         page = self.tabs.current()
         if isinstance(page, DiaryEditor) and page.pop.get_visible():
             page._hide_pop()  # (@'s or #'s list, not left over the page)
-        focus = self.get_focus()
-        self.meta_from = focus if focus is not None and not focus.is_ancestor(self.right) else None
         self.right_slide.set_shown(True)
         self.right_stack.set_visible_child_name("meta")
         self.chat.composer.grab_focus()
 
-    def close_meta(self):
-        """The right bar hidden, Meta's @ list with it, and the focus, if it was in the bar, back where show_meta took
-        it from (a page's text at its caret), else in the page open."""
+    def _focus_moved(self, _pspec):
         focus = self.get_focus()
-        back, self.meta_from = self.meta_from, None
+        if focus is not None and not focus.is_ancestor(self.right):
+            self.meta_from = focus
+
+    def close_meta(self):
+        """The right bar hidden, Meta's @ list with it, and the focus, if it was in the bar, back where it was last
+        outside it if that's still on screen (a page's text at its caret), else in the tab open: a page's text, a
+        chat's transcript, a file's code."""
+        focus = self.get_focus()
         if self.chat.refs.visible():
             self.chat.refs.hide()
         self.right_slide.set_shown(False)
-        if focus is None or focus.is_ancestor(self.right):
-            if not (back is not None and back.get_root() is self and back.get_mapped() and back.grab_focus()):
-                page = self.tabs.current()
-                if page is not None:
-                    (page.view if isinstance(page, DiaryEditor) else page).grab_focus()
+        if focus is not None and not focus.is_ancestor(self.right):
+            return
+        page = self.tabs.current()
+        if not (widgets.focus_shown(self.meta_from)
+                or widgets.focus_shown(page.view if isinstance(page, DiaryEditor) else
+                                       page.scroll if isinstance(page, Reader) else
+                                       page.code.view if isinstance(page, viewers.CodePage) else None)
+                or (page is not None and page.child_focus(Gtk.DirectionType.TAB_FORWARD))):
+            self.set_focus(None)  # (not left in Meta's box as it slides shut)
 
     def open_palette(self):
         """⌘K / Ctrl+K, as Baude's: every name the notebook's folders have, and the notebooks and their pages, searched

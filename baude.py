@@ -11457,7 +11457,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.set_content(host)
         self.connect("notify::visible-dialog", BaudeWindow.dialog_shown)
 
-        self.meta_from = None  # (where the focus was as Ctrl+M showed Meta: close_meta)
+        self.meta_from = None  # (where the focus was last outside the side panel: close_meta)
+        self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.switch_to(self.new_session)), ("<Control>o", self.show_sessions),
                              # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
@@ -13587,30 +13588,37 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.show_meta()
 
     def show_meta(self):
-        """Meta's page of the side panel, the panel shown if it was hidden, and the focus in Meta's box: where it was
-        is kept for close_meta."""
+        """Meta's page of the side panel, the panel shown if it was hidden, and the focus in Meta's box."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
         if self.completer.visible():
             self.completer.hide()  # (/'s or @'s list, not left over the chat's box)
         self.refs.forget()
-        focus = self.get_focus()
-        self.meta_from = focus if focus is not None and not focus.is_ancestor(self.panel) else None
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
 
+    def _focus_moved(self, _pspec):
+        focus = self.get_focus()
+        if focus is not None and not focus.is_ancestor(self.panel):
+            self.meta_from = focus
+
     def close_meta(self):
-        """The side panel hidden, Meta's @ list with it, and the focus, if it was in the panel, back where show_meta
-        took it from, else in the chat's box."""
+        """The side panel hidden, Meta's @ list with it, and the focus, if it was in the panel, back where it was last
+        outside it if that's still on screen, else in what the tab shown has to type in or scroll: the chat's box,
+        the transcript (the box hidden: read-only), a file's code."""
         meta_chat, focus = self.panel.meta, self.get_focus()
-        back, self.meta_from = self.meta_from, None
         if meta_chat.refs.visible():
             meta_chat.refs.hide()
         self.show_panel(False)
-        if focus is None or focus.is_ancestor(self.panel):
-            if not (back is not None and back.get_root() is self and back.get_mapped() and back.grab_focus()):
-                self.input.grab_focus()
+        if focus is not None and not focus.is_ancestor(self.panel):
+            return
+        page = self.tabs.current()
+        if not (widgets.focus_shown(self.meta_from) or widgets.focus_shown(self.input)
+                or widgets.focus_shown(self.scroller if page is self.chat_column else
+                                       page.code.view if isinstance(page, CodePage) else None)
+                or (page is not None and page.child_focus(Gtk.DirectionType.TAB_FORWARD))):
+            self.set_focus(None)  # (not left in Meta's box as it slides shut)
 
     def h_stream_event(self, msg):
         ev, parent = msg.get("event", {}), msg.get("parent_tool_use_id")

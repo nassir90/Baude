@@ -868,7 +868,9 @@ CODE_SYSTEM = """
 Code mode: run_python is your one tool for the app. It runs up to {lines} lines of Python with app, whose functions \
 are the app's tools (below), and returns what's printed and the last expression's value. app.app_index gives its \
 rows as dicts; the others give their answer as text, and raise RuntimeError for an error. Look things up and act in \
-one go: filter, then act on what's found. No imports, no names starting with _; plain builtins only.
+one go: filter, then act on what's found. No imports, no names starting with _; plain builtins only. The tools that \
+set models up (local_models, check_models, prune_models, add_mlx_model, add_endpoint, build_apple_adapter) are yours \
+to call as they are, not through run_python: they take longer than its code has.
 {doc}"""
 
 SHARED_TOOLS = [
@@ -938,12 +940,12 @@ SETUP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
 ]
 SETUP_NAMES = {t["name"] for t in SETUP_TOOLS}
-CONFIRM_WAIT = 900  # (s a question to the user waits for an answer: then it's a no)
+CONFIRM_WAIT = 600  # (s a question to the user waits for an answer, then it's a no: well inside pi's MCP timeout)
 
 
 def models_report():
     """local_models' answer: this machine's providers, a line or a few each (off the main loop: it asks servers)."""
-    found = {p["id"]: p for p in providerslib.found(wait=True, max_age=0)}
+    found = {p["id"]: p for p in providerslib.found(wait=providerslib.TIMEOUT * 3 + 2, max_age=0)}
     lines = []
     o, where = found.get("ollama") or {}, providerslib.ollama_install()
     installed = ", ".join(x for x in (where["exe"], where["app"]) if x)
@@ -3027,6 +3029,7 @@ class MetaChat(Gtk.Box):
                 said.set()
             else:
                 box["card"] = self._ask_card(text, yes, lambda allow: (box.update(yes=allow), said.set()))
+                box["card"].confirm = True  # (dropped, however: a no, for the tool that waits on it)
             return False
         GLib.idle_add(ask)
         if not said.wait(CONFIRM_WAIT) and box.get("card") is not None:
@@ -3035,7 +3038,7 @@ class MetaChat(Gtk.Box):
 
     def _drop_asking(self, deny=False):
         for card in list(self.asking):
-            if deny:
+            if deny or getattr(card, "confirm", False):
                 card.answer(False)
             elif card.get_parent() is not None:
                 self.box.remove(card)
@@ -3119,9 +3122,17 @@ class MetaChat(Gtk.Box):
         except ValueError as e:
             res = {"error": str(e)}
         self._refresh_live(turn)
-        if isinstance(res, Later):  # (its card drawn again once it's answered)
-            done = res.done
-            res.done = lambda out: (done(out) if done else out, self._refresh_live(turn))[0]
+        if isinstance(res, Later):  # (its card drawn again once it's answered; what it does then, only while its turn's
+            done = res.done             # still the one going: stopped meanwhile, nothing's done)
+
+            def finished(out):
+                if done is not None and "error" not in out:
+                    if self.agent is None or self.agent.turn is not turn or turn.get("stopped"):
+                        return {"error": "Stopped: nothing was done."}
+                    out = done(out)
+                self._refresh_live(turn)
+                return out
+            res.done = finished
         return res
 
     @staticmethod
@@ -3172,8 +3183,11 @@ class MetaChat(Gtk.Box):
     def apply(self, kind, data):
         if kind == "setting":
             self.settings[data["name"]].set(data["value"])
-        elif kind == "models":  # (an MLX model, or a server, added: settings.json's list as it was, or is)
-            widgets.save_settings(**{data["key"]: data["value"]})
+        elif kind == "models":  # (an MLX model, or a server, added: in settings.json's list, or not, whatever else is)
+            entry, field = data["entry"], "value" if data["key"] == "mlx_models" else "id"
+            now = [x for x in widgets.load_settings().get(data["key"]) or []
+                   if isinstance(x, dict) and x.get(field) != entry[field]]
+            widgets.save_settings(**{data["key"]: now + [entry] if data["present"] else now})
             providerslib.found(max_age=0)
         elif kind == "rename_chat":
             chat = self.find_chat(data["chat"])
@@ -3406,13 +3420,16 @@ class MetaChat(Gtk.Box):
             names = self.ollama_named(asked, have)
             if missing := [m for m in names if m not in have]:
                 raise ValueError(f"Ollama has no {', '.join(missing)}: it has {', '.join(have) or 'none'}.")
-            lines = []
+            lines, bad = [], 0
             for name in names or list(have):
-                error = providerslib.ollama_check(name)
-                lines.append(f"{name}: " + (f"unhealthy: {error}" if error else "works"))
-            bad = sum("unhealthy" in line for line in lines)
-            return {"text": "\n".join(lines) + (f"\n{bad} unhealthy: prune_models removes them (the user's asked)."
-                                               if bad else "")}
+                if self.agent is None or self.agent.turn is not turn or turn.get("stopped"):
+                    lines.append("(stopped: the rest weren't checked)")
+                    break
+                verdict, said = providerslib.ollama_check(name)
+                bad += verdict == "unhealthy"
+                lines.append(f"{name}: {verdict}" + (f": {said}" if said else ""))
+            return {"text": "\n".join(lines) + (f"\n{bad} unhealthy: prune_models removes them (the user's asked). "
+                                               "An unsure one may be fine: say so, don't prune it." if bad else "")}
         return Later(work)
 
     def prune_models(self, turn, args):
@@ -3453,9 +3470,6 @@ class MetaChat(Gtk.Box):
             return found[repo]
 
         def done(m):
-            if "error" in m:
-                return m
-            before = [x for x in widgets.load_settings().get("mlx_models") or [] if isinstance(x, dict)]
             taken = {x["value"] for x in modelslib.mlx_list()}
             value = base = "mlx-" + re.sub(r"[^a-z0-9.]+", "-", repo.split("/")[-1].lower()).strip("-")
             n = 2
@@ -3465,9 +3479,9 @@ class MetaChat(Gtk.Box):
             entry = {"value": value, "repo": repo, "displayName": shown,
                      "input": ["text", "image"] if m["vision"] else ["text"]} | \
                 ({"thinking": True} if args.get("thinking") else {})
-            self.apply("models", {"key": "mlx_models", "value": before + [entry]})
-            a = self.act(turn, f"MLX: added {shown}", "models", {"key": "mlx_models", "value": before},
-                         {"key": "mlx_models", "value": before + [entry]})
+            self.apply("models", {"key": "mlx_models", "entry": entry, "present": True})
+            a = self.act(turn, f"MLX: added {shown}", "models", {"key": "mlx_models", "entry": entry, "present": False},
+                         {"key": "mlx_models", "entry": entry, "present": True})
             return {"text": f"Added {shown} ({value}) to MLX's models (action {a['id']}): it's in the model pickers "
                     "now. MLX's server loads it when it's first asked."}
         return Later(work, done)
@@ -3476,19 +3490,28 @@ class MetaChat(Gtk.Box):
         name, url = str(args.get("name") or "").strip(), str(args.get("url") or "").strip().rstrip("/")
         key_env = str(args.get("key_env") or "").strip().lstrip("$")
         window = args.get("window") if isinstance(args.get("window"), int) and args["window"] > 0 else None
-        if not name or not re.match(r"https?://", url):
+        parts = urllib.parse.urlsplit(url)
+        if not name or parts.scheme not in ("http", "https") or not parts.hostname:
             raise ValueError("An endpoint needs a name, and its URL (http:// or https://, to its /v1).")
-        if key_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
-            raise ValueError("key_env is the name of the environment variable the key is in, not the key.")
-        before = [e for e in widgets.load_settings().get("endpoints") or [] if isinstance(e, dict)]
+        if parts.username or parts.password or parts.query or parts.fragment:
+            raise ValueError("Give the URL with no name, password or query in it: a key goes in key_env.")
+        if key_env and (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env) or key_env not in os.environ):
+            raise ValueError("key_env is the name of an environment variable here that holds the key (not the key): "
+                             f"there's no {key_env!r}.")
         base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "server"
+        taken = {e.get("id") for e in widgets.load_settings().get("endpoints") or [] if isinstance(e, dict)}
         eid, n = base, 2
-        while any(e.get("id") == eid for e in before):
+        while eid in taken:
             eid, n = f"{base}-{n}", n + 1
         ep = {"id": eid, "name": name, "url": url} | ({"key": f"${key_env}"} if key_env else {}) | \
             ({"window": window} if window else {})
 
         def work():
+            if key_env or not providerslib.local_url(url):  # (a server elsewhere, or a key sent: the user's to say)
+                where = parts.hostname + (f":{parts.port}" if parts.port else "")
+                if not self.confirm(turn, f"{NAME} would like to add {name} at {where} as a model server" +
+                                    (f", sending it the key in ${key_env}" if key_env else "") + ".", "Add"):
+                    return {"text": "The user said no: nothing was added."}
             for try_url in [url] + ([url + "/v1"] if not url.endswith("/v1") else []):
                 there = providerslib.endpoint(providerslib.endpoints({"endpoints": [ep | {"url": try_url}]})[0])
                 if not there["error"]:
@@ -3496,18 +3519,20 @@ class MetaChat(Gtk.Box):
             raise ValueError(f"{name} {there['error']}: not added.")
 
         def done(found):
-            if "error" in found:
+            if "url" not in found:
                 return found
             entry = ep | {"url": found["url"]}
-            self.apply("models", {"key": "endpoints", "value": before + [entry]})
-            a = self.act(turn, f"Server: added {name}", "models", {"key": "endpoints", "value": before},
-                         {"key": "endpoints", "value": before + [entry]})
+            self.apply("models", {"key": "endpoints", "entry": entry, "present": True})
+            a = self.act(turn, f"Server: added {name}", "models", {"key": "endpoints", "entry": entry, "present": False},
+                         {"key": "endpoints", "entry": entry, "present": True})
             listed = ", ".join(found["models"][:12]) or "none yet"
             return {"text": f"Added {name} at {found['url']} (action {a['id']}); its models: {listed}. It's a "
                     "provider in the pickers now."}
         return Later(work, done)
 
     def build_apple_adapter(self, turn, args):
+        told = self.told()  # (this conversation's: another may be open when it's built)
+
         def work():
             st = providerslib.apple_status()
             if sys.platform != "darwin":
@@ -3526,8 +3551,8 @@ class MetaChat(Gtk.Box):
                                       "swift build -c release, in apple-claude/ (a minute or two).", "Build"):
                 return {"text": "The user said no: nothing was built."}
 
-            def built(ok):
-                GLib.idle_add(lambda: self.told().append(
+            def built(ok):  # (said with the next message of the conversation it was asked in)
+                GLib.idle_add(lambda: told.append(
                     "(apple-claude " + ("built: Apple's model is in the pickers.)" if ok else
                                         "didn't build: local_models has its last lines.)")) and False)
             if not providerslib.apple_build(built):

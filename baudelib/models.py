@@ -46,7 +46,8 @@ def mlx_added():
     """The MLX models settings.json adds (mlx_models), as models.json has them: read again only once it's changed."""
     from baudelib.selfupdate import settings_path
     try:
-        at = os.stat(settings_path()).st_mtime_ns
+        st = os.stat(settings_path())
+        at = (st.st_mtime_ns, st.st_size, st.st_ino)  # (a write and its undo can share a coarse timestamp)
     except OSError:
         at = None
     if at != _ADDED["at"]:

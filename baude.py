@@ -12,8 +12,8 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
 
 Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
-Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused.
-Images and PDFs can also be attached with the paperclip or dropped onto the window.
+Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused, or
+closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
 
 Set BAUDE_CLAUDE=/path/to/claude to use a specific claude binary (else claude on PATH, else, on macOS,
 the Claude desktop app's).
@@ -11481,13 +11481,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.set_content(host)
         self.connect("notify::visible-dialog", BaudeWindow.dialog_shown)
 
+        self.meta_from = None  # (where the focus was last outside the side panel: close_meta)
+        self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.switch_to(self.new_session)), ("<Control>o", self.show_sessions),
                              # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
                              # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
-                             (widgets.META_KEY, self.show_meta),
+                             (widgets.META_KEY, self.toggle_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
                              (PALETTE_KEY, lambda: RefPalette(self).present(self)),
                              (SETTINGS_KEY, self.open_settings),
@@ -13615,9 +13617,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.panel.show_page(page or ("agents" if any(t.get("task_type") == "local_agent"
                                                           for t in self.running_tasks()) else "processes"))
 
+    def toggle_meta(self):
+        """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta shown (show_meta), or closed if it's open
+        already (close_meta)."""
+        if self.panel_slide.target and self.panel.stack.get_visible_child_name() == "meta" \
+                and self.capture_cover() is None:
+            self.close_meta()
+        else:
+            self.show_meta()
+
     def show_meta(self):
-        """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta's page of the side panel, the panel shown if it
-        was hidden, and the focus in Meta's box."""
+        """Meta's page of the side panel, the panel shown if it was hidden, and the focus in Meta's box."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
@@ -13626,6 +13636,28 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.refs.forget()
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
+
+    def _focus_moved(self, _pspec):
+        focus = self.get_focus()
+        if focus is not None and not focus.is_ancestor(self.panel):
+            self.meta_from = focus
+
+    def close_meta(self):
+        """The side panel hidden, Meta's @ list with it, and the focus, if it was in the panel, back where it was last
+        outside it if that's still on screen, else in what the tab shown has to type in or scroll: the chat's box,
+        the transcript (the box hidden: read-only), a file's code."""
+        meta_chat, focus = self.panel.meta, self.get_focus()
+        if meta_chat.refs.visible():
+            meta_chat.refs.hide()
+        self.show_panel(False)
+        if focus is not None and not focus.is_ancestor(self.panel):
+            return
+        page = self.tabs.current()
+        if not (widgets.focus_shown(self.meta_from) or widgets.focus_shown(self.input)
+                or widgets.focus_shown(self.scroller if page is self.chat_column else
+                                       page.code.view if isinstance(page, CodePage) else None)
+                or (page is not None and page.child_focus(Gtk.DirectionType.TAB_FORWARD))):
+            self.set_focus(None)  # (not left in Meta's box as it slides shut)
 
     def h_stream_event(self, msg):
         ev, parent = msg.get("event", {}), msg.get("parent_tool_use_id")

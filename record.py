@@ -6522,7 +6522,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
     code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
     side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
-    focused."""
+    focused, or closes it."""
 
     def do_snapshot(self, snapshot):
         self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
@@ -6647,10 +6647,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         launcher = Gio.SimpleAction.new_stateful("launcher", None, GLib.Variant.new_boolean(installed()))
         launcher.connect("change-state", Window._launcher_toggled)
         self.add_action(launcher)
+        self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.right_slide.toggle()),
-                             (widgets.META_KEY, lambda: self.show_meta()),
+                             (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
                              (widgets.NAV_KEYS["forward"], lambda: self.tabs.forward()),  # back, forward, up)
@@ -6722,6 +6723,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.paned.add_css_class("inside-before")
         split.append(self.paned)
         self.right_slide = widgets.PaneSlide(self.paned, right, [self.right_toggle])
+        self.connect("notify::focus-widget", Window._focus_moved)
         self.left_slide = ColumnSlide(column, side, [side_toggle])
         column.slide = self.left_slide
         self.left_slide.moving = self.right_slide.moving = self._side_moving
@@ -7513,9 +7515,17 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.right_slide.set_shown(True)
             self.right_stack.set_visible_child_name(page)
 
+    def toggle_meta(self):
+        """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta shown
+        (show_meta), or closed if it's open already (close_meta)."""
+        if self.right_slide.target and self.right_stack.get_visible_child_name() == "meta" \
+                and self.capture_cover() is None:
+            self.close_meta()
+        else:
+            self.show_meta()
+
     def show_meta(self):
-        """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta's page of the
-        right bar, the bar shown if it was hidden, and the focus in Meta's box."""
+        """Meta's page of the right bar, the bar shown if it was hidden, and the focus in Meta's box."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
@@ -7525,6 +7535,29 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.right_slide.set_shown(True)
         self.right_stack.set_visible_child_name("meta")
         self.chat.composer.grab_focus()
+
+    def _focus_moved(self, _pspec):
+        focus = self.get_focus()
+        if focus is not None and not focus.is_ancestor(self.right):
+            self.meta_from = focus
+
+    def close_meta(self):
+        """The right bar hidden, Meta's @ list with it, and the focus, if it was in the bar, back where it was last
+        outside it if that's still on screen (a page's text at its caret), else in the tab open: a page's text, a
+        chat's transcript, a file's code."""
+        focus = self.get_focus()
+        if self.chat.refs.visible():
+            self.chat.refs.hide()
+        self.right_slide.set_shown(False)
+        if focus is not None and not focus.is_ancestor(self.right):
+            return
+        page = self.tabs.current()
+        if not (widgets.focus_shown(self.meta_from)
+                or widgets.focus_shown(page.view if isinstance(page, DiaryEditor) else
+                                       page.scroll if isinstance(page, Reader) else
+                                       page.code.view if isinstance(page, viewers.CodePage) else None)
+                or (page is not None and page.child_focus(Gtk.DirectionType.TAB_FORWARD))):
+            self.set_focus(None)  # (not left in Meta's box as it slides shut)
 
     def open_palette(self):
         """⌘K / Ctrl+K, as Baude's: every name the notebook's folders have, and the notebooks and their pages, searched

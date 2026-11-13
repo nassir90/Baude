@@ -3321,6 +3321,14 @@ def walk(widget):
         child = child.get_next_sibling()
 
 
+def focus_shown(widget):
+    """The focus put in widget if it's on screen (GTK would put it in one that isn't), an entry's text not all selected
+    by it: whether it took it."""
+    if widget is None or not widget.get_mapped():
+        return False
+    return (getattr(widget, "grab_focus_without_selecting", None) or widget.grab_focus)()
+
+
 def discard(widget):
     """Free a widget taken out for good (already out of its parent), and everything in it. PyGObject can't collect a
     widget whose signal handlers (its own, its children's, its controllers') reach back to it from Python, and most
@@ -6451,7 +6459,7 @@ ZOOM_MODS = ("<Control>", "<Meta>") if sys.platform == "darwin" else ("<Control>
 
 SETTINGS_KEY = "<Meta>comma" if sys.platform == "darwin" else "<Control>comma"  # (⌘, as a Mac app's Settings…)
 FEEDBACK_KEY = "<Meta>period" if sys.platform == "darwin" else "<Control>period"  # (Send Feedback…, over whatever's open)
-META_KEY = "<Control>m"  # (Meta shown, its box focused, from anywhere; Control on macOS too: ⌘M is Minimize)
+META_KEY = "<Control>m"  # (Meta shown and focused, or closed if open; Control on macOS too: ⌘M is Minimize)
 
 
 def zoom_keys(*keys):

@@ -49,7 +49,7 @@ When a conversation is more than the model's context window holds (another model
 "Context Exhausted" shows over its box, the box off, and the context bar shows it full, the tokens used over the
 window's, till a model with a bigger window is picked or the chat's cleared; Baude's chats do the same. Code mode has it
 act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
-anywhere in the window, shows it and puts the focus in its box.
+anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
 
 ## Local models
 

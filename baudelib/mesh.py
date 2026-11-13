@@ -31,16 +31,19 @@ own host process's Proxy, on 127.0.0.1 with a key, which carries each request to
 the answer back as it comes. A program's (apple-claude, pi-claude) runs where it is: a chat started on that member.
 """
 import base64
+import hashlib
 import http.server
 import itertools
 import json
 import os
 import queue
+import re
 import secrets
 import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from baudelib import models, wire
@@ -53,12 +56,42 @@ FORGET_S = 3600  # a record of a member no longer reached is let go after this l
 INFER_S = 600  # a provider has this long to answer
 CHUNK = 64 << 10
 LINKS = "links.json"
+ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
+_PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
+
+
+def is_provider_id(value):
+    """Is it a provider's id: a word, or two with a slash between (openai/<endpoint>)?"""
+    return isinstance(value, str) and bool(_PROVIDER.fullmatch(value)) and ".." not in value
+
+
+def endpoint_id(member, provider):
+    """The id another member's provider has here as an OpenAI-compatible endpoint (endpoints()): the same every run,
+    mesh-<the member's id's first 8>-<the provider's>, 31 characters at most, of a-z, 0-9, _ and -."""
+    slug = re.sub(r"[^a-z0-9_-]", "-", provider.lower())
+    if len(slug) > 17:
+        slug = slug[:10] + "-" + hashlib.sha1(provider.encode()).hexdigest()[:6]
+    return f"mesh-{re.sub(r'[^a-z0-9]', '', member.lower())[:8]}-{slug}"
+
+
+def endpoints(path=None):
+    """Other members' providers that serve HTTP, as OpenAI-compatible endpoints on this machine (its host process's
+    Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, url, key, models: [{id,
+    displayName, window, tools, input}]}], from the file this machine's host process keeps in its runtime folder.
+    [] if it isn't running."""
+    try:
+        with open(path or os.path.join(wire.runtime_dir(), ENDPOINTS), encoding="utf-8") as f:
+            kept = json.load(f)
+        os.kill(int(kept["pid"]), 0)
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    return [e for e in kept.get("endpoints") or [] if isinstance(e, dict)]
 
 
 def local_providers():
-    """This machine's model providers, each {id, kind, name, base_url (an OpenAI-compatible server's; None for a
-    program's), models: [{value, displayName}]}, maybe an api_key too (never sent anywhere): providers.local_providers'
-    once that's here, else the programs models.runnable_models has."""
+    """This machine's model providers, each {id, kind, name, base_url (an OpenAI-compatible server's base, /v1 and
+    all; None for a program's), models: [{value, displayName, id (its name in the server's API), tools, window,
+    input, thinking}]}: providers.local_providers' once that's here, else the programs models.runnable_models has."""
     try:
         from baudelib import providers
         found = providers.local_providers()
@@ -67,11 +100,36 @@ def local_providers():
     if not isinstance(found, list):
         found = []
         if models.apple_exe():
-            found.append({"id": "apple", "kind": "program", "name": "Apple on-device", "base_url": None,
+            found.append({"id": "apple", "kind": "apple", "name": "Apple on-device", "base_url": None,
                           "models": [models.APPLE_MODEL]})
         if pi := models.local_models():
-            found.append({"id": "pi", "kind": "program", "name": "MLX through pi", "base_url": None, "models": pi})
-    return [p for p in found if isinstance(p, dict) and wire.is_id(p.get("id"))]
+            found.append({"id": "mlx", "kind": "mlx", "name": "MLX", "base_url": None, "models": pi})
+    return [p for p in found if isinstance(p, dict) and is_provider_id(p.get("id"))]
+
+
+def provider_key(p):
+    """(on the host that has it) What a provider's server is asked with: its endpoint's key, if it has one."""
+    try:
+        from baudelib import providers
+        return providers.endpoint_key(p["id"]) or None
+    except Exception:  # (none here, or no key for it)
+        return None
+
+
+def _model(m):
+    """A model as the mesh is told of it: value, displayName, and what's said of it that's plain (id, tools,
+    window, input, thinking)."""
+    out = {"value": m["value"][:200], "displayName": str(m.get("displayName") or m["value"])[:200]}
+    if isinstance(m.get("id"), str):
+        out["id"] = m["id"][:200]
+    for k in ("tools", "thinking"):
+        if isinstance(m.get(k), bool):
+            out[k] = m[k]
+    if isinstance(m.get("window"), int) and not isinstance(m.get("window"), bool):
+        out["window"] = m["window"]
+    if isinstance(m.get("input"), list):
+        out["input"] = [x[:32] for x in m["input"][:8] if isinstance(x, str)]
+    return out
 
 
 def published(p, http=None):
@@ -79,8 +137,7 @@ def published(p, http=None):
     one another member's told of), no address or key of this machine's."""
     return {"id": p["id"], "kind": str(p.get("kind") or "openai")[:32], "name": str(p.get("name") or p["id"])[:64],
             "http": bool(p.get("base_url")) if http is None else http,
-            "models": [{"value": m["value"][:200], "displayName": str(m.get("displayName") or m["value"])[:200]}
-                       for m in (p.get("models") or [])[:200]
+            "models": [_model(m) for m in (p.get("models") or [])[:200]
                        if isinstance(m, dict) and isinstance(m.get("value"), str)]}
 
 
@@ -102,7 +159,7 @@ def _record(r):
         return None
     raw = r["info"].get("providers")
     info["providers"] = [published(p, p.get("http") is True) for p in raw[:32]
-                         if isinstance(p, dict) and wire.is_id(p.get("id"))] \
+                         if isinstance(p, dict) and is_provider_id(p.get("id"))] \
         if isinstance(raw, list) else []
     links = r.get("links") if isinstance(r.get("links"), list) else []
     return {"id": r["id"], "seq": r["seq"], "info": info, "links": sorted({x for x in links[:256] if wire.is_id(x)})}
@@ -327,6 +384,7 @@ class Mesh:
         self.proxy = None
         self.outs = []
         self.stopped, self.linked = threading.Event(), threading.Event()  # (linked: set while there's a link)
+        self.told = None  # (the endpoints what runs here was last told of: endpoints())
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
         try:
             with open(os.path.join(server.state_dir, LINKS), encoding="utf-8") as f:
@@ -354,6 +412,10 @@ class Mesh:
             x.close()
         if self.proxy:
             self.proxy.stop()
+        try:
+            os.unlink(self.endpoints_path())
+        except OSError:
+            pass
 
     # ---- what this host is
     def hello(self):
@@ -550,8 +612,31 @@ class Mesh:
             return ls[0].peer["name"] if ls else str(member)[:8]
 
     def changed(self):
-        """Heads hear: the host process's info (its mesh) has changed."""
+        """Heads hear: the host process's info (its mesh) has changed. And what runs here (endpoints()) is told of other
+        members' providers, if they've changed."""
         self.server.mesh_changed()
+        view = self.view()
+        proxy = view["proxy"]
+        eps = [{"id": endpoint_id(m["id"], p["id"]), "name": f"{p['name']} on {m['name']}",
+                "url": f"{proxy['url']}/{m['id']}/{urllib.parse.quote(p['id'], safe='')}", "key": proxy["key"],
+                "models": [{k: x[k] for k in ("id", "displayName", "window", "tools", "input") if k in x}
+                           for x in p["models"]]}
+               for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
+        with self.lock:
+            if eps == self.told:
+                return
+            self.told = eps
+            path = self.endpoints_path()
+            try:
+                fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump({"pid": os.getpid(), "endpoints": eps}, f)
+                os.replace(path + ".tmp", path)
+            except OSError as e:
+                self.log(f"mesh: {path}: {e}")
+
+    def endpoints_path(self):
+        return os.path.join(os.path.dirname(self.server.socket_path), ENDPOINTS)
 
     # ---- tunnels
     def frame(self, link, f):
@@ -692,8 +777,8 @@ class Mesh:
             return reply("error", error="not a request for a provider")
         heads = msg.get("headers") if isinstance(msg.get("headers"), dict) else {}
         headers = {k: str(v) for k, v in heads.items() if str(k).lower() in ("content-type", "accept")}
-        if p.get("api_key"):
-            headers["Authorization"] = f"Bearer {p['api_key']}"
+        if key := p.get("api_key") or provider_key(p):
+            headers["Authorization"] = f"Bearer {key}"
         try:
             body = base64.b64decode(msg.get("body") or "") if method == "POST" else None
         except ValueError:
@@ -760,9 +845,10 @@ class Proxy:
         if not secrets.compare_digest(given.encode(), self.key.encode()):
             return fail(401, "not this proxy's key")
         parts = h.path.split("/", 4)
-        if len(parts) < 4 or parts[1] != "mesh" or not wire.is_id(parts[2]) or not wire.is_id(parts[3]):
+        provider = urllib.parse.unquote(parts[3]) if len(parts) >= 4 else None
+        if len(parts) < 4 or parts[1] != "mesh" or not wire.is_id(parts[2]) or not is_provider_id(provider):
             return fail(404, "not a member's provider: /mesh/<member>/<provider>/...")
-        member, provider, rest = parts[2], parts[3], "/" + (parts[4] if len(parts) > 4 else "")
+        member, rest = parts[2], "/" + (parts[4] if len(parts) > 4 else "")
         try:
             body = h.rfile.read(int(h.headers.get("Content-Length") or 0)) if h.command == "POST" else b""
         except ValueError:

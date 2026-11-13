@@ -14,8 +14,9 @@ import os
 import socket
 import threading
 import time
+import urllib.parse
 
-from baudelib import claude, wire
+from baudelib import claude, mesh, wire
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -485,23 +486,25 @@ class Network:
 
     def providers(self):
         """Every model provider in the mesh, this machine's first, each {host: {id, name, here}, id, kind, name,
-        models: [{value, displayName}], base_url, api_key}. Another member's that serves HTTP has base_url and api_key
-        for the proxy in this machine's host process, an OpenAI-compatible server here that runs the model there;
-        a program's (apple-claude, pi-claude) has none: a chat started on that member (Remote) runs it. This machine's
-        own have their base_url, and no key. [] with no host process here."""
+        models: [{value, displayName, id, tools, window, input, thinking}], base_url, api_key, endpoint}. Another
+        member's that serves HTTP has base_url and api_key for the proxy in this machine's host process, an
+        OpenAI-compatible server here that runs the model there, and endpoint, its id among mesh.endpoints() (the same
+        every run); a program's (apple-claude, pi-claude) has none: a chat started on that member (Remote) runs it.
+        This machine's own have their base_url, and no key. [] with no host process here."""
         here = self.here_alive()
         if here is None:
             return []
         me = {"id": here.info.get("id"), "name": here.info.get("name"), "here": True}
-        out = [{**p, "host": me, "base_url": p.get("base_url"), "api_key": None}
+        out = [{**p, "host": me, "base_url": p.get("base_url"), "api_key": None, "endpoint": None}
                for p in here.info.get("providers") or [] if isinstance(p, dict)]
         proxy = (here.info.get("mesh") or {}).get("proxy") or {}
         for m in self.members():
             host = {"id": m.get("id"), "name": m.get("name"), "here": False}
             for p in m.get("providers") or []:
                 served = bool(p.get("http") and proxy.get("url"))
-                out.append({**p, "host": host, "base_url": f"{proxy['url']}/{m['id']}/{p['id']}" if served else None,
-                            "api_key": proxy.get("key") if served else None})
+                out.append({**p, "host": host, "api_key": proxy.get("key") if served else None,
+                            "base_url": f"{proxy['url']}/{m['id']}/{urllib.parse.quote(p['id'], safe='')}"
+                            if served else None, "endpoint": mesh.endpoint_id(m["id"], p["id"]) if served else None})
         return out
 
     def look(self):

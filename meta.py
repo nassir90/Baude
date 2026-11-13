@@ -1811,7 +1811,6 @@ class MetaChat(Gtk.Box):
         self.forms_open = {}  # (each form's id: {spec, form, widget (its card), slot (its place in its reply)})
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
         over.add_overlay(self.pins)
-        self.over_note = over  # (where "Context Exhausted" goes, once the box is: exhausted)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
             self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_soon())
         self._pin_after, self._pin_waits = None, 0  # (the after-paint handler waiting to look again: _pin_soon)
@@ -1830,9 +1829,9 @@ class MetaChat(Gtk.Box):
         self.composer.add_controller(keys)
         self.send.connect("clicked", lambda *_: self.ask.stop() if self.ask else self.submit())
         comp.append(self.writing)
-        # (more said than the model's window holds: the conversation greyed, the box off, till a model with a bigger
+        # (more said than the model's window holds: said over the box, the box off, till a model with a bigger
         # window's picked or it's cleared; used: the tokens it takes, as its session last said)
-        self.exhausted, self.used = widgets.Exhausted(self.scroll, self.writing, self.over_note), None
+        self.exhausted, self.used = widgets.Exhausted(self.scroll, self.writing), None
         self.outgrew = None  # (the session that said the conversation's more than its window holds)
         foot = Gtk.Box(spacing=12)
         foot.add_css_class("meta-foot")

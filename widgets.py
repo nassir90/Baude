@@ -1635,20 +1635,18 @@ class ContextUsage(Gtk.Box):
 
 
 class Exhausted:
-    """A chat whose conversation is more than its model's window holds (ContextUsage.over): greyed out, "Context
-    Exhausted" over it, and its box off, till a model with a bigger window's picked or the conversation's cleared.
-    chat: the conversation's view; box: the Composer; over: an overlay on the chat, for the words."""
+    """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
+    over its box, in plain grey, and the box off, till a model with a bigger window's picked or the conversation's
+    cleared. box: the Composer, already in its column; chat: what has the focus instead while it's off."""
 
-    def __init__(self, chat, box, over):
+    def __init__(self, chat, box):
         self.chat, self.box, self.on = chat, box, False
-        self.label = Gtk.Label(label="Context Exhausted", halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                               can_target=False, visible=False)
-        self.label.add_css_class("context-exhausted")
-        over.add_overlay(self.label)
+        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
+        self.label.add_css_class("dim-label")
+        box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 
     def set(self, on):
         self.on = on
-        self.chat.set_opacity(0.35 if on else 1)
         self.label.set_visible(on)
         if on and self.box.input.is_focus():
             self.chat.grab_focus()
@@ -6085,7 +6083,6 @@ paned.main-split.inside-after > separator { margin-left: 6px; margin-right: -6px
 paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6px; }
 .composer-box { border-radius: 12px; box-shadow: 0 0 0 1px @baude_rule; }
 .composer-box:disabled { opacity: 0.55; }
-.context-exhausted { font-size: 1.6em; font-weight: 800; }  /* (over a chat its model's window can't hold: Exhausted) */
 .ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
 .ref-pop listview { background: none; }
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */

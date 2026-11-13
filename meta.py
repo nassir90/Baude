@@ -265,55 +265,6 @@ def plain_ref(surface):
     return "@" + (surface if re.fullmatch(r"[\w][\w./:\-]*[\w/]|\w", surface) else "{" + surface + "}")
 
 
-def ref_brief(item, root=""):
-    """What an @name is, as a chat's agent is told it in its place (briefed): a pull request or an issue as
-    owner/name#12, a workload running in a cluster as cluster/namespace/type/name, a file by its path from root, a
-    database's table by where it is, a chat by its title and transcript, and anything else as what it is and its name
-    (and where it's written, if that's known)."""
-    surface, entry = item["surface"], item.get("entry") or {}
-    if (gh := entry.get("github")) is not None:
-        return f"{'pull request' if gh.get('pr') else 'issue'} {gh['repo']}#{gh['number']}"
-    if item.get("kind") == "chat":
-        return f'chat "{surface}"' + (f" (its transcript: {item['path']})" if item.get("path") else "")
-    sources = entry.get("sources") or ()
-    running = next(((w.removesuffix(" running"), at) for w, at in sources if w.endswith(" running")), None)
-    if running is not None and " · " in running[1]:
-        context, namespace = running[1].split(" · ", 1)
-        return f"Kubernetes {context}/{namespace}/{running[0].lower()}/{surface}"
-    if db := (entry.get("db") or [None])[0]:
-        where = f"{db['engine']} database {db['database']} in container {db['container']}"
-        return f"table {db['table']} ({where})" if db.get("table") else where
-    path, line = item.get("path"), item.get("line")
-    if path and root and path.startswith(root.rstrip("/") + "/"):
-        path = os.path.relpath(path, root)
-    at = (path + (f":{line}" if line else "")) if path else ""
-    if item.get("kind") == "file" and at:
-        return f"file {at}"
-    what = item.get("what") or "name"
-    what = what if what[1:2].isupper() else what[:1].lower() + what[1:]
-    if item.get("kind") == "k8s" and not what.lower().startswith("kube"):
-        what = f"Kubernetes {what}"
-    return f"{what} {item.get('canonical') or surface}" + (f" ({at})" if at else "")
-
-
-BRIEF_RE = re.compile(r"(?<![\w@])@(?:\{([^}\n]+)\}|([\w][\w./:\-]*[\w/]|\w)(#\d+\b)?)")  # (REF_RE's, and @owner/name#12)
-
-
-def briefed(text, space, root=""):
-    """text with each @name space knows put as the agent's told it (ref_brief); in code, as written."""
-    if space is None:
-        return text
-    parts = re.split(r"(?ms)(^\s*```.*?(?:^\s*```[^\n]*$|\Z)|`[^`\n]+`)", text)
-
-    def brief(m):
-        item = space.find(m.group(1) or m.group(2) + (m.group(3) or ""))
-        if item is not None:
-            return ref_brief(item, root)
-        item = space.find(m.group(2)) if m.group(3) else None  # (@name#12: a name, then a number)
-        return ref_brief(item, root) + m.group(3) if item is not None else m.group(0)
-    return "".join(p if i % 2 else BRIEF_RE.sub(brief, p) for i, p in enumerate(parts))
-
-
 def attr(value):
     return html.escape(str(value), quote=True)
 

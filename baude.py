@@ -11333,7 +11333,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
                                                propagate_natural_height=True)
         self.completer = SlashCompleter(self.input, box_overlay)
-        # (@'s list, as in Meta's box: Meta's names, the chats and the folder's; sent as briefed says them)
+        # (@'s list, as in Meta's box: the chats, and the names the chat's folder has)
         self.refs = meta.RefCompleter(lambda: self.panel.meta.names if getattr(self, "panel", None) else None,
                                       self.input, box_overlay)
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
@@ -12922,7 +12922,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
-        text = meta.briefed(text, self.panel.meta.names, self.cwd or "")  # (its @names as the agent is told them)
         self.add(self.user_bubble(text, atts))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.user(self.user_content(text, atts))

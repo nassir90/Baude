@@ -275,7 +275,7 @@ def main():
         return
     if args.command == "models":
         for m in ask(args, {"op": "subscribe"})["server"].get("models") or []:
-            print(f"{m['value']:24}  {m['displayName']}" + (f"  [{m['providerName']}]" if m.get("providerName") else ""))
+            print(f"{m['value']:24}  {m['displayName']}")
         return
     if args.command in ("link", "unlink"):
         where = {"via": "ssh", "dest": args.dest, **({"command": args.host_command}

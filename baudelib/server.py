@@ -426,15 +426,15 @@ class Server:
         with self.lock:
             return self._info()
 
-    def models(self, said=None, fresh=False, wait=True):
+    def models(self, said=None, fresh=False):
         """Every model it can run, as initialize lists them: Claude's (as claude last said; said, if it's just said it:
         fresh), then those of this machine's inference providers (baudelib.providers: Apple's, MLX's, Ollama's, an
-        endpoint's), each with its provider. wait: for the providers to be found, the first time."""
+        endpoint's), each with its provider."""
         claudes = [m for m in said or [] if models.model_program(m.get("value")) == "claude"] if fresh else []
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
-        return (claudes or self.me.get("claude_models") or []) + models.runnable_models(wait=wait)
+        return (claudes or self.me.get("claude_models") or []) + models.runnable_models()
 
     def init(self, said, fresh=False):
         """What a session's program said to initialize (fresh: just now, not kept from before), with every model this
@@ -442,18 +442,19 @@ class Server:
         return {**said, "models": self.models(said.get("models"), fresh)}
 
     def can_run(self, model):
-        """Can this machine run a model: Claude's (claude's own say), or one of runnable_models (its program and, for
-        pi's, the model itself here)?"""
+        """Can this machine run a model: Claude's (claude's own say); one Ollama or an endpoint serves, with pi here
+        (its server's say comes with the first message: pi-claude's); or one of runnable_models (its program and, for
+        MLX's, the model itself here)?"""
         if models.model_program(model) == "claude":
             return not models.launch(model, None, None)["missing"]
-        return any(m["value"] == model for m in models.runnable_models()) or \
-            any(m["value"] == model for m in models.runnable_models(fresh=True))  # (pulled since it last looked)
+        if isinstance(model, str) and model.startswith(models.SERVED):
+            return providers.pi_installed()
+        return any(m["value"] == model for m in models.runnable_models())
 
     def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
-                "models": [{"value": m["value"], "displayName": m.get("displayName") or m["value"]} |
-                           {k: m[k] for k in ("provider", "providerName", "tools") if k in m}
-                           for m in self.models(wait=False)],  # (with their providers: a head's provider picker)
+                "models": [{"value": m["value"], "displayName": m.get("displayName") or m["value"]}
+                           for m in self.models()],
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),

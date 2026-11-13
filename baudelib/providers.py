@@ -118,8 +118,9 @@ def key_of(ep):
 
 
 def ollama_url(st=None):
-    """Where Ollama is: settings.json's ollama_url, else OLLAMA_HOST (as Ollama takes it: host, host:port, or a URL;
-    0.0.0.0, where it listens on every address, reached at 127.0.0.1), else 127.0.0.1:11434."""
+    """Where Ollama is: settings.json's ollama_url, else OLLAMA_HOST, else 127.0.0.1:11434; read as Ollama reads
+    OLLAMA_HOST: host, host:port, or a URL (its port 80 or 443 if it gives none, and its path kept). 0.0.0.0, where it
+    listens on every address, is reached at 127.0.0.1."""
     st = settings() if st is None else st
     raw = (st.get("ollama_url") if isinstance(st.get("ollama_url"), str) else None) or os.environ.get("OLLAMA_HOST") or ""
     raw = raw.strip().rstrip("/")
@@ -130,10 +131,10 @@ def ollama_url(st=None):
     if host in ("0.0.0.0", "::"):
         host = "127.0.0.1"
     try:
-        port = u.port or OLLAMA_PORT
+        port = u.port or (OLLAMA_PORT if "://" not in raw else 443 if u.scheme == "https" else 80)
     except ValueError:
         port = OLLAMA_PORT
-    return f"{u.scheme or 'http'}://{'[' + host + ']' if ':' in host else host}:{port}"
+    return f"{u.scheme or 'http'}://{'[' + host + ']' if ':' in host else host}:{port}{u.path.rstrip('/')}"
 
 
 # ---- talking to a server
@@ -280,6 +281,9 @@ def endpoint(ep, timeout=TIMEOUT):
     except (OSError, ValueError) as e:
         out["error"] = unreachable(ep["url"], e)
         return out
+    if not isinstance(listed, dict) or not isinstance(listed.get("data"), list):
+        out["error"] = f"at {ep['url']} didn't list models as OpenAI's API does"
+        return out
     props = None
     try:  # (llama-server says its window at /props, beside /v1)
         props = fetch(re.sub(r"/v1$", "", ep["url"]) + "/props", timeout=timeout) if ep["url"].endswith("/v1") \
@@ -303,18 +307,23 @@ def pi_installed():
     return os.access(pi, os.X_OK)
 
 
-def look():
-    """This machine's providers, looked for now: [{"id", "name", "models", "error", ...}], in ORDER, the endpoints
-    last. One with models and no error can run them (pi-claude needs pi, for all but Apple's)."""
-    st = settings()
+def look_here():
+    """The providers found on disk, at once: Apple's (macOS) and MLX's."""
     out = []
     if sys.platform == "darwin":
         out.append({"id": "apple", "name": "Apple", "models": [modelslib.APPLE_MODEL | {"provider": "apple",
                                                                                          "providerName": "Apple"}],
                     "error": None if modelslib.apple_exe() else "apple-claude isn't built"})
-    pi = pi_installed()
     mlx = [m | {"provider": "mlx", "providerName": "MLX"} for m in modelslib.local_models()]
-    out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": None if pi else "pi isn't installed"})
+    out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": None if pi_installed() else "pi isn't installed"})
+    return out
+
+
+def look():
+    """This machine's providers, looked for now: [{"id", "name", "models", "error", ...}], in ORDER, the endpoints
+    last. One with models and no error can run them (pi-claude needs pi, for all but Apple's)."""
+    st, pi = settings(), pi_installed()
+    out = look_here()
     found, threads = {}, []
     eps = endpoints(st)
 
@@ -337,8 +346,9 @@ def look():
     return out
 
 
-_STATE = {"at": None, "providers": None, "looking": None}
+_STATE = {"at": None, "providers": None, "looking": None, "started": 0.0}
 _LOCK = threading.Lock()
+_FIRST = threading.Event()  # (set once there's anything found: the quick part, look_here's, at once)
 _LISTENERS = []
 
 
@@ -352,17 +362,11 @@ def unlisten(fn):
         _LISTENERS.remove(fn)
 
 
-def _look():
-    try:
-        now = look()
-    except Exception:  # noqa: BLE001 (a look that fails is tried again next time)
-        now = None
+def _publish(now):
     with _LOCK:
-        was = _STATE["providers"]
-        if now is not None:
-            _STATE["providers"] = now
-        _STATE["at"], _STATE["looking"] = time.monotonic(), None
-    if now is not None and _shape(now) != _shape(was):
+        was, _STATE["providers"] = _STATE["providers"], now
+    _FIRST.set()
+    if _shape(now) != _shape(was):
         for fn in list(_LISTENERS):
             try:
                 fn()
@@ -370,23 +374,46 @@ def _look():
                 pass
 
 
+def _look():
+    if _STATE["providers"] is None:  # (the first look: what's on disk said at once, the servers' after)
+        try:
+            _publish(look_here())
+        except Exception:  # noqa: BLE001 (the whole look says it)
+            pass
+    try:
+        now = look()
+    except Exception:  # noqa: BLE001 (a look that fails is tried again next time)
+        now = None
+    if now is not None:
+        _publish(now)
+    with _LOCK:
+        _STATE["at"], _STATE["looking"] = time.monotonic(), None
+    _FIRST.set()
+
+
 def _shape(providers):
-    return [(p["id"], p["error"], [(m["value"], m.get("tools"), m.get("window")) for m in p["models"]])
-            for p in providers or []]
+    """What a picker shows of providers (not a loaded model's window, which comes and goes with Ollama's keep-alive)."""
+    return [(p["id"], p["error"], [(m["value"], m.get("tools")) for m in p["models"]]) for p in providers or []]
 
 
 def found(wait=False, max_age=MAX_AGE):
     """This machine's providers as last found (look), looked for again on a thread once they're max_age old (0: now).
-    wait: for that look, if nothing's been found yet or it's asked to be now (max_age 0), at most WAIT seconds (or as
-    many as it says: a window waits a moment, then hears the rest, listen)."""
+    wait: for what's found, at most WAIT seconds (or as many as it says) from when the look began: the first time,
+    for what's on disk (Apple's, MLX's: at once; the servers' come after, listen); asked to be now (max_age 0), for
+    the whole look. Every caller waits for the same look till the same moment."""
     with _LOCK:
         stale = _STATE["at"] is None or max_age == 0 or time.monotonic() - _STATE["at"] >= max_age
         if stale and _STATE["looking"] is None:
+            _STATE["started"] = time.monotonic()
             t = _STATE["looking"] = threading.Thread(target=_look, daemon=True, name="providers")
             t.start()
-        looking, have = _STATE["looking"], _STATE["providers"]
-    if wait and looking is not None and (have is None or max_age == 0):
-        looking.join(WAIT if wait is True else wait)
+        looking, have, started = _STATE["looking"], _STATE["providers"], _STATE["started"]
+    if wait and looking is not None:
+        left = max(0.0, started + (WAIT if wait is True else wait) - time.monotonic())
+        if max_age == 0:
+            looking.join(left)
+        elif have is None:
+            _FIRST.wait(left)
     return list(_STATE["providers"] or [])
 
 
@@ -398,6 +425,30 @@ def usable(providers=None, tools=False):
         if models and not p["error"]:
             out.append({**p, "models": models})
     return out
+
+
+def local_providers():
+    """This machine's providers that run models now, as another host is told of them (the mesh: plain JSON, no
+    secrets): [{"id", "kind" (apple, mlx, ollama, openai), "name", "base_url" (its OpenAI-compatible API; None for one a
+    program runs: Apple's, MLX's), "models": [{"value", "displayName", "id" (its name to its server), "tools",
+    "window", "input", "thinking"}]}]."""
+    out = []
+    for p in usable():
+        kind = "openai" if p["id"].startswith("openai/") else p["id"]
+        base = p["url"] + "/v1" if kind == "ollama" else p.get("url") if kind == "openai" else None
+        out.append({"id": p["id"], "kind": kind, "name": p["name"], "base_url": base, "models": [
+            {"value": m["value"], "displayName": m["displayName"], "id": m.get("resolvedModel") or m["value"],
+             "tools": m.get("tools", True), "window": m.get("window"), "input": m.get("input") or ["text"],
+             "thinking": bool(m.get("thinking") or m.get("supportsEffort"))} for m in p["models"]]})
+    return out
+
+
+def endpoint_key(pid):
+    """The key an endpoint of this machine's needs (local_providers' id: openai/<id>), for what forwards to it here;
+    None for one that needs none. It never leaves this machine."""
+    if not isinstance(pid, str) or not pid.startswith("openai/"):
+        return None
+    return key_of(next((e for e in endpoints() if e["id"] == pid[len("openai/"):]), None))
 
 
 def group(models):

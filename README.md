@@ -84,7 +84,7 @@ python3 record.py            # Record
 sessions there and their claude processes, for Baude to start, watch and steer from that machine or another. It needs
 only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`, Apple's with
 `apple-claude` once built, and MLX's, Ollama's and an OpenAI-compatible server's with `pi-claude` (`baude_headless.py
-models` lists them, each with its provider). It listens only on a Unix
+models` lists them). It listens only on a Unix
 socket in a folder of its user's own, with no port on the network. Baude on the same machine uses the socket, and reads
 its sessions' transcripts where they are; Baude on another reaches it over ssh, as `ssh HOST baude_headless.py
 connect`, which carries the protocol between ssh and the socket and starts the host process if it isn't running. So

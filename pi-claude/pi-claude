@@ -373,8 +373,11 @@ def leave_server():
 
 
 def use_served():
-    """A served model's server there, and Ollama's model loaded, its window the one it's loaded with (window)."""
+    """A served model's server there (asked again: it may have started, or the model come, since), and Ollama's model
+    loaded, its window the one it's loaded with (window)."""
     global window
+    model.update(providers.resolve(model["value"]) or {})
+    window = model.get("window") or window
     if model.get("error"):
         raise RuntimeError(model["error"])
     if kind != "ollama":
@@ -414,8 +417,9 @@ def provider_config():
                          "compat": {"thinkingFormat": "qwen", "thinkingTokenBudgetField": "thinking_budget"}}
                         if model.get("thinking") else {"maxTokens": MAX_OUT})]}
     thinks = bool(model.get("thinking"))  # (Ollama's thinking models: reasoning_effort, "none" for off)
+    key = (model.get("apiKey") or "none").replace("$", "$$")  # (as it is: pi reads $NAME and a leading ! itself)
     return kind, {
-        "baseUrl": model["baseUrl"], "api": "openai-completions", "apiKey": model.get("apiKey") or "none",
+        "baseUrl": model["baseUrl"], "api": "openai-completions", "apiKey": "$!" + key[1:] if key.startswith("!") else key,
         "compat": {"supportsDeveloperRole": False, "supportsStore": False, "maxTokensField": "max_tokens",
                    "supportsReasoningEffort": thinks} | ({"thinkingFormat": "openai"} if thinks else {}),
         "models": [{"id": model["repo"], "name": model["displayName"], "input": model.get("input") or ["text"],
@@ -456,7 +460,7 @@ class Engine:
             self.failed = str(e)
         self.ready.set()
         for item in self.queue:
-            self.prompt(*item)
+            self.prompt(*item, again=False)
         self.queue.clear()
 
     def _pi(self):
@@ -466,9 +470,11 @@ class Engine:
         provider, config = provider_config()
         with open(os.path.join(self.agent_dir, "models.json"), "w") as f:
             json.dump({"providers": {provider: config}}, f)
-        if window < CONTEXT:  # (a small window: pi summarises sooner, and keeps less as it is, than its own defaults)
+        if window < CONTEXT:  # (a small window: pi summarises once three quarters of it's used, keeping a quarter as
+            # it is, so what's left after is well under where it summarises again)
             with open(os.path.join(self.agent_dir, "settings.json"), "w") as f:
-                json.dump({"compaction": {"reserveTokens": window // 2, "keepRecentTokens": window * 5 // 8}}, f)
+                json.dump({"compaction": {"reserveTokens": max(out_room(model.get("thinking")), window // 4),
+                                          "keepRecentTokens": window // 4}}, f)
         node = which("node", os.path.expanduser("~/.local/node/bin/node"), "/opt/homebrew/bin/node")
         sessions = os.path.join(HOME, "sessions")
         os.makedirs(sessions, exist_ok=True)
@@ -527,7 +533,10 @@ class Engine:
             self.pi.stdin.write((json.dumps(cmd | {"id": cid}) + "\n").encode())
             self.pi.stdin.flush()
 
-    def prompt(self, text, images):
+    def prompt(self, text, images, again=True):
+        if again and self.failed and kind != "mlx" and self.pi is None and self.turn is None:  # (its server wasn't
+            self.failed, self.started = None, False  # there, or the model wouldn't load: tried again with this message)
+            self.ready.clear()
         if not self.ready.is_set():
             self.queue.append((text, images))
             self.start()

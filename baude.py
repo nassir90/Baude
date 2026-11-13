@@ -11228,7 +11228,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # (left of it: the inference providers, by host, whose models it lists after Claude's: sync_providers)
         self.provider_dd = ellipsize_dropdown(ChoiceDropDown([], "Inference provider", self.on_provider_changed), 24)
         self.provider_dd.set_visible(False)
-        self.provider_key, self.provider_models, self.elsewhere = None, {}, {}
+        self.provider_key, self.elsewhere = None, {}
         self.mode_dd = ChoiceDropDown([], "Permission mode", self.on_mode_changed)
         self.effort_dd = ChoiceDropDown([], "Thinking effort", self.on_effort_changed)
         self.effort_dd.set_sensitive(False)
@@ -13012,14 +13012,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         was = self.model
         if value == was:  # (the one it's on)
             return
-        if (key := self.provider_key_of(value)) is not None:  # (the provider's model picked last: picked again with it)
-            save_settings(provider_models={**(load_settings().get("provider_models") or {}), key: value})
         if self.remote is not None and model_program(value) != model_program(was):
             label = self.model_dd.label()
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
             return
         self.model = value
+        self.follow_model(value)
         self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
@@ -13112,7 +13111,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         network session's is the one its server says it's on."""
         if info.get("remote") is not None and info.get("model"):
             self.model = info["model"]
-            self.model_dd.select(self.model)  # (named as its server lists it once it's said: sync_models)
+            self.follow_model(self.model)
+            self.sync_providers()  # (named as its server lists it once it's said: sync_models)
             self.sync_effort_choices()
             self.sync_local()
             return
@@ -13128,7 +13128,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         self.model = model
         if model:
-            self.model_dd.select(model)
+            self.follow_model(model)
+            self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
 
@@ -13170,6 +13171,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         want = self.model or default.get("resolvedModel")
         hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), want) if want else None
         self.model_shown = hit  # (what the picker shows while claude's own default's the model: self.model None)
+        if hit:
+            self.follow_model(hit)
         self.sync_providers(hit)
         self.sync_effort_choices()
         self.sync_local()
@@ -13177,8 +13180,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # ---- inference providers: where the models besides Claude's run (Ollama, MLX, Apple's, an OpenAI-compatible
     # server), by host: this machine's, and every other host's there in the mesh (as its host process lists them).
     # Picked left of the model picker, which lists Claude's (claude's: not a provider, bound to where it runs), then
-    # the provider's. Picked while the chat's on a provider's model, the chat goes on that provider's (the one picked on
-    # it last, else its first); on Claude's, only the list changes. A model on another host is a new conversation there
+    # the provider's. Picking a provider changes the list; picking a model changes the chat (one on another host: a
+    # new conversation there). The picker's on the provider of the chat's model, as it's opened or picked
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
@@ -13217,10 +13220,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return [(k, label, [m["value"] for m in ms]) for k, label, ms, _r in
                 (self.provider_choices() if found is None else found)]
 
-    def sync_providers(self, shown=None, key=None):
-        """The provider picker as the chat's host and the mesh have them, on key (else the provider of the model
-        shown, else the one picked last): hidden with none, dimmed with one; and the model picker: Claude's models,
-        then the provider's, on shown (the chat's model, if not given)."""
+    def follow_model(self, value):
+        """The provider picker on a model's provider, where it's one's (the chat's model, picked, or the chat opened)."""
+        if (key := self.provider_key_of(value)) is not None:
+            self.provider_key = key
+
+    def sync_providers(self, shown=None):
+        """The provider picker as the chat's host and the mesh have them, on the one picked (else the provider of the
+        model shown, else the one picked last time): hidden with none, dimmed with one; and the model picker: Claude's
+        models, then the provider's, on shown (the chat's model, if not given), which is listed too if it isn't."""
         found = self.provider_choices()
         self.providers_seen = self.providers_listed(found)
         if self.chat_host() == HERE_HOST:  # (this machine's models as they're found now: their effort levels)
@@ -13229,11 +13237,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     self.models_info.setdefault(m["value"], m)
         keys = [k for k, *_ in found]
         shown = shown or self.model or getattr(self, "model_shown", None)
+        key = self.provider_key
         if key not in keys:
             key = self.provider_key_of(shown) if shown else None
         if key not in keys:
             kept = load_settings().get("provider")
-            key = self.provider_key if self.provider_key in keys else kept if kept in keys else keys[0] if keys else None
+            key = kept if kept in keys else keys[0] if keys else None
         self.provider_key = key
         self.provider_dd.set_choices([(k, label) for k, label, *_ in found])
         if key:
@@ -13243,28 +13252,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
                                           (" (the only one there is)" if len(found) == 1 else ""))
         chosen = next(((ms, r) for k, _l, ms, r in found if k == key), ([], None))
-        self.provider_models = {m["value"]: m for m in chosen[0]}
         self.elsewhere = {m["value"]: chosen[1] for m in chosen[0]} if chosen[1] is not None else {}
-        claudes = [m for m in self.models_info.values() if m["value"] != "default" and
-                   model_program(m["value"]) == "claude"]
-        self.model_dd.set_choices([(m["value"], m.get("displayName") or m["value"]) for m in claudes + chosen[0]]
-                                  or MODELS)
+        listed = [m for m in self.models_info.values() if m["value"] != "default" and
+                  model_program(m["value"]) == "claude"] + list(chosen[0])
+        if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
+            listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
+        self.model_dd.set_choices([(m["value"], m.get("displayName") or m["value"]) for m in listed] or MODELS)
         if shown:
             self.model_dd.select(shown)
 
     def on_provider_changed(self, key):
-        """A provider picked: kept for the chats after (settings.json's provider); the chat on its model, if it's on a
-        provider's now (the one picked on it last, else its first), else only the list."""
+        """A provider picked: the model picker lists its models after Claude's (the chat goes on with its own till one's
+        picked); kept for the chats after (settings.json's provider)."""
         self.provider_key = key
         save_settings(provider=key)
-        on_claude = self.provider_key_of(self.model) is None if self.model else True
-        self.sync_providers(key=key)
-        if on_claude or not self.provider_models:
-            return
-        kept = (load_settings().get("provider_models") or {}).get(key)
-        value = kept if kept in self.provider_models else next(iter(self.provider_models))
-        self.model_dd.select(value)
-        self.on_model_changed(value)
+        self.sync_providers()
 
     def providers_found(self):
         """This machine's providers changed (found again: Ollama started, a model pulled): the pickers as they are now."""

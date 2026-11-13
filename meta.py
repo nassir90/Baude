@@ -119,22 +119,25 @@ def providers_offered(offered=None):
 
 
 def provider(offered=None):
-    """The provider whose models Intelligence lists after Claude's: Meta's model's, if it's a provider's; else the one
-    picked last (settings.json's meta_provider), else the first."""
+    """The provider whose models Intelligence lists after Claude's: the one picked (settings.json's meta_provider,
+    which a provider's model picked is too); else Meta's model's, else the first."""
     offered = models() if offered is None else offered
-    entry = model_entry(model(), offered)
-    if entry and entry[3]:
-        return entry[3]
     ids = [pid for pid, _ in providers_offered(offered)]
     kept = widgets.load_settings().get("meta_provider")
-    return kept if kept in ids else ids[0] if ids else None
+    if kept in ids:
+        return kept
+    entry = model_entry(model(), offered)
+    return entry[3] if entry and entry[3] in ids else ids[0] if ids else None
 
 
 def listed_models(offered=None):
-    """What Intelligence lists: Claude's models, then the provider's (provider)."""
+    """What Intelligence lists: Claude's models, then the provider's (provider); and Meta's own, if it's another
+    provider's (it goes on with it till another's picked)."""
     offered = models() if offered is None else offered
     pid = provider(offered)
-    return [m for m in offered if m[3] is None or m[3] == pid]
+    out = [m for m in offered if m[3] is None or m[3] == pid]
+    entry = model_entry(model(), offered)
+    return out + [entry] if entry and entry not in out else out
 
 
 def listed(found, seed=False):
@@ -653,11 +656,10 @@ providerslib.listen(sync_rows)  # (this machine's providers found again, and cha
 
 def model_picked(chat, value):
     """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, every Effort row
-    offers its levels, and a provider's model is the one picked again with its provider (meta_provider_models)."""
+    offers its levels, and a provider's model puts Provider on its provider."""
     changes = {"meta_model": value}
     if pid := providerslib.provider_of(value):
-        kept = widgets.load_settings().get("meta_provider_models")
-        changes |= {"meta_provider": pid, "meta_provider_models": {**(kept if isinstance(kept, dict) else {}), pid: value}}
+        changes["meta_provider"] = pid
     widgets.save_settings(**changes)
     sync_rows()
     if chat is not None:
@@ -665,15 +667,9 @@ def model_picked(chat, value):
 
 
 def provider_picked(chat, pid):
-    """Provider set to pid: Intelligence lists its models after Claude's; Meta on its model (the one picked on it last,
-    else its first) if it's on a provider's now."""
+    """Provider set to pid: Intelligence lists its models after Claude's (Meta goes on with its own till one's
+    picked)."""
     widgets.save_settings(meta_provider=pid)
-    offered = models()
-    entry = model_entry(model(), offered)
-    theirs = [m[0] for m in offered if m[3] == pid]
-    if entry and entry[3] and entry[3] != pid and theirs:
-        kept = (widgets.load_settings().get("meta_provider_models") or {}).get(pid)
-        return model_picked(chat, kept if kept in theirs else theirs[0])
     sync_rows()
 
 

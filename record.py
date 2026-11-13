@@ -5378,9 +5378,11 @@ class RecordChat(meta.MetaChat):
         self.win.mark_books()  # (the notebooks' list as this conversation's marks have it)
 
     # ---- what Meta.MetaChat asks of Record
-    def conv(self, notebook=None):
-        """Where a conversation's kept: the notebook open's (or notebook's), else Record's own, with none open."""
-        notebook = notebook or self.notebook
+    OPEN = object()  # (conv's notebook, not said: the one open)
+
+    def conv(self, notebook=OPEN):
+        """Where a conversation's kept: the notebook open's (or notebook's), else Record's own, with none."""
+        notebook = self.notebook if notebook is self.OPEN else notebook
         return notebook if notebook is not None else self.win.store.meta
 
     def messages(self):
@@ -5451,6 +5453,13 @@ class RecordChat(meta.MetaChat):
 
     def told(self):
         return self.conv().setdefault("meta_told", [])
+
+    def unkept(self):
+        """The changes to the left bars not kept yet, whichever conversation made them (a notebook Meta made while
+        none was open, opened: its pages marked as they came), oldest first: marked, and kept or undone together."""
+        convs = [self.win.store.meta, *self.win.store.notebooks]
+        return sorted((a for c in convs for a in c.get("meta_actions") or ()
+                       if a["state"] == "done" and not a.get("kept")), key=lambda a: a.get("t") or 0)
 
     def showing(self, agent):
         return getattr(agent, "notebook", None) is self.notebook
@@ -5761,7 +5770,7 @@ class RecordChat(meta.MetaChat):
             outer.bubble = b
             return outer
         outer = super()._bubble(m)
-        if m["role"] != "user" and m.get("unknown"):
+        if m["role"] != "user" and m.get("unknown") and self.notebook is not None:  # (chips add to its Home)
             outer.bubble.append(self._unknown_chips(m))
         return outer
 
@@ -6185,6 +6194,9 @@ class RecordChat(meta.MetaChat):
         moved = {k: v for k, v in moved.items() if k != v or src is not nb}
         if not moved:
             return {"text": "They're there already."}
+        if src is not nb and (waiting := [p["page"] for p in pending_edits(src, self.agent) if p["page"] in moved]):
+            raise ValueError(f"{short_page(waiting[0])} has edits of yours waiting: they're accepted or rejected (or "
+                             "withdrawn) before it moves to another notebook.")
         if clash := [to for to in moved.values() if to in nb["pages"] and (src is not nb or to not in moved)]:
             raise ValueError(f"There's a page {clash[0]} in {full_name(nb)} already.")
         where = under or "the top"
@@ -6207,7 +6219,8 @@ class RecordChat(meta.MetaChat):
             for old, new in moved.items():
                 if old in src["pages"]:
                     nb["pages"][new] = src["pages"].pop(old)
-            marks = [("page", page_key(nb, new), "moved", f"from {full_name(src)}", page_key(src, old))
+            how = "added" if self.marks("notebook").get(nb["id"], ("",))[0] == "added" else "moved"  # (new to it)
+            marks = [("page", page_key(nb, new), how, f"from {full_name(src)}", page_key(src, old))
                      for old, new in moved.items() if new in nb["pages"]]
             into = f" into {full_name(nb)}" if nb is not self.notebook else ""
             a = self._pages_act(turn, said + f" from {full_name(src)}{into}", before, marks=marks)
@@ -6743,6 +6756,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.notebook_list.select_row(first)
         else:
             self._show(None)
+            self.chat.show(None)  # (Meta's own conversation, as it was left)
         for chat in chats:  # (the chats open when it last closed, back in their tabs)
             if os.path.exists(chat.get("path") or ""):
                 self.open_chat(chat["path"], select=False, present=False)
@@ -7356,6 +7370,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     def add_unknown(self, term):
         notebook = self.current
+        if notebook is None:
+            return
         notebook["pages"][HOME] = add_to_learn(notebook["pages"].get(HOME, ""), term)
         self.store.save()
         if (home := self.tabs.get(("note", HOME))) is not None:

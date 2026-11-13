@@ -1974,6 +1974,8 @@ class MetaChat(Gtk.Box):
                 usage = {"totalTokens": self.used, "maxTokens": window(model())}
             self.ctx.set_usage(usage)
         outgrown = agent is not None and agent is self.outgrew and agent.model == model()
+        if outgrown:
+            self.ctx.bar.set_value(1)
         self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
 
     def close_agent(self):
@@ -1991,6 +1993,7 @@ class MetaChat(Gtk.Box):
             self.ctx.reset()
             self.writing.set_busy(False)
             self._drop_asking()
+            self.model_changed()  # (exhausted or not, as the conversation stands in the next session's window)
 
     CONTEXT_EVERY_MS = 1000
 
@@ -2790,7 +2793,7 @@ class MetaChat(Gtk.Box):
                                    model(), setup.get("exe"), setup.get("env_of"), effort())
                 self.agent_made(self.agent)
             turn = {"text": [], "items": [], "actions": [], "shown": [], "code": [], "streamed": False,
-                    **self.turn_extra(msg)}
+                    "msg": msg, "told": list(self.told()), **self.turn_extra(msg)}  # (msg, told: kept, if not sent)
             self.agent.ask(self.message_for(self.agent, msg), turn)
         except OSError as e:
             self.agent = None
@@ -3003,13 +3006,16 @@ class MetaChat(Gtk.Box):
             self.ask, self.live_widget = None, None
             self.writing.set_busy(False)
             self._drop_asking()
-        if need is not None and agent is self.agent:
-            self.show_usage({"totalTokens": need, "maxTokens": agent.window})
+        if need is not None:
+            self._unsent(turn)
+            if agent is self.agent:
+                self.show_usage({"totalTokens": need, "maxTokens": agent.window})
         elif outgrown and agent is self.agent:
             self.outgrew = agent
+            self.show_usage({})
             agent.usage(lambda usage: agent is self.agent and self.show_usage(usage))
-        else:
-            self.context_soon(agent)
+        elif agent is self.agent:
+            self._context_now()  # (at once: the box off before another's asked, if it's over)
         if error or text.strip() or self.worked(turn):
             m = {"role": "meta", "text": text, "t": time.time(),
                  "items": [{k: v for k, v in it.items() if k != "ran"} for it in turn["items"]]}
@@ -3029,6 +3035,18 @@ class MetaChat(Gtk.Box):
         if self.showing(agent):
             self.render()
         return False
+
+    def _unsent(self, turn):
+        """A message that wasn't sent (more than its session's window holds): out of the conversation, its text back in
+        the box, and what Meta was to be told with it kept for the next."""
+        said, msg = self.messages(), turn.get("msg")
+        if any(m is msg for m in said):
+            said[:] = [m for m in said if m is not msg]
+            buf = self.composer.get_buffer()
+            if not buf.get_char_count():
+                buf.set_text(msg["text"])
+        told = self.told()
+        told[:0] = [t for t in turn.get("told") or () if t not in told]
 
     def store_reply(self, agent, m):
         self.messages().append(m)

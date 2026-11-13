@@ -5526,18 +5526,24 @@ class RecordChat(meta.MetaChat):
 
     def call_hunks(self, it):
         """propose_edit's, revise_edit's and edit_page's: the passage it replaces (revise_edit's, if it gave none: the
-        one its edit replaced then) and what it puts in."""
+        one its edit replaced then, kept with it as it ran) and what it puts in."""
         short, inp = (it.get("name") or "").removeprefix("mcp__meta__"), it.get("input") or {}
         if short not in ("propose_edit", "revise_edit", "edit_page"):
             return []
         if short == "revise_edit":
             old = it.get("replaced", inp.get("old_text"))
-            if old is None and (p := self._proposal(inp.get("id"))) is not None:
-                old = p["old"]  # (still running: what its edit replaces)
+            if old is None and it.get("state") == "running" and (p := self._proposal(inp.get("id"))) is not None:
+                old = p["old"]  # (its edit's, as it's not run yet)
         else:
             old = inp.get("old_text") or ""
         new = str(inp.get("new_text") or "")
         return [] if old is None or str(old) == new else [(str(old), new)]
+
+    def call_row(self, it):
+        if (it.get("name") or "").removeprefix("mcp__meta__") != "edit_page" or self.notebook is None:
+            return None
+        name = str((it.get("input") or {}).get("page") or "")
+        return "page", page_key(self.notebook, page_named(self.notebook, name, self.win.store) or name)
 
     def _proposal(self, pid):
         """An edit the agent proposed to the notebook's pages, by its id, whatever's become of it; or None."""

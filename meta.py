@@ -1664,8 +1664,7 @@ class MetaChat(Gtk.Box):
         if m.get("error"):
             drawn = set()
             for it in items or ():
-                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn and
-                                                 not self.call_hunks(it)):
+                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn):
                     widget, holds = self.call_widget({**it, "actions": [i for i in it.get("actions") or ()
                                                                          if i not in drawn]})
                     drawn.update(it.get("actions") or ())
@@ -1673,6 +1672,8 @@ class MetaChat(Gtk.Box):
                         reply.append(widget)
                     if not holds:
                         self.add_shown(reply, it.get("shown") or ())
+                elif it["kind"] == "tool" and self.call_hunks(it):
+                    reply.append(self.tool_card(it, controls=False))
             reply.prose = label(m.get("text") or "", css=("error",), select=True)
             reply.append(reply.prose)
             return reply
@@ -1687,7 +1688,9 @@ class MetaChat(Gtk.Box):
             else:
                 ids = it.get("actions") or []
                 fresh = [i for i in ids if i not in drawn]
-                if ids and not fresh and not self.call_hunks(it):  # (an edit drawn with an earlier call's: its hunk)
+                if ids and not fresh:
+                    if self.call_hunks(it):  # (an edit, its change drawn at an earlier call's: its card, with its hunk)
+                        reply.append(self.tool_card(it, controls=False))
                     self.add_shown(reply, it.get("shown") or ())
                     continue
                 drawn.update(ids)
@@ -2021,10 +2024,7 @@ class MetaChat(Gtk.Box):
             if base in ("show", "open_form", "fill_form"):  # (what they bring up speaks for itself)
                 return None, False
             if any(a.get("marks") for a in batch):
-                box = self.change_box(batch)
-                if (hunks := self.hunks(it)) is not None:
-                    box.append(hunks)
-                return box, False
+                return self.change_box(batch, it), False
         return self.tool_card(it), False
 
     def call_hunks(self, it):
@@ -2032,14 +2032,21 @@ class MetaChat(Gtk.Box):
         hunk on its card (Record's edits to a page, RecordChat)."""
         return []
 
-    def hunks(self, it):
+    def call_row(self, it):
+        """The left bar's row whose text a call's hunks change, (kind, key): in a change's box, they go under it."""
+        return None
+
+    def hunks(self, it, batch=()):
         """A call's hunks (call_hunks) as Baude's chat shows an Edit's: what it replaces on red, line by line, then
-        what it puts in on green, wrapped as prose; None for a call with none, or that failed."""
+        what it puts in on green, wrapped as prose, faded once its batch is undone; None for a call with none, or
+        that failed."""
         if it.get("state") == "error" or not (pairs := self.call_hunks(it)):
             return None
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=6)
         for old, new in pairs:
             box.append(widgets.diff_block(old, new, wrap=True))
+        if batch and all(a["state"] != "done" for a in batch):
+            box.add_css_class("dim-label")
         return box
 
     def outline(self, batch, caption):
@@ -2075,11 +2082,13 @@ class MetaChat(Gtk.Box):
             row.add_suffix(self.batch_controls(batch))
         return group
 
-    def change_box(self, batch):
+    def change_box(self, batch, it=None):
         """Pages or chats a call changed: what it did, and each one it changed, highlighted as the left bar has it
-        (green added, red deleted, yellow archived, blue moved), clicked to open (open_mark)."""
+        (green added, red deleted, yellow archived, blue moved), clicked to open (open_mark); the call's (it) hunks
+        under the one whose text they change (call_row), or under them all."""
         box = self.outline(batch, "; ".join(a["label"] for a in batch))
         items = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        row, under = self.call_row(it) if it is not None else None, None
         for a in batch:
             live = a["state"] == "done" and not a.get("kept")
             for kind, key, how, *note in a.get("marks") or ():
@@ -2099,7 +2108,15 @@ class MetaChat(Gtk.Box):
                     paint()
                     self.painted.setdefault((kind, key), {})[f"meta:{a['id']}"] = paint
                 items.append(item)
+                if under is None and row is not None and row in ((kind, key), (kind, note[1] if note[1:] else None)):
+                    under = item  # (by its name now, or the one it had: moved since, in the same change)
         box.append(items)
+        if it is not None and (hunks := self.hunks(it, batch)) is not None:
+            if under is not None:
+                hunks.set_margin_bottom(6)
+                items.insert_child_after(hunks, under)
+            else:
+                box.append(hunks)
         return box
 
     def mark_name(self, kind, key, action):
@@ -2137,11 +2154,11 @@ class MetaChat(Gtk.Box):
             return " · ".join(filter(None, [str(inp.get("what") or ""), short(inp.get("items") or [])]))
         return " · ".join(short(v) for v in inp.values() if v not in (None, "", []))[:200]
 
-    def tool_card(self, it):
-        """A tool card as Baude's chat has one (widgets.CSS's .tool-card): its name, what it was for, Input (Code)
-        and Output to open, or an edit's hunks under its line in place of Input (hunks); a spinner while it runs, red
-        if it failed. A call that changed things: its actions one batch, Keep and Undo (Redo, undone) on its line, and
-        the pointer over it lights what it changed in the left bar (light)."""
+    def tool_card(self, it, controls=True):
+        """A tool card as Baude's chat has one (widgets.CSS's .tool-card): its name, what it was for, an edit's hunks
+        under its line (hunks) or else Input (Code) to open, and Output; a spinner while it runs, red if it failed. A
+        call that changed things: its actions one batch, said undone once they are, and (controls) Keep and Undo
+        (Redo, undone) on its line, and the pointer over it lights what it changed in the left bar (light)."""
         name = it.get("name") or ""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         card.add_css_class("tool-card")
@@ -2158,7 +2175,9 @@ class MetaChat(Gtk.Box):
         grid.attach(line, 0, 0, 1, 1)
         card.append(grid)
         base = name.removeprefix("mcp__meta__")
-        if (hunks := self.hunks(it)) is not None:  # (what it was given, as the change it makes)
+        acts = {a["id"]: a for a in self.actions()}
+        batch = [acts[i] for i in it.get("actions") or () if i in acts]
+        if (hunks := self.hunks(it, batch)) is not None:  # (what it was given, as the change it makes)
             grid.attach(hunks, 0, 1, 1, 1)
         elif it.get("input"):
             code = base == "run_python"
@@ -2167,13 +2186,12 @@ class MetaChat(Gtk.Box):
         if it.get("result"):
             self._disclosure(toggles, grid, 2, "Error" if it.get("state") == "error" else "Output", it["result"],
                              "output")
-        acts = {a["id"]: a for a in self.actions()}
-        batch = [acts[i] for i in it.get("actions") or () if i in acts]
         if batch:
             card.set_tooltip_text("\n".join(a["label"] for a in batch))
             if all(a["state"] != "done" for a in batch):
                 header.add_css_class("dim-label")
                 header.set_label(header.get_label() + " · undone")
+        if batch and controls:
             line.append(self.batch_controls(batch))
             hover = Gtk.EventControllerMotion()
             hover.connect("enter", lambda *_: self.light(batch, True))

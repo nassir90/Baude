@@ -35,6 +35,7 @@ else).
 import codecs
 import difflib
 import contextlib
+import copy
 import glob
 import html
 import json
@@ -418,6 +419,7 @@ class Store:
         self.markup = "line"  # (the notes' formatting shown: "line", the caret's; "none"; "all", all but links')
         self.books_width = None  # (the notebooks' column, dragged; None: as it comes)
         self.zoom = self.zoom_default = 1.0  # (Ctrl/⌘ + − 0: the notes', the chat's and the conversation's text)
+        self.meta = {"messages": []}  # (Meta's conversation while no notebook's open: RecordChat.conv)
         try:
             with open(self.path) as f:
                 saved = json.load(f)
@@ -434,6 +436,8 @@ class Store:
                 self.pages_folded = bool(saved.get("pages_folded"))
                 self.books_folded = bool(saved.get("books_folded"))
                 self.markup = saved.get("markup") if saved.get("markup") in MARKUP_MODES else "line"
+                if isinstance(saved.get("meta"), dict):
+                    self.meta = {**saved["meta"], "messages": list(saved["meta"].get("messages") or [])}
                 chosen = saved.get("agent_model")  # (the model chosen for Record's own agent: Meta's, if it has none)
                 if chosen in dict(MODELS) and chosen != meta.MODEL and "meta_model" not in widgets.load_settings():
                     widgets.save_settings(meta_model=chosen)
@@ -571,7 +575,8 @@ class Store:
             json.dump({"records": self.notebooks, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
-                       "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all},
+                       "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
+                       "meta": self.meta},
                       f, indent=1)
             f.flush()
             os.fsync(f.fileno())  # (on the disk before it takes the file's place)
@@ -886,7 +891,8 @@ def paned_grip(paned):
 RECORD_PROMPT = """The user keeps notebooks of pages in Markdown ([[Page]] links a page to another; a page's name is \
 its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file, a chat or anything else their \
 folders have). You see the notebook they have open: its pages, the folders attached to it, and what they @-reference \
-or select. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and its folders.
+or select; with none open, the notebooks there are, and only add_notebook and move_pages (naming its notebooks) \
+change anything. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and its folders.
 
 You never write a page's text yourself. To change it (fill a passage in, rewrite one, add to it), call propose_edit \
 with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
@@ -900,8 +906,9 @@ is found in the page as it reads with your pending edits applied, so a change to
 that edit, and one to text an edit replaces replaces it, rather than adding a second; revise_edit changes an edit \
 outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
 
-The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from another \
-notebook into the one open): each changes them at once, marked in the pages' list. All you change of the pages in one \
+The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from one \
+notebook into another), and the notebooks with add_notebook, which makes one as add_page makes a page: each changes \
+them at once, marked in the pages' or the notebooks' list. All you change of the pages in one \
 turn is one change for the user, undone as one: so do one goal (moving pages and fixing what refers to them) in one \
 turn. Links to the pages you move follow by themselves; edit_page changes a page's text at once, as part of that \
 change (what still says a page's old place, say), where propose_edit's draft waits for the user to accept it. \
@@ -967,10 +974,14 @@ RECORD_TOOLS = [
      "inputSchema": {"type": "object", "required": ["page"], "properties": {"page": {"type": "string"}}}},
     {"name": "move_pages",
      "description": "Move pages, each with its sub-pages, under another page (under: its name; empty: the top), "
-     "keeping their own names; links to them follow. from_notebook: move them from that notebook into the one open.",
+     "keeping their own names; links to them follow. from_notebook: the notebook they're in, to_notebook: the one "
+     "they go to (either left out: the one open).",
      "inputSchema": {"type": "object", "required": ["pages", "under"], "properties": {
          "pages": {"type": "array", "items": {"type": "string"}}, "under": {"type": "string"},
-         "from_notebook": {"type": "string"}}}},
+         "from_notebook": {"type": "string"}, "to_notebook": {"type": "string"}}}},
+    {"name": "add_notebook",
+     "description": "Make a notebook, empty but for Home, at once (not opened): move_pages to_notebook fills it.",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "edit_page",
      "description": "Change a page's text at once, as part of the change you're making to the pages this turn "
      "(fixing what refers to pages you moved, say): undone with the rest of it, as one. old_text is the text it "
@@ -1048,6 +1059,14 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT, room=None):
             spare -= meta.weight(part) + 1
         parts.append(part)
     return "\n".join(parts + end)
+
+
+def none_open_said(store):
+    """A session's first words while no notebook's open: that, and the notebooks there are, with their pages' names."""
+    books = [f'<notebook name="{attr(full_name(t))}">' +
+             ", ".join(sorted(t["pages"], key=lambda p: (p != HOME, p.lower()))[:40]) + "</notebook>"
+             for t in store.notebooks[:30]]
+    return "\n".join(["<no-notebook-open/>", *books]) if books else "<no-notebook-open/> (and there are no notebooks yet)"
 
 
 def referenced(text, space):
@@ -5356,19 +5375,22 @@ class RecordChat(meta.MetaChat):
         self.notebook = notebook
         self.set_quote("")
         self.render()
+        self.win.mark_books()  # (the notebooks' list as this conversation's marks have it)
 
     # ---- what Meta.MetaChat asks of Record
+    def conv(self, notebook=None):
+        """Where a conversation's kept: the notebook open's (or notebook's), else Record's own, with none open."""
+        notebook = notebook or self.notebook
+        return notebook if notebook is not None else self.win.store.meta
+
     def messages(self):
-        return self.notebook["messages"] if self.notebook is not None else []
+        return self.conv()["messages"]
 
     def actions(self):
-        return self.notebook.setdefault("meta_actions", []) if self.notebook is not None else []
+        return self.conv().setdefault("meta_actions", [])
 
     def save(self, now=False):
         (self.win.store.save_now if now else self.win.store.save)()
-
-    def ready(self):
-        return self.notebook is not None
 
     def space(self):
         return self.win.space()
@@ -5393,10 +5415,20 @@ class RecordChat(meta.MetaChat):
         return RECORD_TOOLS
 
     def app_handlers(self):
-        return {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
-                "withdraw_edit": self.withdraw_edit, "add_page": self.add_page, "delete_page": self.delete_page,
-                "edit_page": self.edit_page,
-                "move_pages": self.move_pages, "highlight_pages": self.highlight_pages}
+        on_open = {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
+                   "withdraw_edit": self.withdraw_edit, "add_page": self.add_page, "delete_page": self.delete_page,
+                   "edit_page": self.edit_page, "highlight_pages": self.highlight_pages}
+        return {**{name: self._on_open(fn) for name, fn in on_open.items()},
+                "move_pages": self.move_pages, "add_notebook": self.add_notebook}
+
+    def _on_open(self, fn):
+        """A tool that works on the notebook open: with none open, why it can't."""
+        def run(turn, args):
+            if self.notebook is None:
+                raise ValueError(f"No {book().lower()} is open: move_pages takes from_notebook and to_notebook, and "
+                                 "add_notebook makes one.")
+            return fn(turn, args)
+        return run
 
     def make_settings(self):
         win = self.win
@@ -5418,17 +5450,18 @@ class RecordChat(meta.MetaChat):
         return super()._guard(agent)
 
     def told(self):
-        return self.notebook.setdefault("meta_told", []) if self.notebook is not None else []
+        return self.conv().setdefault("meta_told", [])
 
     def showing(self, agent):
         return getattr(agent, "notebook", None) is self.notebook
 
     def store_reply(self, agent, m):
-        getattr(agent, "notebook", self.notebook)["messages"].append(m)
+        self.conv(getattr(agent, "notebook", self.notebook))["messages"].append(m)
 
     def marks_changed(self):
-        """What Meta's marked changed: the pages' list, the pages open (tint), and a deleted one's tab gone once it's
-        kept or undone."""
+        """What Meta's marked changed: the notebooks' list, the pages' list, the pages open (tint), and a deleted one's
+        tab gone once it's kept or undone."""
+        self.win.mark_books()
         if self.notebook is None:
             return
         if self.win.pages.notebook is self.notebook:
@@ -5496,9 +5529,26 @@ class RecordChat(meta.MetaChat):
                 before = books[name]
         return before
 
+    def mark_name(self, kind, key, action):
+        if kind == "notebook":
+            nb = next((t for t in self.win.store.notebooks if t.get("id") == key), None)
+            ghost = next((p["redo"]["add"] for p in meta.action_parts(action) if p.get("kind") == "notebook" and
+                          (p.get("redo") or {}).get("add", {}).get("id") == key), None)
+            return full_name(nb or ghost or {"name": key})
+        if kind == "page" and (nb := self._book(key.partition("\n")[0])) is not None and nb is not self.notebook:
+            return f"{full_name(nb)}/{key.partition(chr(10))[2]}"  # (another notebook's: its notebook's name too)
+        return super().mark_name(kind, key, action)
+
+    def _book(self, book_id):
+        return next((t for t in self.win.store.notebooks if t.get("id") == book_id), None)
+
     def open_mark(self, kind, key, how, action):
         """A page in a change's box clicked: opened (in its notebook); one deleted, its text as it was, all red, in a
-        tab that can't be written in (open_gone)."""
+        tab that can't be written in (open_gone). A notebook: opened."""
+        if kind == "notebook":
+            if self._book(key) is not None:
+                self.win.select(key)
+            return
         book_id, _, page = key.partition("\n")
         nb = next((t for t in self.win.store.notebooks if t.get("id") == book_id), None)
         if kind != "page" or nb is None:
@@ -5535,7 +5585,10 @@ class RecordChat(meta.MetaChat):
         if short == "move_pages":
             pages = ", ".join(short_page(str(p)) for p in inp.get("pages") or ())
             return f"{pages} → {short_page(str(inp.get('under') or '')) or 'the top'}" + \
-                (f" (from {inp['from_notebook']})" if inp.get("from_notebook") else "")
+                (f" (from {inp['from_notebook']})" if inp.get("from_notebook") else "") + \
+                (f" (into {inp['to_notebook']})" if inp.get("to_notebook") else "")
+        if short == "add_notebook":
+            return base_name(str(inp.get("name") or ""))
         return super().tool_summary(name, inp)
 
     def call_hunks(self, it):
@@ -5598,7 +5651,8 @@ class RecordChat(meta.MetaChat):
                            for it in self.referenced(text)]
         if self.quote:
             msg["quote"] = self.quote
-            if self.selection is not None and self.selection["notebook"] == notebook.get("id"):
+            if notebook is not None and self.selection is not None and \
+                    self.selection["notebook"] == notebook.get("id"):
                 msg["selection"] = self._selection_now(notebook) or \
                     {"page": self.selection["page"], "start": None, "end": None, "text": self.selection["text"]}
         return msg
@@ -5621,19 +5675,21 @@ class RecordChat(meta.MetaChat):
     def first_said(self, agent):
         """A new session's notebook (notebook_said), in the room it has."""
         notebook, store, space = self.notebook, self.win.store, self.space()
+        if notebook is None:
+            return lambda room: none_open_said(store)
         return lambda room: notebook_said(notebook, store, space, room=room)
 
     def context(self, agent, msg):
         """What's become of the changes proposed; what's referenced (ref_said, of Window.space), the passage quoted
         from a chat (its names, the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
-        for m in notebook["messages"]:
+        for m in notebook["messages"] if notebook is not None else ():
             for p in m.get("proposals") or ():
                 if p.get("status") in ("accepted", "rejected") and not p.get("told"):
                     if not agent.fresh:
                         parts.append(f"(The change you proposed to {p['page']} was {p['status']} by the user.)")
                     p["told"] = True
-        if waiting := pending_edits(notebook):
+        if notebook is not None and (waiting := pending_edits(notebook)):
             pages = list(dict.fromkeys(p["page"] for p in waiting))
             parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
                          "shows them.)")
@@ -5808,6 +5864,8 @@ class RecordChat(meta.MetaChat):
                          (f" (+{len(pages) - 40}: app_index pages)" if len(pages) > 40 else ""))
             if waiting := pending_edits(nb, self.agent):
                 lines.append(f"your edits waiting: {len(waiting)} (list_edits)")
+        else:
+            lines.append("no notebook open")
         if others := [t for t in store.notebooks if t is not nb]:
             lines.append("other notebooks: " + ", ".join(f"{json.dumps(full_name(t))} ({len(t['pages'])} page"
                                                          f"{'s' if len(t['pages']) != 1 else ''})"
@@ -5916,9 +5974,10 @@ class RecordChat(meta.MetaChat):
         return rows
 
     def forms(self):
+        if self.notebook is None:
+            return {}
         return {"new_page": (f"make a page in the {book().lower()} open (its name, the page it goes under, its text)",
-                             self.page_form),
-                "new_notebook": (f"make a {book().lower()}", self.notebook_form)}
+                             self.page_form)}
 
     def page_form(self):
         """New page's fields, as the pages' + asks (PagesList.new_page), with where it goes and what it says: for
@@ -5970,31 +6029,6 @@ class RecordChat(meta.MetaChat):
                                            ("text", "what it says, in Markdown (or empty)", text)],
                          check, submit, verb="Add")
 
-    def notebook_form(self):
-        """New Notebook's field (Window.new_notebook asks for its name), for Meta's new_notebook form: made, and
-        listed, not opened (this conversation is the notebook open's)."""
-        store = self.win.store
-        entry = Gtk.Entry(activates_default=True, placeholder_text="Its name")
-
-        def check():
-            if not base_name(entry.get_text()):
-                return f"A {book().lower()} needs a name"
-            if base_name(entry.get_text()).lower() in {full_name(t).lower() for t in store.notebooks}:
-                return f"There's a {book().lower()} called {base_name(entry.get_text())} already"
-            return None
-
-        def submit():
-            if (problem := check()) is not None:
-                raise ValueError(problem)
-            made = store.new(base_name(entry.get_text()))
-            made.pop("fresh", None)  # (named: kept, Store.is_blank)
-            store.save_now()
-            self.win.notebook_list.prepend(self.win._row(made))  # (first, as Store.new puts it; the one open stays)
-            return f"made {full_name(made)}, in the {book(plural=True).lower()}' list"
-        return meta.Form(f"New {book()}", entry, [("name", f"the {book().lower()}'s name", entry)], check, submit,
-                         verb="Create", body=f"A {book().lower()} is your notes on a subject, and {meta.NAME}'s "
-                                         "conversation about them")
-
     def open_page(self, notebook, page):
         if notebook is not self.win.current:
             self.win.select(notebook["id"])
@@ -6012,10 +6046,12 @@ class RecordChat(meta.MetaChat):
         btn.connect("clicked", lambda *_: self.win.delete())
         return btn
 
-    def _pages_act(self, turn, said, before, moved=None, marks=()):
+    def _pages_act(self, turn, said, before, moved=None, marks=(), moved_in=None):
         """Pages changed (before: {notebook id: {page: its text before, or None}}, of every one touched; moved: {old
-        name: new}, of the notebook open), kept as an action: undone, they're put back as they were, and done again,
-        as the action left them; either only while every one it touched is as the other left it (apply_app)."""
+        name: new}, in notebook moved_in (the one open, if not said)), kept as an action: undone, they're put back as
+        they were, and done again, as the action left them; either only while every one it touched is as the other
+        left it (apply_app)."""
+        moved_in = (moved_in or self.notebook or {}).get("id")
         books = {t.get("id"): t for t in self.win.store.notebooks}
         after = {b: {p: books[b]["pages"].get(p) for p in pages} for b, pages in before.items()}
         marked = {m[1] for m in marks}  # (and those whose text it changed, there before and after: edited)
@@ -6023,10 +6059,13 @@ class RecordChat(meta.MetaChat):
                                for p, text in pages.items() if text is not None and after[b][p] is not None and
                                after[b][p] != text and f"{b}\n{p}" not in marked]
         return self.act(turn, said, "pages",
-                        {"books": before, "expect": after, "moved": {v: k for k, v in (moved or {}).items()}},
-                        {"books": after, "expect": before, "moved": dict(moved or {})}, marks)
+                        {"books": before, "expect": after, "moved": {v: k for k, v in (moved or {}).items()},
+                         "in": moved_in},
+                        {"books": after, "expect": before, "moved": dict(moved or {}), "in": moved_in}, marks)
 
     def apply_app(self, kind, data):
+        if kind == "notebook":
+            return self.apply_notebook(data)
         if kind != "pages":
             raise ValueError(f"No such action: {kind}")
         books = {t.get("id"): t for t in self.win.store.notebooks}
@@ -6043,7 +6082,27 @@ class RecordChat(meta.MetaChat):
                     books[b]["pages"].pop(p, None)
                 else:
                     books[b]["pages"][p] = text
-        self.pages_changed(data.get("moved") or {})
+        here = self.notebook is not None and data.get("in", self.notebook.get("id")) == self.notebook.get("id")
+        self.pages_changed(data.get("moved") or {} if here else {})
+
+    def apply_notebook(self, data):
+        """A notebook Meta made, taken away again (drop: its id; only while its pages are as it left them, expect) or
+        made again (add: as it was made)."""
+        store = self.win.store
+        if "add" in data:
+            if self._book(data["add"]["id"]) is None:
+                store.notebooks.insert(0, copy.deepcopy(data["add"]))
+        else:
+            nb = self._book(data["drop"])
+            if nb is None:
+                return
+            if nb["pages"] != data["expect"] or nb.get("folders") or nb.get("messages"):
+                raise ValueError(f"{full_name(nb)} changed since; undo what came after first")
+            if nb is self.win.current:
+                self.win.notebook_list.unselect_all()
+            store.notebooks.remove(nb)
+        store.save()
+        self.win.books_changed()
 
     def pages_changed(self, moved):
         """The notebook open's pages changed under its tabs: those moved go with their pages (Window.note_renamed),
@@ -6095,18 +6154,28 @@ class RecordChat(meta.MetaChat):
         self.pages_changed({})
         return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
 
+    def _notebook_named(self, name, open_one):
+        """The notebook a tool's call names (its name, any case); not named, the one open, if open_one."""
+        name = base_name(str(name or ""))
+        if not name:
+            if open_one and self.notebook is not None:
+                return self.notebook
+            raise ValueError(f"No {book().lower()} is open: say which (from_notebook, to_notebook).")
+        nb = next((t for t in self.win.store.notebooks if full_name(t).lower() == name.lower()), None)
+        if nb is None:
+            raise ValueError(f"There's no {book().lower()} {name!r}: app_index notebooks lists them.")
+        return nb
+
     def move_pages(self, turn, args):
-        nb, store = self.notebook, self.win.store
-        under, source = page_name(args.get("under")), str(args.get("from_notebook") or "").strip()
-        src = nb if not source else next((t for t in store.notebooks if full_name(t).lower() == source.lower()), None)
-        if src is None:
-            raise ValueError(f"There's no {book().lower()} {source!r}: app_index notebooks lists them.")
+        under = page_name(args.get("under"))
+        src = self._notebook_named(args.get("from_notebook"), True)
+        nb = self._notebook_named(args.get("to_notebook"), True)
         names = [self._named_page(p, src) for p in args.get("pages") or ()]
         if not names:
             raise ValueError("Which pages? pages is empty.")
         if HOME in names:
             raise ValueError(f"{HOME} stays where it is.")
-        listed = set(src["pages"]) | (set(self.win.pages.names()[0]) if src is nb else set())
+        listed = set(src["pages"]) | (set(self.win.pages.names()[0]) if src is self.notebook else set())
         moved = {}
         for old in names:
             if src is nb and (under == old or under.startswith(old + ":")):
@@ -6117,7 +6186,7 @@ class RecordChat(meta.MetaChat):
         if not moved:
             return {"text": "They're there already."}
         if clash := [to for to in moved.values() if to in nb["pages"] and (src is not nb or to not in moved)]:
-            raise ValueError(f"There's a page {clash[0]} already.")
+            raise ValueError(f"There's a page {clash[0]} in {full_name(nb)} already.")
         where = under or "the top"
         said = f"Moved {', '.join(short_page(n) for n in names)} {'under ' + short_page(under) if under else 'to the top'}"
         if src is nb:
@@ -6129,8 +6198,9 @@ class RecordChat(meta.MetaChat):
             nb["pages"].update(renamed)
             marks = [("page", page_key(nb, new), "moved", f"from {old.rpartition(':')[0] or 'the top'}",
                       page_key(nb, old)) for old, new in moved.items() if old in was]
-            a = self._pages_act(turn, said, before, moved, marks)
-            self.pages_changed(moved)
+            a = self._pages_act(turn, said + (f" in {full_name(nb)}" if nb is not self.notebook else ""), before,
+                                moved, marks, moved_in=nb)
+            self.pages_changed(moved if nb is self.notebook else {})
         else:
             before = {src["id"]: {old: src["pages"].get(old) for old in moved},
                       nb["id"]: {new: nb["pages"].get(new) for new in moved.values()}}
@@ -6139,9 +6209,28 @@ class RecordChat(meta.MetaChat):
                     nb["pages"][new] = src["pages"].pop(old)
             marks = [("page", page_key(nb, new), "moved", f"from {full_name(src)}", page_key(src, old))
                      for old, new in moved.items() if new in nb["pages"]]
-            a = self._pages_act(turn, said + f" from {full_name(src)}", before, marks=marks)
+            into = f" into {full_name(nb)}" if nb is not self.notebook else ""
+            a = self._pages_act(turn, said + f" from {full_name(src)}{into}", before, marks=marks)
             self.pages_changed({})
-        return {"text": f"Moved {len(moved)} page{'s' if len(moved) != 1 else ''} under {where} (action {a['id']})."}
+        return {"text": f"Moved {len(moved)} page{'s' if len(moved) != 1 else ''} under {where}"
+                        f"{f' in {full_name(nb)}' if nb is not self.notebook else ''} (action {a['id']})."}
+
+    def add_notebook(self, turn, args):
+        """add_notebook: a notebook made at once, as a page is (add_page), marked in the notebooks' list, part of the
+        turn's change and undone with it; not opened (this conversation stays the one shown)."""
+        store, name = self.win.store, base_name(str(args.get("name") or ""))
+        if not name:
+            raise ValueError(f"A {book().lower()}'s name is needed.")
+        if name.lower() in {full_name(t).lower() for t in store.notebooks}:
+            raise ValueError(f"There's a {book().lower()} called {name} already.")
+        made = store.new(name)
+        made.pop("fresh", None)  # (named: kept, Store.is_blank)
+        store.save()
+        a = self.act(turn, f"Made {name}", "notebook", {"drop": made["id"], "expect": copy.deepcopy(made["pages"])},
+                     {"add": copy.deepcopy(made)}, [("notebook", made["id"], "added")])
+        self.win.books_changed()
+        return {"text": f"Made the {book().lower()} {name} (action {a['id']}); move_pages to_notebook puts pages in "
+                        "it, add_page can't (it adds to the one open)."}
 
     def edit_page(self, turn, args):
         """edit_page: a page's text changed at once, part of the turn's change to the pages (Meta.act), undone with
@@ -7061,6 +7150,33 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def _fill_row(self, row):
         row.name.set_text(full_name(row.notebook))
         row.set_tooltip_text(self.attached_words(row.notebook) or None)  # (its folders, the pointer over it)
+        row.name.set_attributes(None)
+        chat = getattr(self, "chat", None)
+        if chat is not None and (mark := chat.marks("notebook").get(row.notebook.get("id"))) is not None:
+            meta.mark_row(row, ("notebook", row.notebook.get("id")), mark, chat, row.name, inline=False)
+
+    def mark_books(self):
+        """The notebooks' rows as Meta's marks have them now (one it made, green, till it's kept or undone)."""
+        i = 0
+        while (r := self.notebook_list.get_row_at_index(i)) is not None:
+            self._fill_row(r)
+            i += 1
+
+    def books_changed(self):
+        """The notebooks' list as the store has them now (Meta made one, or took it away again): rows added and gone
+        in place, so the one open stays selected; their marks again."""
+        rows, i = {}, 0
+        while (r := self.notebook_list.get_row_at_index(i)) is not None:
+            rows[id(r.notebook)] = r
+            i += 1
+        keep = {id(t) for t in self.store.notebooks}
+        for key, r in rows.items():
+            if key not in keep:
+                self.notebook_list.remove(r)
+        for i, t in enumerate(self.store.notebooks):
+            if id(t) not in rows:
+                self.notebook_list.insert(self._row(t), i)
+        self.mark_books()
 
     def fill_sidebar(self):
         while (r := self.notebook_list.get_row_at_index(0)) is not None:
@@ -7098,6 +7214,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.pages.show(None)
             self.content_stack.set_visible_child_name("none")
             self.folders_page.fill()
+            if changed:
+                self.chat.show(None)  # (Meta's own conversation, not the notebook left's)
             return
         self.folders_page.fill()
         self.pages.show(notebook)

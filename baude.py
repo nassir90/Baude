@@ -13399,6 +13399,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
     def show_meta(self):
         """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta's page of the side panel, the panel shown if it
         was hidden, and the focus in Meta's box."""
+        cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
+        if cover is not None:
+            cover.close()
+        if self.completer.visible():
+            self.completer.hide()  # (/'s or @'s list, not left over the chat's box)
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
 

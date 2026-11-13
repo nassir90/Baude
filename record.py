@@ -7343,6 +7343,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
     def show_meta(self):
         """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta's page of the
         right bar, the bar shown if it was hidden, and the focus in Meta's box."""
+        cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
+        if cover is not None:
+            cover.close()
+        page = self.tabs.current()
+        if isinstance(page, DiaryEditor) and page.pop.get_visible():
+            page._hide_pop()  # (@'s or #'s list, not left over the page)
         self.right_slide.set_shown(True)
         self.right_stack.set_visible_child_name("meta")
         self.chat.composer.grab_focus()

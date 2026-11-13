@@ -11425,6 +11425,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
+        # (more said than the model's window holds: said over the box, the box off, till a bigger model or a new chat)
+        self.exhausted = widgets.Exhausted(self.scroller, box_overlay)
+        self.outgrown = False  # (a turn ended with claude saying the prompt's too long: exhausted, show_context)
         root.append(statusbar)
         self.panel = SidePanel(self)
         # a plain split: same background on both sides, a 1px rule between them, no shadow;
@@ -11705,6 +11708,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def continue_cut(self):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""
+        if self.exhausted.on:
+            return
         self.cut_pending = None
         self.show_cut(None)
         atts, self.attachments = self.attachments, []
@@ -12081,6 +12086,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def set_busy(self, busy):
         self.busy = busy
+        if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
+            self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
         if not busy and self.proc is not None:
             self.turn_finished = True
         self.set_send_button(busy)
@@ -12361,6 +12368,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def show_context(self, usage):
         self.ctx_box.set_usage(usage)
+        if self.outgrown:
+            self.ctx_box.bar.set_value(1)
+        # (a turn's stop button kept: asked again as it ends)
+        self.exhausted.set((self.ctx_box.over or self.outgrown) and not self.busy)
 
     def refresh_effort(self):
         self.request({"subtype": "get_settings"},
@@ -12767,6 +12778,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.toggle_held = None
         self.total_cost = 0.0
         self.ctx_box.reset()
+        self.outgrown = False
+        self.exhausted.set(False)
         self.show_title(None)
         self.tasks.clear()
         self.sub_tails.clear()
@@ -12888,6 +12901,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return False
 
     def on_send(self):
+        if self.exhausted.on:
+            return
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
         if (typed in ("/login", "/logout") or typed.startswith("/login ")) and self.remote is not None \
@@ -13033,6 +13048,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         was = self.model
         if value == was:  # (the one it's on)
             return
+        self.outgrown = False  # (another model's window: as its usage says)
         if self.remote is not None and model_program(value) != model_program(was):
             label = self.model_dd.label()
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
@@ -13057,6 +13073,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.note(f"model → {self.model_dd.label()}")
             self.refresh_effort()  # the CLI may change or drop the effort with the model
             self.refresh_context()  # different models have different windows
+        else:
+            self.exhausted.set(False)  # (no claude to ask: the one started next says)
 
     def on_effort_changed(self, value):
         if model_program(self.model) == "pi":
@@ -15828,6 +15846,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                + u.get("cache_creation_input_tokens", 0))
         if msg.get("is_error"):
             self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
+            if meta.OVERFLOW_RE.search(msg.get("result") or ""):
+                self.outgrown = True
             if needs_login(msg.get("result")):
                 self.login_prompt(msg["result"])
         self.set_busy(False)

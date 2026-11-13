@@ -1602,7 +1602,8 @@ class ContextMeter(Gtk.LevelBar):
 
 class ContextUsage(Gtk.Box):
     """How much of its context window a session's used, Baude's chat's and Meta's alike: "context 24k / 200k · 12%" and
-    a bar, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's answer)."""
+    a bar, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's answer). Past the
+    window ("context 12.4k / 8.2k · 151%"), the bar's full: over."""
 
     def __init__(self, **kw):
         super().__init__(spacing=8, tooltip_text="Context window usage", **kw)
@@ -1618,18 +1619,39 @@ class ContextUsage(Gtk.Box):
         used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
         if not total:
             return
-        frac = min(1.0, used / total)
-        self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {frac:.0%}")
-        self.bar.set_value(frac)
+        self.over = used > total
+        self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {used / total:.0%}")
+        self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
                  if c.get("tokens") and c.get("kind") != "deferred"]
         self.set_tooltip_text("Context window usage\n" + "\n".join(lines))
 
     def reset(self):
         """No session's: nothing used yet."""
+        self.over = False
         self.label.set_text("context —")
         self.bar.set_value(0)
         self.set_tooltip_text("Context window usage")
+
+
+class Exhausted:
+    """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
+    over its box, in plain grey, and the box off, till a model with a bigger window's picked or the conversation's
+    cleared. box: the Composer, already in its column; chat: what has the focus instead while it's off."""
+
+    def __init__(self, chat, box):
+        self.chat, self.box, self.on = chat, box, False
+        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
+        self.label.add_css_class("dim-label")
+        box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
+
+    def set(self, on):
+        self.on = on
+        self.label.set_visible(on)
+        if on and self.box.input.is_focus():
+            self.chat.grab_focus()
+        self.box.input.set_cursor_visible(not on)
+        self.box.set_sensitive(not on)
 
 
 class FindBar(Gtk.SearchBar):

@@ -45,8 +45,9 @@ claude lists, or one of this machine's inference providers' that can call tools 
 whose are listed), each given Meta's tools. It sets models up too: it says what runs them here, checks Ollama's
 models and removes those that don't load (asking you first), adds an MLX model you've downloaded or an
 OpenAI-compatible server, and builds `apple-claude` (asking first). It never installs or downloads anything.
-Switched to a model whose context window can't hold the conversation, it's given as much as fits and says so ("Context
-window exhausted"), as it does when a conversation outgrows the window, or a reply is cut short. Code mode has it
+When a conversation is more than the model's context window holds (another model picked, or the conversation grown),
+"Context Exhausted" shows over its box, the box off, and the context bar shows it full, the tokens used over the
+window's, till a model with a bigger window is picked or the chat's cleared; Baude's chats do the same. Code mode has it
 act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
 anywhere in the window, shows it and puts the focus in its box.
 

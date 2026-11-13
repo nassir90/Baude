@@ -1023,42 +1023,28 @@ def said_names(text, space):
 attr, trimmed = meta.attr, meta.trimmed
 
 
-def notebook_said(notebook, store, space, limit=NOTES_LIMIT, room=None):
+def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
     """A session's first words: the notebook open, its pages (each one's file, and its text as far as limit, its
-    @names said) and its folders. room: the characters it may take in all (a small window's), past which its pages
-    are left out, how many said."""
+    @names said) and its folders."""
     files = page_paths(store.notebooks)
     root = pages_root()
     pages = sorted(notebook["pages"], key=lambda p: (p != HOME, p.lower()))
-    folders = attached_folders(notebook)
-    head = f'<notebook name="{attr(full_name(notebook))}">'
-    end = ["Its folders: " + (", ".join(folders) if folders else "none attached"), "</notebook>"]
-    parts, left = [head], limit
-    spare = None if room is None else room - meta.weight(head) - sum(meta.weight(e) + 1 for e in end) - 80  # (80:
-    # the pages left out)
-    if spare is not None and spare < 0:
-        return ""
-    for i, name in enumerate(pages):
+    parts = [f'<notebook name="{attr(full_name(notebook))}">']
+    left = limit
+    for name in pages:
         text = notebook["pages"][name].strip()
         file = os.path.join(root, files.get((notebook.get("id"), name), ""))
-        gist = f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>'
         if not text:
-            part = f'<page name="{attr(name)}" file="{attr(file)}">(empty)</page>'
+            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(empty)</page>')
         elif len(text) <= left:
-            part = f'<page name="{attr(name)}" file="{attr(file)}">\n{said_names(text, space)}\n</page>'
-        else:
-            part = gist
-        if spare is not None and meta.weight(part) + 1 > spare:
-            part = gist if meta.weight(gist) + 1 <= spare else None
-        if part is None:
-            parts.append(f"({len(pages) - i} more pages, not put here: app_index pages names them)")
-            break
-        if part != gist and text:
+            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">\n{said_names(text, space)}\n</page>')
             left -= len(text)
-        if spare is not None:
-            spare -= meta.weight(part) + 1
-        parts.append(part)
-    return "\n".join(parts + end)
+        else:
+            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>')
+    folders = attached_folders(notebook)
+    parts.append("Its folders: " + (", ".join(folders) if folders else "none attached"))
+    parts.append("</notebook>")
+    return "\n".join(parts)
 
 
 def none_open_said(store):
@@ -5681,17 +5667,12 @@ class RecordChat(meta.MetaChat):
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection")}
 
-    def first_said(self, agent):
-        """A new session's notebook (notebook_said), in the room it has."""
-        notebook, store, space = self.notebook, self.win.store, self.space()
-        if notebook is None:
-            return lambda room: none_open_said(store)
-        return lambda room: notebook_said(notebook, store, space, room=room)
-
     def context(self, agent, msg):
-        """What's become of the changes proposed; what's referenced (ref_said, of Window.space), the passage quoted
-        from a chat (its names, the chat's) or selected on a page."""
+        """A new session's notebook; what's become of the changes proposed; what's referenced (ref_said, of
+        Window.space), the passage quoted from a chat (its names, the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
+        if agent.fresh:
+            parts.append(notebook_said(notebook, store, space) if notebook is not None else none_open_said(store))
         for m in notebook["messages"] if notebook is not None else ():
             for p in m.get("proposals") or ():
                 if p.get("status") in ("accepted", "rejected") and not p.get("told"):

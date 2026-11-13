@@ -4,12 +4,11 @@ a client of baudelib/wire.py's) start, watch and steer, here or from another mac
 it owns that user's sessions there and their claude processes. On baudelib (see baudelib/server.py); no GTK needed.
 
     python3 baude_headless.py [serve] [--group NAME] [--name NAME] [--state DIR] [--idle-minutes N]
-                                      [--exit-after-hours N] [--advertise | --no-advertise] [--no-menu-bar]
+                                      [--exit-after-hours N] [--no-menu-bar]
                                       [--auto-update] [--follow-checkout]
     python3 baude_headless.py [--auto-update] connect   # for ssh: stdin and stdout to this machine's host process
     python3 baude_headless.py socket              # where this user's host process listens (or would), to connect to
     python3 baude_headless.py quit                # this machine's host process stopped (its sessions kept)
-    python3 baude_headless.py hosts               # the hosts found: this machine's, and on the network's
     python3 baude_headless.py list   [--archived] [--host DEST [--host-command CMD]]   # a host's sessions
     python3 baude_headless.py models [--host DEST [--host-command CMD]]   # the models it can run
     python3 baude_headless.py stop      SESSION [--host DEST [--host-command CMD]]   # its claude stopped
@@ -66,11 +65,8 @@ def serve(args):
     # (SIGUSR1, a head's "listen again": ignored till it's listening, as it would end a process that isn't ready)
     signal.signal(signal.SIGUSR1, signal.SIG_IGN)
     try:
-        server = Server(state_dir=args.state, group=args.group, name=args.name, advertise=args.advertise,
-                        idle_s=args.idle_minutes * 60, socket_path=args.socket,  # (--advertise, --no-advertise: kept)
-                        exit_s=args.exit_after_hours * 3600)
-        if os.environ.get("BAUDE_NETWORK", "1") == "0" and not args.advertise:
-            server.advertise = False  # (nothing said this time, as Baude then looks for nothing there; not kept)
+        server = Server(state_dir=args.state, group=args.group, name=args.name, idle_s=args.idle_minutes * 60,
+                        socket_path=args.socket, exit_s=args.exit_after_hours * 3600)
     except AlreadyRunning as e:
         sys.exit(f"baude-headless: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
@@ -212,18 +208,15 @@ def main():
 
     def serving(c):
         c.add_argument("--group", help="the group its sessions are in unless started in another (default: its name)")
-        c.add_argument("--name", help="what it's called on the network (default: this machine's name)")
+        c.add_argument("--name", help="what heads call it (default: this machine's name)")
         c.add_argument("--state", help="where it keeps its sessions' settings (default: ~/.local/share/baude/server)")
         c.add_argument("--socket", help=argparse.SUPPRESS)  # (another socket than this user's one: a test's)
         c.add_argument("--idle-minutes", type=float, default=30, help="a session's claude stops after this long unused")
         c.add_argument("--exit-after-hours", type=float, default=4,
                        help="with nothing running and nobody attached this long, it goes (0: never)")
-        said = c.add_mutually_exclusive_group()
-        said.add_argument("--advertise", action="store_const", const=True, dest="advertise",
-                          help="say on the local network that Baude is on this host, and which user ssh would log in "
-                               "as (multicast DNS); remembered (default: not said)")
-        said.add_argument("--no-advertise", action="store_const", const=False, dest="advertise",
-                          help="don't say it on the network any more")
+        # (said Baude was on this host by multicast DNS, once: taken and ignored, as one started with them restarts
+        # with them onto an update)
+        c.add_argument("--advertise", "--no-advertise", action="store_true", dest="advertise", help=argparse.SUPPRESS)
         c.add_argument("--no-menu-bar", action="store_true", help="on macOS, no item in the menu bar")
         c.add_argument("--auto-update", action="store_true",
                        help="keep itself up to date from git, as Baude's Auto restart on update does (default: as "
@@ -236,7 +229,6 @@ def main():
     sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")
     sub.add_parser("socket", help="the path of this user's host process's socket, to connect to (running or not)")
     sub.add_parser("quit", help="this machine's host process stopped, its claudes too (their sessions kept)")
-    sub.add_parser("hosts", help="the hosts found: this machine's, and those on the network")
     client("list", "a host's sessions").add_argument("--archived", action="store_true", help="archived ones too")
     client("models", "the models a host can run")
     for name, help_ in (("stop", "a session's claude stopped (it's resumed when it's next written to)"),
@@ -260,10 +252,6 @@ def main():
         ch.send({"op": "quit", "req": 1})
         ch.reply()
         ch.close()
-        return
-    if args.command == "hosts":
-        for s in hosts.find():
-            print(f"{s['name']}  {s['dest'] or '-'}  group={s['words'].get('group')}  id={s['words'].get('id')}")
         return
     if args.command == "list":
         for s in [x for x in ask(args, {"op": "subscribe", "archived": args.archived})["sessions"] if not x.get("draft")]:

@@ -104,7 +104,8 @@ Moving to them, from `baude_server.py`:
 - `baude_server.py start --prompt TEXT …` is `baude_oneshot.py … TEXT`, with the same options (`--ask-timeout` and
   `--ask-default` for a new session only). It waits for the turn and prints it, rather than printing the session's id
   and leaving: `baude_oneshot.py … TEXT | head -1` gives the id, and the turn's still seen to its end.
-- `baude_server.py servers` is `baude_headless.py hosts`; `list`, `models` and `stop` are `baude_headless.py`'s, with
+- `baude_server.py servers` has no successor, as nothing's looked for on the network; `list`, `models` and `stop` are
+  `baude_headless.py`'s, with
   `--host DEST` (an ssh destination) instead of `--server HOST:PORT`.
 - A client of `baudelib/wire.py` connects with `wire.connect_local()` on the same machine, or `wire.connect_ssh(DEST)`
   from another, instead of `wire.connect(host, port)`: the protocol's the same. `baudelib.hosts.reach(DEST)` starts
@@ -126,16 +127,9 @@ and Shift or Ctrl (⌘) and a click adds or takes away one, as the Git page's br
 session was started with. Right-click a host → New Session Here starts a session there with the top bar's model, effort
 and mode, and a prompt and folder; on This Mac, its host process is started first if it isn't running.
 
-Baude finds hosts three ways:
-- **On the local network,** a host process started with `--advertise` (remembered from then on) says by multicast DNS
-  (`_baude._tcp`) that Baude is on its host, and which user ssh would log in as. Baude lists it in ⋮ → Hosts as found,
-  but doesn't reach it till you right-click it → Connect, since anyone on a network can say anything: then it's
-  `ssh user@name.local`, with the host's key already in `known_hosts`. Nothing's said on the network unless asked.
-- **Tailscale's peers** are tried too (`tailscale status --json`, where Tailscale's installed), one at a time, since
-  multicast DNS doesn't cross a tailnet; one is listed once Baude answers there, and its key must be known already.
-- **By hand,** ⋮ → Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or `user@host`.
-
-`BAUDE_NETWORK=0` stops Baude looking.
+Baude doesn't look for hosts on the network. This machine's host process it finds by its socket. Another machine's
+you give it by where ssh goes: ⋮ → Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or
+`user@host` (`user@name.local` on the local network, a Tailscale name on a tailnet), and it's kept from then on.
 
 Each host shares one ssh connection among Baude's sessions there (`ControlMaster`), so sshd's `MaxSessions` (10 by
 default) is how many can be open at once. A host process started over ssh, by `connect`, has that ssh session's

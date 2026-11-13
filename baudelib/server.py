@@ -12,7 +12,6 @@ What it keeps (state_dir: the server's id, each session's settings) is its own; 
 Code's, and the server keeps one in the same form for a session whose program keeps none (apple-claude, pi-claude)."""
 import base64
 import fcntl
-import getpass
 import itertools
 import json
 import os
@@ -27,7 +26,6 @@ import urllib.parse
 import uuid
 
 from baudelib import claude, models, selfupdate, transcripts, wire
-from baudelib.discovery import Advertiser
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -307,10 +305,10 @@ class AlreadyRunning(OSError):
 
 class Server:
     """Serve sessions on a Unix socket (socket_path: wire.socket_path(), this user's one on this machine, unless
-    another's given). advertise: say on the network that Baude is on this host, and the ssh user who'd reach it
-    (True, False, or None: as it was last told, else not; remembered in its state)."""
+    another's given). Nothing's said on the network: a head on this machine finds it by its socket, and one on
+    another reaches it over ssh."""
 
-    def __init__(self, state_dir=None, group=None, name=None, socket_path=None, exe=None, advertise=None,
+    def __init__(self, state_dir=None, group=None, name=None, socket_path=None, exe=None,
                  idle_s=IDLE_S, log=None, env=None, exit_s=EXIT_S, on_change=None):
         self.state_dir = state_dir or state_home()
         self.exe, self.idle_s, self.env, self.exit_s = exe, idle_s, env, exit_s  # (env: more for its claudes; exit_s 0: never)
@@ -351,9 +349,7 @@ class Server:
             self.me["id"] = str(uuid.uuid4())
         self.me["name"] = name or self.me.get("name") or host
         self.me["group"] = group or self.me.get("group") or self.me["name"]
-        if advertise is not None:
-            self.me["advertise"] = bool(advertise)
-        self.advertise = bool(self.me.get("advertise"))
+        self.me.pop("advertise", None)  # (said on the network, once: nothing is now)
         _write_json(me, self.me)
         self.sessions = {}
         folder = os.path.join(self.state_dir, "sessions")
@@ -375,7 +371,6 @@ class Server:
         self.listener, self.accepted, self.binding = None, 0.0, threading.Lock()
         self.wake_r, self.wake_w = os.pipe()  # (the accept's waits woken: a new socket, or shut down)
         self.bind()
-        self.advertiser = None
         self.stopped, self.closed = threading.Event(), threading.Event()  # (closed: shutdown's done, socket and all)
         # the commit its own code is, as it started (None: not a git checkout); what its updater has ready, waiting for
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
@@ -567,12 +562,7 @@ class Server:
     def serve_forever(self):
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
-        if self.advertise:  # (its port's ssh's: what's said is who'd reach it; no command, which no one should take
-            # from the network)
-            self.advertiser = Advertiser(self.me["name"], 22, {
-                "id": self.me["id"], "group": self.me["group"], "v": wire.VERSION, "user": getpass.getuser()}).start()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
-                 + ("" if self.advertise else ", not said on the network")
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
             listener = self.listener
@@ -643,8 +633,6 @@ class Server:
             open(self.state_dir + "/.stopping", "w").close()
         except OSError:
             pass
-        if self.advertiser is not None:
-            self.advertiser.stop()
         with self.lock:
             for c in list(self.conns):
                 c.close()

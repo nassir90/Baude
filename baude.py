@@ -7512,12 +7512,11 @@ _HOST_SAID = {}  # (check_host_version's: the host process it's said is older, b
 
 def network():
     """The hosts Baude knows, and their sessions (baudelib.client.Network): one for the app, started when it's first
-    wanted. BAUDE_NETWORK=0: none looked for on the network or Tailscale; BAUDE_HOSTS=dest,…: these ssh destinations
-    too."""
+    wanted: this machine's host process, by its socket, and the hosts given by where ssh goes (Add Host…, and
+    BAUDE_HOSTS=dest,…). None is looked for on the network."""
     if not _NETWORK:
         _NETWORK.append(baudelib.client.Network(
-            on_main, discover=os.environ.get("BAUDE_NETWORK", "1") != "0",
-            hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()]))
+            on_main, hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()]))
     return _NETWORK[0]
 
 
@@ -7845,7 +7844,7 @@ class SessionSidebar(Gtk.Box):
             item = Gio.MenuItem.new(None, None)
             item.set_attribute_value("custom", GLib.Variant.new_string(name))
             menu.append_item(item)
-        hosts.append("Add Host…", "sb.add_server")  # (one not found by itself: ask_add_host)
+        hosts.append("Add Host…", "sb.add_server")  # (another machine, by where ssh goes: ask_add_host)
         item = Gio.MenuItem.new("New Group…", None)  # (no chat moved to it: ask_new_group)
         item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
         groups.append_item(item)
@@ -7897,9 +7896,6 @@ class SessionSidebar(Gtk.Box):
         actions.add_action(here)
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
-        take = Gio.SimpleAction.new("connect_host", GLib.VariantType.new("s"))
-        take.connect("activate", lambda _a, v: (pop.popdown(), self.connect_host(v.get_string())))
-        actions.add_action(take)
         command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
         command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
         actions.add_action(command)
@@ -7987,12 +7983,12 @@ class SessionSidebar(Gtk.Box):
     # Everything's listed till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
-        is; "found", for one found on the network and not taken up: Connect, its right-click)."""
+        is)."""
         out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
-                out.append((key, remote_name(r), "found" if r.offered else "gone" if r.state == "dead" else ""))
+                out.append((key, remote_name(r), "gone" if r.state == "dead" else ""))
         return out
 
     def known_groups(self):
@@ -8050,10 +8046,6 @@ class SessionSidebar(Gtk.Box):
         over ssh."""
         r = next((r for r in network().remotes() if host_key(r) == row.key), None)
         menu = Gio.Menu()
-        if r is not None and r.offered:  # (found on the network: reached only once it's taken up)
-            item = Gio.MenuItem.new(f"Connect as {r.where.get('dest')}", None)
-            item.set_action_and_target_value("sb.connect_host", GLib.Variant.new_string(row.key))
-            menu.append_item(item)
         item = Gio.MenuItem.new("New Session Here", None)
         if row.key == HERE_HOST or r is not None and r.state == "alive":
             item.set_action_and_target_value("sb.new_here", GLib.Variant.new_string(row.key))
@@ -8087,12 +8079,6 @@ class SessionSidebar(Gtk.Box):
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         pop.popup()
         return pop
-
-    def connect_host(self, key):
-        """A host found on the network (offered), right-clicked → Connect: reached over ssh from now on, and kept."""
-        if (r := next((r for r in network().remotes() if host_key(r) == key and r.offered), None)) is not None:
-            network().accept(r)
-            toast(self, f"Connecting to {r.host}")
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
     # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it
@@ -15171,8 +15157,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                   "in known_hosts, and your key in its authorized_keys")
 
     def ask_add_host(self):
-        """⋮ → Hosts → Add Host…: a host Baude doesn't find by itself (where multicast DNS doesn't reach, and not on
-        Tailscale), as host_form has it."""
+        """⋮ → Hosts → Add Host…: another machine's host, by where ssh goes, as host_form has it."""
         form = self.host_form()
         dest, command = (w for _name, _takes, w in form.fields)
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="add",

@@ -1084,7 +1084,7 @@ def network_fixture():
         os.makedirs(d, exist_ok=True)
     servers = {}
     for name in ("lab-mac", "build-box"):  # (each on a socket of its own: reached as another host's is)
-        s = Server(state_dir=os.path.join(T.TMP, "servers", name), group="Lab", name=name, advertise=False,
+        s = Server(state_dir=os.path.join(T.TMP, "servers", name), group="Lab", name=name,
                    socket_path=os.path.join(os.environ["BAUDE_RUNTIME_DIR"], f"{name}.sock"), log=lambda _text: None,
                    env=env)
         threading.Thread(target=s.serve_forever, daemon=True).start()
@@ -1186,7 +1186,7 @@ def models_server():
            "BAUDE_PI": os.path.join(d, "agent"), "HF_HUB_CACHE": hub, "FAKE_CLAUDE_SESSION_IDS": "1",
            "FAKE_CLAUDE_TRANSCRIPTS": "1"}
     proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(T.HERE), "baude_headless.py"), "serve",
-                             "--no-advertise", "--group", "Lab", "--name", "gpu-mac", "--state", os.path.join(d, "state"),
+                             "--group", "Lab", "--name", "gpu-mac", "--state", os.path.join(d, "state"),
                              "--socket", os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "gpu-mac.sock")],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True)
     import atexit
@@ -1295,7 +1295,7 @@ def _(app):
     return win
 
 
-@scene("55k-network-add-server", "⋮ → Hosts → Add Host…: one Baude doesn't find by itself, by where ssh goes (an "
+@scene("55k-network-add-server", "⋮ → Hosts → Add Host…: another machine's host, by where ssh goes (an "
                                  "alias, or user@host), and its host process's command there if it isn't on PATH; "
                                  "kept from then on, reached or not")
 def _(app):
@@ -1364,21 +1364,6 @@ def _(app):
     win.sidebar.view_btn.popup()
     T.pump(0.2)
     row = next(x for x in win.sidebar.host_list.rows() if x.key == r.key)
-    ok, rect = row.compute_bounds(win.sidebar.host_list)
-    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
-    return win
-
-
-@scene("55r-network-found-host", "A host found on the network (one that says Baude is on it): listed as found, not "
-                                 "reached till it's right-clicked → Connect, as the user it says, by its name there")
-def _(app):
-    win = network_window(app, None)
-    baude.network().found({"instance": "studio._baude._tcp.local.", "host": "192.0.2.7", "target": "studio.local.",
-                           "port": 22, "words": {"id": "5a1d0c1e-0000-4000-8000-0000000000aa", "user": "lab"}})
-    win.sidebar.fill_filters()
-    win.sidebar.view_btn.popup()
-    T.pump(0.2)
-    row = next(x for x in win.sidebar.host_list.rows() if x.key == "5a1d0c1e-0000-4000-8000-0000000000aa")
     ok, rect = row.compute_bounds(win.sidebar.host_list)
     win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
     return win

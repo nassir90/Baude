@@ -1664,7 +1664,8 @@ class MetaChat(Gtk.Box):
         if m.get("error"):
             drawn = set()
             for it in items or ():
-                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn):
+                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn and
+                                                 not self.call_hunks(it)):
                     widget, holds = self.call_widget({**it, "actions": [i for i in it.get("actions") or ()
                                                                          if i not in drawn]})
                     drawn.update(it.get("actions") or ())
@@ -1686,7 +1687,7 @@ class MetaChat(Gtk.Box):
             else:
                 ids = it.get("actions") or []
                 fresh = [i for i in ids if i not in drawn]
-                if ids and not fresh:
+                if ids and not fresh and not self.call_hunks(it):  # (an edit drawn with an earlier call's: its hunk)
                     self.add_shown(reply, it.get("shown") or ())
                     continue
                 drawn.update(ids)
@@ -2020,8 +2021,26 @@ class MetaChat(Gtk.Box):
             if base in ("show", "open_form", "fill_form"):  # (what they bring up speaks for itself)
                 return None, False
             if any(a.get("marks") for a in batch):
-                return self.change_box(batch), False
+                box = self.change_box(batch)
+                if (hunks := self.hunks(it)) is not None:
+                    box.append(hunks)
+                return box, False
         return self.tool_card(it), False
+
+    def call_hunks(self, it):
+        """What a call changed (or proposes to) in some text, as [(what it replaces, what it puts in)]: each an edit's
+        hunk on its card (Record's edits to a page, RecordChat)."""
+        return []
+
+    def hunks(self, it):
+        """A call's hunks (call_hunks) as Baude's chat shows an Edit's: what it replaces on red, line by line, then
+        what it puts in on green, wrapped as prose; None for a call with none, or that failed."""
+        if it.get("state") == "error" or not (pairs := self.call_hunks(it)):
+            return None
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=6)
+        for old, new in pairs:
+            box.append(widgets.diff_block(old, new, wrap=True))
+        return box
 
     def outline(self, batch, caption):
         """A box with a tool card's outline (widgets.CSS's .tool-card): what was done, in a line, with the batch's Keep
@@ -2120,9 +2139,9 @@ class MetaChat(Gtk.Box):
 
     def tool_card(self, it):
         """A tool card as Baude's chat has one (widgets.CSS's .tool-card): its name, what it was for, Input (Code)
-        and Output to open; a spinner while it runs, red if it failed. A call that changed things: its actions one
-        batch, Keep and Undo (Redo, undone) on its line, and the pointer over it lights what it changed in the left
-        bar (light)."""
+        and Output to open, or an edit's hunks under its line in place of Input (hunks); a spinner while it runs, red
+        if it failed. A call that changed things: its actions one batch, Keep and Undo (Redo, undone) on its line, and
+        the pointer over it lights what it changed in the left bar (light)."""
         name = it.get("name") or ""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         card.add_css_class("tool-card")
@@ -2139,7 +2158,9 @@ class MetaChat(Gtk.Box):
         grid.attach(line, 0, 0, 1, 1)
         card.append(grid)
         base = name.removeprefix("mcp__meta__")
-        if it.get("input"):
+        if (hunks := self.hunks(it)) is not None:  # (what it was given, as the change it makes)
+            grid.attach(hunks, 0, 1, 1, 1)
+        elif it.get("input"):
             code = base == "run_python"
             shown = str(it["input"].get("code") or "") if code else json.dumps(it["input"], ensure_ascii=False, indent=1)
             self._disclosure(toggles, grid, 1, "Code" if code else "Input", shown, "python" if code else "json")

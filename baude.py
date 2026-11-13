@@ -131,7 +131,7 @@ from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
-    CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock,
+    CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
     EXISTS_FOR, FILE_SCHEME, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
     HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
     KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch,
@@ -5549,12 +5549,6 @@ def _path_label(path, extra=""):
     return lbl
 
 
-def _diff_block(old, new, path=""):
-    """Removed lines on red, added lines on green (no -/+ markers), highlighted as path's code."""
-    lines = [("del", l) for l in (old or "").splitlines()] + [("add", l) for l in (new or "").splitlines()]
-    return CodeBlock(new or "", "", diff=lines or [("ctx", "")], path=path)
-
-
 def _value_widget(v, depth=0):
     """A readable widget for any JSON value: nested objects become indented rows."""
     if isinstance(v, str) and "\n" in v:
@@ -5641,12 +5635,12 @@ def tool_input_view(name, inp):
         rest = _kv_rows(inp, skip=("command", "description"))
     elif base == "Edit" and "file_path" in inp:
         add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
-        add(_diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
+        add(diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "MultiEdit" and "file_path" in inp:
         add(_path_label(inp["file_path"], f"{len(inp.get('edits') or [])} edits"))
         for e in inp.get("edits") or []:
-            add(_diff_block(e.get("old_string"), e.get("new_string"), inp["file_path"]))
+            add(diff_block(e.get("old_string"), e.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "Write" and "file_path" in inp:
         content = inp.get("content") or ""

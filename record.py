@@ -6541,7 +6541,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
     code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
     side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
-    focused."""
+    focused, or closes it."""
 
     def do_snapshot(self, snapshot):
         self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
@@ -6666,10 +6666,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         launcher = Gio.SimpleAction.new_stateful("launcher", None, GLib.Variant.new_boolean(installed()))
         launcher.connect("change-state", Window._launcher_toggled)
         self.add_action(launcher)
+        self.meta_from = None  # (where the focus was as Ctrl+M showed Meta: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.right_slide.toggle()),
-                             (widgets.META_KEY, lambda: self.show_meta()),
+                             (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
                              (widgets.NAV_KEYS["forward"], lambda: self.tabs.forward()),  # back, forward, up)
@@ -7532,18 +7533,43 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.right_slide.set_shown(True)
             self.right_stack.set_visible_child_name(page)
 
+    def toggle_meta(self):
+        """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta shown
+        (show_meta), or closed if it's open already (close_meta)."""
+        if self.right_slide.target and self.right_stack.get_visible_child_name() == "meta" \
+                and self.capture_cover() is None:
+            self.close_meta()
+        else:
+            self.show_meta()
+
     def show_meta(self):
-        """Ctrl+M (widgets.META_KEY), as Baude's, from anywhere in the window, a page's text too: Meta's page of the
-        right bar, the bar shown if it was hidden, and the focus in Meta's box."""
+        """Meta's page of the right bar, the bar shown if it was hidden, and the focus in Meta's box: where it was is
+        kept for close_meta."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
         page = self.tabs.current()
         if isinstance(page, DiaryEditor) and page.pop.get_visible():
             page._hide_pop()  # (@'s or #'s list, not left over the page)
+        focus = self.get_focus()
+        self.meta_from = focus if focus is not None and not focus.is_ancestor(self.right) else None
         self.right_slide.set_shown(True)
         self.right_stack.set_visible_child_name("meta")
         self.chat.composer.grab_focus()
+
+    def close_meta(self):
+        """The right bar hidden, Meta's @ list with it, and the focus, if it was in the bar, back where show_meta took
+        it from (a page's text at its caret), else in the page open."""
+        focus = self.get_focus()
+        back, self.meta_from = self.meta_from, None
+        if self.chat.refs.visible():
+            self.chat.refs.hide()
+        self.right_slide.set_shown(False)
+        if focus is None or focus.is_ancestor(self.right):
+            if not (back is not None and back.get_root() is self and back.get_mapped() and back.grab_focus()):
+                page = self.tabs.current()
+                if page is not None:
+                    (page.view if isinstance(page, DiaryEditor) else page).grab_focus()
 
     def open_palette(self):
         """⌘K / Ctrl+K, as Baude's: every name the notebook's folders have, and the notebooks and their pages, searched

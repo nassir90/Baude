@@ -12,8 +12,8 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
 
 Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
-Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused.
-Images and PDFs can also be attached with the paperclip or dropped onto the window.
+Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused, or
+closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
 
 Set BAUDE_CLAUDE=/path/to/claude to use a specific claude binary (else claude on PATH, else, on macOS,
 the Claude desktop app's).
@@ -11457,13 +11457,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.set_content(host)
         self.connect("notify::visible-dialog", BaudeWindow.dialog_shown)
 
+        self.meta_from = None  # (where the focus was as Ctrl+M showed Meta: close_meta)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.switch_to(self.new_session)), ("<Control>o", self.show_sessions),
                              # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
                              # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
-                             (widgets.META_KEY, self.show_meta),
+                             (widgets.META_KEY, self.toggle_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
                              (PALETTE_KEY, lambda: RefPalette(self).present(self)),
                              (SETTINGS_KEY, self.open_settings),
@@ -13576,17 +13577,40 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.panel.show_page(page or ("agents" if any(t.get("task_type") == "local_agent"
                                                           for t in self.running_tasks()) else "processes"))
 
+    def toggle_meta(self):
+        """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta shown (show_meta), or closed if it's open
+        already (close_meta)."""
+        if self.panel_slide.target and self.panel.stack.get_visible_child_name() == "meta" \
+                and self.capture_cover() is None:
+            self.close_meta()
+        else:
+            self.show_meta()
+
     def show_meta(self):
-        """Ctrl+M (widgets.META_KEY), from anywhere in the window: Meta's page of the side panel, the panel shown if it
-        was hidden, and the focus in Meta's box."""
+        """Meta's page of the side panel, the panel shown if it was hidden, and the focus in Meta's box: where it was
+        is kept for close_meta."""
         cover = self.capture_cover()  # (the large image, the Kubernetes or the database view: over Meta too)
         if cover is not None:
             cover.close()
         if self.completer.visible():
             self.completer.hide()  # (/'s or @'s list, not left over the chat's box)
         self.refs.forget()
+        focus = self.get_focus()
+        self.meta_from = focus if focus is not None and not focus.is_ancestor(self.panel) else None
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
+
+    def close_meta(self):
+        """The side panel hidden, Meta's @ list with it, and the focus, if it was in the panel, back where show_meta
+        took it from, else in the chat's box."""
+        meta_chat, focus = self.panel.meta, self.get_focus()
+        back, self.meta_from = self.meta_from, None
+        if meta_chat.refs.visible():
+            meta_chat.refs.hide()
+        self.show_panel(False)
+        if focus is None or focus.is_ancestor(self.panel):
+            if not (back is not None and back.get_root() is self and back.get_mapped() and back.grab_focus()):
+                self.input.grab_focus()
 
     def h_stream_event(self, msg):
         ev, parent = msg.get("event", {}), msg.get("parent_tool_use_id")

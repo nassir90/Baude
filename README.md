@@ -48,7 +48,7 @@ OpenAI-compatible server, and builds `apple-claude` (asking first). It never ins
 Switched to a model whose context window can't hold the conversation, it's given as much as fits and says so ("Context
 window exhausted"), as it does when a conversation outgrows the window, or a reply is cut short. Code mode has it
 act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
-anywhere in the window, shows it and puts the focus in its box.
+anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
 
 ## Local models
 

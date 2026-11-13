@@ -7983,12 +7983,14 @@ class SessionSidebar(Gtk.Box):
     # Everything's listed till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "gone", for one that
-        is)."""
+        is; "through" the member of the mesh it's reached through, for one this machine's host process isn't linked
+        to itself)."""
         out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
-                out.append((key, remote_name(r), "gone" if r.state == "dead" else ""))
+                out.append((key, remote_name(r), "gone" if r.state == "dead" else
+                            f"through {r.through}" if r.through else ""))
         return out
 
     def known_groups(self):
@@ -15154,7 +15156,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                          "isn't on its PATH (or empty)", command)],
                          lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
                          submit, verb="Add", body="Reached over ssh with your keys, never a password: the host must be "
-                                                  "in known_hosts, and your key in its authorized_keys")
+                                                  "in known_hosts, and your key in its authorized_keys. Linked both "
+                                                  "ways: it, and every host it's linked to, can then start chats "
+                                                  f"on {THIS_MACHINE} and run its models, as {THIS_MACHINE} can "
+                                                  "on them")
 
     def ask_add_host(self):
         """⋮ → Hosts → Add Host…: another machine's host, by where ssh goes, as host_form has it."""

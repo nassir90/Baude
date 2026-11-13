@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import claude, models, selfupdate, transcripts, wire
+from baudelib import claude, mesh, models, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -377,6 +377,7 @@ class Server:
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
+        self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -452,7 +453,14 @@ class Server:
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
-                "init": self.me.get("init") or None, "commit": self.commit, "update": self.update}
+                "init": self.me.get("init") or None, "commit": self.commit, "update": self.update,
+                "providers": self.mesh.providers_here(), "mesh": self.mesh.view()}
+
+    def mesh_changed(self):
+        """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with
+        the mesh's lock held: info takes it under this one's.)"""
+        with self.lock:
+            self.changed()
 
     def set_update(self, update):
         """What its updater says (info's update): None, or {to: the commit it'll restart onto, waiting: [{session,
@@ -562,6 +570,7 @@ class Server:
     def serve_forever(self):
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
+        self.mesh.start()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -633,6 +642,7 @@ class Server:
             open(self.state_dir + "/.stopping", "w").close()
         except OSError:
             pass
+        self.mesh.stop()
         with self.lock:
             for c in list(self.conns):
                 c.close()
@@ -669,6 +679,12 @@ class Server:
         self.woken.set()  # (someone's here: watched for them)
         try:
             for msg in ch:
+                if msg.get("op") in ("join", "relay") and not self.stopped.is_set():  # (another host's link to
+                    with self.lock:  # here, or a tunnel through the mesh: the connection's the mesh's from now on)
+                        self.conns.discard(conn)
+                    conn.close()
+                    (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
+                    break
                 try:
                     self.handle(conn, msg)
                 except Exception as e:  # (one bad request doesn't end the connection)
@@ -695,6 +711,8 @@ class Server:
         if op == "hello":
             return reply("hello", server=self.info())
         if op == "subscribe":
+            if not conn.subscribed:  # (a head's come: this machine's model providers looked at again, for it)
+                threading.Thread(target=self.mesh.refresh, daemon=True, name="providers").start()
             conn.subscribed, conn.archived = True, bool(msg.get("archived"))
             with self.lock:  # (as they are now: nothing's been read while nobody was attached)
                 for s in self.sessions.values():
@@ -714,6 +732,15 @@ class Server:
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
+        if op == "link":  # (a head's: a link made from here)
+            where = msg.get("where")
+            self.mesh.link(where)
+            return reply("linking", where=where)
+        if op == "unlink":
+            return reply("unlinked", any=self.mesh.unlink(msg.get("where") if isinstance(msg.get("where"), dict)
+                                                          else None, msg.get("id")))
+        if op == "infer":
+            return self.mesh.infer(conn, msg)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")
@@ -1306,7 +1333,9 @@ class Server:
                 quiet = max(quiet, self.accepted)
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
-                if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns:
+                if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
+                        and not self.mesh.links and not self.mesh.outs:  # (linked, or making links: the mesh's
+                    # members may want it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
                     return

@@ -15,6 +15,10 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
     python3 baude_headless.py archive   SESSION [...]   # stopped, and listed only with --archived
     python3 baude_headless.py unarchive SESSION [...]
     python3 baude_headless.py delete    SESSION [...]   # stopped, gone, its transcript moved to the trash
+    python3 baude_headless.py link   DEST [--host-command CMD]   # this host linked to DEST's, both ways: the mesh
+    python3 baude_headless.py unlink DEST                       # that link let go of
+    python3 baude_headless.py mesh                # the mesh's members, and the links this host makes
+A command that takes --host takes --member ID instead: a member of the mesh, reached through this machine's host.
 
 A session's prompt, folder, model and the rest come over the wire, in start: baude_oneshot.py starts one from the
 command line. The host process listens only on a Unix socket in a folder of its user's own (no port on the network):
@@ -33,6 +37,10 @@ While nobody's attached it does nothing: no timers, a claude stopped once it's b
 process itself gone once nothing's run for --exit-after-hours (0: never), as a head starts it again. On macOS, at the
 screen, it's an item in the menu bar (no Dock icon): what it's doing, and Quit. Quitting, or SIGTERM, stops its
 claudes, their transcripts kept, so their sessions are resumed next time.
+
+Linked to another machine's host process (link, or Add Host… in Baude), it's in a mesh with it (baudelib/mesh.py):
+the link's used both ways, so that machine reaches this one through it too, and every host either is linked to joins
+them. A member lists, starts and steers the others' chats, and runs their models, as a head on that machine does.
 
 It runs a model as Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in
 apple-claude, once built; one on this machine in pi-claude, once pi and the model are here.
@@ -184,7 +192,7 @@ def connect(args):
 
 def ask(args, msg):
     try:
-        ch, _info = hosts.reach(args.host, args.host_command)
+        ch, _info = hosts.reach(args.host, args.host_command, getattr(args, "member", None))
     except OSError as e:
         sys.exit(f"baude-headless: {e}")
     ch.send({**msg, "req": 1})
@@ -204,6 +212,8 @@ def main():
         c.add_argument("--host", help="where ssh reaches another machine's host process: an alias in ~/.ssh/config, a "
                                       "host, or user@host (default: this machine's)")
         c.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
+        c.add_argument("--member", help="a member of the mesh (its id, as `mesh` lists it), reached through this "
+                                        "machine's host process")
         return c
 
     def serving(c):
@@ -231,6 +241,11 @@ def main():
     sub.add_parser("quit", help="this machine's host process stopped, its claudes too (their sessions kept)")
     client("list", "a host's sessions").add_argument("--archived", action="store_true", help="archived ones too")
     client("models", "the models a host can run")
+    link = sub.add_parser("link", help="this machine's host process linked to another's, over ssh, both ways: the mesh")
+    link.add_argument("dest", help="where ssh goes: an alias in ~/.ssh/config, a host, or user@host")
+    link.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
+    sub.add_parser("unlink", help="a link this machine's host process makes let go of").add_argument("dest")
+    sub.add_parser("mesh", help="the mesh's members, and the links this machine's host process makes")
     for name, help_ in (("stop", "a session's claude stopped (it's resumed when it's next written to)"),
                         ("archive", "a session's claude stopped, and the session listed only when archived ones are"),
                         ("unarchive", "a session listed again"),
@@ -261,6 +276,25 @@ def main():
     if args.command == "models":
         for m in ask(args, {"op": "subscribe"})["server"].get("models") or []:
             print(f"{m['value']:24}  {m['displayName']}")
+        return
+    if args.command in ("link", "unlink"):
+        where = {"via": "ssh", "dest": args.dest, **({"command": args.host_command}
+                                                      if getattr(args, "host_command", None) else {})}
+        args.host, args.host_command = None, None
+        ask(args, {"op": args.command, "where": where})
+        return print(f"linking to {args.dest}: `{os.path.basename(sys.argv[0])} mesh` says how it goes"
+                     if args.command == "link" else f"no longer linked to {args.dest}")
+    if args.command == "mesh":
+        args.host, args.host_command = None, None
+        mesh = ask(args, {"op": "subscribe"})["server"].get("mesh") or {}
+        for m in mesh.get("members") or []:
+            print(f"{m['id']}  {m['name']:16}  " + (f"through {m['through']}" if m.get("through") else "linked") +
+                  "".join(f"  [{p['name']}: {len(p.get('models') or [])} models]" for p in m.get("providers") or []))
+        for x in mesh.get("links") or []:
+            print(f"link to {wire.said_where(x['where'])}: {x['state']}"
+                  + (f" ({x['error']})" if x.get("error") else ""))
+        if not mesh.get("members") and not mesh.get("links"):
+            print("in no mesh: link to another host with `link DEST`")
         return
     if args.command in ("stop", "archive", "unarchive"):
         ask(args, {"op": args.command, "session": args.session})

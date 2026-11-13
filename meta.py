@@ -31,6 +31,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import weakref
 
 import gi
 
@@ -49,7 +50,7 @@ from baudelib.models import model_program  # noqa: E402
 NAME = "Meta"
 MODEL = "haiku"  # its model, unless Settings → Meta → Intelligence says another (settings.json meta_model)
 MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers till claude's listed its own)
-MODEL_KEYS = ("value", "resolvedModel", "displayName", "description", "supportsEffort", "supportedEffortLevels")
+MODEL_KEYS = ("value", "displayName", "supportsEffort", "supportedEffortLevels")  # (what's kept of each: models)
 CODE_LINES = 10  # the most lines of Python run_python runs
 READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
@@ -69,34 +70,44 @@ def models():
     MODELS_OFFERED till it has."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
-    return [(m["value"], m.get("displayName") or m["value"],
-             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None) for m in listed] or \
+    out = [(m["value"], m.get("displayName") or m["value"],
+            list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None) for m in listed] or \
         [(value, lbl, None) for value, lbl in MODELS_OFFERED]
+    chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list: still there to see)
+    if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" and model_entry(chosen, out) is None:
+        out.append((chosen, chosen, None))
+    return out
 
 
-def listed(found):
+def listed(found, seed=False):
     """claude's initialize listed its models (found): those claude runs, kept as what Intelligence offers (models).
-    Meta acts through MCP tools, which claude takes."""
+    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet."""
     keep = [{k: m[k] for k in MODEL_KEYS if k in m} for m in found or []
             if isinstance(m, dict) and m.get("value") and m["value"] != "default" and model_program(m["value"]) == "claude"]
-    if keep and keep != widgets.load_settings().get("claude_models"):
+    had = widgets.load_settings().get("claude_models")
+    if keep and keep != had and not (seed and had):
         widgets.save_settings(claude_models=keep)
 
 
 def model_entry(value, offered=None):
     """The entry of offered (models()) for a model value: its own, else, for an alias (haiku), the first listed model
-    of its family (claude-haiku-4-5); None if neither."""
+    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if neither."""
     offered = models() if offered is None else offered
+    family = re.compile(rf"(^|-){re.escape(value)}(-|\[|$)")
     return next((m for m in offered if m[0] == value), None) or \
-        (next((m for m in offered if value in m[0]), None) if value in dict(MODELS) else None)
+        (next((m for m in offered if family.search(m[0])), None) if value in dict(MODELS) else None)
 
 
 def model():
-    """The model Meta runs on: settings.json's meta_model, if it's offered (models) or an alias of claude's, else
-    Haiku."""
+    """The model Meta runs on: settings.json's meta_model (picked from a list claude gave, and kept while another
+    claude lists others), else Haiku."""
     chosen = widgets.load_settings().get("meta_model")
-    return chosen if isinstance(chosen, str) and (chosen in dict(MODELS) or any(m[0] == chosen for m in models())) \
-        else MODEL
+    return chosen if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" else MODEL
+
+
+def model_value():
+    """model() as Intelligence lists it (claude-haiku-4-5 for haiku, where it's listed so)."""
+    return (model_entry(model()) or (model(),))[0]
 
 
 def efforts():
@@ -478,7 +489,8 @@ def api_doc(tools):
 
 class Setting:
     """A setting Meta changes (set_setting) and shows (show setting:<name>): its value (get), changing it (put), the
-    row Settings has for it (row), and what it takes: values a list of names, (low, high) for a size, or bool. note:
+    row Settings has for it (row), and what it takes: values a list of names (or a function giving them, where they
+    change), (low, high) for a size, or bool. note:
     what to know of it (the code font takes from the next start)."""
 
     def __init__(self, name, title, get, put, row, values, note="", meta_sets=True):
@@ -529,8 +541,21 @@ class Setting:
         return "|".join(map(str, self.options()))
 
 
-def model_row(chat, then=None):
-    """Settings → Meta → Intelligence: the model Meta thinks with, from its next message (then(): after it's picked)."""
+EFFORT_ROWS = weakref.WeakSet()  # (the Effort rows up: each offers the model's levels, model_picked)
+
+
+def model_picked(chat, value):
+    """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, and every Effort row
+    offers its levels."""
+    widgets.save_settings(meta_model=value)
+    for row in list(EFFORT_ROWS):
+        row.sync()
+    if chat is not None:
+        chat.model_changed()
+
+
+def model_row(chat):
+    """Settings → Meta → Intelligence: the model Meta thinks with, from its next message."""
     offered = models()
     values = [m[0] for m in offered]
     entry = model_entry(model(), offered)
@@ -538,19 +563,14 @@ def model_row(chat, then=None):
                        model=Gtk.StringList.new([m[1] for m in offered]),
                        selected=offered.index(entry) if entry else 0)
 
-    def picked(r, _p):
-        widgets.save_settings(meta_model=values[r.get_selected()])
-        if chat is not None:
-            chat.model_changed()
-        if then is not None:
-            then()
-    row.connect("notify::selected", picked)
+    row.connect("notify::selected", lambda r, _p: r.get_selected() < len(values) and
+                model_picked(chat, values[r.get_selected()]))
     return row
 
 
 def effort_row(chat):
     """Settings → Meta → Effort: how hard Meta thinks, of the levels its model takes, from its next message. Its sync()
-    offers another model's levels (model_row's then)."""
+    offers another model's levels (model_picked)."""
     row = Adw.ComboRow(title="Effort")
     state = {"values": [None], "syncing": False}
 
@@ -574,6 +594,7 @@ def effort_row(chat):
     row.connect("notify::selected", picked)
     row.sync = sync
     sync()
+    EFFORT_ROWS.add(row)
     return row
 
 
@@ -589,9 +610,8 @@ def code_mode_row(chat):
 def settings_group(chat):
     """Settings → Meta, in Baude's and Record's Settings: Intelligence, Effort and Code mode."""
     group = Adw.PreferencesGroup(title=NAME)
-    effort = effort_row(chat)
-    group.add(model_row(chat, effort.sync))
-    group.add(effort)
+    group.add(model_row(chat))
+    group.add(effort_row(chat))
     group.add(code_mode_row(chat))
     return group
 
@@ -641,8 +661,7 @@ def shared_settings(win, chat, app, zoom_default):
                 lambda: bool((a := win.lookup_action("fullwidth")) and a.get_state().get_boolean()), wide,
                 lambda: widgets.settings_switch("Full-width text", None, "win.fullwidth"), bool),
         Setting("auto_update", "Auto restart on update", update.enabled, auto, update.settings_row, bool),
-        Setting("meta_model", "Intelligence", model,
-                lambda v: (widgets.save_settings(meta_model=v), chat.model_changed()), lambda: model_row(chat),
+        Setting("meta_model", "Intelligence", model_value, lambda v: model_picked(chat, v), lambda: model_row(chat),
                 lambda: [m[0] for m in models()], note=f"{NAME}'s own model, from its next message"),
         Setting("meta_effort", "Effort", lambda: effort() or "default",
                 lambda v: (widgets.save_settings(meta_effort=None if v == "default" else v), chat.model_changed()),

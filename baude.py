@@ -13120,7 +13120,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             models = getattr(self, "claude_models", [])
         else:
             self.claude_models = models
-            meta.listed(models)  # (what this machine's claude runs: Meta's Intelligence offers them too)
+            meta.listed(models, seed=True)  # (what this machine's claude runs: Meta's Intelligence, till Meta's own lists)
         if self.remote is None:
             models = [m for m in models if model_program(m["value"]) == "claude"] + [APPLE_MODEL] + local_models()
         self.models_info = {m["value"]: m for m in models}

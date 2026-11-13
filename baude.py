@@ -11402,8 +11402,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         self.banner = Adw.Banner(revealed=False)
         root.append(self.banner)
-        root.append(self.scroller)
+        chat_over = Gtk.Overlay(child=self.scroller, vexpand=True)
+        root.append(chat_over)
         root.append(composer)
+        # (more said than the model's window holds: the chat greyed, its box off, till a bigger model or a new chat)
+        self.exhausted = widgets.Exhausted(self.scroller, box_overlay, chat_over)
         root.append(statusbar)
         self.panel = SidePanel(self)
         # a plain split: same background on both sides, a 1px rule between them, no shadow;
@@ -12340,6 +12343,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def show_context(self, usage):
         self.ctx_box.set_usage(usage)
+        self.exhausted.set(self.ctx_box.over and not self.busy)  # (a turn's stop button kept: asked again as it ends)
 
     def refresh_effort(self):
         self.request({"subtype": "get_settings"},
@@ -12746,6 +12750,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.toggle_held = None
         self.total_cost = 0.0
         self.ctx_box.reset()
+        self.exhausted.set(False)
         self.show_title(None)
         self.tasks.clear()
         self.sub_tails.clear()
@@ -12867,6 +12872,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return False
 
     def on_send(self):
+        if self.exhausted.on:
+            return
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
         if (typed in ("/login", "/logout") or typed.startswith("/login ")) and self.remote is not None \

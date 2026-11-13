@@ -7,6 +7,10 @@ Of the flags Baude passes it uses --model (a value in models.json), --resume (pi
 starts with the first message and stops with this. Each of pi's tool calls is put to Baude as a permission question,
 through ask.ts (a pi extension), and shown to it as Claude's tool of that kind (bash as Bash, read as Read, ...).
 
+As claude does for Meta, it also takes --system-prompt (pi's, in place of its own), --tools (Claude's tools, as pi's),
+--mcp-config (stdio servers, whose tools pi calls through its own MCP support, named mcp__<server>__<tool> as
+Claude's are) and --no-session-persistence (a session pi doesn't keep).
+
 Every chat, in every Baude window, shares one server: `pi-claude --serve` keeps mlx_vlm.server, which holds one model at
 a time (16 GB holds no more), behind a gate on PORT: a request for the model it has goes ahead, one for another waits
 for those running to finish (a swap stops what's generating). The first chat to need it starts it; it unloads the
@@ -63,6 +67,32 @@ def level(effort):
 thinking = level(flag("--effort"))
 mode = {"manual": "default", None: "default"}.get(flag("--permission-mode"), flag("--permission-mode"))
 cwd = os.getcwd()
+system_prompt = flag("--system-prompt")
+keep_session = "--no-session-persistence" not in sys.argv
+PI_TOOLS = {"Read": "read", "Bash": "bash", "Edit": "edit", "MultiEdit": "edit", "Write": "write", "Grep": "grep",
+            "Glob": "find", "LS": "ls"}  # (Claude's tools as pi's)
+
+
+def mcp_servers():
+    """--mcp-config's stdio servers ({name: {command, args, env}}), from its JSON or the file it names."""
+    raw = flag("--mcp-config")
+    if not raw:
+        return {}
+    try:
+        cfg = json.loads(raw) if raw.lstrip().startswith("{") else json.load(open(raw))
+    except (OSError, ValueError):
+        say("pi-claude: --mcp-config isn't JSON, nor a file of it")
+        return {}
+    return {name: server for name, server in (cfg.get("mcpServers") or {}).items() if server.get("command")}
+
+
+def pi_tools(servers):
+    """--tools as pi's (None: pi's own), with each MCP server's (mcp__<server>__*), declared to the model."""
+    asked = flag("--tools")
+    if asked is None:
+        return None
+    names = [PI_TOOLS[t.strip()] for t in asked.split(",") if t.strip() in PI_TOOLS]
+    return list(dict.fromkeys(names + [f"mcp__{name}__*" for name in servers]))
 
 out_lock = threading.Lock()
 
@@ -100,6 +130,8 @@ def to_claude(name, args):
     a = args or {}
     if name == "bash":
         return "Bash", drop_none({"command": a.get("command")})
+    if name in ("grep", "find", "ls"):
+        return {"grep": "Grep", "find": "Glob", "ls": "LS"}[name], drop_none(dict(a))
     if name == "read":
         return "Read", drop_none({"file_path": a.get("path"), "offset": a.get("offset"), "limit": a.get("limit")})
     if name == "write":
@@ -380,12 +412,28 @@ class Engine:
         sessions = os.path.join(HOME, "sessions")
         os.makedirs(sessions, exist_ok=True)
         args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", "mlx", "--model", model["repo"],
-                "--session-dir", sessions, "--session-id", session_id, "--thinking", thinking,
-                "--no-extensions",
-                "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp",
-                "--no-approve", "--offline", "--append-system-prompt",
-                f"The user's project is {cwd}, the working folder: the files they mention are there, not in pi's "
-                "own documentation."]
+                *(("--session-dir", sessions, "--session-id", session_id) if keep_session else ("--no-session",)),
+                "--thinking", thinking, "--no-extensions",
+                "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes",
+                "--no-approve", "--offline"]
+        servers = mcp_servers()
+        if servers:  # (pi's own MCP support, its tools declared to the model as they are, not through codemode)
+            with open(os.path.join(self.agent_dir, "mcp.json"), "w") as f:
+                json.dump({"mcpServers": {name: {k: v for k, v in server.items() if k in ("command", "args", "env")} |
+                                          {"exposure": "direct"} for name, server in servers.items()}}, f)
+            args += ["-e", "builtin:mcp"]
+        else:
+            args += ["--no-mcp"]
+        tools = pi_tools(servers)
+        if tools is not None:
+            args += ["--tools", ",".join(tools)] if tools else ["--no-tools"]
+        if system_prompt is not None:  # (the caller's instructions, all of them: no AGENTS.md or CLAUDE.md added)
+            with open(os.path.join(self.agent_dir, "system.md"), "w") as f:
+                f.write(system_prompt)
+            args += ["--system-prompt", os.path.join(self.agent_dir, "system.md"), "--no-context-files"]
+        else:
+            args += ["--append-system-prompt", f"The user's project is {cwd}, the working folder: the files they "
+                     "mention are there, not in pi's own documentation."]
         os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
         log = open(os.path.join(HOME, "logs", "pi.log"), "a")
         self.pi = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
@@ -521,6 +569,8 @@ class Engine:
         emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session_id,
               "message": {"id": getattr(self, "mid", new_id("msg_")), "model": model["repo"], "role": "assistant",
                           "content": content,
+                          "stop_reason": {"length": "max_tokens", "toolUse": "tool_use", "stop": "end_turn"}.get(
+                              m.get("stopReason")),  # (length: cut short, at MAX_OUT)
                           "usage": {"input_tokens": u.get("input", 0), "output_tokens": u.get("output", 0)}}})
         if self.turn:
             self.turn["messages"] += 1
@@ -604,9 +654,9 @@ def handle(msg):
             reply(rid, {"commands": [], "current_permission_mode": mode,
                         "models": [{"value": model["value"], "resolvedModel": model["repo"],
                                     "displayName": model["displayName"]}]})
+            asked = [t.strip() for t in (flag("--tools") or "Read,Bash,Edit,Write").split(",") if t.strip() in PI_TOOLS]
             emit({"type": "system", "subtype": "init", "session_id": session_id, "cwd": cwd,
-                  "model": model["displayName"], "tools": ["Read", "Bash", "Edit", "Write"],
-                  "permissionMode": mode})
+                  "model": model["displayName"], "tools": asked, "permissionMode": mode})
         elif sub == "get_context_usage":
             def usage(r):
                 u = (r.get("data") or {}).get("contextUsage") or {}

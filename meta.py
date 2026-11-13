@@ -44,6 +44,7 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+from baudelib import models as modelslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
 from baudelib.models import model_program  # noqa: E402
 
@@ -59,6 +60,17 @@ AGENT_ENV = {"ENABLE_TOOL_SEARCH": "false", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "
              "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
 REF_LIMIT = 20000  # characters of a referenced page's, file's or chat's text put in with a message (past it: where to Read)
 EARLIER_LIMIT = 16000  # of what was said before a session started, with its first message
+# how many tokens a session's window holds, by what runs its model, till the session says (get_context_usage): claude's
+# (1M for a [1m] model's), pi-claude's (its CONTEXT), and the least Apple's on-device model has had
+WINDOWS = {"claude": 200_000, "pi": 32_768, "apple": 4_096}
+# of a window, the tokens kept for the reply (at most half a small one): Claude Code's longest reply; pi-claude's
+# model's, as pi keeps them (it summarises the conversation past its window less these); a short one for Apple's
+REPLY_ROOM = {"claude": 32_000, "pi": 16_384, "apple": 1_024}
+CHARS_PER_TOKEN = 3  # (a token's characters, at the fewest, in what Meta's sent: what's measured as text is so)
+# a turn's error that says the session's window was outgrown: claude's ("Prompt is too long"), Apple's model's, those
+# MLX serves (pi-claude's, from the server), and others' wordings of it
+OVERFLOW_RE = re.compile(r"prompt is too long|context (window|length|size)|exceed\w*[^.]{0,40}\b(context|tokens)\b|"
+                         r"too many tokens|maximum context", re.I)
 REF_RE = re.compile(r"(?<![\w@])@(?:\{([^}\n]+)\}|([\w][\w./:\-]*[\w/]|\w))")  # (@name, @{a name})
 REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
@@ -66,17 +78,26 @@ MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 def models():
     """What Intelligence offers, as (value, label, effort levels or None): the models this machine's claude listed last
-    (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude), in its order;
-    MODELS_OFFERED till it has."""
+    (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude), in its order
+    (MODELS_OFFERED till it has); then those this Mac runs besides (baudelib.models.runnable_models: Apple's once
+    apple-claude's built, and pi's that are downloaded), as Baude's chats offer them."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     out = [(m["value"], m.get("displayName") or m["value"],
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None) for m in listed] or \
         [(value, lbl, None) for value, lbl in MODELS_OFFERED]
-    chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list: still there to see)
-    if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" and model_entry(chosen, out) is None:
-        out.append((chosen, chosen, None))
+    out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None)
+            for m in modelslib.runnable_models()]
+    chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list, or a model this Mac
+    if isinstance(chosen, str) and chosen and model_entry(chosen, out) is None:  # ran then: still there to see)
+        out.append((chosen, local_name(chosen), None))
     return out
+
+
+def local_name(value):
+    """A model's name where it's one this Mac runs besides Claude's (Apple's, pi's), else value."""
+    found = [modelslib.APPLE_MODEL, *modelslib.LOCAL_MODELS]
+    return next((m["displayName"] for m in found if m["value"] == value), value)
 
 
 def listed(found, seed=False):
@@ -100,14 +121,21 @@ def model_entry(value, offered=None):
 
 def model():
     """The model Meta runs on: settings.json's meta_model (picked from a list claude gave, and kept while another
-    claude lists others), else Haiku."""
+    claude lists others; or one this Mac runs besides), else Haiku."""
     chosen = widgets.load_settings().get("meta_model")
-    return chosen if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" else MODEL
+    return chosen if isinstance(chosen, str) and chosen else MODEL
 
 
 def model_value():
     """model() as Intelligence lists it (claude-haiku-4-5 for haiku, where it's listed so)."""
     return (model_entry(model()) or (model(),))[0]
+
+
+def model_name(value=None):
+    """A model's name as Intelligence lists it (Meta's own, if none's given)."""
+    value = model() if value is None else value
+    entry = model_entry(value)
+    return entry[1] if entry else local_name(value)
 
 
 def efforts():
@@ -120,6 +148,16 @@ def effort():
     """How hard Meta thinks: settings.json's meta_effort if its model takes it, else None (claude's own default)."""
     chosen = widgets.load_settings().get("meta_effort")
     return chosen if chosen in efforts() else None
+
+
+def window(value):
+    """How many tokens a model's session holds, till it says (WINDOWS)."""
+    program = model_program(value)
+    return 1_000_000 if program == "claude" and "[1m]" in value else WINDOWS[program]
+
+
+class Exhausted(Exception):
+    """A session's window has no room for a message: what to tell the user."""
 
 
 def code_mode():
@@ -269,22 +307,25 @@ def transcript_text(path, limit=REF_LIMIT):
         text[-limit:]
 
 
-def earlier_said(messages, limit=EARLIER_LIMIT):
+def earlier_said(messages, limit=EARLIER_LIMIT, strict=False):
     """What was said before this session (a new one: the app started again, another model), the newest as far back
-    as limit."""
+    as limit, and how many of the messages that is: (text, given, of). The newest is put in past limit, unless
+    strict (limit's all the room the session's window has: Agent.first)."""
+    kept = [m for m in messages if not m.get("error")]
     lines, size = [], 0
-    for m in reversed([m for m in messages if not m.get("error")]):
+    for m in reversed(kept):
         who = "User" if m.get("role") == "user" else NAME
         body = m.get("text") or ""
         if m.get("quote"):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
             body += f"\n(an edit to {p['page']}: {p.get('status', 'pending')})"
-        size += len(body)
-        if size > limit and lines:
+        size += len(body) + len(who) + 4
+        if size > limit and (lines or strict):
             break
         lines.append(f"{who}: {body}")
-    return "<earlier_conversation>\n" + "\n\n".join(reversed(lines)) + "\n</earlier_conversation>" if lines else ""
+    text = "<earlier_conversation>\n" + "\n\n".join(reversed(lines)) + "\n</earlier_conversation>" if lines else ""
+    return text, len(lines), len(kept)
 
 
 # ---------------------------------------------------------------- what's running
@@ -582,9 +623,7 @@ def effort_row(chat):
         row.set_selected(state["values"].index(effort()))
         state["syncing"] = False
         row.set_sensitive(bool(levels))
-        name = model_entry(model())
-        row.set_subtitle(f"How hard {NAME} thinks" if levels else
-                         f"{name[1] if name else model()} has no effort setting")
+        row.set_subtitle(f"How hard {NAME} thinks" if levels else f"{model_name()} has no effort setting")
 
     def picked(r, _p):
         if not state["syncing"] and r.get_selected() < len(state["values"]):
@@ -933,7 +972,18 @@ class Agent:
     EXIT_WAIT = 200  # ms for what it said as it ended (stderr, read on its own thread) to come in
 
     def __init__(self, chat, key, system, tools, cwd, roots=(), model=MODEL, exe=None, env_of=None, effort=None):
+        # (what runs the model, as Baude's chats start it: claude (exe), or apple-claude or pi-claude for a model this
+        # Mac runs besides, each given Meta's tools through the same MCP relay, and its effort only if it takes one)
+        run = modelslib.launch(model, "default", effort)
+        if run["missing"]:
+            raise OSError("apple-claude isn't built yet: swift build -c release, in apple-claude/"
+                          if run["program"] == "apple" else f"{run['program']}-claude isn't here")
+        self.program = run["program"]
+        self.runs = "claude" if self.program == "claude" else f"{self.program}-claude"  # (what runs it: runtime info)
+        exe, effort = (exe, effort) if self.program == "claude" else (run["exe"], run["effort"])
         self.chat, self.key, self.model, self.effort = chat, key, model, effort
+        self.window = window(model)  # (tokens its session holds: what it says, once it's asked: first)
+        self.overhead = (len(system) + len(json.dumps(tools))) // CHARS_PER_TOKEN  # (its instructions' and tools', at most)
         self.roots = [os.path.realpath(r) for r in roots if r]
         self.turn, self.fresh, self.stderr, self.closed = None, True, [], False
         self.answers = {}  # (the control requests it's made, by id: what to do with their answers)
@@ -955,12 +1005,40 @@ class Agent:
                              exe=exe, env_of=env_of)
 
     def ask(self, text, turn):
-        """A message (turn: what the reply's made of, as it comes: its text, actions, what it shows)."""
-        self.turn, self.fresh = turn, False
+        """A message (turn: what the reply's made of, as it comes: its text, actions, what it shows). text: what's
+        sent; for a session's first, what makes it, given the room its window has (first)."""
+        self.turn = turn
+        if callable(text):
+            self.usage(lambda usage: self.first(text, usage, turn))
+        else:
+            self.fresh = False
+            self.proc.user(text)
+
+    def first(self, make, usage, turn):
+        """A session's first message, made (make(room)) once it's said how many tokens its window holds and its
+        instructions and tools take (usage; pi-claude's says none till it's started: overhead, then): room, the
+        characters left of the window, less the reply's (REPLY_ROOM), for what was said before and the rest. None
+        fits: the turn's error says so (Exhausted)."""
+        if self.closed or self.turn is not turn or turn.get("stopped"):
+            return
+        self.window = usage.get("maxTokens") or self.window
+        reply = min(REPLY_ROOM[self.program], self.window // 2)
+        room = (self.window - (usage.get("totalTokens") or self.overhead) - reply) * CHARS_PER_TOKEN
+        try:
+            text, notice = make(room)
+        except Exhausted as e:
+            self.turn = None
+            self.chat._done(self, "", str(e), turn)
+            return
+        if notice:
+            turn.setdefault("notices", []).append(notice)
+            self.chat._refresh_live(turn)
+        self.fresh = False
         self.proc.user(text)
 
     def usage(self, then):
-        """then(usage): how much of its context window the session's used (Claude Code's get_context_usage)."""
+        """then(usage): how much of its context window the session's used (Claude Code's get_context_usage); {} if
+        it didn't say."""
         self.answers[self.proc.control({"subtype": "get_context_usage"})] = then
 
     def stop(self):
@@ -1034,12 +1112,19 @@ class Agent:
             if r.get("request_id") == proc.init_rid and r.get("subtype") == "success":
                 listed((r.get("response") or {}).get("models"))  # (what this machine's claude runs: Intelligence)
             then = self.answers.pop(r.get("request_id"), None)
-            if then is not None and r.get("subtype") == "success":
-                then(r.get("response") or {})
+            if then is not None:
+                then((r.get("response") or {}) if r.get("subtype") == "success" else {})
         elif turn is None or msg.get("parent_tool_use_id"):
             pass
+        elif t == "system" and msg.get("subtype") == "compact_boundary":  # (claude's, pi's: the window filled)
+            turn.setdefault("notices", []).append(
+                f"Context window full: what was said before was summarised to fit {model_name(self.model)}'s "
+                f"{widgets.fmt_tokens(self.window)} tokens.")
+            self.chat._refresh_live(turn)
         elif t == "stream_event":
             ev = msg.get("event") or {}
+            if ev.get("type") == "message_delta":  # (why the message ended: max_tokens, cut short)
+                turn["stop"] = (ev.get("delta") or {}).get("stop_reason")
             if ev.get("type") == "message_start":  # (a message of the turn's, after a tool's: a paragraph of its own)
                 turn["streamed"] = False
                 if "".join(turn["text"]).strip() and not "".join(turn["text"]).endswith("\n\n"):
@@ -1050,6 +1135,8 @@ class Agent:
                 turn["streamed"] = True
                 self.chat._said_more(self, turn, delta["text"])
         elif t == "assistant":
+            if (msg.get("message") or {}).get("stop_reason"):
+                turn["stop"] = msg["message"]["stop_reason"]
             for c in (msg.get("message") or {}).get("content") or []:
                 if c.get("type") == "tool_use":
                     self.chat._tool_started(self, turn, c)
@@ -1063,13 +1150,21 @@ class Agent:
         elif t == "result":
             self.turn = None
             text = "".join(turn["text"]).strip() or ("" if msg.get("is_error") else (msg.get("result") or "").strip())
-            error = None
+            error, outgrown = None, False
             if msg.get("is_error") and not turn.get("stopped"):
                 error = (msg.get("result") or "; ".join(map(str, msg.get("errors") or [])) or
                          "claude reported an error")[-600:]
-                if "log" in error.lower() and "in" in error.lower():
+                if outgrown := bool(OVERFLOW_RE.search(error)):
+                    error = (f"Context window exhausted: the conversation outgrew {model_name(self.model)}'s "
+                             f"{widgets.fmt_tokens(self.window)} tokens. Your next message starts a new session, given "
+                             "as much of the conversation as fits.")
+                elif "log" in error.lower() and "in" in error.lower():
                     error += "\n\nRun `claude` in a terminal and /login, then ask again."
+            if turn.get("stop") == "max_tokens" and not error:
+                turn["cut"] = f"Cut short: the reply reached {model_name(self.model)}'s length limit."
             self.chat._done(self, text, error, turn)
+            if outgrown:
+                self.close()
         return False
 
     def on_exit(self, code):
@@ -1109,6 +1204,8 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .meta-foot > * {{ opacity: 0.75; }}
 .meta-foot button {{ min-height: 0; padding: 0 4px; font-weight: normal; }}
 label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
+/* (over a reply, its session's window outgrown; under it, the reply cut short) */
+label.meta-notice {{ font-size: 0.9em; color: @warning_color; }}
 /* a form (MetaChat.form_card): hollow, in a tool card's outline, as Meta's rows are; pinned over the conversation,
    on the pane's own background, a shadow under it */
 .meta-form {{ border: 1px solid @baude_rule; border-radius: 8px; padding: 10px 12px; }}
@@ -1657,8 +1754,8 @@ class MetaChat(Gtk.Box):
     # ---- the conversation
     def model_changed(self):
         """Settings → Meta: the send button says the model it asks; the next message is the new model's (submit)."""
-        entry, level = model_entry(model()), effort()
-        name = (entry[1] if entry else model()) + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
+        level = effort()
+        name = model_name() + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
         self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) (Enter)\n" \
                                 "New line: Shift+Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
@@ -1773,6 +1870,8 @@ class MetaChat(Gtk.Box):
             return outer
         reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         reply.bubble, reply.prose = reply, None
+        for notice in m.get("notices") or ():
+            reply.append(label(notice, css=("meta-notice",), select=True))
         items = m.get("items")
         if m.get("error"):
             drawn = set()
@@ -1818,6 +1917,8 @@ class MetaChat(Gtk.Box):
         if not items and not m.get("actions") and not m.get("shown"):
             reply.prose = self.prose(m.get("text") or "…")
             reply.append(reply.prose)
+        if m.get("cut"):
+            reply.append(label(m["cut"], css=("meta-notice",), select=True))
         return reply
 
     def has_work(self, m):
@@ -2481,7 +2582,7 @@ class MetaChat(Gtk.Box):
             self.agent.ask(self.message_for(self.agent, msg), turn)
         except OSError as e:
             self.agent = None
-            self.messages().append({"role": "meta", "text": f"Couldn't run claude ({e}).", "error": True,
+            self.messages().append({"role": "meta", "text": f"Couldn't run {model_name()} ({e}).", "error": True,
                                     "t": time.time()})
             self.save(now=True)
             return self.render()
@@ -2511,17 +2612,39 @@ class MetaChat(Gtk.Box):
         return {}
 
     def message_for(self, agent, msg):
-        """What's sent for a message: a new session's index and what was said before it; what the user's done since
-        (undone, redone, a row adjusted); the app's own (context); and what was written."""
-        parts = []
-        if agent.fresh:
-            parts.append(f"<app_index>\n{self.index_text()}\n</app_index>")
-            if earlier := earlier_said(self.messages()[:-1]):
-                parts.append(earlier)
-        parts += self.since()
-        parts += self.context(agent, msg)
-        parts.append(msg["text"])
-        return "\n\n".join(p.strip("\n") for p in parts if p)
+        """What's sent for a message: what the user's done since (undone, redone, a row adjusted); the app's own
+        (context); and what was written. A new session's starts with the index, what was said before it and the app's
+        first words (first_said): what makes that, given the room its window has (Agent.first), putting in as much of
+        what was said before as fits, and saying so when that isn't all of it; or Exhausted if the rest doesn't."""
+        tail = "\n\n".join(p.strip("\n") for p in [*self.since(), *self.context(agent, msg), msg["text"]] if p)
+        if not agent.fresh:
+            return tail
+        index = f"<app_index>\n{self.index_text()}\n</app_index>"
+        before, first, name = self.messages()[:-1], self.first_said(agent), model_name(agent.model)
+
+        def make(room):
+            size, need = widgets.fmt_tokens(agent.window), len(index) + len(tail) + 4
+            if need > room:  # (its instructions', tools' and reply's tokens, and this message's)
+                total = agent.window - room // CHARS_PER_TOKEN + need // CHARS_PER_TOKEN
+                raise Exhausted(
+                    f"Context window exhausted: {name} holds {size} tokens, and {NAME}'s instructions and tools, this "
+                    f"message and room for a reply need about {widgets.fmt_tokens(total)}. Pick a model with a bigger "
+                    f"window (Settings → {NAME} → Intelligence), or put less in the message.")
+            left = room - need
+            earlier, given, of = earlier_said(before, min(EARLIER_LIMIT, left - 60), strict=True)
+            notes = first(left - len(earlier) - 4) if first is not None else ""
+            notice = None
+            if given < of:
+                notice = f"Context window exhausted: {name} holds {size} tokens, so {NAME} was given " + \
+                    (f"only the last {given} of the {of} messages before this one." if given else
+                     f"none of the {of} messages before this one.")
+            return "\n\n".join(p.strip("\n") for p in (index, earlier, notes, tail) if p), notice
+        return make
+
+    def first_said(self, agent):
+        """What a new session's told first, of the app's own, as far as a number of characters (a function of that):
+        Record's notebook open. None: nothing."""
+        return None
 
     def since(self):
         """What the user's done that Meta hasn't been told: its actions they undid or redid, and the settings they
@@ -2605,11 +2728,13 @@ class MetaChat(Gtk.Box):
 
     def _live(self, turn):
         if not turn["items"]:
-            reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            for notice in turn.get("notices") or ():
+                reply.append(label(notice, css=("meta-notice",), select=True))
             reply.append(label("Thinking…", css=("dim-label",)))
             reply.bubble, reply.prose = reply, None
         else:
-            reply = self._bubble({"role": "meta", "items": turn["items"]})
+            reply = self._bubble({"role": "meta", "items": turn["items"], "notices": turn.get("notices")})
             last = turn["items"][-1]
             if last["kind"] != "text":
                 reply.prose = None  # (the part to grow is a new one: made when it comes)
@@ -2665,9 +2790,13 @@ class MetaChat(Gtk.Box):
             self.ask, self.live_widget = None, None
             self.writing.set_busy(False)
             self._drop_asking()
-        if error or text.strip() or self.worked(turn):
+        if error or text.strip() or self.worked(turn) or turn.get("notices"):
             m = {"role": "meta", "text": text, "t": time.time(),
                  "items": [{k: v for k, v in it.items() if k != "ran"} for it in turn["items"]]}
+            if turn.get("notices"):
+                m["notices"] = turn["notices"]  # (its window outgrown: said over it)
+            if turn.get("cut"):
+                m["cut"] = turn["cut"]  # (its reply cut short: said under it)
             for it in m["items"]:
                 if it.get("state") == "running":  # (stopped before its result came)
                     it["state"] = "interrupted"

@@ -17,6 +17,8 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
     python3 baude_headless.py delete    SESSION [...]   # stopped, gone, its transcript moved to the trash
     python3 baude_headless.py link   DEST [--host-command CMD]   # this host linked to DEST's, both ways: the mesh
     python3 baude_headless.py unlink DEST                       # that link let go of
+    python3 baude_headless.py deactivate DEST|ID   # a member not reached, nor let reach here, till it's activated
+    python3 baude_headless.py activate   DEST|ID
     python3 baude_headless.py mesh                # the mesh's members, and the links this host makes
 A command that takes --host takes --member ID instead: a member of the mesh, reached through this machine's host.
 
@@ -246,6 +248,10 @@ def main():
     link.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
     sub.add_parser("unlink", help="a link this machine's host process makes let go of").add_argument("dest")
     sub.add_parser("mesh", help="the mesh's members, and the links this machine's host process makes")
+    for name, help_ in (("deactivate", "a member (where a link goes, or its id) not reached from here, nor let reach "
+                                       "here, till it's activated again"),
+                        ("activate", "a member deactivated here taken up again")):
+        sub.add_parser(name, help=help_).add_argument("target", help="where ssh goes (as linked), or its id")
     for name, help_ in (("stop", "a session's claude stopped (it's resumed when it's next written to)"),
                         ("archive", "a session's claude stopped, and the session listed only when archived ones are"),
                         ("unarchive", "a session listed again"),
@@ -284,6 +290,11 @@ def main():
         ask(args, {"op": args.command, "where": where})
         return print(f"linking to {args.dest}: `{os.path.basename(sys.argv[0])} mesh` says how it goes"
                      if args.command == "link" else f"no longer linked to {args.dest}")
+    if args.command in ("deactivate", "activate"):
+        args.host, args.host_command = None, None
+        said = ask(args, {"op": args.command, **({"id": args.target} if wire.is_id(args.target) else {}),
+                          **({"where": {"via": "ssh", "dest": args.target}} if wire.is_dest(args.target) else {})})
+        return print(f"{args.target} {args.command}d" if said.get("any") else f"no member or link {args.target} here")
     if args.command == "mesh":
         args.host, args.host_command = None, None
         mesh = ask(args, {"op": "subscribe"})["server"].get("mesh") or {}
@@ -291,9 +302,11 @@ def main():
             print(f"{m['id']}  {m['name']:16}  " + (f"through {m['through']}" if m.get("through") else "linked") +
                   "".join(f"  [{p['name']}: {len(p.get('models') or [])} models]" for p in m.get("providers") or []))
         for x in mesh.get("links") or []:
-            print(f"link to {wire.said_where(x['where'])}: {x['state']}"
+            print(f"link to {wire.said_where(x['where'])}: {'deactivated' if x.get('active') is False else x['state']}"
                   + (f" ({x['error']})" if x.get("error") else ""))
-        if not mesh.get("members") and not mesh.get("links"):
+        for i in mesh.get("inactive") or []:
+            print(f"{i}  deactivated")
+        if not mesh.get("members") and not mesh.get("links") and not mesh.get("inactive"):
             print("in no mesh: link to another host with `link DEST`")
         return
     if args.command in ("stop", "archive", "unarchive"):

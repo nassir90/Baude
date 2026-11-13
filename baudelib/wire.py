@@ -94,6 +94,10 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        (mesh.py). Its state's in info's mesh
     unlink {where?, id?}                            -> unlinked {any}: the links made from here to where, or to
                                                        member id, let go of and forgotten
+    deactivate {id?, where?}, activate {id?, where?} -> deactivated / activated {any}: a member (its id, or where a
+                                                       link from here goes) deactivated here: its links let go of
+                                                       and not made, its joins and tunnels refused (info's mesh:
+                                                       inactive); activate, taken up again
     join {host}                                     -> joined {host}: (another host process's) this connection,
                                                        from now on, a link it's made to here (mesh.py)
     relay {to}                                      -> relayed {to}: this connection, from now on, a tunnel to
@@ -157,7 +161,8 @@ import subprocess
 import threading
 import time
 
-VERSION = 3  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer)
+VERSION = 4  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+# 4: deactivate, activate)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word

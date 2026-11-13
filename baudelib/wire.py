@@ -413,12 +413,14 @@ OPEN_S = 20  # (a member of the mesh, reached through it: the tunnel's this long
 def through(ch, host, timeout=5.0):
     """(channel, info) past hello for member host of the mesh, on a channel to a host process in it: relay, then
     hello through the tunnel. OSError if there's no way to it."""
-    ch.sock.settimeout(max(timeout, OPEN_S))
+    ch.sock.settimeout(max(timeout, OPEN_S + 5))  # (the host process's own wait, OPEN_S, ends first, and says why)
     ch.send({"op": "relay", "to": host, "req": 0})
     reply = ch.reply()
     if not reply or reply.get("op") != "relayed":
         ch.close()
-        raise OSError((reply or {}).get("error") or "the host process here isn't in a mesh")
+        error = (reply or {}).get("error") or "the host process here didn't answer"
+        raise OSError("the host process here is older, with no mesh: restart it" if error.startswith("no session")
+                      else error)
     return _hello(ch, max(timeout, 10.0), host)
 
 

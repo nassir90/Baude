@@ -123,8 +123,8 @@ class Remote:
             if self.state != "dead":
                 self.state = "dead"
                 self.network.changed()
-            if self.where.get("via") == "mesh":  # (tried again once the mesh says it's there)
-                self.wake.wait()
+            if self.where.get("via") == "mesh":  # (tried again soon while the mesh lists it, else once it does)
+                self.wake.wait(10 if self.mesh else None)
             else:
                 retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
                 self.wake.wait(retry[min(tries, len(retry) - 1)])
@@ -457,6 +457,10 @@ class Network:
             threading.Thread(target=lambda: [self.link(r) for r in given], daemon=True, name="link").start()
         members = [m for m in mesh.get("members") or [] if isinstance(m, dict) and wire.is_id(m.get("id"))]
         with self.lock:
+            listed = {m["id"] for m in members}
+            for r in self.servers.values():
+                if r.mesh is not None and r.key not in listed and r.info.get("id") not in listed:
+                    r.mesh = None  # (gone from the mesh: tried again once it's back)
             known = {r.info.get("id") for r in self.servers.values() if r.where.get("via") != "mesh"}
             for m in members:
                 if m["id"] == here.info.get("id"):

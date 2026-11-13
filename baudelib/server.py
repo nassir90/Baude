@@ -457,9 +457,10 @@ class Server:
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view()}
 
     def mesh_changed(self):
-        """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info."""
-        self.dirty = True
-        self.woken.set()
+        """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with
+        the mesh's lock held: info takes it under this one's.)"""
+        with self.lock:
+            self.changed()
 
     def set_update(self, update):
         """What its updater says (info's update): None, or {to: the commit it'll restart onto, waiting: [{session,
@@ -1333,7 +1334,8 @@ class Server:
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
-                        and not self.mesh.links:  # (linked: the mesh's members may want it)
+                        and not self.mesh.links and not self.mesh.outs:  # (linked, or making links: the mesh's
+                    # members may want it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
                     return

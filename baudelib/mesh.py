@@ -334,8 +334,10 @@ class Out:
     def take(self, ch, info):
         """A connection to where: made a link, and run till it drops."""
         peer = _hello_of(info)
-        if peer is None or peer["id"] == self.mesh.id:
-            self.error, self.state = "that's this host" if peer else "it gave no id Baude can use", "dropped"
+        if peer is None or peer["id"] == self.mesh.id or peer["version"] < 3:
+            self.error = "it gave no id Baude can use" if peer is None else "that's this host" \
+                if peer["id"] == self.mesh.id else "its Baude is older, with no mesh: update it"
+            self.state = "dropped"
             ch.close()
             return
         ch.sock.settimeout(OPEN_S)
@@ -343,14 +345,16 @@ class Out:
         reply = ch.reply()
         theirs = _hello_of((reply or {}).get("host"))
         if not reply or reply.get("op") != "joined" or theirs is None or theirs["id"] != peer["id"]:
-            error = (reply or {}).get("error") or "it didn't answer"
-            self.error = "its Baude is older, with no mesh: update it" if "unknown op" in error else error
-            self.state = "dropped"
+            self.error, self.state = (reply or {}).get("error") or "it didn't answer", "dropped"
             ch.close()
             return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
-        self.mesh.save()
         self.link = Link(self.mesh, ch, theirs, made=True)
+        if self.stopped:  # (unlinked as it was made: stop saw no link to close, or closed this one)
+            self.link, self.state = None, "dropped"
+            ch.close()
+            return
+        self.mesh.save()
         self.mesh.add(self.link)
         self.link.run()
         self.link, self.state = None, "dropped"
@@ -553,8 +557,8 @@ class Mesh:
             for r in records if isinstance(records, list) else []:
                 if (r := _record(r)) is None:
                     continue
-                if r["id"] == self.id:  # (an old one of this host's, from before a restart: this one's to be newer)
-                    if r["seq"] >= self.seq:
+                if r["id"] == self.id:  # (one of this host's: only one from before a restart that's newer than
+                    if r["seq"] > self.seq:  # this run's is published over; its own, come back, is nothing new)
                         self.seq = r["seq"]
                         new.append(None)
                     continue
@@ -565,17 +569,16 @@ class Mesh:
             if None in new:
                 self.publish()
             if new := [r for r in new if r is not None]:
-                for ls in self.links.values():
-                    for x in ls:
-                        if x is not link:
-                            x.send({"op": "mesh", "records": new})
+                for peer, ls in self.links.items():
+                    for x in ls if peer != link.id else ():  # (not back to the member they came from, by any link)
+                        x.send({"op": "mesh", "records": new})
                 self.reroute()
         if new:
             self.changed()
 
     def reroute(self):
         """(lock held) Who's reached, and through which link: breadth first through links both ends list, this host's
-        own counted at once. Records of members not reached for FORGET_S let go of."""
+        own counted at once. Records of members not reached for FORGET_S since let go of."""
         def linked(u):
             mine = (self.records.get(u) or {}).get("rec", {}).get("links") or []
             return [v for v in mine if u in ((self.records.get(v) or {}).get("rec", {}).get("links") or [])]
@@ -593,8 +596,11 @@ class Mesh:
             frontier = ahead
         self.routes, self.hops = via, {k: n for k, n in hops.items() if k != self.id}
         now = time.time()
-        for k in [k for k, r in self.records.items() if k not in hops and now - r["got"] > FORGET_S]:
-            del self.records[k]
+        for k, r in list(self.records.items()):
+            if k in hops:
+                r.pop("lost", None)
+            elif now - r.setdefault("lost", now) > FORGET_S:
+                del self.records[k]
 
     def next_link(self, to):
         with self.lock:
@@ -794,8 +800,11 @@ class Mesh:
         with resp:
             reply("infer_head", status=resp.getcode(),
                   headers={k: v for k in ("Content-Type",) if (v := resp.headers.get(k))})
+            gone = lambda: getattr(getattr(conn, "channel", None), "closed", False)  # noqa: E731
             try:
                 while chunk := (resp.read1(CHUNK) if hasattr(resp, "read1") else resp.read(CHUNK)):
+                    if gone():  # (whoever asked has gone: the provider's let go of, so it stops)
+                        return
                     reply("infer_data", data=base64.b64encode(chunk).decode())
             except OSError as e:
                 return reply("error", error=f"{p['name']} on {self.server.me['name']}: {e}")

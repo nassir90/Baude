@@ -86,8 +86,9 @@ def models():
     claude listed last (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude),
     in its order (MODELS_OFFERED till it has); then those of this machine's inference providers that call tools
     (baudelib.models.runnable_models: Apple's once apple-claude's built, MLX's that are downloaded, Ollama's, an
-    OpenAI-compatible server's), as Baude's chats offer them. Claude's have no provider: claude runs them, wherever
-    it is. Another host's providers aren't offered: Meta's tools are this app's, on this machine."""
+    OpenAI-compatible server's), as Baude's chats offer them; and those of other hosts' in the mesh that serve HTTP
+    (providers.mesh_endpoints: run here, through the mesh's proxy, so Meta's tools stay this app's). Claude's have no
+    provider: claude runs them, wherever it is."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     out = [(m["value"], m.get("displayName") or m["value"],
@@ -96,6 +97,8 @@ def models():
     out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None,
              m.get("provider") or providerslib.provider_of(m["value"]))
             for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
+    out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"], None, f"openai/{e['id']}")
+            for e in providerslib.mesh_endpoints() for m in e["models"] if m.get("tools", True)]
     chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list, or a model this Mac
     if isinstance(chosen, str) and chosen and model_entry(chosen, out) is None:  # ran then: still there to see)
         out.append((chosen, local_name(chosen), None, providerslib.provider_of(chosen)))
@@ -707,7 +710,7 @@ def provider_row(chat):
         found = providers_offered()
         current = provider()
         state["ids"], state["syncing"] = [pid for pid, _ in found], True
-        row.set_model(Gtk.StringList.new([f"{name} · {HERE_NAME}" for _, name in found]))
+        row.set_model(Gtk.StringList.new([name if " · " in name else f"{name} · {HERE_NAME}" for _, name in found]))
         row.set_selected(state["ids"].index(current) if current in state["ids"] else 0)
         state["syncing"] = False
         row.set_visible(bool(found))

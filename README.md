@@ -61,11 +61,12 @@ listed in `settings.json`:
 
 All but Apple's run in [pi](https://pi.dev), which speaks their API, through `pi-claude` (pi installed in
 `~/.local/share/baude/pi`). The picker left of the model picker chooses the provider, by host: this machine's, and
-those the hosts Baude knows have (Ollama · studio, say); the model picker lists Claude's models, then the provider's.
-Claude isn't a provider: `claude` runs Claude's models on the machine it's on. A model on another host starts a new
-conversation there. With one provider the picker is greyed a little; with none it's gone. An Ollama model gets the
-context window Ollama loads it with (4k unless its context length is raised), which is too small for pi's
-instructions and tools: the chat says so.
+those of the other members of the mesh (Ollama · studio, say); the model picker lists Claude's models, then the
+provider's. Picking a provider changes the list; picking a model changes the chat. Claude isn't a provider: `claude`
+runs Claude's models on the machine it's on. Another member's Ollama or OpenAI-compatible server runs here through
+the mesh's proxy, so Meta can use it too; its Apple or MLX model starts a new conversation there. With one provider
+the picker is greyed a little; with none it's gone. An Ollama model gets the context window Ollama loads it with (4k
+unless its context length is raised), which is too small for pi's instructions and tools: the chat says so.
 
 ## Running it
 

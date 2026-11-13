@@ -6,7 +6,8 @@ pi-claude/models.json names that are downloaded), Ollama (its server: settings.j
 else 127.0.0.1:11434), and the OpenAI-compatible servers settings.json lists as endpoints (LM Studio, llama.cpp's
 llama-server, vLLM, ...: [{"id", "name", "url" (its /v1), "key"?: "$NAME" for an environment variable's, or the key,
 "window"?: its context window}]). Ollama's models and the endpoints' run in pi-claude, as MLX's do: pi speaks their API
-(openai-completions). Another Baude's are those its host process lists (wire's hello: models, each with its provider).
+(openai-completions). Another host's in the mesh are what baudelib.mesh carries: one that serves HTTP is an endpoint
+here too (mesh_endpoints: its host process's proxy on this machine), run as this machine's are.
 
 A model's value says its provider: "apple", an MLX one's own (mlx-qwen3-4b), "ollama/<name>", and
 "openai/<endpoint id>/<model id>"; Claude's are the rest (provider_of).
@@ -56,11 +57,11 @@ def provider_of(value):
 
 
 def provider_name(pid, settings=None):
-    """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name."""
+    """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name (another host's in the mesh: Ollama · studio)."""
     if pid in NAMES:
         return NAMES[pid]
     if isinstance(pid, str) and pid.startswith("openai/"):
-        ep = next((e for e in endpoints(settings) if e["id"] == pid[len("openai/"):]), None)
+        ep = next((e for e in endpoints(settings) + mesh_endpoints() if e["id"] == pid[len("openai/"):]), None)
         return ep["name"] if ep else pid[len("openai/"):]
     return str(pid)
 
@@ -105,6 +106,26 @@ def endpoints(st=None):
             out.append({"id": e["id"], "name": str(e.get("name") or e["id"]), "url": e["url"].rstrip("/"),
                         "key": e.get("key") if isinstance(e.get("key"), str) else None,
                         "window": e["window"] if isinstance(e.get("window"), int) and e["window"] > 0 else None})
+    return out
+
+
+def mesh_endpoints():
+    """Other hosts' providers in the mesh that serve HTTP, as endpoints on this machine (baudelib.mesh.endpoints: its
+    host process's proxy, which runs each request there): [{"id", "name" (Ollama · studio), "url", "key", "window":
+    None, "models": [{"id", "displayName", "window", "tools", "input"}]}]; [] with no mesh here."""
+    try:
+        from baudelib import mesh
+        found = mesh.endpoints()
+    except Exception:  # noqa: BLE001 (no mesh, or its file unreadable: none)
+        return []
+    out = []
+    for e in found:
+        if isinstance(e, dict) and isinstance(e.get("id"), str) and ENDPOINT_ID_RE.fullmatch(e["id"]) and \
+                isinstance(e.get("url"), str) and e["url"].startswith(("http://", "https://")):
+            provider, _, host = str(e.get("name") or e["id"]).rpartition(" on ")  # (mesh's "Ollama on studio")
+            out.append({"id": e["id"], "name": f"{provider} · {host}" if provider else host, "url": e["url"].rstrip("/"),
+                        "key": e.get("key") if isinstance(e.get("key"), str) else None, "window": None,
+                        "models": [m for m in e.get("models") or [] if isinstance(m, dict) and isinstance(m.get("id"), str)]})
     return out
 
 
@@ -433,7 +454,7 @@ def local_providers():
     program runs: Apple's, MLX's), "models": [{"value", "displayName", "id" (its name to its server), "tools",
     "window", "input", "thinking"}]}]."""
     out = []
-    for p in usable():
+    for p in usable(found(wait=True)):
         kind = "openai" if p["id"].startswith("openai/") else p["id"]
         base = p["url"] + "/v1" if kind == "ollama" else p.get("url") if kind == "openai" else None
         out.append({"id": p["id"], "kind": kind, "name": p["name"], "base_url": base, "models": [
@@ -492,15 +513,19 @@ def resolve(value, timeout=TIMEOUT):
         return out | {k: entry[k] for k in ("input", "tools", "window")} | {"thinking": bool(entry.get("thinking"))}
     if pid and pid.startswith("openai/"):
         _, eid, mid = value.split("/", 2)
-        ep = next((e for e in endpoints() if e["id"] == eid), None)
+        ep = next((e for e in endpoints() + mesh_endpoints() if e["id"] == eid), None)
         if ep is None:
             return {"value": value, "repo": mid, "displayName": mid, "input": ["text"], "thinking": False,
                     "tools": True, "window": DEFAULT_WINDOW, "provider": pid, "kind": "openai", "url": "",
                     "baseUrl": "", "apiKey": "none", "error": f"there's no endpoint {eid} in settings.json"}
-        there = endpoint(ep, timeout)
-        listed = next((m for m in there["models"] if m["resolvedModel"] == mid), {})
-        return {"value": value, "repo": mid, "displayName": f"{mid} ({ep['name']})", "input": ["text"],
-                "thinking": False, "tools": True, "window": listed.get("window") or ep.get("window") or DEFAULT_WINDOW,
-                "provider": pid, "kind": "openai", "url": ep["url"], "baseUrl": ep["url"],
-                "apiKey": key_of(ep) or "none", "error": there["error"] and f"{ep['name']} {there['error']}"}
+        if "models" in ep:  # (another host's, in the mesh: what it said of the model, its server asked there)
+            listed, error = next((m for m in ep["models"] if m["id"] == mid), {}), None
+        else:
+            there = endpoint(ep, timeout)
+            listed = next((m for m in there["models"] if m["resolvedModel"] == mid), {})
+            error = there["error"] and f"{ep['name']} {there['error']}"
+        return {"value": value, "repo": mid, "displayName": f"{mid} ({ep['name']})",
+                "input": listed.get("input") or ["text"], "thinking": False, "tools": listed.get("tools", True),
+                "window": listed.get("window") or ep.get("window") or DEFAULT_WINDOW, "provider": pid, "kind": "openai",
+                "url": ep["url"], "baseUrl": ep["url"], "apiKey": key_of(ep) or "none", "error": error}
     return None

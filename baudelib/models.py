@@ -93,9 +93,12 @@ def runnable_models(fresh=False, tools=False, wait=True):
 
 
 def window_of(value):
-    """A model's context window as its provider says it (Ollama's, an endpoint's), None where it hasn't."""
+    """A model's context window as its provider says it (Ollama's, an endpoint's, another host's in the mesh), None
+    where it hasn't."""
     from baudelib import providers
-    return next((m.get("window") for p in providers.found() for m in p["models"] if m["value"] == value), None)
+    return next((m.get("window") for p in providers.found() for m in p["models"] if m["value"] == value), None) or \
+        next((m.get("window") for e in providers.mesh_endpoints() for m in e["models"]
+              if f"openai/{e['id']}/{m['id']}" == value), None)
 
 
 def launch(model, mode, effort, session_id=None, resumed=False):

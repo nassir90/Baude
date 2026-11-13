@@ -1023,7 +1023,8 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT, room=None):
     head = f'<notebook name="{attr(full_name(notebook))}">'
     end = ["Its folders: " + (", ".join(folders) if folders else "none attached"), "</notebook>"]
     parts, left = [head], limit
-    spare = None if room is None else room - len(head) - sum(len(e) + 1 for e in end) - 80  # (80: the pages left out)
+    spare = None if room is None else room - meta.weight(head) - sum(meta.weight(e) + 1 for e in end) - 80  # (80:
+    # the pages left out)
     if spare is not None and spare < 0:
         return ""
     for i, name in enumerate(pages):
@@ -1036,15 +1037,15 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT, room=None):
             part = f'<page name="{attr(name)}" file="{attr(file)}">\n{said_names(text, space)}\n</page>'
         else:
             part = gist
-        if spare is not None and len(part) + 1 > spare:
-            part = gist if len(gist) + 1 <= spare else None
+        if spare is not None and meta.weight(part) + 1 > spare:
+            part = gist if meta.weight(gist) + 1 <= spare else None
         if part is None:
             parts.append(f"({len(pages) - i} more pages, not put here: app_index pages names them)")
             break
         if part != gist and text:
             left -= len(text)
         if spare is not None:
-            spare -= len(part) + 1
+            spare -= meta.weight(part) + 1
         parts.append(part)
     return "\n".join(parts + end)
 

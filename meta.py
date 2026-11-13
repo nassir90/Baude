@@ -66,7 +66,7 @@ WINDOWS = {"claude": 200_000, "pi": 32_768, "apple": 4_096}
 # of a window, the tokens kept for the reply (at most half a small one): Claude Code's longest reply; pi-claude's
 # model's, as pi keeps them (it summarises the conversation past its window less these); a short one for Apple's
 REPLY_ROOM = {"claude": 32_000, "pi": 16_384, "apple": 1_024}
-CHARS_PER_TOKEN = 3  # (a token's characters, at the fewest, in what Meta's sent: what's measured as text is so)
+CHARS_PER_TOKEN = 3  # (a token's characters, at the fewest, in ASCII; a character beyond it, a token: weight)
 # a turn's error that says the session's window was outgrown: claude's ("Prompt is too long"), Apple's model's, those
 # MLX serves (pi-claude's, from the server), and others' wordings of it
 OVERFLOW_RE = re.compile(r"prompt is too long|context (window|length|size)|exceed\w*[^.]{0,40}\b(context|tokens)\b|"
@@ -154,6 +154,12 @@ def window(value):
     """How many tokens a model's session holds, till it says (WINDOWS)."""
     program = model_program(value)
     return 1_000_000 if program == "claude" and "[1m]" in value else WINDOWS[program]
+
+
+def weight(text):
+    """text's size as a window's room is counted (Agent.first): its ASCII characters, and each other one as
+    CHARS_PER_TOKEN (a token of its own, at most: Chinese, say)."""
+    return len(text) + (CHARS_PER_TOKEN - 1) * (len(text) - len(text.encode("ascii", "ignore")))
 
 
 class Exhausted(Exception):
@@ -320,7 +326,7 @@ def earlier_said(messages, limit=EARLIER_LIMIT, strict=False):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
             body += f"\n(an edit to {p['page']}: {p.get('status', 'pending')})"
-        size += len(body) + len(who) + 4
+        size += weight(body) + len(who) + 4
         if size > limit and (lines or strict):
             break
         lines.append(f"{who}: {body}")
@@ -1047,6 +1053,10 @@ class Agent:
             return
         self.turn["stopped"] = True
         self.chat._drop_asking(deny=True)
+        if self.fresh:  # (its first message not sent yet, its window asked for: nothing to interrupt, the session kept)
+            turn, self.turn = self.turn, None
+            self.chat._done(self, "", None, turn)
+            return
         self.proc.control({"subtype": "interrupt"})
         turn = self.turn
         GLib.timeout_add(self.STOP_WAIT, lambda: self.turn is turn and self.close() and False)
@@ -2614,16 +2624,21 @@ class MetaChat(Gtk.Box):
     def message_for(self, agent, msg):
         """What's sent for a message: what the user's done since (undone, redone, a row adjusted); the app's own
         (context); and what was written. A new session's starts with the index, what was said before it and the app's
-        first words (first_said): what makes that, given the room its window has (Agent.first), putting in as much of
-        what was said before as fits, and saying so when that isn't all of it; or Exhausted if the rest doesn't."""
-        tail = "\n\n".join(p.strip("\n") for p in [*self.since(), *self.context(agent, msg), msg["text"]] if p)
+        first words (first_said): what makes that, given the room its window has (Agent.first). What was said before
+        is put in as it usually is (earlier_said), or, where the window hasn't room for that, as much as fits, saying
+        so; Exhausted if even the rest doesn't fit, and nothing's then marked told (since)."""
+        told, said = self.told(), self.messages()  # (the conversation's now: another may be open once it's made)
+        own = [*self.context(agent, msg), msg["text"]]
+
+        def tail(mark=True):
+            return "\n\n".join(p.strip("\n") for p in [*self.since(mark, told, said), *own] if p)
         if not agent.fresh:
-            return tail
+            return tail()
         index = f"<app_index>\n{self.index_text()}\n</app_index>"
-        before, first, name = self.messages()[:-1], self.first_said(agent), model_name(agent.model)
+        before, first, name = said[:-1], self.first_said(agent), model_name(agent.model)
 
         def make(room):
-            size, need = widgets.fmt_tokens(agent.window), len(index) + len(tail) + 4
+            size, need = widgets.fmt_tokens(agent.window), weight(index) + weight(tail(mark=False)) + 4
             if need > room:  # (its instructions', tools' and reply's tokens, and this message's)
                 total = agent.window - room // CHARS_PER_TOKEN + need // CHARS_PER_TOKEN
                 raise Exhausted(
@@ -2631,14 +2646,15 @@ class MetaChat(Gtk.Box):
                     f"message and room for a reply need about {widgets.fmt_tokens(total)}. Pick a model with a bigger "
                     f"window (Settings → {NAME} → Intelligence), or put less in the message.")
             left = room - need
-            earlier, given, of = earlier_said(before, min(EARLIER_LIMIT, left - 60), strict=True)
-            notes = first(left - len(earlier) - 4) if first is not None else ""
+            earlier, given, of = usual = earlier_said(before)
             notice = None
-            if given < of:
+            if weight(earlier) > left - 4:  # (the window's too small for what's usually put in: as much as fits)
+                earlier, given, _of = earlier_said(before, left - 4, strict=True)
                 notice = f"Context window exhausted: {name} holds {size} tokens, so {NAME} was given " + \
                     (f"only the last {given} of the {of} messages before this one." if given else
-                     f"none of the {of} messages before this one.")
-            return "\n\n".join(p.strip("\n") for p in (index, earlier, notes, tail) if p), notice
+                     f"none of the {of} messages before this one.") if given < usual[1] else None
+            notes = first(left - weight(earlier) - 4) if first is not None else ""
+            return "\n\n".join(p.strip("\n") for p in (index, earlier, notes, tail()) if p), notice
         return make
 
     def first_said(self, agent):
@@ -2646,13 +2662,15 @@ class MetaChat(Gtk.Box):
         Record's notebook open. None: nothing."""
         return None
 
-    def since(self):
+    def since(self, mark=True, told=None, said=None):
         """What the user's done that Meta hasn't been told: its actions they undid or redid, and the settings they
-        changed with the rows under its replies."""
-        told = self.told()
+        changed with the rows under its replies; marked told (unless not mark: only measured). told and said: the
+        conversation's (told() and messages(), unless given)."""
+        told = self.told() if told is None else told
         out = list(told)
-        del told[:]
-        for m in self.messages():
+        if mark:
+            del told[:]
+        for m in self.messages() if said is None else said:
             specs = [s for it in m.get("items") or () if it["kind"] == "tool" for s in it.get("shown") or ()]
             for spec in specs or m.get("shown") or ():
                 if spec.get("kind") != "setting" or "set" not in spec or spec["name"] not in self.settings:
@@ -2660,7 +2678,8 @@ class MetaChat(Gtk.Box):
                 now = self.settings[spec["name"]].value()
                 if now != spec.get("told", spec["set"]):
                     out.append(f"(The user set {spec['name']} to {said_value(now)} with the row under your reply.)")
-                    spec["told"] = now
+                    if mark:
+                        spec["told"] = now
         return out
 
     # ---- the reply as it comes

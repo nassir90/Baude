@@ -2494,8 +2494,7 @@ class PageHistory:
 
 class EditControls(Gtk.Box):
     """A proposed edit's Accept and Reject, on its page where its green ends (DiaryEditor._put_greens: at its anchor):
-    a tick on green and a cross on red, as tall as the text's letters (size), in its line. Neither takes the focus: the
-    caret stays where it was in the page."""
+    a tick on green and a cross on red, as tall as the text's letters (size), in its line. Neither takes the focus."""
 
     def __init__(self, editor, p, px):
         super().__init__(spacing=3, margin_start=4, margin_end=2)
@@ -3261,12 +3260,16 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.buf.move_mark(e["a"], b)
 
     def _take_green(self, e):
+        """A change's green out of the buffer, its Accept and Reject off the page first, on their own: taking away the
+        one under the pointer has GTK look up the caret there and then, which it can't do with the green half
+        deleted (the caret's at its anchor once one's pressed, or Previous or Next has put it there)."""
         if e["g0"] is not None:
+            self.view.remove(e["controls"])
             self.buf.delete(self.buf.get_iter_at_mark(e["g0"]), self.buf.get_iter_at_mark(e["g1"]))
             for k in ("g0", "g1"):
                 self.buf.delete_mark(e[k])
                 e[k] = None
-            e["anchor"] = e["controls"] = None  # (its Accept and Reject gone with it)
+            e["anchor"] = e["controls"] = None
 
     def _control_px(self):
         """How tall an edit's Accept and Reject are: the text's letters' height, its font's ascent (a widget in a line
@@ -3818,6 +3821,10 @@ class DiaryEditor(Gtk.Box, FindInText):
         except GLib.Error:
             pasted = ""
         a, b = (self.buf.get_iter_at_mark(m) for m in marks)
+        if any(a.get_offset() < y and b.get_offset() > x for x, y in self._greens()):
+            for m in marks:  # (what's proposed shown in it while the clipboard was read: not pasted over, as _paste)
+                self.buf.delete_mark(m)
+            return
         chosen = self.buf.get_slice(a, b, True)
         url = pasted.strip()
         self.buf.begin_user_action()

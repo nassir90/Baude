@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(HERE))  # (baudelib, beside pi-claude/: where
 from baudelib import providers  # noqa: E402
 HOME = os.path.expanduser("~/.local/share/baude/pi")
 PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "pi")
-MODELS = {m["value"]: m for m in json.load(open(os.path.join(HERE, "models.json")))}
+MODELS = {m["value"]: m for m in providers.modelslib.mlx_list()}  # (models.json's, and those settings.json adds)
 CONTEXT = 32768  # (the window pi is told: these models take more, but not in 16 GB beside everything else)
 MAX_OUT = 4096
 MAX_OUT_THINKING = 16384  # (thinking and answer share it: pi's high budget, less 1024 for the answer)
@@ -56,6 +56,7 @@ RUN = os.path.join(HOME, "run")  # (the server's keeper: server.json; the chats 
 IDLE = 60
 UNLOAD_AFTER = 600
 LEVELS = ("off", "minimal", "low", "medium", "high")
+MCP_TIMEOUT = 900  # (s an MCP tool's call may take: one of Meta's waits on a model loaded, or on the user's answer)
 SMALL_WINDOW = 8192  # (a served model's window with less than this has no room for pi's instructions and tools)
 
 
@@ -487,7 +488,8 @@ class Engine:
         if servers:  # (pi's own MCP support, its tools declared to the model as they are, not through codemode)
             with open(os.path.join(self.agent_dir, "mcp.json"), "w") as f:
                 json.dump({"mcpServers": {name: {k: v for k, v in server.items() if k in ("command", "args", "env")} |
-                                          {"exposure": "direct"} for name, server in servers.items()}}, f)
+                                          {"exposure": "direct", "timeout": MCP_TIMEOUT}
+                                          for name, server in servers.items()}}, f)
             args += ["-e", "builtin:mcp"]
         else:
             args += ["--no-mcp"]

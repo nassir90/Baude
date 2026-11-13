@@ -14,9 +14,13 @@ A model's value says its provider: "apple", an MLX one's own (mlx-qwen3-4b), "ol
 
 What's found is kept MAX_AGE seconds and looked for again on a thread of its own (found), so a window asking never
 waits on a server that doesn't answer; listen(fn) hears when it changes."""
+import glob
 import json
 import os
+import platform
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -47,7 +51,7 @@ def provider_of(value):
         return None
     if value == modelslib.APPLE_MODEL["value"]:
         return "apple"
-    if any(m["value"] == value for m in modelslib.LOCAL_MODELS):
+    if any(m["value"] == value for m in modelslib.mlx_models()):
         return "mlx"
     if value.startswith("ollama/"):
         return "ollama"
@@ -485,6 +489,157 @@ def group(models):
         name = m.get("providerName") or provider_name(pid)
         out.setdefault(pid, (name, []))[1].append(m)
     return [(pid, name, ms) for pid, (name, ms) in sorted(out.items(), key=lambda kv: rank(kv[0]))]
+
+
+# ---- setting models up (Meta's tools): Ollama's install and its models' health, MLX models downloaded, apple-claude
+
+def ollama_install():
+    """Where Ollama's installed here: {"exe": its command, "app": its app (macOS)}, None for either that isn't."""
+    exe = shutil.which("ollama") or next((p for p in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
+                                          if os.access(p, os.X_OK)), None)
+    app = next((p for p in ("/Applications/Ollama.app", os.path.expanduser("~/Applications/Ollama.app"))
+                if os.path.isdir(p)), None) if sys.platform == "darwin" else None
+    return {"exe": exe, "app": app}
+
+
+CHECK_TIMEOUT = 300  # (s a model has to load and answer, checked)
+
+
+def ollama_check(name, timeout=CHECK_TIMEOUT):
+    """Whether one of Ollama's models works: (verdict, Ollama's words): "works"; "unhealthy" (it won't load or answer);
+    "unsure" (Ollama didn't say what it is, or there wasn't the memory for it now: no fault of the model's). One that
+    talks gives a one-token reply, one that embeds an embedding; one that wasn't loaded is unloaded again after."""
+    url = ollama_url()
+    was = name in ollama_loaded(url)
+    shown = ollama_show(url, name)
+    if not shown:
+        return "unsure", "Ollama didn't say what it is"
+    keep = {} if was else {"keep_alive": 0}
+    talk = ("/api/generate", {"model": name, "prompt": "Say OK.", "stream": False, "options": {"num_predict": 1}})
+    embed = ("/api/embed", {"model": name, "input": "OK"})
+    tries = [talk, embed] if "completion" in (shown.get("capabilities") or ["completion"]) else [embed]
+    error = None
+    for path, body in tries:
+        try:
+            fetch(url + path, body | keep, timeout=timeout)
+            return "works", None
+        except (OSError, ValueError) as e:
+            error = str(e)
+            if "does not support generate" not in error:
+                break
+    if re.search(r"memory|out of memory|insufficient", error or "", re.I):
+        return "unsure", error
+    return "unhealthy", error
+
+
+def ollama_delete(name):
+    """One of Ollama's models removed (its weights too, where no other model shares them); OSError if it wasn't."""
+    fetch(ollama_url() + "/api/delete", {"model": name}, method="DELETE")
+
+
+def talks(snap):
+    """Whether a downloaded model is one to talk to: it has a chat template (a speech or embedding model hasn't)."""
+    if glob.glob(os.path.join(snap, "chat_template.*")):
+        return True
+    try:
+        with open(os.path.join(snap, "tokenizer_config.json")) as f:
+            return bool(json.load(f).get("chat_template"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def mlx_downloaded():
+    """MLX models to talk to in the Hugging Face cache (modelslib.hf_hub), their weights there in full: [{"repo", "size"
+    (bytes), "vision", "added" (pi-claude knows it: mlx_list)}]. An MLX model's config says how it's quantized, or its
+    repo's name says MLX; one to talk to has a chat template (talks). Its snapshot is the one refs/main names, else the
+    newest."""
+    hub, out = modelslib.hf_hub(), []
+    known = {m["repo"] for m in modelslib.mlx_list()}
+    for d in sorted(os.listdir(hub)) if os.path.isdir(hub) else []:
+        if not d.startswith("models--") or "--" not in d[len("models--"):]:
+            continue
+        try:
+            found = one_downloaded(os.path.join(hub, d), d[len("models--"):].replace("--", "/", 1), known)
+        except (OSError, ValueError):  # (changing as it's looked at: left out this time)
+            continue
+        if found is not None:
+            out.append(found)
+    return out
+
+
+def one_downloaded(path, repo, known):
+    """mlx_downloaded's entry for one repo's folder in the cache, or None."""
+    try:
+        with open(os.path.join(path, "refs", "main")) as f:
+            snap = os.path.join(path, "snapshots", f.read().strip())
+    except OSError:
+        snaps = [p for p in glob.glob(os.path.join(path, "snapshots", "*")) if os.path.isdir(p)]
+        snap = max(snaps, key=os.path.getmtime) if snaps else None
+    if snap is None or not os.path.isdir(snap):
+        return None
+    with open(os.path.join(snap, "config.json")) as f:
+        config = json.load(f)
+    if not isinstance(config, dict) or not ("quantization" in config or "mlx" in repo.lower()) or not talks(snap):
+        return None
+    weights = [w for w in glob.glob(os.path.join(snap, "*.safetensors")) if os.path.exists(w)]
+    try:
+        with open(os.path.join(snap, "model.safetensors.index.json")) as f:
+            shards = set((json.load(f).get("weight_map") or {}).values())
+    except (OSError, ValueError, AttributeError):
+        shards = set()
+    have = {os.path.basename(w) for w in weights}
+    if not have or not shards <= have:  # (none, or some still downloading)
+        return None
+    return {"repo": repo, "size": sum(os.path.getsize(w) for w in weights), "vision": "vision_config" in config,
+            "added": repo in known}
+
+
+APPLE_NEEDS = (26, 4)  # (the macOS apple-claude/Package.swift says it needs: FoundationModels' tools)
+_BUILD = {"state": None, "lines": [], "started": None}  # (apple-claude's build, apple_build's: building, built, failed)
+_BUILD_LOCK = threading.Lock()
+
+
+def apple_status():
+    """Apple's on-device model's adapter (apple-claude) here: {"built", "exe", "source", "swift", "macos", "fits" (this
+    macOS runs it), "build": its build's state, "log": the build's last lines}."""
+    mac = platform.mac_ver()[0] if sys.platform == "darwin" else ""
+    try:
+        fits = tuple(int(x) for x in (mac.split(".") + ["0"])[:2]) >= APPLE_NEEDS
+    except ValueError:
+        fits = False
+    return {"built": bool(modelslib.apple_exe()), "exe": modelslib.apple_exe(),
+            "source": os.path.isfile(os.path.join(modelslib.REPO, "apple-claude", "Package.swift")),
+            "swift": shutil.which("swift"), "macos": mac, "fits": fits, "build": _BUILD["state"],
+            "log": list(_BUILD["lines"][-12:])}
+
+
+def apple_build(done=None):
+    """apple-claude built (swift build -c release, in apple-claude/), on a thread of its own: its state in
+    apple_status, done(ok) when it's over. False if it can't be (not macOS, no swift, already building)."""
+    st = apple_status()
+    with _BUILD_LOCK:
+        if sys.platform != "darwin" or not st["swift"] or not st["source"] or _BUILD["state"] == "building":
+            return False
+        _BUILD.update(state="building", lines=[], started=time.time())
+
+    def run():
+        ok = False
+        try:
+            p = subprocess.Popen([st["swift"], "build", "-c", "release"], cwd=os.path.join(modelslib.REPO, "apple-claude"),
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                 errors="replace")
+            for line in p.stdout:
+                _BUILD["lines"] = (_BUILD["lines"] + [line.rstrip()])[-200:]
+            ok = p.wait() == 0 and bool(modelslib.apple_exe())
+        except Exception as e:  # noqa: BLE001 (whatever went wrong: said, and the build's over)
+            _BUILD["lines"] = (_BUILD["lines"] + [str(e)])[-200:]
+        finally:
+            _BUILD["state"] = "built" if ok else "failed"
+        found(max_age=0)  # (Apple's model, there now: the pickers)
+        if done is not None:
+            done(ok)
+    threading.Thread(target=run, daemon=True, name="apple-claude-build").start()
+    return True
 
 
 # ---- what pi-claude runs a model with

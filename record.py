@@ -1276,10 +1276,11 @@ button.edit-reject { background: #e01b24; }
 button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reject, on its page: EditControls) */
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
 .pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
-.quote-chip { background: alpha(@accent_bg_color, 0.10); border-left: 3px solid @accent_bg_color;
-              border-radius: 6px; padding: 6px 8px; }
 .quote-in-bubble { border-left: 3px solid alpha(@view_fg_color, 0.25); padding-left: 8px; font-size: 0.92em;
                    opacity: 0.8; }  /* (a quote as Baude's chat has one: .md-quote) */
+.quote-in-bubble.quote-chip { border-left-color: @accent_bg_color; opacity: 1; color: alpha(@card_fg_color, 0.8); }
+/* (one to send, its bar as bright as the accent: RecordChat.quote_box) */
+button.quote-drop { min-width: 24px; min-height: 24px; padding: 0; border-radius: 0; }
 .diary-title { font-size: 1.75em; font-weight: 800; }
 .diary { font-size: 1.05em; background: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
@@ -5354,20 +5355,20 @@ class RecordChat(meta.MetaChat):
         self._spans_seen = {}  # (a page's key: (its text before, now, where what was put in is): changed_spans)
         self.pending_box = self._pending_bar()
         self.bars.append(self.pending_box)
-        self.quote_box = Gtk.Box(spacing=6)
-        self.quote_box.add_css_class("quote-chip")
-        self.quote_label = label("", css=("caption",))
+        # (what's quoted, in the box over what's written, as its bubble will have it once sent: quote_said)
+        self.quote_box = Gtk.Box(spacing=6, margin_top=10, margin_start=10, margin_end=10)
+        self.quote_label = label("", css=("quote-in-bubble", "quote-chip"))
         self.quote_label.set_hexpand(True)
         self.quote_label.set_lines(3)
         self.quote_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.quote_box.append(self.quote_label)
         x = Gtk.Button(icon_name="window-close-symbolic", valign=Gtk.Align.START, tooltip_text="Drop the passage")
         x.add_css_class("flat")
-        x.add_css_class("circular")
+        x.add_css_class("quote-drop")
         x.connect("clicked", lambda *_: self.set_quote(""))
         self.quote_box.append(x)
         self.quote_box.set_visible(False)
-        self.bars.append(self.quote_box)
+        self.writing.head.append(self.quote_box)
         self.settings = self.make_settings()
 
     def show(self, notebook):
@@ -6965,6 +6966,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         name = zoom_class(self.store.zoom)
         self.chat.place.zoom(name)
         set_zoom_class(self.chat.composer, name)
+        set_zoom_class(self.chat.quote_box, name)
         self.zoom_tab(self.tabs.current())
 
     def zoom_tab(self, tab):

@@ -3050,7 +3050,8 @@ class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
     written: ComposerMarkdown) in a card, at least two lines tall and scrolling past nine, with its buttons in its
     bottom right corner, the send button last; the text's right margin keeps it from running under them. buttons:
-    any to go before the send button (Baude's attach). Its owner connects the send button and the keys."""
+    any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
+    as it needs (Record's quote). Its owner connects the send button and the keys."""
 
     def __init__(self, buttons=(), send_tip="Send (Enter)\nNew line: Shift+Enter"):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
@@ -3061,7 +3062,12 @@ class Composer(Gtk.Overlay):
         self.markdown = ComposerMarkdown(self.input)
         scroll = Gtk.ScrolledWindow(min_content_height=56, max_content_height=220, propagate_natural_height=True,
                                     hexpand=True, child=self.input)
-        super().__init__(child=scroll, hexpand=True)
+        self.head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.head.add_css_class("composer-head")
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        body.append(self.head)
+        body.append(scroll)
+        super().__init__(child=body, hexpand=True)
         self.send, self.send_tip = Gtk.Button(), send_tip
         actions = Gtk.Box(spacing=4, halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=10, margin_bottom=10)
         actions.add_css_class("composer-actions")
@@ -6060,6 +6066,7 @@ paned.main-split > separator { min-width: 1px; background: @baude_frame; box-sha
 paned.main-split.inside-after > separator { margin-left: 6px; margin-right: -6px; }
 paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6px; }
 .composer-box { border-radius: 12px; box-shadow: 0 0 0 1px @baude_rule; }
+.composer-head { background-color: @view_bg_color; }  /* (as the text under it is: Composer.head) */
 .composer-box:disabled { opacity: 0.55; }
 .ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
 .ref-pop listview { background: none; }

@@ -21,28 +21,71 @@ def apple_exe():
 
 
 # (beta) models on this Mac, through pi-claude (pi-claude/: pi, the coding agent, on a model mlx_lm.server or
-# mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json that are downloaded, after Apple's;
-# Manual only, like Apple's, and no effort but a thinking level for those that think; one to another keeps the
-# conversation (pi's session), to Claude's doesn't
+# mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json, and those settings.json adds
+# (mlx_models: Meta's add_mlx_model), that are downloaded, after Apple's; Manual only, like Apple's, and no effort but a
+# thinking level for those that think; one to another keeps the conversation (pi's session), to Claude's doesn't
 PI_CLAUDE = os.path.join(REPO, "pi-claude")
+
+
+def _entry(m):
+    """An MLX model as models.json has it, as initialize lists it."""
+    return {"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]} | \
+        ({"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]} if m.get("thinking") else {})
+
+
 try:
     with open(os.path.join(PI_CLAUDE, "models.json")) as f:
-        LOCAL_MODELS = [{"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]} |
-                        ({"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}
-                         if m.get("thinking") else {}) for m in json.load(f)]
-except (OSError, ValueError, KeyError):
-    LOCAL_MODELS = []
+        MLX_OWN = [m for m in json.load(f) if isinstance(m, dict) and m.get("value") and m.get("repo")]
+except (OSError, ValueError):
+    MLX_OWN = []
+LOCAL_MODELS = [_entry(m) for m in MLX_OWN]  # (models.json's: mlx_models has those settings.json adds too)
+_ADDED = {"at": None, "list": []}
+
+
+def mlx_added():
+    """The MLX models settings.json adds (mlx_models), as models.json has them: read again only once it's changed."""
+    from baudelib.selfupdate import settings_path
+    try:
+        at = os.stat(settings_path()).st_mtime_ns
+    except OSError:
+        at = None
+    if at != _ADDED["at"]:
+        try:
+            with open(settings_path()) as f:
+                found = json.load(f).get("mlx_models") or []
+        except (OSError, ValueError, AttributeError):
+            found = []
+        own = {m["value"] for m in MLX_OWN}
+        _ADDED.update(at=at, list=[m for m in found if isinstance(m, dict) and isinstance(m.get("value"), str) and
+                                   isinstance(m.get("repo"), str) and m["value"] not in own and
+                                   isinstance(m.get("displayName"), str)])
+    return list(_ADDED["list"])
+
+
+def mlx_list():
+    """Every MLX model pi-claude knows, as models.json has them: its own, then settings.json's (mlx_added)."""
+    return MLX_OWN + [{"input": ["text"]} | m for m in mlx_added()]
+
+
+def mlx_models():
+    """mlx_list's models as initialize lists them."""
+    return LOCAL_MODELS + [_entry(m) for m in mlx_added()]
+
+
+def hf_hub():
+    """Where huggingface_hub keeps what it downloads (its HF_HUB_CACHE, HF_HOME, XDG_CACHE_HOME)."""
+    return os.environ.get("HF_HUB_CACHE") or os.path.join(
+        os.environ.get("HF_HOME") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+                                                  "huggingface"), "hub")
 
 
 def local_models():
-    """LOCAL_MODELS whose weights are in the Hugging Face cache, while pi (in ~/.local/share/baude/pi) is installed."""
+    """mlx_models whose weights are in the Hugging Face cache, while pi (in ~/.local/share/baude/pi) is installed."""
     pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
     if not os.access(pi, os.X_OK):
         return []
-    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(  # (where huggingface_hub looks)
-        os.environ.get("HF_HOME") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
-                                                  "huggingface"), "hub")
-    return [m for m in LOCAL_MODELS
+    hub = hf_hub()
+    return [m for m in mlx_models()
             if os.path.isdir(os.path.join(hub, "models--" + m["resolvedModel"].replace("/", "--")))]
 
 
@@ -55,7 +98,7 @@ def model_program(value):
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
         return "pi"
-    return "pi" if any(m["value"] == value for m in LOCAL_MODELS) else "claude"
+    return "pi" if any(m["value"] == value for m in mlx_models()) else "claude"
 
 
 def pi_exe():

@@ -42,7 +42,9 @@ and propose edits to them. Every change it makes shows under its reply with undo
 added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
 own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model: any model your
 claude lists, or one of this machine's inference providers' that can call tools (Settings → Meta → Provider picks
-whose are listed), each given Meta's tools.
+whose are listed), each given Meta's tools. It sets models up too: it says what runs them here, checks Ollama's
+models and removes those that don't load (asking you first), adds an MLX model you've downloaded or an
+OpenAI-compatible server, and builds `apple-claude` (asking first). It never installs or downloads anything.
 Switched to a model whose context window can't hold the conversation, it's given as much as fits and says so ("Context
 window exhausted"), as it does when a conversation outgrows the window, or a reply is cut short. Code mode has it
 act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from
@@ -51,8 +53,8 @@ anywhere in the window, shows it and puts the focus in its box.
 ## Local models
 
 Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model
-(`apple-claude`, once it's built), MLX (`pi-claude`'s own server, on the models in `pi-claude/models.json` you've
-downloaded), [Ollama](https://ollama.com) (`settings.json`'s `ollama_url`, else `OLLAMA_HOST`, else 127.0.0.1:11434), or any OpenAI-compatible server
+(`apple-claude`, once it's built), MLX (`pi-claude`'s own server, on the models in `pi-claude/models.json`, or
+added in `settings.json`'s `mlx_models`, that you've downloaded), [Ollama](https://ollama.com) (`settings.json`'s `ollama_url`, else `OLLAMA_HOST`, else 127.0.0.1:11434), or any OpenAI-compatible server
 listed in `settings.json`:
 
 ```json

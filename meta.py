@@ -108,7 +108,7 @@ def models():
 def local_name(value):
     """A model's name where it's one this Mac runs besides Claude's (Apple's, MLX's, Ollama's, an endpoint's), else
     value."""
-    found = [modelslib.APPLE_MODEL, *modelslib.LOCAL_MODELS]
+    found = [modelslib.APPLE_MODEL, *modelslib.mlx_models()]
     return next((m["displayName"] for m in found if m["value"] == value), None) or providerslib.model_name(value)
 
 
@@ -856,6 +856,11 @@ Settings: set_setting changes one at once, and its row shows under your reply, w
 you're told the value they settle on. Asked about a setting without being asked to change it, show its row (show \
 setting:<name>). show also lists chats{and_pages} as rows the user can click, and shows the changelog.
 
+Models: local_models says what runs models here besides Claude's (Ollama, MLX, Apple's adapter, OpenAI-compatible \
+servers). check_models finds Ollama's unhealthy ones; prune_models removes them (the user's asked first: it can't be \
+undone). add_mlx_model and add_endpoint add one; build_apple_adapter builds Apple's (asked first). Nothing is \
+installed or downloaded for the user: say what they'd run.
+
 Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it."""
 
 CODE_SYSTEM = """
@@ -904,6 +909,107 @@ SHARED_TOOLS += [
      "inputSchema": {"type": "object", "required": ["id", "values"], "properties": {
          "id": {"type": "string"}, "values": {"type": "object"}}}},
 ]
+
+# setting models up: what runs them here, Ollama's models checked and pruned, an MLX model or a server added, Apple's
+# adapter built (MetaChat's handlers). Slow ones answer later (Later), and are Meta's own tools in code mode too:
+# run_python's code has seconds
+SETUP_TOOLS = [
+    {"name": "local_models", "description": "What runs models here besides Claude's: Ollama (installed, running, its "
+     "models: window, tools), MLX (pi's models, and MLX models downloaded but not added), Apple's adapter, and the "
+     "OpenAI-compatible servers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "check_models", "description": "Load Ollama's models (all, if none are named) for a one-token reply each: "
+     "which are unhealthy, and why. Slow: one at a time.",
+     "inputSchema": {"type": "object", "properties": {"models": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "prune_models", "description": "Remove Ollama models, by name. The user's asked first; it can't be "
+     "undone (they'd be downloaded again).",
+     "inputSchema": {"type": "object", "required": ["models"], "properties": {
+         "models": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "add_mlx_model", "description": "Add a downloaded MLX model (local_models: its repo) to MLX's models. "
+     "thinking: it thinks (Qwen3's do); name: as it's listed.",
+     "inputSchema": {"type": "object", "required": ["repo"], "properties": {
+         "repo": {"type": "string"}, "name": {"type": "string"}, "thinking": {"type": "boolean"}}}},
+    {"name": "add_endpoint", "description": "Add an OpenAI-compatible server (LM Studio, llama.cpp, vLLM), once it "
+     "answers: name, url (to /v1); key_env: the environment variable its key is in; window: its context window.",
+     "inputSchema": {"type": "object", "required": ["name", "url"], "properties": {
+         "name": {"type": "string"}, "url": {"type": "string"}, "key_env": {"type": "string"},
+         "window": {"type": "integer"}}}},
+    {"name": "build_apple_adapter", "description": "Build apple-claude, which runs Apple's on-device model (macOS 26.4 "
+     "or later, with swift). The user's asked first; it builds in the background (local_models: how it went).",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+SETUP_NAMES = {t["name"] for t in SETUP_TOOLS}
+CONFIRM_WAIT = 900  # (s a question to the user waits for an answer: then it's a no)
+
+
+def models_report():
+    """local_models' answer: this machine's providers, a line or a few each (off the main loop: it asks servers)."""
+    found = {p["id"]: p for p in providerslib.found(wait=True, max_age=0)}
+    lines = []
+    o, where = found.get("ollama") or {}, providerslib.ollama_install()
+    installed = ", ".join(x for x in (where["exe"], where["app"]) if x)
+    if o and not o.get("error"):
+        lines.append(f"Ollama {o.get('version') or ''}: running at {o['url']}" + (f" (installed: {installed})"
+                                                                                  if installed else "") +
+                     f"; {len(o['models'])} models" + (":" if o["models"] else ""))
+        for m in o["models"]:
+            notes = [f"window {m['window']:,}" + (" (too small for pi's tools: raise Ollama's context length)"
+                                                   if m["window"] < 8192 else ""),
+                     "tools" if m.get("tools") else "no tools", *(["thinks"] if m.get("thinking") else []),
+                     *(["sees images"] if "image" in (m.get("input") or ()) else [])]
+            size = f"{m['size'] / 1e9:.1f} GB, " if m.get("size") else ""
+            lines.append(f"  {m['resolvedModel']}: {size}{', '.join(notes)}")
+    elif installed:
+        lines.append(f"Ollama: installed ({installed}) but {(o or {}).get('error') or 'not running'}: the user opens "
+                     "it (or runs ollama serve)")
+    else:
+        lines.append("Ollama: not installed (ollama.com/download: the user installs it)")
+    mlx = found.get("mlx") or {}
+    known = modelslib.mlx_models()
+    have = {m["value"] for m in mlx.get("models") or []}
+    lines.append("MLX (pi-claude): " + ("pi isn't installed (in ~/.local/share/baude/pi); " if mlx.get("error") else "") +
+                 (", ".join(f"{m['displayName']} ({'downloaded' if m['value'] in have else 'not downloaded'})"
+                            for m in known) or "no models"))
+    extra = [m for m in providerslib.mlx_downloaded() if not m["added"]]
+    if extra:
+        lines.append("  downloaded, not added (add_mlx_model): " + ", ".join(
+            f"{m['repo']} ({m['size'] / 1e9:.1f} GB{', sees images' if m['vision'] else ''})" for m in extra))
+    if sys.platform == "darwin":
+        st = providerslib.apple_status()
+        state = "built" if st["built"] else {"building": "building now", "failed": "its build failed"}.get(
+            st["build"], "not built")
+        need = ".".join(map(str, providerslib.APPLE_NEEDS))
+        lines.append(f"Apple's on-device model (apple-claude): {state}; macOS {st['macos']}" +
+                     ("" if st["fits"] else f", it needs {need}") +
+                     ("" if st["swift"] else "; no swift (Xcode's command line tools)") +
+                     ("" if st["built"] or st["build"] else " (build_apple_adapter)"))
+        if st["build"] == "failed" and st["log"]:
+            lines.append("  its build's last lines: " + " | ".join(st["log"][-6:]))
+    for pid, p in found.items():
+        if pid.startswith("openai/"):
+            lines.append(f"{p['name']} ({p['url']}): " + (p["error"] or f"{len(p['models'])} models: " +
+                                                           ", ".join(m["resolvedModel"] for m in p["models"][:10])))
+    if not any(pid.startswith("openai/") for pid in found):
+        lines.append("OpenAI-compatible servers: none added (add_endpoint)")
+    return "\n".join(lines)
+
+
+class Later:
+    """A tool's answer that takes a while (Ollama loading a model, the user answering, a build starting): work() run
+    on the socket's thread (ToolSocket), the main loop free meanwhile; then done(answer) on the main loop, its
+    answer what Meta's told."""
+
+    def __init__(self, work, done=None):
+        self.work, self.done = work, done
+
+    def run(self):
+        try:
+            out = self.work()
+        except Exception as e:  # noqa: BLE001 (Meta's told; the app goes on)
+            out = {"error": str(e) if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: {e}"}
+        if self.done is not None:
+            out = ToolSocket.main(self.done, out) or out
+        return out
+
 
 RUN_PYTHON = {"name": "run_python", "description": "Run up to 10 lines of Python with app (its functions: your "
               "instructions). Returns what's printed and the last expression's value.",
@@ -1036,6 +1142,8 @@ class ToolSocket:
                 res = python(req.get("args") or {})
             else:
                 res = self.main(handler, req.get("tool"), req.get("args") or {}) if handler is not None else None
+                if isinstance(res, Later):  # (a slow one: worked out here, off the main loop)
+                    res = res.run()
                 res = res or {"error": f"{NAME} didn't answer: try again"}
             if not req.get("nested"):
                 res = {k: v for k, v in res.items() if k != "data"}  # (data is run_python's code's: the text says it)
@@ -2665,11 +2773,11 @@ class MetaChat(Gtk.Box):
         if extra := self.app_prompt():
             text += "\n\n" + extra
         if code_mode():
-            text += CODE_SYSTEM.format(lines=CODE_LINES, doc=api_doc(tools))
+            text += CODE_SYSTEM.format(lines=CODE_LINES, doc=api_doc([t for t in tools if t["name"] not in SETUP_NAMES]))
         return text
 
     def all_tools(self):
-        return SHARED_TOOLS + self.app_tools()
+        return SHARED_TOOLS + SETUP_TOOLS + self.app_tools()
 
     CLEAR = ("clear", "/clear")  # (asked alone: the conversation cleared, not sent)
 
@@ -2695,7 +2803,7 @@ class MetaChat(Gtk.Box):
         try:
             if self.agent is None:
                 tools = self.all_tools()
-                offered = [RUN_PYTHON] if code_mode() else tools
+                offered = [RUN_PYTHON, *SETUP_TOOLS] if code_mode() else tools  # (the slow ones beside its code)
                 setup = self.agent_setup()
                 self.agent = Agent(self, key, self.system(tools), offered, setup["cwd"], setup.get("roots") or (),
                                    model(), setup.get("exe"), setup.get("env_of"), effort())
@@ -2877,11 +2985,17 @@ class MetaChat(Gtk.Box):
         """A read outside its folders, not of anything referenced: the user's asked, as Baude asks in its Manual mode,
         Allow or Deny."""
         path = str(inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("glob") or "")
+        verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in"}.get(name, name)
+        self._ask_card(f"{NAME} would like to {verb} {path.replace(os.path.expanduser('~'), '~', 1)}", "Allow",
+                       lambda allow: agent.answer(rid, allow, name, inp))
+
+    def _ask_card(self, text, yes, answered):
+        """A question to the user at the conversation's end, as Baude asks in its Manual mode: Deny, or yes (its
+        button's label); answered(allow) once they say. A turn stopped says Deny (_drop_asking)."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("tool-card")
         card.add_css_class("asking")  # (waiting on you: as a tool card asking in Baude's chat)
-        verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in"}.get(name, name)
-        card.append(label(f"{NAME} would like to {verb} {path.replace(os.path.expanduser('~'), '~', 1)}"))
+        card.append(label(text))
         row = Gtk.Box(spacing=6, halign=Gtk.Align.END)
 
         def answer(allow):
@@ -2889,9 +3003,9 @@ class MetaChat(Gtk.Box):
                 self.asking.remove(card)
             if card.get_parent() is not None:
                 self.box.remove(card)
-            agent.answer(rid, allow, name, inp)
-        for text, allow in (("Deny", False), ("Allow", True)):
-            btn = Gtk.Button(label=text)
+            answered(allow)
+        for text_, allow in (("Deny", False), (yes, True)):
+            btn = Gtk.Button(label=text_)
             if allow:
                 btn.add_css_class("suggested-action")
             btn.connect("clicked", lambda *_, allow=allow: answer(allow))
@@ -2901,6 +3015,23 @@ class MetaChat(Gtk.Box):
         self.asking.append(card)
         self.box.append(card)
         GLib.idle_add(self._to_bottom)
+        return card
+
+    def confirm(self, turn, text, yes):
+        """The user asked (text, and yes: the button that says so) from a tool's work (Later: off the main loop, which
+        draws the question): True once they say yes; a no, a turn stopped, or no answer in CONFIRM_WAIT, False."""
+        box, said = {}, threading.Event()
+
+        def ask():
+            if self.agent is None or self.agent.turn is not turn or turn.get("stopped"):
+                said.set()
+            else:
+                box["card"] = self._ask_card(text, yes, lambda allow: (box.update(yes=allow), said.set()))
+            return False
+        GLib.idle_add(ask)
+        if not said.wait(CONFIRM_WAIT) and box.get("card") is not None:
+            GLib.idle_add(lambda: box["card"].answer(False) and False)
+        return bool(box.get("yes"))
 
     def _drop_asking(self, deny=False):
         for card in list(self.asking):
@@ -2972,6 +3103,9 @@ class MetaChat(Gtk.Box):
         return {"app_index": self.app_index, "set_setting": self.set_setting, "show": self.show_ui,
                 "read_chat": self.read_chat, "rename_chat": self.rename_chat, "undo": self.undo_tool,
                 "redo": self.redo_tool, "open_form": self.open_form, "fill_form": self.fill_form,
+                "local_models": self.local_models, "check_models": self.check_models,
+                "prune_models": self.prune_models, "add_mlx_model": self.add_mlx_model,
+                "add_endpoint": self.add_endpoint, "build_apple_adapter": self.build_apple_adapter,
                 **self.app_handlers()}
 
     def run_tool(self, turn, tool, args):
@@ -2985,6 +3119,9 @@ class MetaChat(Gtk.Box):
         except ValueError as e:
             res = {"error": str(e)}
         self._refresh_live(turn)
+        if isinstance(res, Later):  # (its card drawn again once it's answered)
+            done = res.done
+            res.done = lambda out: (done(out) if done else out, self._refresh_live(turn))[0]
         return res
 
     @staticmethod
@@ -3035,6 +3172,9 @@ class MetaChat(Gtk.Box):
     def apply(self, kind, data):
         if kind == "setting":
             self.settings[data["name"]].set(data["value"])
+        elif kind == "models":  # (an MLX model, or a server, added: settings.json's list as it was, or is)
+            widgets.save_settings(**{data["key"]: data["value"]})
+            providerslib.found(max_age=0)
         elif kind == "rename_chat":
             chat = self.find_chat(data["chat"])
             if chat is None:
@@ -3237,6 +3377,164 @@ class MetaChat(Gtk.Box):
         lines.append(f"parts (app_index): {', '.join(self.all_sections())}")
         return "\n".join(lines)
 
+    # ---- setting models up (SETUP_TOOLS): what runs them here; Ollama's checked and pruned; an MLX model, an
+    # OpenAI-compatible server added (actions, undone as settings are); Apple's adapter built
+    def local_models(self, turn, args):
+        return Later(lambda: {"text": models_report()})
+
+    def ollama_names(self):
+        """The models Ollama has, by name; ValueError if it isn't there."""
+        p = providerslib.ollama()
+        if p["error"]:
+            raise ValueError(f"Ollama {p['error']}.")
+        try:
+            tags = providerslib.fetch(p["url"] + "/api/tags") or {}
+        except (OSError, ValueError) as e:
+            raise ValueError(f"Ollama didn't list its models: {e}")
+        return {m.get("name"): m.get("size") or 0 for m in tags.get("models") or [] if isinstance(m, dict)}
+
+    @staticmethod
+    def ollama_named(asked, have):
+        """Model names as Ollama has them (qwen3 for qwen3:latest)."""
+        return list(dict.fromkeys(m if m in have or f"{m}:latest" not in have else f"{m}:latest" for m in asked))
+
+    def check_models(self, turn, args):
+        asked = [str(m) for m in args.get("models") or []]
+
+        def work():
+            have = self.ollama_names()
+            names = self.ollama_named(asked, have)
+            if missing := [m for m in names if m not in have]:
+                raise ValueError(f"Ollama has no {', '.join(missing)}: it has {', '.join(have) or 'none'}.")
+            lines = []
+            for name in names or list(have):
+                error = providerslib.ollama_check(name)
+                lines.append(f"{name}: " + (f"unhealthy: {error}" if error else "works"))
+            bad = sum("unhealthy" in line for line in lines)
+            return {"text": "\n".join(lines) + (f"\n{bad} unhealthy: prune_models removes them (the user's asked)."
+                                               if bad else "")}
+        return Later(work)
+
+    def prune_models(self, turn, args):
+        names = list(dict.fromkeys(str(m) for m in args.get("models") or []))
+        if not names:
+            raise ValueError("Name the models to remove.")
+
+        def work():
+            have = self.ollama_names()
+            names[:] = self.ollama_named(names, have)
+            if missing := [m for m in names if m not in have]:
+                raise ValueError(f"Ollama has no {', '.join(missing)}: nothing was removed.")
+            listed = ", ".join(f"{m} ({have[m] / 1e9:.1f} GB)" if have[m] else m for m in names)
+            if not self.confirm(turn, f"{NAME} would like to remove {len(names)} model{'s' * (len(names) > 1)} from "
+                                      f"Ollama: {listed}. They'd have to be downloaded again.", "Remove"):
+                return {"text": "The user said no: nothing was removed."}
+            done, failed = [], []
+            for m in names:
+                try:
+                    providerslib.ollama_delete(m)
+                    done.append(m)
+                except OSError as e:
+                    failed.append(f"{m} ({e})")
+            providerslib.found(max_age=0)
+            return {"text": (f"Removed {', '.join(done)}." if done else "Nothing was removed.") +
+                    (f" Not removed: {'; '.join(failed)}." if failed else "")}
+        return Later(work)
+
+    def add_mlx_model(self, turn, args):
+        repo = str(args.get("repo") or "").strip()
+
+        def work():
+            found = {m["repo"]: m for m in providerslib.mlx_downloaded()}
+            if repo not in found:
+                raise ValueError(f"No MLX model {repo!r} is downloaded: local_models lists those that are.")
+            if found[repo]["added"]:
+                raise ValueError(f"{repo} is one of MLX's models already.")
+            return found[repo]
+
+        def done(m):
+            if "error" in m:
+                return m
+            before = [x for x in widgets.load_settings().get("mlx_models") or [] if isinstance(x, dict)]
+            taken = {x["value"] for x in modelslib.mlx_list()}
+            value = base = "mlx-" + re.sub(r"[^a-z0-9.]+", "-", repo.split("/")[-1].lower()).strip("-")
+            n = 2
+            while value in taken:
+                value, n = f"{base}-{n}", n + 1
+            shown = (str(args.get("name") or "").strip() or repo.split("/")[-1]) + " (MLX)"
+            entry = {"value": value, "repo": repo, "displayName": shown,
+                     "input": ["text", "image"] if m["vision"] else ["text"]} | \
+                ({"thinking": True} if args.get("thinking") else {})
+            self.apply("models", {"key": "mlx_models", "value": before + [entry]})
+            a = self.act(turn, f"MLX: added {shown}", "models", {"key": "mlx_models", "value": before},
+                         {"key": "mlx_models", "value": before + [entry]})
+            return {"text": f"Added {shown} ({value}) to MLX's models (action {a['id']}): it's in the model pickers "
+                    "now. MLX's server loads it when it's first asked."}
+        return Later(work, done)
+
+    def add_endpoint(self, turn, args):
+        name, url = str(args.get("name") or "").strip(), str(args.get("url") or "").strip().rstrip("/")
+        key_env = str(args.get("key_env") or "").strip().lstrip("$")
+        window = args.get("window") if isinstance(args.get("window"), int) and args["window"] > 0 else None
+        if not name or not re.match(r"https?://", url):
+            raise ValueError("An endpoint needs a name, and its URL (http:// or https://, to its /v1).")
+        if key_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
+            raise ValueError("key_env is the name of the environment variable the key is in, not the key.")
+        before = [e for e in widgets.load_settings().get("endpoints") or [] if isinstance(e, dict)]
+        base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "server"
+        eid, n = base, 2
+        while any(e.get("id") == eid for e in before):
+            eid, n = f"{base}-{n}", n + 1
+        ep = {"id": eid, "name": name, "url": url} | ({"key": f"${key_env}"} if key_env else {}) | \
+            ({"window": window} if window else {})
+
+        def work():
+            for try_url in [url] + ([url + "/v1"] if not url.endswith("/v1") else []):
+                there = providerslib.endpoint(providerslib.endpoints({"endpoints": [ep | {"url": try_url}]})[0])
+                if not there["error"]:
+                    return {"url": try_url, "models": [m["resolvedModel"] for m in there["models"]]}
+            raise ValueError(f"{name} {there['error']}: not added.")
+
+        def done(found):
+            if "error" in found:
+                return found
+            entry = ep | {"url": found["url"]}
+            self.apply("models", {"key": "endpoints", "value": before + [entry]})
+            a = self.act(turn, f"Server: added {name}", "models", {"key": "endpoints", "value": before},
+                         {"key": "endpoints", "value": before + [entry]})
+            listed = ", ".join(found["models"][:12]) or "none yet"
+            return {"text": f"Added {name} at {found['url']} (action {a['id']}); its models: {listed}. It's a "
+                    "provider in the pickers now."}
+        return Later(work, done)
+
+    def build_apple_adapter(self, turn, args):
+        def work():
+            st = providerslib.apple_status()
+            if sys.platform != "darwin":
+                raise ValueError("apple-claude runs on macOS only.")
+            if st["built"]:
+                return {"text": f"apple-claude is built already ({st['exe']})."}
+            if st["build"] == "building":
+                return {"text": "It's building already: local_models says how it's going."}
+            if not st["fits"]:
+                raise ValueError(f"Apple's on-device model needs macOS {'.'.join(map(str, providerslib.APPLE_NEEDS))} "
+                                 f"or later; this is {st['macos'] or 'older'}.")
+            if not st["swift"]:
+                raise ValueError("There's no swift here: the user installs Xcode, or its command line tools "
+                                 "(xcode-select --install), first.")
+            if not self.confirm(turn, f"{NAME} would like to build apple-claude, which runs Apple's on-device model: "
+                                      "swift build -c release, in apple-claude/ (a minute or two).", "Build"):
+                return {"text": "The user said no: nothing was built."}
+
+            def built(ok):
+                GLib.idle_add(lambda: self.told().append(
+                    "(apple-claude " + ("built: Apple's model is in the pickers.)" if ok else
+                                        "didn't build: local_models has its last lines.)")) and False)
+            if not providerslib.apple_build(built):
+                raise ValueError("It couldn't be started: local_models says why.")
+            return {"text": "Building apple-claude in the background; you're told when it's done."}
+        return Later(work)
+
     # ---- the shared tools
     def set_setting(self, turn, args):
         name = str(args.get("name") or "").strip()
@@ -3323,7 +3621,8 @@ class MetaChat(Gtk.Box):
     def _python_start(self, agent, code):
         if (error := self._guard(agent)) is not None:
             return error
-        tools = {t["name"]: list((t.get("inputSchema") or {}).get("properties") or {}) for t in self.all_tools()}
+        tools = {t["name"]: list((t.get("inputSchema") or {}).get("properties") or {}) for t in self.all_tools()
+                 if t["name"] not in SETUP_NAMES}
         try:
             check_code(code, tools)
         except ValueError as e:

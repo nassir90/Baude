@@ -9518,7 +9518,7 @@ class BaudeMeta(meta.MetaChat):
             if n:
                 out.append(f"{n} {said}{'s' if n != 1 else ''} in the open chat")
         if self.agent is not None and not self.agent.closed:
-            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model}"
+            out.append(f"{meta.NAME}'s {self.agent.runs} (pid {self.agent.proc.p.pid}, {self.agent.model}"
                        f"{f', {self.agent.effort} effort' if self.agent.effort else ''})")
         return out
 

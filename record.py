@@ -1012,28 +1012,42 @@ def said_names(text, space):
 attr, trimmed = meta.attr, meta.trimmed
 
 
-def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
+def notebook_said(notebook, store, space, limit=NOTES_LIMIT, room=None):
     """A session's first words: the notebook open, its pages (each one's file, and its text as far as limit, its
-    @names said) and its folders."""
+    @names said) and its folders. room: the characters it may take in all (a small window's), past which its pages
+    are left out, how many said."""
     files = page_paths(store.notebooks)
     root = pages_root()
     pages = sorted(notebook["pages"], key=lambda p: (p != HOME, p.lower()))
-    parts = [f'<notebook name="{attr(full_name(notebook))}">']
-    left = limit
-    for name in pages:
+    folders = attached_folders(notebook)
+    head = f'<notebook name="{attr(full_name(notebook))}">'
+    end = ["Its folders: " + (", ".join(folders) if folders else "none attached"), "</notebook>"]
+    parts, left = [head], limit
+    spare = None if room is None else room - meta.weight(head) - sum(meta.weight(e) + 1 for e in end) - 80  # (80:
+    # the pages left out)
+    if spare is not None and spare < 0:
+        return ""
+    for i, name in enumerate(pages):
         text = notebook["pages"][name].strip()
         file = os.path.join(root, files.get((notebook.get("id"), name), ""))
+        gist = f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>'
         if not text:
-            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(empty)</page>')
+            part = f'<page name="{attr(name)}" file="{attr(file)}">(empty)</page>'
         elif len(text) <= left:
-            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">\n{said_names(text, space)}\n</page>')
-            left -= len(text)
+            part = f'<page name="{attr(name)}" file="{attr(file)}">\n{said_names(text, space)}\n</page>'
         else:
-            parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>')
-    folders = attached_folders(notebook)
-    parts.append("Its folders: " + (", ".join(folders) if folders else "none attached"))
-    parts.append("</notebook>")
-    return "\n".join(parts)
+            part = gist
+        if spare is not None and meta.weight(part) + 1 > spare:
+            part = gist if meta.weight(gist) + 1 <= spare else None
+        if part is None:
+            parts.append(f"({len(pages) - i} more pages, not put here: app_index pages names them)")
+            break
+        if part != gist and text:
+            left -= len(text)
+        if spare is not None:
+            spare -= meta.weight(part) + 1
+        parts.append(part)
+    return "\n".join(parts + end)
 
 
 def referenced(text, space):
@@ -5604,12 +5618,15 @@ class RecordChat(meta.MetaChat):
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection")}
 
+    def first_said(self, agent):
+        """A new session's notebook (notebook_said), in the room it has."""
+        notebook, store, space = self.notebook, self.win.store, self.space()
+        return lambda room: notebook_said(notebook, store, space, room=room)
+
     def context(self, agent, msg):
-        """A new session's notebook; what's become of the changes proposed; what's referenced (ref_said, of
-        Window.space), the passage quoted from a chat (its names, the chat's) or selected on a page."""
+        """What's become of the changes proposed; what's referenced (ref_said, of Window.space), the passage quoted
+        from a chat (its names, the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
-        if agent.fresh:
-            parts.append(notebook_said(notebook, store, space))
         for m in notebook["messages"]:
             for p in m.get("proposals") or ():
                 if p.get("status") in ("accepted", "rejected") and not p.get("told"):
@@ -5807,7 +5824,7 @@ class RecordChat(meta.MetaChat):
     def running_lines(self):
         out = []
         if self.agent is not None and not self.agent.closed:
-            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model}"
+            out.append(f"{meta.NAME}'s {self.agent.runs} (pid {self.agent.proc.p.pid}, {self.agent.model}"
                        f"{f', {self.agent.effort} effort' if self.agent.effort else ''}{', at a turn' if self.ask else ''})")
         if readers := [c for c in self.win.tabs.children() if isinstance(c, Reader) and c.chat]:
             out.append(f"{len(readers)} chat{'s' if len(readers) != 1 else ''} followed as written")

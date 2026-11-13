@@ -6806,6 +6806,38 @@ class SlashCompleter:
         return True
 
 
+class ChatRefCompleter(meta.RefCompleter):
+    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), where Enter sends: not in code (an @ there
+    is a decorator's, an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @
+    is one word, or once the arrows have moved to it; else it sends, as Ctrl+Enter always does, and Shift+Enter is a
+    new line. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
+
+    def __init__(self, space, view, anchor, slash):
+        self.slash = slash
+        super().__init__(space, view, anchor)
+
+    def word(self):
+        word = super().word()
+        if word is None or self.slash.visible():
+            return None
+        buf = self.view.get_buffer()
+        return None if SlashCompleter.in_code(buf.get_text(*buf.get_bounds(), True), word[0]) else word
+
+    def handle_key(self, keyval, state=0):
+        if not self.visible():
+            return False
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (
+                state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) or
+                not self.moved and " " in (self.word() or (0, ""))[1].strip()):
+            self.forget()
+            return False
+        if keyval == Gdk.KEY_Escape:
+            found = bool(self.shown)
+            self.forget()
+            return found
+        return super().handle_key(keyval, state)
+
+
 class ChoiceDropDown(Gtk.DropDown):
     """A DropDown over (value, label) pairs. on_pick(value) fires for user picks only,
     not for select()/set_choices() calls that mirror what the CLI reports."""
@@ -11320,7 +11352,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter")
+            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter\n"
+                     "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
         keys = Gtk.EventControllerKey()
@@ -11332,6 +11365,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
                                                propagate_natural_height=True)
         self.completer = SlashCompleter(self.input, box_overlay)
+        # (@'s list, as in Meta's box: the chats, and the names the chat's folder has)
+        self.refs = ChatRefCompleter(lambda: self.panel.meta.names if getattr(self, "panel", None) else None,
+                                     self.input, box_overlay, self.completer)
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
                            margin_start=12, margin_end=12, margin_bottom=6)
         composer.append(self.attach_strip)
@@ -12810,7 +12846,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- UI events
     def on_key(self, _ctl, keyval, _code, state):
-        if self.completer.handle_key(keyval, state):
+        if self.completer.handle_key(keyval, state) or self.refs.handle_key(keyval, state):
             return True
         if widgets.leave_wrapped(self.input.get_buffer(), keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)
@@ -13403,6 +13439,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             cover.close()
         if self.completer.visible():
             self.completer.hide()  # (/'s or @'s list, not left over the chat's box)
+        self.refs.forget()
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
 

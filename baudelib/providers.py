@@ -126,7 +126,10 @@ def mesh_endpoints():
     for e in found:
         if isinstance(e, dict) and isinstance(e.get("id"), str) and ENDPOINT_ID_RE.fullmatch(e["id"]) and \
                 isinstance(e.get("url"), str) and e["url"].startswith(("http://", "https://")):
-            provider, _, host = str(e.get("name") or e["id"]).rpartition(" on ")  # (mesh's "Ollama on studio")
+            provider, host = e.get("provider_name"), e.get("host_name")
+            if not (isinstance(provider, str) and provider and isinstance(host, str) and host):  # (a host process
+                # here that names them only as "Ollama on studio")
+                provider, _, host = str(e.get("name") or e["id"]).rpartition(" on ")
             out.append({"id": e["id"], "name": f"{provider} · {host}" if provider else host, "url": e["url"].rstrip("/"),
                         "key": e.get("key") if isinstance(e.get("key"), str) else None, "window": None,
                         "models": [m for m in e.get("models") or [] if isinstance(m, dict) and isinstance(m.get("id"), str)]})

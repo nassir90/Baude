@@ -5516,11 +5516,40 @@ class RecordChat(meta.MetaChat):
         short = name.removeprefix("mcp__meta__")
         if short in ("propose_edit", "add_page", "delete_page", "edit_page"):
             return short_page(str(inp.get("page") or ""))
+        if short == "revise_edit" and (p := self._proposal(inp.get("id"))) is not None:
+            return short_page(p["page"])
         if short == "move_pages":
             pages = ", ".join(short_page(str(p)) for p in inp.get("pages") or ())
             return f"{pages} → {short_page(str(inp.get('under') or '')) or 'the top'}" + \
                 (f" (from {inp['from_notebook']})" if inp.get("from_notebook") else "")
         return super().tool_summary(name, inp)
+
+    def call_hunks(self, it):
+        """propose_edit's, revise_edit's and edit_page's: the passage it replaces (revise_edit's, if it gave none: the
+        one its edit replaced then, kept with it as it ran) and what it puts in."""
+        short, inp = (it.get("name") or "").removeprefix("mcp__meta__"), it.get("input") or {}
+        if short not in ("propose_edit", "revise_edit", "edit_page"):
+            return []
+        if short == "revise_edit":
+            old = it.get("replaced", inp.get("old_text"))
+            if old is None and it.get("state") == "running" and (p := self._proposal(inp.get("id"))) is not None:
+                old = p["old"]  # (its edit's, as it's not run yet)
+        else:
+            old = inp.get("old_text") or ""
+        new = str(inp.get("new_text") or "")
+        return [] if old is None or str(old) == new else [(str(old), new)]
+
+    def call_row(self, it):
+        if (it.get("name") or "").removeprefix("mcp__meta__") != "edit_page" or self.notebook is None:
+            return None
+        name = str((it.get("input") or {}).get("page") or "")
+        return "page", page_key(self.notebook, page_named(self.notebook, name, self.win.store) or name)
+
+    def _proposal(self, pid):
+        """An edit the agent proposed to the notebook's pages, by its id, whatever's become of it; or None."""
+        live = self.agent.turn["proposals"] if self.agent is not None and self.agent.turn is not None else ()
+        return next((p for m in self.messages() for p in m.get("proposals") or () if p["id"] == pid),
+                    next((p for p in live if p["id"] == pid), None))
 
     # ---- what's asked
     def set_quote(self, text):
@@ -6285,6 +6314,8 @@ class RecordChat(meta.MetaChat):
                 return {"error": "That's in the passage another of your pending edits replaces: revise that one."}
             fields = {"old": old, "start": at}
         self._restage(turn, p, new=new, **fields)
+        if (item := turn.get("at")) is not None and item is not turn.get("nested"):
+            item["replaced"] = p["old"]  # (as it is now: its card's red, old_text being optional)
         if p["status"] == "withdrawn":
             return {"text": f"That puts back what's on the page: your edit {p['id']} is taken back."}
         return {"text": f"Edit {p['id']} revised, still waiting for the user."}

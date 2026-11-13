@@ -3331,12 +3331,13 @@ def _dispose_tree(widget):
 
 
 class CodeBlock(Gtk.Overlay):
-    """Monospace, unwrapped, horizontally scrollable code. The language tag and copy button
+    """Monospace code, its long lines scrolled sideways (or wrapped: wrap). The language tag and copy button
     float in the top-right corner, so the block is only as tall as its code.
     diff=[("del"|"add"|"ctx", line), ...] shows a red / green background per line instead.
     A long block is a sub-pane: at most ~2/3 of the transcript's height, scrolled inside itself.
     syntax (a language's name: bash, regex, a code fence's tag) or else path (a file's: its name picks the language)
-    highlights it (code_spans), in the light or dark style's colours; numbered: a Read's output, its lines numbered."""
+    highlights it (code_spans), in the light or dark style's colours; numbered: a Read's output, its lines numbered.
+    wrap: prose's, its lines wrapped at the block's width."""
     max_height = 600  # set from the window (CodeBlock.set_max_height) as it's resized
     live = weakref.WeakSet()
     styled = False  # (the theme watched: a block's colours follow it)
@@ -3349,21 +3350,25 @@ class CodeBlock(Gtk.Overlay):
             for block in list(cls.live):
                 block.scroll.set_max_content_height(h)
 
-    def __init__(self, code, lang="", markup=None, diff=None, syntax=None, path="", numbered=False):
+    def __init__(self, code, lang="", markup=None, diff=None, syntax=None, path="", numbered=False, wrap=False):
         super().__init__()
         self.add_css_class("codeblock")
+        if wrap:
+            self.add_css_class("wrapped")
         self.code, self.diff = code, diff
         self.how = (syntax or "", path or "", numbered) if (syntax or path) and markup is None else None
         self.looks, self.generation, self.soon = None, 0, None  # ([(label, its text, its spans)]; a highlight due)
+        label_type = WrapLabel if wrap else Gtk.Label  # (wrapped, measured without Pango breaking it at every point)
         if diff is not None:
             self.label = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             for kind, line in diff:
-                lbl = Gtk.Label(label=line or " ", xalign=0, selectable=True, hexpand=True)
+                lbl = label_type(label=line or " ", xalign=0, selectable=True, hexpand=True, wrap=wrap,
+                                 wrap_mode=Pango.WrapMode.WORD_CHAR)
                 lbl.add_css_class("mono")
                 lbl.add_css_class(f"diff-{kind}")
                 self.label.append(lbl)
         else:
-            self.label = Gtk.Label(xalign=0, yalign=0, selectable=True, wrap=False)
+            self.label = label_type(xalign=0, yalign=0, selectable=True, wrap=wrap, wrap_mode=Pango.WrapMode.WORD_CHAR)
             self.label.add_css_class("mono")
             self.own_markup = markup is not None  # (a block drawn with its own markup is left as it is)
             if markup is not None:
@@ -3371,7 +3376,7 @@ class CodeBlock(Gtk.Overlay):
             else:
                 self.label.set_text(code)
         scroll = Gtk.ScrolledWindow(child=self.label, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-                                    hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                                    hscrollbar_policy=Gtk.PolicyType.NEVER if wrap else Gtk.PolicyType.AUTOMATIC,
                                     propagate_natural_height=True, max_content_height=CodeBlock.max_height)
         scroll.add_css_class("code-scroll")
         self.scroll = scroll
@@ -3493,6 +3498,13 @@ class CodeBlock(Gtk.Overlay):
             self.label.set_text(self.code)
             self.linked = False
             self.paint()
+
+
+def diff_block(old, new, path="", wrap=False):
+    """An edit's hunk, as Baude's chat shows an Edit's and Meta a change to a page's text: the lines it replaced on red,
+    then those it put in on green, highlighted as path's code; wrap: prose's (CodeBlock)."""
+    lines = [("del", l) for l in (old or "").splitlines()] + [("add", l) for l in (new or "").splitlines()]
+    return CodeBlock(new or "", "", diff=lines or [("ctx", "")], path=path, wrap=wrap)
 
 
 def _highlight_part(text):
@@ -5970,6 +5982,9 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .codeblock .code-corner { padding: 3px 4px 3px 4px; border-radius: 0 6px 0 6px;
   background: mix(@baude_inside, @view_fg_color, 0.06);
   box-shadow: -10px 0 8px -2px mix(@baude_inside, @view_fg_color, 0.06); }
+/* a wrapped block's lines can't be scrolled out from under them: they show while the pointer's on it */
+.codeblock.wrapped .code-corner { opacity: 0; transition: opacity 150ms; }
+.codeblock.wrapped:hover .code-corner, .codeblock.wrapped .code-corner:focus-within { opacity: 1; }
 /* a one-line block stays one line tall: a vertical scrollbar's minimum would pad it out */
 .codeblock .code-scroll > scrollbar.vertical, .codeblock .code-scroll > scrollbar.vertical > range,
 .codeblock .code-scroll > scrollbar.vertical > range > trough { min-height: 0; }

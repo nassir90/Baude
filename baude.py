@@ -11149,7 +11149,10 @@ class Repaint(Gtk.Widget):
             snap.append_color(Repaint.TINT, Graphene.Rect().init(0, 0, self.get_width(), self.get_height()))
 
 
-class BaudeWindow(Adw.ApplicationWindow, FeedbackHost):
+class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
+    def do_snapshot(self, snapshot):
+        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
+
     def __init__(self, app, opts):
         super().__init__(application=app, title="Baude", default_width=900, default_height=800)
         self.cwd = self.run_cwd = None  # set through set_cwd() once the header button exists

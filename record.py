@@ -6386,12 +6386,15 @@ class Settings(Adw.PreferencesDialog):
         return False
 
 
-class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost):
+class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, widgets.AccentFade):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
     code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
     side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
     focused."""
+
+    def do_snapshot(self, snapshot):
+        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
 
     def __init__(self, app):
         super().__init__(application=app, title=noun(), default_width=1320, default_height=860)

@@ -6571,8 +6571,9 @@ class AccentFade:
     now, in FADE_MS, so what Baude and Record colour themselves (Record's links, a mark's highlight, a chip's name)
     changes as libadwaita's own buttons and switches do, in their time and ease. The fade's time starts once the
     window's drawn in the new colours (restyling all of it can take a frame or more). Not shown, or with animations
-    off: at once. GTK's first frame of a fade is slow (80 ms and more, readying how it draws one), so each window has
-    one READY_MS after it's first drawn, unseen (ready_fade), and its first fade runs smoothly."""
+    off: at once; minimized, or hidden before it's drawn, the new colours as it's next seen. GTK's first frame of a
+    fade is slow (80 ms and more, readying how it draws one), so each window has one READY_MS after it's first drawn,
+    unseen (ready_fade), and its first fade runs smoothly."""
     FADE_MS = 200
     READY_MS = 1000
     drawn = None  # (the window as it was last drawn, a fade in it: what a fade starts from)
@@ -6585,6 +6586,7 @@ class AccentFade:
         if self.readying is None:
             self.readying = GLib.timeout_add(self.READY_MS, self.ready_fade)
             self.connect("unmap", AccentFade.drop_fade)
+            self.connect("notify::suspended", AccentFade.drop_fade)  # (minimized: no frames till it's back)
         inner = Gtk.Snapshot()
         if (fade := self.accent_fade) is not None:
             inner.push_cross_fade(1.0 - fade["seen"])  # (what's the same in both stays as it is)
@@ -6599,10 +6601,11 @@ class AccentFade:
             snapshot.append_node(node)
 
     def fade_accent(self):
-        if not self.get_mapped() or not Adw.get_enable_animations(self) or self.drawn is None:
+        if not self.can_fade():
             return
-        # (a fade under way: its picture as it is, drawn into one, so fades started in fades don't pile up)
-        fade = {"node": self.drawn if self.accent_fade is None else self.flattened(self.drawn), "seen": 1.0}
+        # (a fade drawn and under way: its picture as it is, drawn into one, so fades started in fades don't pile up)
+        under_way = self.accent_fade is not None and "painted" not in self.accent_fade
+        fade = {"node": self.flattened(self.drawn) if under_way else self.drawn, "seen": 1.0}
 
         def step(v):
             if self.accent_fade is fade:
@@ -6626,13 +6629,16 @@ class AccentFade:
             anim.play()
         self.begin_fade(fade, painted)
 
+    def can_fade(self):
+        return self.get_mapped() and not self.is_suspended() and Adw.get_enable_animations(self) and \
+            self.drawn is not None
+
     def ready_fade(self):
-        """One frame with the frame before all but wholly cross-faded into it: settled, the two are the same, so
-        nothing's seen, and GTK's slow first frame of a fade is had now."""
-        if self.accent_fade is not None or self.drawn is None or not self.get_mapped() or \
-                not Adw.get_enable_animations(self):
+        """One frame with the frame before all but gone, cross-faded into this one: settled, the two are the same,
+        so nothing's seen, and GTK's slow first frame of a fade is had now."""
+        if self.accent_fade is not None or not self.can_fade():
             return False
-        ready = {"node": self.drawn, "seen": 0.999}
+        ready = {"node": self.drawn, "seen": 0.001}
 
         def painted():
             if self.accent_fade is ready:
@@ -6642,7 +6648,9 @@ class AccentFade:
         return False
 
     def begin_fade(self, fade, painted):
-        """fade drawn from the next frame (snapshot_fading), and painted() once that frame's drawn."""
+        """fade drawn from the next frame (snapshot_fading), in place of one not yet drawn, and painted() once that
+        frame's drawn."""
+        self.drop_fade()
         clock = self.get_frame_clock()
 
         def after(_clock):
@@ -6652,20 +6660,28 @@ class AccentFade:
         self.accent_fade = fade
         self.queue_draw()
 
-    def drop_fade(self):
-        """Hidden: a fade not yet drawn let go, so shown again the window's as it is (libadwaita ends one under way:
-        its animation's done)."""
+    def drop_fade(self, *_):
+        """A fade not yet drawn let go: hidden or minimized, so shown again the window's as it is (libadwaita ends
+        one under way: its animation's done); or another in its place."""
         if (fade := self.accent_fade) is not None and "painted" in fade:
             fade["clock"].disconnect(fade.pop("painted"))
             self.accent_fade = None
 
     def flattened(self, node):
-        """node drawn once, at the window's scale, as a picture of its own."""
-        scale = self.get_surface().get_scale()
-        texture = self.get_renderer().render_texture(Gsk.TransformNode.new(node, Gsk.Transform.new().scale(scale, scale)),
-                                                     None)
+        """node drawn once as a picture of its own: the window's part of it, in whole pixels of its display's (else
+        node, if that's nothing)."""
+        s, b = self.get_surface().get_scale(), node.get_bounds()
+        x0, y0 = math.floor(max(b.get_x(), 0) * s), math.floor(max(b.get_y(), 0) * s)
+        x1 = math.ceil(min(b.get_x() + b.get_width(), self.get_width()) * s)
+        y1 = math.ceil(min(b.get_y() + b.get_height(), self.get_height()) * s)
+        if x1 <= x0 or y1 <= y0:
+            return node
+        texture = self.get_renderer().render_texture(Gsk.TransformNode.new(node, Gsk.Transform.new().scale(s, s)),
+                                                     Graphene.Rect().init(x0, y0, x1 - x0, y1 - y0))
+        if texture is None:
+            return node
         snap = Gtk.Snapshot()
-        snap.append_texture(texture, node.get_bounds())
+        snap.append_texture(texture, Graphene.Rect().init(x0 / s, y0 / s, (x1 - x0) / s, (y1 - y0) / s))
         return snap.to_node()
 
 

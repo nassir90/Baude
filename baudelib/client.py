@@ -62,7 +62,8 @@ class Remote:
         self.tried, self.error = 0.0, None
         self.mesh = None  # (a member of this machine's mesh: {hops, through, providers, ...})
         self.deactivated = bool(cached.get("deactivated"))  # (not reached till it's activated: Network.deactivate)
-        self.toggled = float("-inf")  # (when it was deactivated or activated here)
+        self.untold = bool(cached.get("untold"))  # (this machine's host process not told of it yet)
+        self.toggled = float("-inf")  # (when it was deactivated or activated here, or the host process told)
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
@@ -125,6 +126,9 @@ class Remote:
             if ch is not None and self.stopped:  # (let go of while it connected: rekey's)
                 ch.close()
                 break
+            if ch is not None and self.deactivated:  # (deactivated while it connected: not served)
+                ch.close()
+                continue
             if ch is not None:
                 tries = 0
                 self._serve(ch, info)
@@ -344,7 +348,14 @@ class Remote:
     def cached(self):
         return {"where": self.where, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
                 "found_by": self.found_by, "command": self.command, "sessions": list(self.sessions.values()),
-                **({"deactivated": True} if self.deactivated else {})}
+                **({"deactivated": True} if self.deactivated else {}), **({"untold": True} if self.untold else {})}
+
+    def let_go(self):
+        """Its connection closed, if it has one (deactivated: not made again till it's activated)."""
+        with self.lock:
+            ch = self.ch
+        if ch is not None:
+            ch.close()
 
 
 class Network:
@@ -359,7 +370,7 @@ class Network:
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
         self.linked_pid = None  # (the host process here that's been asked to link to the hosts given by hand)
         for key, c in self.saved().items():
-            if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand"):
+            if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand") or c.get("deactivated"):
                 self.servers[key] = Remote(self, key, c["where"], c)
             else:
                 self.forgotten.add(key)
@@ -453,17 +464,21 @@ class Network:
         machine's host process, which lets go of its links and refuses its joins and tunnels; its chats stay listed as
         they were last seen. Kept in servers.json, and by the host process."""
         r.deactivated, r.toggled = off, time.monotonic()
-        with r.lock:
-            ch = r.ch
-        if off and ch is not None:
-            ch.close()
+        if off:
+            r.let_go()
         r.wake.set()
+        r.untold = True
         if (here := self.here_alive(4)) is not None and not r.mine:
-            here.request({"op": "deactivate" if off else "activate",
-                          **({"id": r.info["id"]} if wire.is_id(r.info.get("id")) else {}),
-                          **({"where": r.reach_where()} if r.where.get("via") in ("ssh", "unix") else {})})
+            self.tell(r, here)
         self.save()
         self.changed()
+
+    def tell(self, r, here):
+        """This machine's host process told whether a host's deactivated here (untold: not yet, kept till it is)."""
+        r.untold, r.toggled = False, time.monotonic()
+        here.request({"op": "deactivate" if r.deactivated else "activate",
+                      **({"id": r.info["id"]} if wire.is_id(r.info.get("id")) else {}),
+                      **({"where": r.reach_where()} if r.where.get("via") in ("ssh", "unix") else {})})
 
     def link(self, r):
         """A host given by hand, linked to from this machine's host process: it, and every member it
@@ -475,29 +490,35 @@ class Network:
         """(this machine's host process said what its info is) Each member of its mesh known here, reached through it
         (one known otherwise, over ssh, say, reached so), and tried again if it's gone; and, once each time it's
         started, every host given by hand linked to from it."""
-        mesh = here.info.get("mesh")
-        if not isinstance(mesh, dict) or (here.info.get("version") or 1) < 3:
+        state = here.info.get("mesh")
+        if not isinstance(state, dict) or (here.info.get("version") or 1) < 3:
             return
         if here.info.get("pid") != self.linked_pid:
             self.linked_pid = here.info.get("pid")
             with self.lock:
                 given = [r for r in self.servers.values() if r.by_hand]
             threading.Thread(target=lambda: [self.link(r) for r in given], daemon=True, name="link").start()
-        members = [m for m in mesh.get("members") or [] if isinstance(m, dict) and wire.is_id(m.get("id"))]
+        members = [m for m in state.get("members") or [] if isinstance(m, dict) and wire.is_id(m.get("id"))]
         if (here.info.get("version") or 1) >= 4:  # (what's deactivated is as the host process has it: here, or its
-            off = set(mesh.get("inactive") or [])  # command line's)
-            off_where = [x["where"] for x in mesh.get("links") or []
-                         if isinstance(x, dict) and x.get("active") is False]
-            with self.lock:
+            with self.lock:                        # command line's; once it's told what was changed here meanwhile)
                 remotes = [r for r in self.servers.values() if not r.mine]
+            for r in remotes:
+                if r.untold:
+                    self.tell(r, here)
+            off = set(state.get("inactive") or [])
+            off_where = [x["where"] for x in state.get("links") or []
+                         if isinstance(x, dict) and x.get("active") is False]
             for r in remotes:
                 was = r.deactivated
                 now = (r.info.get("id") or r.key) in off or any(mesh.same_place(w, r.reach_where()) for w in off_where)
                 if now != was and time.monotonic() - r.toggled > 5:  # (not one just changed here, not told yet)
                     r.deactivated = now
-                    r.wake.set()
-                    if not now:
+                    if now:
+                        r.let_go()
+                    else:
                         r.state = "connecting"
+                    r.wake.set()
+                    self.save()
                     self.changed()
         with self.lock:
             listed = {m["id"] for m in members}
@@ -515,8 +536,8 @@ class Network:
                     r.start()
                 if r is None:
                     continue
-                r.mesh = m
-                if r.where.get("via") == "mesh" and r.state != "alive" and time.monotonic() - r.tried > 5:
+                back, r.mesh = r.mesh is None, m  # (back: listed again, as it wasn't)
+                if r.where.get("via") == "mesh" and r.state != "alive" and (back or time.monotonic() - r.tried > 5):
                     r.wake.set()
 
     def members(self):

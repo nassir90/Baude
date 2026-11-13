@@ -7990,15 +7990,15 @@ class SessionSidebar(Gtk.Box):
     # own, whatever host they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group).
     # Everything's listed till some are picked (FilterList)
     def known_hosts(self):
-        """[(key, name, note, dim)]: this machine, then each other host a server's on, by name (note: "deactivated",
-        for one that is, grayed (dim); "gone", for one that is; "through" the member of the mesh it's reached through,
-        for one this machine's host process isn't linked to itself)."""
-        out, seen = [(HERE_HOST, THIS_MACHINE, "", False)], {HERE_HOST}
+        """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
+        one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
+        machine's host process isn't linked to itself)."""
+        out, seen = [(HERE_HOST, THIS_MACHINE, "")], {HERE_HOST}
         for r in sorted(network().remotes(), key=lambda r: remote_name(r).lower()):
             if (key := host_key(r)) not in seen:
                 seen.add(key)
                 out.append((key, remote_name(r), "deactivated" if r.deactivated else "gone" if r.state == "dead"
-                            else f"through {r.through}" if r.through else "", r.deactivated))
+                            else f"through {r.through}" if r.through else ""))
         return out
 
     def known_groups(self):
@@ -8046,7 +8046,8 @@ class SessionSidebar(Gtk.Box):
         not left out either, till it's back)."""
         if (old := load_settings().get("sidebar_network")) is not None:  # (⋮ → Group's one group, from before)
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
-        self.host_list.fill(self.known_hosts(), self.host_filter())
+        off = {host_key(r) for r in network().remotes() if r.deactivated}  # (grayed)
+        self.host_list.fill([(*h, h[0] in off) for h in self.known_hosts()], self.host_filter())
         self.group_list.fill(self.known_groups(), self.group_filter())
         self.actions.lookup_action("show_all").set_enabled(  # (as it is after both: a fill can change what's picked)
             self.host_filter() is not None or self.group_filter() is not None)

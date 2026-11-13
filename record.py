@@ -5808,7 +5808,7 @@ class RecordChat(meta.MetaChat):
         out = []
         if self.agent is not None and not self.agent.closed:
             out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model}"
-                       f"{', at a turn' if self.ask else ''})")
+                       f"{f', {self.agent.effort} effort' if self.agent.effort else ''}{', at a turn' if self.ask else ''})")
         if readers := [c for c in self.win.tabs.children() if isinstance(c, Reader) and c.chat]:
             out.append(f"{len(readers)} chat{'s' if len(readers) != 1 else ''} followed as written")
         return out

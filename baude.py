@@ -11320,7 +11320,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter")
+            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter\n"
+                     "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
         keys = Gtk.EventControllerKey()
@@ -11332,6 +11333,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
                                                propagate_natural_height=True)
         self.completer = SlashCompleter(self.input, box_overlay)
+        # (@'s list, as in Meta's box: Meta's names, the chats and the folder's; sent as briefed says them)
+        self.refs = meta.RefCompleter(lambda: self.panel.meta.names if getattr(self, "panel", None) else None,
+                                      self.input, box_overlay)
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
                            margin_start=12, margin_end=12, margin_bottom=6)
         composer.append(self.attach_strip)
@@ -12810,7 +12814,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- UI events
     def on_key(self, _ctl, keyval, _code, state):
-        if self.completer.handle_key(keyval, state):
+        if self.completer.handle_key(keyval, state) or self.refs.handle_key(keyval, state):
             return True
         if widgets.leave_wrapped(self.input.get_buffer(), keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)
@@ -12918,6 +12922,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
+        text = meta.briefed(text, self.panel.meta.names, self.cwd or "")  # (its @names as the agent is told them)
         self.add(self.user_bubble(text, atts))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.user(self.user_content(text, atts))
@@ -13403,6 +13408,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             cover.close()
         if self.completer.visible():
             self.completer.hide()  # (/'s or @'s list, not left over the chat's box)
+        self.refs.forget()
         self.show_panel(True, "meta")
         self.panel.meta.composer.grab_focus()
 

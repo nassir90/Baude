@@ -3,7 +3,9 @@ The same lines could go over stdin and stdout: Channel takes any pair of binary 
 
 A client's requests (a "req" it picks comes back on the reply):
     hello {client}                                  -> hello {server: info} (info: its id, name, group, version,
-                                                       models, host, home, pid, groups, init; commit, the git commit
+                                                       models, host, home, pid, groups, init; providers, this
+                                                       machine's model providers; mesh, the members it reaches and
+                                                       the links it's made (mesh.Mesh.view); commit, the git commit
                                                        its code was as it started (None: not a checkout); update,
                                                        None or {to: a commit, waiting: [{session, what}]}: its own
                                                        updater has a newer version ready, and waits for those
@@ -86,6 +88,21 @@ A client's requests (a "req" it picks comes back on the reply):
     rename {session, title}                         -> renamed {session} (claude renames it, if it's running; else
                                                        the server does as claude would)
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
+    link {where}                                    -> linking {where}: a link made from this host process to
+                                                       where (as reach has it, not "local" or "mesh"), kept and made
+                                                       again whenever it drops, and used both ways: the mesh
+                                                       (mesh.py). Its state's in info's mesh
+    unlink {where?, id?}                            -> unlinked {any}: the links made from here to where, or to
+                                                       member id, let go of and forgotten
+    join {host}                                     -> joined {host}: (another host process's) this connection,
+                                                       from now on, a link it's made to here (mesh.py)
+    relay {to}                                      -> relayed {to}: this connection, from now on, a tunnel to
+                                                       member to's host process (hello first, as ever); error if
+                                                       there's no way to it now
+    infer {provider, method, path, headers, body}   -> infer_head {status, headers}, infer_data {data (base64)}...,
+                                                       infer_end: an HTTP request to one of this machine's model
+                                                       providers (an OpenAI-compatible server's: path after its
+                                                       base_url), its answer as it comes
     ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
                                                      and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".
@@ -127,6 +144,8 @@ connects to any of them:
                                                     the host process on D, as it's given here (default
                                                     baude_headless.py, found on its PATH); strict: its key must be
                                                     known already
+    {"via": "mesh", "host": ID, "path"?}            member ID of the mesh this machine's host process is in (or the
+                                                    one listening at path), through it: relay
 """
 import json
 import os
@@ -138,7 +157,7 @@ import subprocess
 import threading
 import time
 
-VERSION = 2  # (1: #98-#123; 2: adopt, ephemeral, env, info's init)
+VERSION = 3  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word
@@ -388,6 +407,36 @@ def connect_ssh(dest, command=None, strict=False, timeout=25.0):
         raise OSError("; ".join(s for s in said if s) or str(e)) from None
 
 
+OPEN_S = 20  # (a member of the mesh, reached through it: the tunnel's this long to open)
+
+
+def through(ch, host, timeout=5.0):
+    """(channel, info) past hello for member host of the mesh, on a channel to a host process in it: relay, then
+    hello through the tunnel. OSError if there's no way to it."""
+    ch.sock.settimeout(max(timeout, OPEN_S))
+    ch.send({"op": "relay", "to": host, "req": 0})
+    reply = ch.reply()
+    if not reply or reply.get("op") != "relayed":
+        ch.close()
+        raise OSError((reply or {}).get("error") or "the host process here isn't in a mesh")
+    return _hello(ch, max(timeout, 10.0), host)
+
+
+def connect_mesh(host, path=None, timeout=5.0):
+    """A Channel to member host of the mesh, through this machine's host process (socket_path(), or the one at
+    path)."""
+    path = path or socket_path()
+    own_socket(path)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(path)
+    except OSError:
+        sock.close()
+        raise
+    return through(Channel.over(sock), host, timeout)
+
+
 def reach(where, timeout=5.0):
     """(channel, info) for a host process wherever it is (where: see this module's docstring)."""
     via = (where or {}).get("via")
@@ -397,16 +446,30 @@ def reach(where, timeout=5.0):
         return connect_local(where["path"], timeout)
     if via == "ssh":
         return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")), max(timeout, 3.0))
+    if via == "mesh":
+        return connect_mesh(where["host"], where.get("path"), timeout)
     raise OSError(f"nowhere to reach: {where!r}")
 
 
+def is_where(where):
+    """Is it somewhere reach can go?"""
+    if not isinstance(where, dict):
+        return False
+    via = where.get("via")
+    return via == "local" or via == "unix" and isinstance(where.get("path"), str) or \
+        via == "ssh" and is_dest(where.get("dest")) and isinstance(where.get("command") or "", str) or \
+        via == "mesh" and is_id(where.get("host")) and isinstance(where.get("path") or "", str)
+
+
 def is_local(where):
-    """Is it on this machine (reached by its socket, not over ssh)?"""
+    """Is it on this machine (reached by its socket, not over ssh or through the mesh)?"""
     return (where or {}).get("via") in ("local", "unix")
 
 
 def said_where(where):
-    """Where a host process is, as people say it: user@host, or this machine."""
+    """Where a host process is, as people say it: user@host, through the mesh, or this machine."""
+    if (where or {}).get("via") == "mesh":
+        return "through the mesh"
     return where.get("dest") if (where or {}).get("via") == "ssh" else "this machine"
 
 

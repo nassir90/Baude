@@ -43,15 +43,15 @@ def log_path():
     return os.path.join(state_home(), "host.log")
 
 
-def reach(dest=None, command=None):
+def reach(dest=None, command=None, member=None):
     """(channel, info) for a host process: another machine's over ssh (dest: an alias, a host, user@host; command:
-    its host process's, if baude_headless.py isn't on its PATH), else this machine's, started if need be. OSError if
-    it can't be."""
+    its host process's, if baude_headless.py isn't on its PATH), a member of the mesh through this machine's (member:
+    its id), else this machine's, started if need be. OSError if it can't be."""
     if dest:
         return wire.connect_ssh(dest, command)
     if not start_here():
         raise OSError(f"no host process here, and none could be started (see {log_path()})")
-    return wire.connect_local()
+    return wire.connect_mesh(member) if member else wire.connect_local()
 
 
 _HERE = []

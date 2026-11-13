@@ -71,11 +71,21 @@ ssh decides who may: Baude never asks for a password (`BatchMode`), and uses you
 them, with the host already in `known_hosts`. Put `baude_headless.py` on each host's `PATH`, or give Baude its path
 there (right-click the host → Host Command…).
 
-Heads start the host process when they need it, so there's nothing to run by hand. With no head attached it does
-nothing: no timers, a session's claude stopped once it's been idle half an hour, and the process itself gone after four
-hours with nothing running (`--idle-minutes`, `--exit-after-hours`). On macOS, at the screen, it's an item in the menu
-bar, with no Dock icon: how many sessions it has and which are running, and Quit. Quitting it (or `baude_headless.py
-quit`, or SIGTERM) stops its claudes, keeping their transcripts, so their sessions are resumed next time.
+Adding a host also links this machine's host process to that host's, and the link works both ways: that host, and
+every host it's linked to, can then start, watch and steer chats here and run this machine's models, as this machine
+can on them. The hosts linked like this form one mesh. A host reached only through another (build-box, linked to
+lab-mac, which is linked here) is listed under Hosts as "through lab-mac", and everything said to it goes through
+lab-mac. Each host tells the mesh its model providers. One that serves an OpenAI-compatible API, such as Ollama, can be
+run from any member through a proxy on 127.0.0.1 that the member's own host process runs; Apple's model and pi's run
+where they are, in a chat started on that host. From the command line, `baude_headless.py link DEST`, `unlink DEST`
+and `mesh` do the same, and `--member ID` reaches a member of the mesh in place of `--host`.
+
+Heads start the host process when they need it, so there's nothing to run by hand. With no head attached and no link to
+another host it does nothing: no timers, a session's claude stopped once it's been idle half an hour, and the process
+itself gone after four hours with nothing running and no link to another host (`--idle-minutes`, `--exit-after-hours`).
+On macOS, at the screen, it's an item in the menu bar, with no Dock icon: how many sessions it has and which are
+running, and Quit. Quitting it (or `baude_headless.py quit`, or SIGTERM) stops its claudes, keeping their transcripts,
+so their sessions are resumed next time.
 
 `baude_oneshot.py` starts one session in a host process, attaches, and streams what its claude says to stdout as JSON
 lines, as `claude -p --output-format stream-json` does. The session goes on in the host process, so Baude lists it,

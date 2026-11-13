@@ -33,15 +33,19 @@ def _subagent_file(name):
 
 
 def is_here(info):
-    """Is a server on this machine (its folders are this machine's)?"""
-    return bool(info) and (info.get("host") or "").split(".")[0].lower() == socket.gethostname().split(".")[0].lower()
+    """Is a server on this machine, as this user (its folders are this one's)?"""
+    if not info or (info.get("host") or "").split(".")[0].lower() != socket.gethostname().split(".")[0].lower():
+        return False
+    home = info.get("home")
+    return not isinstance(home, str) or os.path.realpath(home) == os.path.realpath(os.path.expanduser("~"))
 
 
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
-    "tailscale", as it was found then). command: its host process's command, as given here (what it's said to be
-    otherwise)."""
+    "tailscale", as it was found then), "mesh" (a member of the mesh this machine's host process is in: reached
+    through it, and tried again when it's there, Network.meshed). command: its host process's command, as given
+    here (what it's said to be otherwise). mesh: what the host process says of a member (hops, through)."""
 
     def __init__(self, network, key, where, cached=None, found_by="hand"):
         cached = cached or {}
@@ -55,6 +59,7 @@ class Remote:
         self.found_by = cached.get("found_by") or found_by
         self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
         self.tried, self.error = 0.0, None
+        self.mesh = None  # (a member of this machine's mesh: {hops, through, providers, ...})
         self.state = "connecting"  # then "alive", or "dead"
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
@@ -76,6 +81,12 @@ class Remote:
     def host(self):
         """Where it is, as people say it: user@host, or this machine."""
         return wire.said_where(self.where)
+
+    @property
+    def through(self):
+        """The member of the mesh it's reached through (by name), if it's reached through the mesh and not linked to
+        this machine's host process itself."""
+        return (self.mesh or {}).get("through") if self.where.get("via") == "mesh" else None
 
     def reach_where(self):
         return {**self.where, "command": self.command} if self.command and self.where.get("via") == "ssh" else self.where
@@ -111,8 +122,11 @@ class Remote:
             if self.state != "dead":
                 self.state = "dead"
                 self.network.changed()
-            retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
-            self.wake.wait(retry[min(tries, len(retry) - 1)])
+            if self.where.get("via") == "mesh":  # (tried again once the mesh says it's there)
+                self.wake.wait()
+            else:
+                retry = RETRY_SSH_S if self.where.get("via") == "ssh" else RETRY_S
+                self.wake.wait(retry[min(tries, len(retry) - 1)])
             self.wake.clear()
             tries += 1
 
@@ -139,6 +153,8 @@ class Remote:
                                  if isinstance(s, dict) and wire.is_id(s.get("id"))}
                 if self.state != "alive":
                     self.state = "alive"
+                if self.mine:
+                    self.network.meshed(self)
                 self.network.changed()
             elif op != "ping" and (req := msg.get("req")) is not None and req in self.calls:
                 self.calls.pop(req)(msg)
@@ -329,6 +345,7 @@ class Network:
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
         self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
+        self.linked_pid = None  # (the host process here that's been asked to link to the hosts given by hand)
         for key, c in self.saved().items():
             if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand"):
                 self.servers[key] = Remote(self, key, c["where"], c)
@@ -399,6 +416,7 @@ class Network:
                 r.wake.set()
             r.by_hand = r.by_hand or by_hand
         if by_hand or command is not None:
+            self.link(r)
             self.save()
             self.changed()
         return r
@@ -407,7 +425,84 @@ class Network:
         """A host's process's command there, as given here (None: what it says, or SSH_COMMAND): tried again with it."""
         r.command = command or None
         r.wake.set()
+        self.link(r)
         self.save()
+
+    # ---- the mesh: this machine's host process linked to each host given by hand, the link used both ways, and
+    # every member it reaches known here, reached through it (baudelib/mesh.py)
+    def here_alive(self):
+        """This machine's host process, if it's there (and knows the mesh)."""
+        with self.lock:
+            here = next((r for r in self.servers.values() if r.mine and r.state == "alive"), None)
+        return here if here is not None and (here.info.get("version") or 1) >= 3 else None
+
+    def link(self, r):
+        """A host given by hand, linked to from this machine's host process: it, and every member it
+        reaches, can reach here too. Kept there; asked again each time it's started."""
+        if r.by_hand and r.where.get("via") in ("ssh", "unix") and (here := self.here_alive()) is not None:
+            here.request({"op": "link", "where": r.reach_where()})
+
+    def meshed(self, here):
+        """(this machine's host process said what its info is) Each member of its mesh known here, reached through it
+        (one known otherwise, over ssh, say, reached so), and tried again if it's gone; and, once each time it's
+        started, every host given by hand linked to from it."""
+        mesh = here.info.get("mesh")
+        if not isinstance(mesh, dict) or (here.info.get("version") or 1) < 3:
+            return
+        if here.info.get("pid") != self.linked_pid:
+            self.linked_pid = here.info.get("pid")
+            with self.lock:
+                given = [r for r in self.servers.values() if r.by_hand]
+            threading.Thread(target=lambda: [self.link(r) for r in given], daemon=True, name="link").start()
+        members = [m for m in mesh.get("members") or [] if isinstance(m, dict) and wire.is_id(m.get("id"))]
+        with self.lock:
+            known = {r.info.get("id") for r in self.servers.values() if r.where.get("via") != "mesh"}
+            for m in members:
+                if m["id"] == here.info.get("id"):
+                    continue
+                r = self.servers.get(m["id"])
+                if r is None and m["id"] not in known:
+                    r = self.servers[m["id"]] = Remote(self, m["id"], {"via": "mesh", "host": m["id"]}, found_by="mesh")
+                    r.info = {k: m.get(k) for k in ("id", "name", "group", "host")}
+                    r.start()
+                if r is None:
+                    continue
+                r.mesh = m
+                if r.where.get("via") == "mesh" and r.state != "alive" and time.monotonic() - r.tried > 5:
+                    r.wake.set()
+
+    def members(self):
+        """The mesh's members, as this machine's host process has them: [{id, name, group, host, hops, through,
+        providers}] ([] with none, or no host process here)."""
+        here = self.here_alive()
+        return list(((here.info.get("mesh") or {}).get("members") or [])) if here is not None else []
+
+    def links(self):
+        """The links this machine's host process makes: [{where, id, name, state ("linked", "connecting",
+        "dropped"), error}]."""
+        here = self.here_alive()
+        return list(((here.info.get("mesh") or {}).get("links") or [])) if here is not None else []
+
+    def providers(self):
+        """Every model provider in the mesh, this machine's first, each {host: {id, name, here}, id, kind, name,
+        models: [{value, displayName}], base_url, api_key}. Another member's that serves HTTP has base_url and api_key
+        for the proxy in this machine's host process, an OpenAI-compatible server here that runs the model there;
+        a program's (apple-claude, pi-claude) has none: a chat started on that member (Remote) runs it. This machine's
+        own have their base_url, and no key. [] with no host process here."""
+        here = self.here_alive()
+        if here is None:
+            return []
+        me = {"id": here.info.get("id"), "name": here.info.get("name"), "here": True}
+        out = [{**p, "host": me, "base_url": p.get("base_url"), "api_key": None}
+               for p in here.info.get("providers") or [] if isinstance(p, dict)]
+        proxy = (here.info.get("mesh") or {}).get("proxy") or {}
+        for m in self.members():
+            host = {"id": m.get("id"), "name": m.get("name"), "here": False}
+            for p in m.get("providers") or []:
+                served = bool(p.get("http") and proxy.get("url"))
+                out.append({**p, "host": host, "base_url": f"{proxy['url']}/{m['id']}/{p['id']}" if served else None,
+                            "api_key": proxy.get("key") if served else None})
+        return out
 
     def look(self):
         """Look again now, as a restart would (Baude's window came forward, its ⋮ menu opened): every host that's gone
@@ -526,11 +621,7 @@ class Network:
 
 def _where(where):
     """Is it somewhere wire.reach can go?"""
-    if not isinstance(where, dict):
-        return False
-    via = where.get("via")
-    return via == "local" or via == "unix" and isinstance(where.get("path"), str) or \
-        via == "ssh" and wire.is_dest(where.get("dest")) and isinstance(where.get("command") or "", str)
+    return wire.is_where(where)
 
 
 class _Remote:

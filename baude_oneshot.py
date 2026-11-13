@@ -4,8 +4,8 @@ started (or carried on) with a prompt, attached to, and what its claude says str
 `claude -p --output-format stream-json` writes them. A head, as Baude is: the session goes on in the host process, and
 Baude lists it under its host and group. No GTK needed.
 
-    python3 baude_oneshot.py [--host DEST [--host-command CMD]] [--group G] [--cwd DIR] [--model M] [--effort E]
-                             [--mode MODE] [--title T] [--system TEXT] [--add-dir DIR]... [--allow RULE]...
+    python3 baude_oneshot.py [--host DEST [--host-command CMD] | --member ID] [--group G] [--cwd DIR] [--model M]
+                             [--effort E] [--mode MODE] [--title T] [--system TEXT] [--add-dir DIR]... [--allow RULE]...
                              [--deny RULE]... [--fork-from SESSION] [--resume SESSION] [--follow] [--input]
                              [--partial] [--ask-timeout S [--ask-default allow]] PROMPT
 
@@ -56,6 +56,8 @@ def main():
     p.add_argument("--host", help="another machine's host process, where ssh reaches it: an alias, a host, user@host "
                                   "(default: this machine's, started if it isn't running)")
     p.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
+    p.add_argument("--member", help="a member of the mesh (its id, as `baude_headless.py mesh` lists it), reached "
+                                    "through this machine's host process")
     p.add_argument("--group", help="the session's group (default: the host's)")
     p.add_argument("--cwd", help="the folder it runs in, on the host (default: its home; a relative one is this folder's)")
     p.add_argument("--model")
@@ -82,7 +84,7 @@ def main():
     if args.resume and (args.ask_timeout is not None or args.ask_default):
         p.error("--ask-timeout and --ask-default are a new session's: a resumed one keeps what it was started with")
     try:
-        ch, info = hosts.reach(args.host, args.host_command)
+        ch, info = hosts.reach(args.host, args.host_command, args.member)
     except OSError as e:
         print(f"baude-oneshot: {e}", file=sys.stderr)
         return 2
@@ -94,10 +96,11 @@ def main():
     if args.resume:
         ch.send({"op": "attach", "session": args.resume, "live": True, "answers": answers, "req": 1})
     else:
-        cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) or args.host else os.path.abspath(args.cwd)
+        away = args.host or args.member
+        cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) or away else os.path.abspath(args.cwd)
         ch.send({"op": "start", "prompt": prompt or "", "cwd": cwd, "model": args.model, "effort": args.effort,
                  "mode": args.mode, "group": args.group, "title": args.title, "system": args.system,
-                 "add_dirs": [os.path.abspath(os.path.expanduser(d)) if not args.host else d for d in args.add_dir],
+                 "add_dirs": [os.path.abspath(os.path.expanduser(d)) if not away else d for d in args.add_dir],
                  "allowed_tools": args.allow, "disallowed_tools": args.deny, "fork_from": args.fork_from,
                  "ask_timeout": args.ask_timeout, "ask_default": args.ask_default, "attach": True,
                  "answers": answers, "req": 1})

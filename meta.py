@@ -31,6 +31,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import weakref
 
 import gi
 
@@ -43,11 +44,13 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
-from baudelib.claude import MODELS, ClaudeProc  # noqa: E402
+from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
+from baudelib.models import model_program  # noqa: E402
 
 NAME = "Meta"
 MODEL = "haiku"  # its model, unless Settings → Meta → Intelligence says another (settings.json meta_model)
-MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers, the quickest first)
+MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers till claude's listed its own)
+MODEL_KEYS = ("value", "displayName", "supportsEffort", "supportedEffortLevels")  # (what's kept of each: models)
 CODE_LINES = 10  # the most lines of Python run_python runs
 READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
@@ -61,10 +64,62 @@ REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
+def models():
+    """What Intelligence offers, as (value, label, effort levels or None): the models this machine's claude listed last
+    (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude), in its order;
+    MODELS_OFFERED till it has."""
+    listed = [m for m in widgets.load_settings().get("claude_models") or []
+              if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
+    out = [(m["value"], m.get("displayName") or m["value"],
+            list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None) for m in listed] or \
+        [(value, lbl, None) for value, lbl in MODELS_OFFERED]
+    chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list: still there to see)
+    if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" and model_entry(chosen, out) is None:
+        out.append((chosen, chosen, None))
+    return out
+
+
+def listed(found, seed=False):
+    """claude's initialize listed its models (found): those claude runs, kept as what Intelligence offers (models).
+    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet."""
+    keep = [{k: m[k] for k in MODEL_KEYS if k in m} for m in found or []
+            if isinstance(m, dict) and m.get("value") and m["value"] != "default" and model_program(m["value"]) == "claude"]
+    had = widgets.load_settings().get("claude_models")
+    if keep and keep != had and not (seed and had):
+        widgets.save_settings(claude_models=keep)
+
+
+def model_entry(value, offered=None):
+    """The entry of offered (models()) for a model value: its own, else, for an alias (haiku), the first listed model
+    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if neither."""
+    offered = models() if offered is None else offered
+    family = re.compile(rf"(^|-){re.escape(value)}(-|\[|$)")
+    return next((m for m in offered if m[0] == value), None) or \
+        (next((m for m in offered if family.search(m[0])), None) if value in dict(MODELS) else None)
+
+
 def model():
-    """The model Meta runs on: settings.json's meta_model, else Haiku."""
+    """The model Meta runs on: settings.json's meta_model (picked from a list claude gave, and kept while another
+    claude lists others), else Haiku."""
     chosen = widgets.load_settings().get("meta_model")
-    return chosen if chosen in dict(MODELS) else MODEL
+    return chosen if isinstance(chosen, str) and chosen and model_program(chosen) == "claude" else MODEL
+
+
+def model_value():
+    """model() as Intelligence lists it (claude-haiku-4-5 for haiku, where it's listed so)."""
+    return (model_entry(model()) or (model(),))[0]
+
+
+def efforts():
+    """The effort levels Meta's model takes (none: [])."""
+    entry = model_entry(model())
+    return list(entry[2] or []) if entry else []
+
+
+def effort():
+    """How hard Meta thinks: settings.json's meta_effort if its model takes it, else None (claude's own default)."""
+    chosen = widgets.load_settings().get("meta_effort")
+    return chosen if chosen in efforts() else None
 
 
 def code_mode():
@@ -434,13 +489,18 @@ def api_doc(tools):
 
 class Setting:
     """A setting Meta changes (set_setting) and shows (show setting:<name>): its value (get), changing it (put), the
-    row Settings has for it (row), and what it takes: values a list of names, (low, high) for a size, or bool. note:
+    row Settings has for it (row), and what it takes: values a list of names (or a function giving them, where they
+    change), (low, high) for a size, or bool. note:
     what to know of it (the code font takes from the next start)."""
 
     def __init__(self, name, title, get, put, row, values, note="", meta_sets=True):
         self.name, self.title, self.get, self.put, self.row, self.values, self.note = \
             name, title, get, put, row, values, note
         self.meta_sets = meta_sets  # (False: Meta only shows it, the user changes it)
+
+    def options(self):
+        """values as they are now (a list's given as a function where it changes: the models claude lists)."""
+        return self.values() if callable(self.values) and self.values is not bool else self.values
 
     def value(self):
         return self.get()
@@ -463,9 +523,9 @@ class Setting:
             if not self.values[0] <= v <= self.values[1]:
                 raise ValueError(f"{self.name} is a number from {self.values[0]} to {self.values[1]}.")
             return v
-        found = next((v for v in self.values if str(v).lower() == str(value).strip().lower()), None)
+        found = next((v for v in self.options() if str(v).lower() == str(value).strip().lower()), None)
         if found is None:
-            raise ValueError(f"{self.name} is one of: {', '.join(map(str, self.values))}.")
+            raise ValueError(f"{self.name} is one of: {', '.join(map(str, self.options()))}.")
         return found
 
     def set(self, value):
@@ -478,17 +538,63 @@ class Setting:
             return "on|off"
         if isinstance(self.values, tuple):
             return f"{self.values[0]}–{self.values[1]}"
-        return "|".join(map(str, self.values))
+        return "|".join(map(str, self.options()))
+
+
+EFFORT_ROWS = weakref.WeakSet()  # (the Effort rows up: each offers the model's levels, model_picked)
+
+
+def model_picked(chat, value):
+    """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, and every Effort row
+    offers its levels."""
+    widgets.save_settings(meta_model=value)
+    for row in list(EFFORT_ROWS):
+        row.sync()
+    if chat is not None:
+        chat.model_changed()
 
 
 def model_row(chat):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message."""
-    values = [value for value, _label in MODELS_OFFERED]
+    offered = models()
+    values = [m[0] for m in offered]
+    entry = model_entry(model(), offered)
     row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with",
-                       model=Gtk.StringList.new([lbl for _value, lbl in MODELS_OFFERED]),
-                       selected=values.index(model()) if model() in values else 0)
-    row.connect("notify::selected", lambda r, _p: (widgets.save_settings(meta_model=values[r.get_selected()]),
-                                                   chat is not None and chat.model_changed()))
+                       model=Gtk.StringList.new([m[1] for m in offered]),
+                       selected=offered.index(entry) if entry else 0)
+
+    row.connect("notify::selected", lambda r, _p: r.get_selected() < len(values) and
+                model_picked(chat, values[r.get_selected()]))
+    return row
+
+
+def effort_row(chat):
+    """Settings → Meta → Effort: how hard Meta thinks, of the levels its model takes, from its next message. Its sync()
+    offers another model's levels (model_picked)."""
+    row = Adw.ComboRow(title="Effort")
+    state = {"values": [None], "syncing": False}
+
+    def sync():
+        levels = efforts()
+        state["values"] = [None, *levels]
+        state["syncing"] = True
+        row.set_model(Gtk.StringList.new(["Default", *(EFFORT_LABELS.get(lv, lv.title()) for lv in levels)]))
+        row.set_selected(state["values"].index(effort()))
+        state["syncing"] = False
+        row.set_sensitive(bool(levels))
+        name = model_entry(model())
+        row.set_subtitle(f"How hard {NAME} thinks" if levels else
+                         f"{name[1] if name else model()} has no effort setting")
+
+    def picked(r, _p):
+        if not state["syncing"] and r.get_selected() < len(state["values"]):
+            widgets.save_settings(meta_effort=state["values"][r.get_selected()])
+            if chat is not None:
+                chat.model_changed()
+    row.connect("notify::selected", picked)
+    row.sync = sync
+    sync()
+    EFFORT_ROWS.add(row)
     return row
 
 
@@ -502,9 +608,10 @@ def code_mode_row(chat):
 
 
 def settings_group(chat):
-    """Settings → Meta, in Baude's and Record's Settings: Intelligence and Code mode."""
+    """Settings → Meta, in Baude's and Record's Settings: Intelligence, Effort and Code mode."""
     group = Adw.PreferencesGroup(title=NAME)
     group.add(model_row(chat))
+    group.add(effort_row(chat))
     group.add(code_mode_row(chat))
     return group
 
@@ -554,9 +661,12 @@ def shared_settings(win, chat, app, zoom_default):
                 lambda: bool((a := win.lookup_action("fullwidth")) and a.get_state().get_boolean()), wide,
                 lambda: widgets.settings_switch("Full-width text", None, "win.fullwidth"), bool),
         Setting("auto_update", "Auto restart on update", update.enabled, auto, update.settings_row, bool),
-        Setting("meta_model", "Intelligence", model,
-                lambda v: (widgets.save_settings(meta_model=v), chat.model_changed()), lambda: model_row(chat),
-                [v for v, _label in MODELS_OFFERED], note=f"{NAME}'s own model, from its next message"),
+        Setting("meta_model", "Intelligence", model_value, lambda v: model_picked(chat, v), lambda: model_row(chat),
+                lambda: [m[0] for m in models()], note=f"{NAME}'s own model, from its next message"),
+        Setting("meta_effort", "Effort", lambda: effort() or "default",
+                lambda v: (widgets.save_settings(meta_effort=None if v == "default" else v), chat.model_changed()),
+                lambda: effort_row(chat), lambda: ["default", *efforts()],
+                note=f"how hard {NAME} thinks, of the levels its model takes, from its next message"),
         Setting("meta_code_mode", "Code mode", code_mode,
                 lambda v: (widgets.save_settings(meta_code_mode=v), chat.model_changed()), lambda: code_mode_row(chat),
                 bool, note=f"{NAME} acts through run_python, from its next message; the user's to turn on",
@@ -822,8 +932,8 @@ class Agent:
     STOP_WAIT = 3000  # ms for an interrupted turn to end, before the session's stopped
     EXIT_WAIT = 200  # ms for what it said as it ended (stderr, read on its own thread) to come in
 
-    def __init__(self, chat, key, system, tools, cwd, roots=(), model=MODEL, exe=None, env_of=None):
-        self.chat, self.key, self.model = chat, key, model
+    def __init__(self, chat, key, system, tools, cwd, roots=(), model=MODEL, exe=None, env_of=None, effort=None):
+        self.chat, self.key, self.model, self.effort = chat, key, model, effort
         self.roots = [os.path.realpath(r) for r in roots if r]
         self.turn, self.fresh, self.stderr, self.closed = None, True, [], False
         self.answers = {}  # (the control requests it's made, by id: what to do with their answers)
@@ -841,8 +951,8 @@ class Agent:
                 "--disable-slash-commands", "--setting-sources", ""]
         for root in self.roots:
             args += ["--add-dir", root]
-        self.proc = MetaProc(self.on_msg, self.on_exit, cwd, model, "default", extra=args, env=AGENT_ENV, exe=exe,
-                             env_of=env_of)
+        self.proc = MetaProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args, env=AGENT_ENV,
+                             exe=exe, env_of=env_of)
 
     def ask(self, text, turn):
         """A message (turn: what the reply's made of, as it comes: its text, actions, what it shows)."""
@@ -921,6 +1031,8 @@ class Agent:
                     "error": f"meta: unsupported {(msg.get('request') or {}).get('subtype')}"}})
         elif t == "control_response":
             r = msg.get("response") or {}
+            if r.get("request_id") == proc.init_rid and r.get("subtype") == "success":
+                listed((r.get("response") or {}).get("models"))  # (what this machine's claude runs: Intelligence)
             then = self.answers.pop(r.get("request_id"), None)
             if then is not None and r.get("subtype") == "success":
                 then(r.get("response") or {})
@@ -1545,7 +1657,8 @@ class MetaChat(Gtk.Box):
     # ---- the conversation
     def model_changed(self):
         """Settings → Meta: the send button says the model it asks; the next message is the new model's (submit)."""
-        name = dict(MODELS_OFFERED).get(model(), model())
+        entry, level = model_entry(model()), effort()
+        name = (entry[1] if entry else model()) + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
         self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) (Enter)\n" \
                                 "New line: Shift+Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
@@ -2352,7 +2465,7 @@ class MetaChat(Gtk.Box):
         if self.lit:
             self.lit = {}
             self.marks_changed()
-        key = (self.scope(), model(), code_mode())
+        key = (self.scope(), model(), effort(), code_mode())
         if self.agent is not None and self.agent.key != key:
             self.close_agent()  # (another model, another scope: a session for them, told what was said)
         try:
@@ -2361,7 +2474,7 @@ class MetaChat(Gtk.Box):
                 offered = [RUN_PYTHON] if code_mode() else tools
                 setup = self.agent_setup()
                 self.agent = Agent(self, key, self.system(tools), offered, setup["cwd"], setup.get("roots") or (),
-                                   model(), setup.get("exe"), setup.get("env_of"))
+                                   model(), setup.get("exe"), setup.get("env_of"), effort())
                 self.agent_made(self.agent)
             turn = {"text": [], "items": [], "actions": [], "shown": [], "code": [], "streamed": False,
                     **self.turn_extra(msg)}

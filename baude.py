@@ -9518,7 +9518,8 @@ class BaudeMeta(meta.MetaChat):
             if n:
                 out.append(f"{n} {said}{'s' if n != 1 else ''} in the open chat")
         if self.agent is not None and not self.agent.closed:
-            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model})")
+            out.append(f"{meta.NAME}'s claude (pid {self.agent.proc.p.pid}, {self.agent.model}"
+                       f"{f', {self.agent.effort} effort' if self.agent.effort else ''})")
         return out
 
     def sections(self):
@@ -13119,6 +13120,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             models = getattr(self, "claude_models", [])
         else:
             self.claude_models = models
+            meta.listed(models, seed=True)  # (what this machine's claude runs: Meta's Intelligence, till Meta's own lists)
         if self.remote is None:
             models = [m for m in models if model_program(m["value"]) == "claude"] + [APPLE_MODEL] + local_models()
         self.models_info = {m["value"]: m for m in models}

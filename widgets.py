@@ -6551,6 +6551,9 @@ def apply_accent(display):
     if css == _accent["css"]:
         return
     again = _accent["css"] is not None
+    for win in Gtk.Window.list_toplevels() if again else ():
+        if isinstance(win, AccentFade):
+            win.fade_accent()
     _accent["name"], _accent["css"] = name, css
     _accent["provider"].load_from_string(css)
     for win in Gtk.Window.list_toplevels() if again else ():
@@ -6560,6 +6563,83 @@ def apply_accent(display):
             if (changed := getattr(widget, "accent_changed", None)) is not None:  # (its own colours: Record's links)
                 changed()
             widget.queue_draw()
+
+
+class AccentFade:
+    """Mixed into a window (Baude's, Record's) whose do_snapshot is snapshot_fading's: as the accent changes
+    (apply_accent, picked in Settings or set by Meta), the window as it was last drawn is drawn over it, fading out in
+    FADE_MS, so what Baude and Record colour themselves (Record's links, a mark's highlight, a chip's name) changes as
+    libadwaita's own buttons and switches do, in their time and ease. The fade's time starts once the window's drawn
+    in the new colours (restyling all of it can take a frame or more). Not shown, or with animations off: at once.
+    GTK's first frame with a window faded over it is slow (80 ms and more, readying how it draws one), so each window
+    has one such frame READY_MS after it's first drawn, unseen (ready_fade), and its first fade runs smoothly."""
+    FADE_MS = 200
+    READY_MS = 1000
+    drawn = None  # (the window as it was last drawn, a fade in it: what a fade starts from)
+    accent_fade = None  # (that picture, and how much of it's still seen)
+    readying = None  # (ready_fade, to come)
+
+    def snapshot_fading(self, snapshot, base):
+        """do_snapshot's: the window as base (its class) draws it, a fade over it; kept as it's drawn."""
+        if self.readying is None:
+            self.readying = GLib.timeout_add(self.READY_MS, self.ready_fade)
+        inner = Gtk.Snapshot()
+        base.do_snapshot(self, inner)
+        if (fade := self.accent_fade) is not None:
+            inner.push_opacity(fade["seen"])
+            inner.append_node(fade["node"])
+            inner.pop()
+        if (node := inner.to_node()) is not None:
+            self.drawn = node
+            snapshot.append_node(node)
+
+    def fade_accent(self):
+        if not self.get_mapped() or not Adw.get_enable_animations(self) or self.drawn is None:
+            return
+        fade, clock = {"node": self.drawn, "seen": 1.0}, self.get_frame_clock()
+
+        def step(v):
+            if self.accent_fade is fade:
+                fade["seen"] = v
+                self.queue_draw()
+
+        def done(_a):
+            if self.accent_fade is fade:
+                self.accent_fade = None
+                self.queue_draw()
+            fade.clear()  # (its picture and animation let go: they and its callbacks hold each other)
+
+        def painted(_clock):  # (the first frame in the new colours, all of it still the old: it fades from here)
+            clock.disconnect(fade.pop("painted"))
+            if self.accent_fade is not fade:  # (another change since: that one fades)
+                fade.clear()
+                return
+            anim = fade["anim"] = Adw.TimedAnimation.new(self, 1.0, 0.0, self.FADE_MS,
+                                                         Adw.CallbackAnimationTarget.new(step))
+            anim.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+            anim.connect("done", done)
+            anim.play()
+        fade["painted"] = clock.connect("after-paint", painted)
+        self.accent_fade = fade
+        self.queue_draw()
+
+    def ready_fade(self):
+        """One frame with the window as it was last drawn at all but full strength over it: settled, the same picture,
+        so nothing's seen, and GTK's slow first frame of a fade is had now."""
+        if self.accent_fade is not None or self.drawn is None or not self.get_mapped() or \
+                not Adw.get_enable_animations(self):
+            return False
+        ready, clock = {"node": self.drawn, "seen": 0.999}, self.get_frame_clock()
+
+        def painted(_clock):
+            clock.disconnect(ready.pop("painted"))
+            if self.accent_fade is ready:
+                self.accent_fade = None
+                self.queue_draw()
+        ready["painted"] = clock.connect("after-paint", painted)
+        self.accent_fade = ready
+        self.queue_draw()
+        return False
 
 
 class AccentDot(Gtk.Widget):

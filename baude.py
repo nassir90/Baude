@@ -11232,6 +11232,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.models_info = {}      # model value -> initialize's model entry
         self.effort = None
         self.local_effort = "off"  # (a model on this Mac that thinks: its own level, Claude's effort apart; none at first)
+        if not os.path.exists(_settings_path()):  # a new installation: full-width text from the start
+            save_settings(full_width=True)
         self.settings = load_settings()
         self.zoom = min(ZOOM_MAX, max(ZOOM_MIN, float(load_settings().get("zoom", 1.0))))
         self.zoom_default = min(ZOOM_MAX, max(ZOOM_MIN, float(self.settings.get("zoom_default") or 1.0)))  # (Ctrl+0's)

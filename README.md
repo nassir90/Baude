@@ -38,21 +38,22 @@ the open fonts in [fonts/](fonts/README.md) (SIL Open Font License), or macOS's 
 
 Meta (the spanner, first in the right bar of Baude and of Record) is a helper that operates the app: ask it to move
 chats into a group, archive or rename them, list only some hosts or groups, or, in Record, move, add or delete pages
-and propose edits to them. Every change it makes shows under its reply with undo, and is marked in the left bar (green
-added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
-own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model: any model your
-claude lists, or any in the mesh that can call tools (Settings → Meta → Provider says where it runs, and picks another
-host's copy), each given Meta's tools. On Claude's models it also runs shell commands, edits files and looks things up
-on the web, in Claude Code's Auto mode, so it checks things for itself (a file's path, what a host has, over ssh)
-rather than asking you; what Auto mode holds back it asks you about, Allow or Deny. Settings → Meta → Run commands
-turns that off; other models only read. It sets models up too: it says what runs them here, checks Ollama's models and
-removes those that don't load (asking you first), adds an MLX model you've downloaded or an OpenAI-compatible server,
-and builds `apple-claude` (asking first). It installs or downloads nothing you didn't ask for. When a conversation is
-more than the model's context window holds (another model picked, or the conversation grown), "Context Exhausted"
-shows over its box, the box off, and the context bar shows it full, the tokens used over the window's, till a model
-with a bigger window is picked or the chat's cleared; Baude's chats do the same. Code mode has it act by writing up to
-10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too), from anywhere in the window,
-shows it and puts the focus in its box; pressed again while it's open, it closes it.
+and propose edits to them. Every change it makes with the app's own tools shows under its reply with undo, and is
+marked in the left bar (green added, red removed, blue moved) until you keep or undo it. Asked about a setting, it
+changes it and puts the setting's own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says
+another model: any model your claude lists, or any in the mesh that can call tools (Settings → Meta → Provider says
+where it runs, and picks another host's copy), each given Meta's tools. On Claude's models it also runs shell
+commands, edits files and looks things up on the web, in Claude Code's Auto mode, so it checks things for itself (a
+file's path, what a host has, over ssh) rather than asking you; what Auto mode holds back it asks you about, Allow or
+Deny, and commands and file edits have no undo. In Record it never edits the pages' own files. Settings → Meta → Run
+commands turns that off; other models only read. It sets models up too: it says what runs them here, checks Ollama's
+models and removes those that don't load (asking you first), adds an MLX model you've downloaded or an
+OpenAI-compatible server, and builds `apple-claude` (asking first). It installs or downloads nothing you didn't ask
+for. When a conversation is more than the model's context window holds (another model picked, or the conversation
+grown), "Context Exhausted" shows over its box, the box off, and the context bar shows it full, the tokens used over
+the window's, till a model with a bigger window is picked or the chat's cleared; Baude's chats do the same. Code mode
+has it act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too),
+from anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
 
 ## Local models
 

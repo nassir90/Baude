@@ -61,6 +61,8 @@ READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # Claude Code's own that act, given on Claude's models (runs_commands), in its Auto mode: what its classifier holds back
 # is put to the user (MetaChat.ask_permission)
 COMMAND_TOOLS = ("Bash", "Edit", "Write", "WebFetch", "WebSearch")
+EDIT_TOOLS = ("Edit", "Write")  # (those of them that write files: never under the app's own (MetaChat.agent_setup's protect))
+NO_AUTO = set()  # (models claude started in another mode when Meta asked for Auto: each command put to the user)
 # its session's environment: its MCP tools loaded at the start (not through a ToolSearch turn), no auto memory, no
 # claude.ai connectors, no telemetry or update checks (as Baude's Signal reader has it)
 AGENT_ENV = {"ENABLE_TOOL_SEARCH": "false", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
@@ -247,6 +249,12 @@ def takes_commands(value=None):
 def runs_commands():
     """Whether Meta's next session runs commands (COMMAND_TOOLS, in Auto mode): on Claude's models, Run commands on."""
     return commands_on() and takes_commands()
+
+
+def auto_mode_note(value=None):
+    """What to say when claude didn't start a model (Meta's own, if none's given) in Auto mode (NO_AUTO), else ""."""
+    value = model() if value is None else value
+    return f"Claude Code didn't start {model_name(value)} in Auto mode here" if value in NO_AUTO else ""
 
 
 # ---------------------------------------------------------------- text
@@ -813,7 +821,8 @@ def commands_row(chat):
         row.set_active(takes and commands_on())  # (off, greyed, on a model that only reads: the setting kept)
         row.syncing = was
         row.set_sensitive(takes)
-        row.set_subtitle(f"{NAME} runs shell commands and edits files, in Auto mode" if takes else
+        row.set_subtitle((f"{auto_mode_note()}: {NAME} asks before each command" if auto_mode_note() else
+                          f"{NAME} runs shell commands and edits files, in Auto mode") if takes else
                          f"{model_name()} only reads: Claude's models run commands")
     row.sync = sync
     widgets.follow_setting(row, "meta_commands", lambda _v: sync())
@@ -889,7 +898,7 @@ def shared_settings(win, chat, app, zoom_default):
                 lambda v: (widgets.save_settings(meta_code_mode=v), chat.model_changed()), lambda: code_mode_row(chat),
                 bool, note=f"{NAME} acts through run_python, from its next message; the user's to turn on",
                 meta_sets=False),
-        Setting("meta_commands", "Run commands", commands_on,
+        Setting("meta_commands", "Run commands", lambda: commands_on() and takes_commands(),
                 lambda v: (widgets.save_settings(meta_commands=v), chat.model_changed()), lambda: commands_row(chat),
                 bool, note=f"on Claude's models, {NAME} runs shell commands and edits files, from its next message; "
                 "the user's to turn on or off", meta_sets=False),
@@ -936,9 +945,11 @@ COMMANDS_SYSTEM = """
 
 Commands: you run shell commands (Bash), edit files (Edit, Write) and look things up on the web (WebFetch, \
 WebSearch), in Claude Code's Auto mode: what looks risky is put to the user first. Check things yourself rather than \
-asking the user to: where a file is, what's installed, what a host has (ssh -o BatchMode=yes <host> '<command>' for \
-one of the app's hosts or one the user names: there's no terminal for a password). Read and look as you like; change \
-nothing outside the app that the user didn't ask for, and install, delete or download nothing unasked."""
+asking the user to: where a file is, what's installed, what a host has (ssh -o BatchMode=yes -o ConnectTimeout=10 \
+<host> '<command>' for one of the app's hosts or one the user names: there's no terminal for a password). Read and look \
+as you like. Commands and file edits aren't your actions: they have no undo, and what's said above of undo is of the \
+app's tools. So change nothing outside the app that the user didn't ask for, install, delete or download nothing \
+unasked, and before a command that changes or removes something, say in a line what it will do."""
 
 CODE_SYSTEM = """
 
@@ -1276,16 +1287,17 @@ class Agent:
     """Meta's session: a Claude Code session for a conversation (one turn at a time: ask), on the model chosen. Its
     tools read (READ_TOOLS): what's under roots it reads as it likes; anything else it asks for, and is let read what
     the user referenced, else the user's asked (MetaChat.ask_permission). With commands (runs_commands: Claude's
-    models) it also acts (COMMAND_TOOLS), in Claude Code's Auto mode, which lets by what's safe and asks for the rest:
-    the user's asked, as for a read. Without, it's in Claude Code's default permission mode, and anything but its tools
-    is refused. Its own tools come in on the ToolSocket. Its callbacks reach chat on the main loop: _said_more,
+    models) it also acts (COMMAND_TOOLS), in Claude Code's Auto mode, which lets by what's safe (reads anywhere, edits
+    in its folders, as it judges) and asks for the rest: the user's asked, as for a read. Nothing's written under
+    protect (the app's own files: Record's pages), whatever the mode. Without commands, it's in Claude Code's default
+    permission mode, and anything but its tools is refused. Its own tools come in on the ToolSocket. Its callbacks reach chat on the main loop: _said_more,
     _tool_started, _tool_ended, _done, agent_gone."""
 
     STOP_WAIT = 3000  # ms for an interrupted turn to end, before the session's stopped
     EXIT_WAIT = 200  # ms for what it said as it ended (stderr, read on its own thread) to come in
 
     def __init__(self, chat, key, system, tools, cwd, roots=(), model=MODEL, exe=None, env_of=None, effort=None,
-                 commands=False):
+                 commands=False, protect=()):
         # (what runs the model, as Baude's chats start it: claude (exe), or apple-claude or pi-claude for a model this
         # Mac runs besides, each given Meta's tools through the same MCP relay, and its effort only if it takes one)
         commands = commands and takes_commands(model)  # (only Claude's models act)
@@ -1300,6 +1312,8 @@ class Agent:
         self.window = window(model)  # (tokens its session holds: what it says, once it's asked: first)
         self.overhead = (len(system) + len(json.dumps(tools))) // CHARS_PER_TOKEN  # (its instructions' and tools', at most)
         self.roots = [os.path.realpath(r) for r in roots if r]
+        self.protect = [os.path.realpath(r) for r in protect if r] if commands else []
+        self.started_mode = None  # (the mode claude says the session's in: its init's)
         self.turn, self.fresh, self.stderr, self.closed = None, True, [], False
         self.answers = {}  # (the control requests it's made, by id: what to do with their answers)
         self.allowed = set()  # (paths the user referenced: read when it asks)
@@ -1316,6 +1330,9 @@ class Agent:
                 "--disable-slash-commands", "--setting-sources", ""]
         for root in self.roots:
             args += ["--add-dir", root]
+        if self.protect:  # (Claude Code's own rule, so an edit Auto mode would let by unasked is refused too: //, from /)
+            args += ["--settings", json.dumps({"permissions": {"deny": [
+                f"{t}(/{r}/**)" for r in self.protect for t in EDIT_TOOLS]}})]
         if modelslib.proxied(model) is not None:  # (another host's: run there, Meta's tools here, relayed)
             self.proc = MetaProxiedProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args)
         else:
@@ -1378,6 +1395,11 @@ class Agent:
         self.chat.agent_gone(self)
         return False
 
+    def under(self, path, roots):
+        """Whether path (as the session gives it: from its folder) is one of roots or under one."""
+        path = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(str(path))))
+        return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
     def may_read(self, path):
         """Whether a path is one it reads without asking: under a root, or referenced."""
         if not path:
@@ -1391,11 +1413,17 @@ class Agent:
         name, inp = req.get("tool_name") or "", req.get("input") or {}
         if name.startswith("mcp__meta__") or name in READ_TOOLS and self.may_read(inp.get("file_path") or inp.get("path")):
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
+        elif name in EDIT_TOOLS and self.under(inp.get("file_path") or "", self.protect):
+            self.proc.respond(rid, {"behavior": "deny", "message": "Those are the app's own files: change them with "
+                                    "your tools."})
         elif name in READ_TOOLS or self.commands and name in COMMAND_TOOLS:
             self.chat.ask_permission(self, rid, name, inp)
+        elif name in COMMAND_TOOLS:
+            self.proc.respond(rid, {"behavior": "deny", "message": f"{NAME} doesn't run commands or edit files here "
+                                    "(Settings → Meta → Run commands, on Claude's models): say what the user would run."})
         else:
-            self.proc.respond(rid, {"behavior": "deny", "message": f"On this model {NAME} reads, and acts with its own "
-                                    "tools only: say what the user would run instead."})
+            self.proc.respond(rid, {"behavior": "deny", "message": f"{NAME} reads, and acts with its own tools: it "
+                                    f"doesn't use {name}."})
 
     def answer(self, rid, allow, name, inp):
         """The user's answer to a read or command it asked for (MetaChat.ask_permission)."""
@@ -1412,6 +1440,11 @@ class Agent:
         if proc is not self.proc or self.closed:
             return False
         t, turn = msg.get("type"), self.turn
+        if t == "system" and msg.get("permissionMode"):  # (the mode it's in: Auto, if claude gave it for this model)
+            self.started_mode = msg["permissionMode"]
+            if self.commands and (self.started_mode != "auto") != (self.model in NO_AUTO):
+                (NO_AUTO.add if self.started_mode != "auto" else NO_AUTO.discard)(self.model)
+                sync_rows()
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
         elif t == "control_request":
@@ -1994,7 +2027,8 @@ class MetaChat(Gtk.Box):
         return ""
 
     def agent_setup(self):
-        """{cwd, roots, exe, env_of} for its session."""
+        """{cwd, roots, exe, env_of, protect} for its session (protect: folders of the app's own files, never written
+        by its Edit or Write)."""
         return {"cwd": os.path.expanduser("~"), "roots": ()}
 
     def scope(self):
@@ -2939,7 +2973,8 @@ class MetaChat(Gtk.Box):
                 offered = [RUN_PYTHON, *SETUP_TOOLS] if code_mode() else tools  # (the slow ones beside its code)
                 setup = self.agent_setup()
                 self.agent = Agent(self, key, self.system(tools), offered, setup["cwd"], setup.get("roots") or (),
-                                   model(), setup.get("exe"), setup.get("env_of"), effort(), commands=key[-1])
+                                   model(), setup.get("exe"), setup.get("env_of"), effort(), commands=key[-1],
+                                   protect=setup.get("protect") or ())
                 self.agent_made(self.agent)
             turn = {"text": [], "items": [], "actions": [], "shown": [], "code": [], "streamed": False,
                     "msg": msg, "told": list(self.told()), **self.turn_extra(msg)}  # (msg, told: kept, if not sent)
@@ -3094,15 +3129,21 @@ class MetaChat(Gtk.Box):
             why = str(inp.get("description") or "").strip().rstrip(".")
             text = f"{NAME} would like to run this{f' ({why[:1].lower() + why[1:]})' if why else ''}:"
             code = trimmed(str(inp.get("command") or ""), 600)
+        elif name in EDIT_TOOLS:
+            text = f"{NAME} would like to {name.lower()} {home(inp.get('file_path'))}:"
+            code = trimmed(str(inp.get("content") or ""), 600) if name == "Write" else trimmed("\n".join(
+                [*(f"- {line}" for line in str(inp.get("old_string") or "").splitlines()),
+                 *(f"+ {line}" for line in str(inp.get("new_string") or "").splitlines())]), 600)
         elif name == "WebFetch":
             text = f"{NAME} would like to fetch {inp.get('url') or ''}"
         elif name == "WebSearch":
             text = f"{NAME} would like to search the web for “{inp.get('query') or ''}”"
         else:
             path = home(inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("glob"))
-            verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in", "Edit": "edit",
-                    "Write": "write"}.get(name, name)
+            verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in"}.get(name, name)
             text = f"{NAME} would like to {verb} {path}"
+        if name in COMMAND_TOOLS and agent.started_mode not in (None, "auto"):
+            text = f"{auto_mode_note(agent.model)}, so each command is asked. {text}"
         self._ask_card(text, "Allow", lambda allow: agent.answer(rid, allow, name, inp), code)
 
     def _ask_card(self, text, yes, answered, code=None):

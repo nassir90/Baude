@@ -1100,8 +1100,8 @@ its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file
 folders have). You see the notebook they have open: its pages, the folders attached to it, and what they @-reference \
 or select; with none open, the notebooks there are, and only add_notebook, add_page and move_pages (naming its \
 notebooks) change anything. The conversation stays as they open another notebook: you're told when they do, and \
-your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and \
-its folders.
+your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, read-only: a \
+page is changed with your tools, never with Edit, Write or a command, and nothing's added beside them) and its folders.
 
 The notebooks are on hosts, the user's machines: local is this one. A place is host / notebook / page, and you're \
 told where the user is (Open: host / notebook / page) as it changes. The left bar lists the picked host's notebooks; \
@@ -5680,7 +5680,7 @@ class RecordChat(meta.MetaChat):
 
     def agent_setup(self):
         return {"cwd": pages_root(), "roots": [pages_root(), *self.win.read_folders()], "exe": claude_exe(),
-                "env_of": child_env}
+                "env_of": child_env, "protect": [pages_root()]}  # (the pages' files: changed through its tools only)
 
     def app_prompt(self):
         return RECORD_PROMPT.format(name=meta.NAME, to_learn=TO_LEARN)

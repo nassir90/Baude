@@ -318,6 +318,7 @@ class ProxiedProc(ClaudeProc):
         self.req_ids = itertools.count(1)
         self.asks = {}
         self.member, inner = split(model)
+        self.inner = inner
         self.cwd = cwd if cwd and os.path.isdir(cwd) else os.path.expanduser("~")
         self.env = os.environ | (env or {})  # (the caller's, as its claude would have it: its tools' here)
         got = flags(extra)
@@ -340,6 +341,7 @@ class ProxiedProc(ClaudeProc):
                         "relay": True}  # (pi's session as pi writes it, from a host that does: session.ts)
         self.ch, self.waiting, self.lock = None, [], threading.Lock()
         self.relays = {}  # (conn: the MCP server started here for it)
+        self.opened, self.checked = set(), False  # (the servers it's started here; said if any never came: _check)
         self.p, self.ended = _Ended(self, ["agent", self.member, inner]), False
         self.finished = threading.Event()  # (its end handled: what it said of pi's session, all taken)
         threading.Thread(target=self._run, args=({"via": "mesh", "host": self.member, "path": path},),
@@ -398,6 +400,8 @@ class ProxiedProc(ClaudeProc):
                     if not kept:
                         self._say("pi's session couldn't be kept on this host as it was written")
                 elif isinstance(said, dict):
+                    if said.get("type") in ("stream_event", "assistant", "result", "control_request"):
+                        self._check(info.get("name") or self.member[:8])
                     self.dispatch(lambda m=bare(said): self.on_msg(self, m))
             elif op == "err":
                 self._say(str(msg.get("line") or ""))
@@ -416,6 +420,31 @@ class ProxiedProc(ClaudeProc):
             self._say("the connection to the host that runs this model is gone")
         self._end(code)
 
+    def _check(self, host):
+        """Once, as the model first says anything: the chat told if any of its MCP servers never reached the program
+        on host (it's started them all by then), as the model would otherwise make up what they'd have said."""
+        with self.lock:
+            if self.checked:
+                return
+            self.checked = True
+            missing = sorted(set(self.servers) - self.opened)
+        if not missing or not self._calls_tools():
+            return
+        which = [f"this chat's tools ({', '.join(self.host_tools)})" if n == hosttools.NAME else f"{n}'s tools"
+                 for n in missing]
+        said = " and ".join(which)
+        self._say(f"{said[0].upper()}{said[1:]} didn't reach {host}, which runs this model: it can't use "
+                  "them in this conversation, and may make up what they'd return")
+
+    def _calls_tools(self):
+        """Does the model call tools, as its host says (one that doesn't only talks: its program starts no servers)?"""
+        try:
+            from baudelib import mesh
+            return next((m.get("tools", True) is not False for a in mesh.agents() if a.get("host") == self.member
+                         for m in a.get("models") or [] if isinstance(m, dict) and m.get("value") == self.inner), True)
+        except Exception:  # noqa: BLE001 (not known here: it's taken to)
+            return True
+
     def _open(self, conn, name):
         server = self.servers.get(name)
         if server is None or not isinstance(conn, int) or self.ended:
@@ -431,6 +460,7 @@ class ProxiedProc(ClaudeProc):
             ended = self.ended
             if not ended:
                 self.relays[conn] = p
+                self.opened.add(name)
         if ended:  # (it ended as this was started: not kept)
             p.kill()
             return None
@@ -528,7 +558,8 @@ class Run:
         self.ids = [resume] if resume and msg.get("persist") is not False and models.model_program(model) == "pi" \
             else []
         self.sessions, self.stamps = os.path.join(self.folder, "sessions"), {}
-        self.relay = bool(msg.get("relay"))  # (a caller that takes pi's notices; an older one, files each turn: sync)
+        self.notices = bool(msg.get("relay"))  # (a caller that takes pi's notices; an older one, files each turn: sync)
+        # (not self.relay: that's the method the host process calls as each of the program's MCP servers connects)
         self.told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
         if self.ids and not unpack(self.sessions, msg.get("sessions"), self.ids, os.path.realpath(self.folder)):
             shutil.rmtree(self.folder, ignore_errors=True)
@@ -551,7 +582,7 @@ class Run:
                                       stderr=subprocess.PIPE, text=True, bufsize=1,
                                       env=claude_env() | {"BAUDE_TOOLS_CWD": self.told[:4096]} |
                                       ({"BAUDE_PI_SESSIONS": self.sessions} if self.ids else {}) |
-                                      ({"BAUDE_PI_RELAY": "1"} if self.ids and self.relay else {}))
+                                      ({"BAUDE_PI_RELAY": "1"} if self.ids and self.notices else {}))
         except OSError:
             shutil.rmtree(self.folder, ignore_errors=True)
             raise
@@ -572,7 +603,7 @@ class Run:
 
     def sync(self):
         """(a caller that doesn't take pi's notices) pi's session files, those written since they were last sent."""
-        if self.ids and not self.relay and (files := pack(self.sessions, self.ids, self.stamps, self.told)):
+        if self.ids and not self.notices and (files := pack(self.sessions, self.ids, self.stamps, self.told)):
             self.conn.send({"op": "sessions", "files": files})
 
     def take(self, msg):

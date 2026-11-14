@@ -12515,13 +12515,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.status_extra = extra
         self.working_dots.set_working(self.busy)
         here = self.chat_host() == HERE_HOST
-        there = None if here else (self.remote.sessions.get(self.session_id) or {}).get("cwd")  # (its folder there)
-        self.status.set_text(f"{remote_path(there, self.remote) if there else self.short_cwd()}   "
-                             f"${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
-        self.status.set_tooltip_text(there or self.run_cwd)
+        there = None if here else self.remote_folder()
+        self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
+                             f"   ${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
+        self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
         self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
                                          ("" if here else f" ({self.remote.host})"))
+
+    def remote_folder(self):
+        """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it
+        when the chat was attached to (RemoteProc's listing: a new chat it doesn't list yet), else as last said; None
+        till it's said."""
+        sid = self.session_id
+        said = (self.remote.sessions.get(sid) or {}).get("cwd") or \
+            ((getattr(self.proc, "listing", None) or {}).get("cwd") if isinstance(self.proc, RemoteProc) else None)
+        if said:
+            self.remote_cwd = (sid, said)
+        return said or (self.remote_cwd[1] if getattr(self, "remote_cwd", (None,))[0] == sid else None)
 
     # ---- process lifecycle
     def runs_here(self):

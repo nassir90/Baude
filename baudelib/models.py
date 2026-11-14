@@ -57,9 +57,11 @@ def mlx_added():
         except (OSError, ValueError, AttributeError):
             found = []
         own = {m["value"] for m in MLX_OWN}
-        _ADDED.update(at=at, list=[m for m in found if isinstance(m, dict) and isinstance(m.get("value"), str) and
+        _ADDED.update(at=at, list=[m | {"displayName": m["displayName"].removesuffix(" (MLX)") or m["displayName"]}
+                                   for m in found if isinstance(m, dict) and isinstance(m.get("value"), str) and
                                    isinstance(m.get("repo"), str) and m["value"] not in own and
-                                   isinstance(m.get("displayName"), str)])
+                                   isinstance(m.get("displayName"), str)])  # (named as models.json's are: a
+        # name ending in " (MLX)" without it, the provider picker's to say)
     return list(_ADDED["list"])
 
 

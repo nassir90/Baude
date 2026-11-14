@@ -78,29 +78,21 @@ def provider_name(pid, settings=None):
 
 
 def model_name(value):
-    """A model's name, known or not: "qwen3:4b (Ollama)" for "ollama/qwen3:4b"."""
+    """A model's name, known or not, the same whatever runs it and wherever: "qwen3:4b" for "ollama/qwen3:4b". Its
+    provider and host are the provider picker's to say."""
     for p in found():
         for m in p["models"]:
             if m["value"] == value:
                 return m["displayName"]
-    if (agent := modelslib.proxied(value)) is not None:  # (another host's, run there: its name · its host's)
+    if (agent := modelslib.proxied(value)) is not None:  # (another host's, run there)
         there = next((m for m in mesh_agents() if m["value"] == value), None)
-        return f"{there['displayName']} · {there['host']}" if there else f"{model_name(agent[1])} · {agent[0][:8]}"
+        return there["displayName"] if there else model_name(agent[1])
     pid = provider_of(value)
     if pid == "ollama":
-        return f"{value[len('ollama/'):]} (Ollama)"
+        return value[len("ollama/"):]
     if pid and pid.startswith("openai/"):
-        return f"{value.split('/', 2)[2]} ({provider_name(pid)})"
+        return value.split("/", 2)[2]
     return value
-
-
-def bare_name(name, provider, host=None):
-    """A model's name without its provider's and its host's, for a list beside a picker that says them: "Qwen3 4B" for
-    "Qwen3 4B (MLX)" of MLX, and for "Qwen3 4B (MLX) · studio" of studio's. Any other name as it is."""
-    for end in ((f" · {host}",) if host else ()) + ((f" ({provider})",) if provider else ()):
-        if name.endswith(end) and len(name) > len(end):
-            name = name[:-len(end)]
-    return name
 
 
 def has_runtime(pid):
@@ -334,7 +326,7 @@ def ollama_entry(name, shown, loaded=None, size=None):
     caps = shown.get("capabilities") or ["completion"]
     if "completion" not in caps:
         return None
-    entry = {"value": f"ollama/{name}", "resolvedModel": name, "displayName": f"{name} (Ollama)",
+    entry = {"value": f"ollama/{name}", "resolvedModel": name, "displayName": name,
              "provider": "ollama", "providerName": "Ollama", "tools": "tools" in caps,
              "input": ["text", "image"] if "vision" in caps else ["text"], "window": ollama_window(shown, loaded)}
     if "thinking" in caps:
@@ -404,7 +396,7 @@ def endpoint(ep, timeout=TIMEOUT):
         if not isinstance(mid, str) or not mid or EMBED_RE.search(mid):
             continue
         out["models"].append({"value": f"openai/{ep['id']}/{mid}", "resolvedModel": mid,
-                              "displayName": f"{mid} ({ep['name']})", "provider": pid, "providerName": ep["name"],
+                              "displayName": mid, "provider": pid, "providerName": ep["name"],
                               "tools": True, "input": ["text"], "window": endpoint_window(m, ep, props)})
     return out
 
@@ -736,7 +728,7 @@ def resolve(value, timeout=TIMEOUT):
     pid = provider_of(value)
     if pid == "ollama":
         name, url = value[len("ollama/"):], ollama_url()
-        out = {"value": value, "repo": name, "displayName": f"{name} (Ollama)", "input": ["text"], "thinking": False,
+        out = {"value": value, "repo": name, "displayName": name, "input": ["text"], "thinking": False,
                "tools": True, "window": OLLAMA_WINDOW, "provider": "ollama", "kind": "ollama", "url": url,
                "baseUrl": url + "/v1", "apiKey": "ollama", "error": None}
         try:
@@ -763,7 +755,7 @@ def resolve(value, timeout=TIMEOUT):
             there = endpoint(ep, timeout)
             listed = next((m for m in there["models"] if m["resolvedModel"] == mid), {})
             error = there["error"] and f"{ep['name']} {there['error']}"
-        return {"value": value, "repo": mid, "displayName": f"{mid} ({ep['name']})",
+        return {"value": value, "repo": mid, "displayName": mid,
                 "input": listed.get("input") or ["text"], "thinking": False, "tools": listed.get("tools", True),
                 "window": listed.get("window") or ep.get("window") or DEFAULT_WINDOW, "provider": pid, "kind": "openai",
                 "url": ep["url"], "baseUrl": ep["url"], "apiKey": key_of(ep) or "none", "error": error}

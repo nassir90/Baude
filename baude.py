@@ -13126,7 +13126,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.note("interrupt requested")
 
     def model_said(self, value):
-        """A model's name as a note says it, its provider's with it: Qwen3 4B (MLX)."""
+        """A model's name as a note says it: as the model picker lists it (Qwen3 4B)."""
         return getattr(self, "model_names", {}).get(value) or self.model_dd.label()
 
     def on_model_changed(self, value):
@@ -13310,8 +13310,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # where it is, with its files, and another host's model runs for it through the mesh's proxy where it serves an API,
     # else as an agent there whose tools are the chat's host's (providers.elsewhere). Where a chat lives is picked as
     # it's made (New Session's host), or by Meta. The picker's on the provider of the chat's model, as it's opened or
-    # picked. It's gone while the chat's on Claude's, and empty while it's on Apple's (no runtime: listed with Claude's,
-    # another host's too)
+    # picked. It's gone while the chat's on Claude's. On Apple's it names Apple's own provider (local / Apple), greyed: it
+    # has no runtime to pick, so it's listed with Claude's, another host's too. A model's name is the same whatever the
+    # picker's on: its provider and host are the picker's to say
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
@@ -13322,8 +13323,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def provider_key_of(self, value):
         """The provider key (host|provider) of a model this chat's host runs (another member's, through the mesh: its),
         None for Claude's."""
-        if value in getattr(self, "provider_index", {}):
-            return self.provider_index[value]
+        if value in getattr(self, "provider_index", {}):  # (another host's Apple model: none, as this one's)
+            k = self.provider_index[value]
+            return k if providerslib.has_runtime(k.split("|", 1)[1]) else None
         entry = self.models_info.get(value) or {}
         pid = entry.get("provider") or providerslib.provider_of(value)
         return f"{self.chat_host()}|{pid}" if providerslib.has_runtime(pid) else None
@@ -13359,9 +13361,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 p.get("name") or p.get("id")
             pid, models = providerslib.elsewhere(p, host["id"])
             out.append((f"{host['id']}|{p['id']}", hname, pname,
-                        [m | {"providerName": f"{hname} / {pname}"} |
-                         ({} if providerslib.has_runtime(pid) else {"displayName": f"{m['displayName']} · {hname}"})
-                         for m in models]))
+                        [m | {"providerName": f"{hname} / {pname}"} for m in models]))
         return out
 
     def providers_listed(self, found=None):
@@ -13377,9 +13377,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def sync_providers(self, shown=None):
         """The provider picker as the chat's host and the mesh have them, by host, on the one picked (else the provider
         of the model shown, else the one picked last time): hidden with none, or with Claude's the chat's model (claude
-        runs where it is: no provider of its); empty and off with Apple's (no runtime); dimmed with one; and the model
-        picker: Claude's models and Apple's, then the provider's, on shown (the chat's model, if not given), which is
-        listed too if it isn't."""
+        runs where it is: no provider of its); on Apple's own, greyed, with Apple's (no runtime); dimmed with one; and
+        the model picker: Claude's models and Apple's, then the provider's, on shown (the chat's model, if not given),
+        which is listed too if it isn't."""
         found = self.provider_choices()
         self.providers_seen = self.providers_listed(found)
         self.provider_index = {}  # (each model's provider, the first that lists it: this machine's before the mesh's)
@@ -13387,6 +13387,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             for m in ms:
                 self.provider_index.setdefault(m["value"], k)
                 self.models_info.setdefault(m["value"], m)  # (as it's run: its effort levels, its name)
+        every = found
         found = [f for f in found if providerslib.has_runtime(f[0].split("|", 1)[1])]  # (another host's Apple model:
         # listed with Claude's, its provider none to pick)
         keys = [k for k, *_ in found]
@@ -13398,30 +13399,36 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             kept = load_settings().get("provider")
             key = kept if kept in keys else keys[0] if keys else None
         self.provider_key = key
-        hosts = {}  # (by host, its key's: two hosts of a name are two)
-        for k, host, label, *_ in found:
-            hosts.setdefault(k.split("|", 1)[0], (host, []))[1].append((k, label))
-        self.provider_dd.set_choices(list(hosts.values()))
         pid = ((self.models_info.get(shown) or {}).get("provider") or providerslib.provider_of(shown)) if shown else None
-        runtime = not shown or providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
-        self.provider_dd.select(key if runtime else None)
-        self.provider_dd.set_sensitive(runtime)
-        self.provider_dd.set_visible(bool(found) and not (shown and pid is None))  # (Claude's: none)
-        says = runtime and self.provider_dd.get_visible() and self.provider_dd.value() is not None
-        (self.provider_dd.add_css_class if len(found) == 1 else self.provider_dd.remove_css_class)("one-provider")
+        apple = pid is not None and not providerslib.has_runtime(pid)  # (no runtime: its own provider's the only one)
+        hosts = {}  # (by host, its key's: two hosts of a name are two)
+        picked = key
+        if apple:
+            there, pname = providerslib.where(pid)
+            picked, there, pname = next(((k, h, l) for k, h, l, ms in every if any(m["value"] == shown for m in ms)),
+                                        (f"{self.chat_host()}|{pid}", there, pname))
+            hosts[picked.split("|", 1)[0]] = (there or (THIS_MACHINE if self.chat_host() == HERE_HOST else
+                                                        remote_name(self.remote)), [(picked, pname)])
+        else:
+            for k, host, label, *_ in found:
+                hosts.setdefault(k.split("|", 1)[0], (host, []))[1].append((k, label))
+        self.provider_dd.set_choices(list(hosts.values()))
+        self.provider_dd.select(picked)
+        self.provider_dd.set_sensitive(not apple)  # (Apple's: greyed, rather than dimmed as one is too)
+        self.provider_dd.set_visible((bool(found) or apple) and not (shown and pid is None))  # (Claude's: none)
+        (self.provider_dd.add_css_class if len(found) == 1 and not apple else
+         self.provider_dd.remove_css_class)("one-provider")
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
-                                          (" (the only one there is)" if len(found) == 1 else ""))
-        chosen = next(((ms, label) for k, _h, label, ms in found if k == key), ([], None))
+                                          (" (the only one there is)" if len(found) == 1 or apple else ""))
+        chosen = next((ms for k, _h, _l, ms in found if k == key), [])
         listed = [m for m in self.models_info.values() if m["value"] != "default" and
                   (model_program(m["value"]) == "claude" or not providerslib.has_runtime(
-                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen[0])
+                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen)
         if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
             listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
         names = [(m["value"], m.get("displayName") or m["value"]) for m in listed]
         self.model_names = dict(names)
-        bare = {m["value"] for m in chosen[0]} if says else set()  # (the picker beside it says their provider)
-        self.model_dd.set_choices([(v, providerslib.bare_name(name, chosen[1]) if v in bare else name)
-                                   for v, name in names] or MODELS)
+        self.model_dd.set_choices(names or MODELS)
         if shown:
             self.model_dd.select(shown)
 

@@ -1659,16 +1659,22 @@ def _(app):
     return win
 
 
-@scene("75b-side-question-new", "Side questions' +: a new one asked in its own box, and another waiting for its "
-                                "question", size=(1200 + SIDEBAR, H))
+@scene("75b-side-question-new", "Side questions' + (or the box over the list): a new one asked, and another "
+                                "waiting for its question", size=(1200 + SIDEBAR, H))
 def _(app):
     proj = os.path.join(T.TMP, "btw-new-proj")
     os.makedirs(proj, exist_ok=True)
     win = app.window(opts(cwd=proj))
     T.write_session(proj, win.session_id, title="Main chat")
     win.show_panel(True, "btw")
+    ask = getattr(win.panel, "btw_ask", None)
     plus = getattr(win.panel, "btw_new", None)
-    if plus is not None:  # (before the +: the page as it was)
+    if ask is not None:  # (the box over the list: one asked in it, another typed and not yet sent)
+        ask.input.get_buffer().set_text("what does make do here?")
+        first = win.panel.ask_typed()
+        T.wait_for(lambda: first.answer is not None and not first.busy, "answer")
+        ask.input.get_buffer().set_text("is the build cached?")
+    elif plus is not None:  # (before the +: the page as it was)
         plus.emit("clicked")
         first = win.panel.side_questions()[0]
         if hasattr(first, "composer"):

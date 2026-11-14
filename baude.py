@@ -8852,8 +8852,9 @@ class SideQuestion(Gtk.ListBoxRow):
         --resume <session> --fork-session --no-session-persistence --permission-mode plan
     so it sees the whole conversation so far but writes nothing (not to the session, not a new
     one), and can't edit anything. Tools that need permission are refused. Follow-ups go to the
-    same process; it ends with the window. Any number can run at once. One made from the pane's + has no question
-    yet: its box takes the first, and its claude starts then.
+    same process; it ends with the window. Any number can run at once. One asked in the box over the pane's list
+    (SidePanel.ask_typed) is made with no question and given it at once. One whose claude couldn't be had keeps its
+    question in its own box, to send again: its claude starts then.
     Its thread (inside: the darker inside, the box it's asked in under it, Meta's) opens under its line (toggle: ⌄, −
     to close it again), the box slimmer there, or fills the page (full: SidePanel.open_side_question, back out of it),
     the box as Meta's is, its dots and context meter under it."""
@@ -8920,7 +8921,7 @@ class SideQuestion(Gtk.ListBoxRow):
         rows.append(self.reveal)
         self.put_inside_row()
         self.set_expanded(False)
-        if question and not self.start(question):  # (couldn't be had: kept in its box, as one from +'s, to send again)
+        if question and not self.start(question):  # (couldn't be had: kept in its box, to send again)
             self.composer.get_buffer().set_text(question)
 
     def expanded(self):
@@ -9049,7 +9050,7 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def ask(self, text, first=False):
         text = (text or "").strip()
-        if text and not first and self.proc is None and self.answer is None:  # (from +: its first question)
+        if text and not first and self.proc is None and self.answer is None:  # (its first question, sent again)
             return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
@@ -10145,13 +10146,21 @@ class SidePanel(Gtk.Box):
         self.btw_list.add_css_class("boxed-list")
         self.btw_list.set_placeholder(self._empty("No side questions"))
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        btw_top = Gtk.Box(margin_start=10, margin_end=10, margin_top=6)  # (+: a new one, its question typed in it)
-        self.btw_new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New side question",
-                                  halign=Gtk.Align.END, hexpand=True)
-        self.btw_new.add_css_class("flat")
-        self.btw_new.connect("clicked", lambda *_: self.new_side_question())
-        btw_top.append(self.btw_new)
-        btw_page.append(btw_top)
+        # (over them, a pill of its own: the box a new one's asked in, as tall as the pill a page with none shows; Enter
+        # and its send button off while it's empty)
+        self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
+        self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
+        self.btw_ask.set_margin_top(10)
+        self.btw_ask.input.get_parent().set_min_content_height(self.ASK_HEIGHT)
+        self.btw_ask.gate("empty", True)
+        self.btw_ask.input.get_buffer().connect("changed", lambda *_: self.btw_ask.gate(
+            "empty", not self.btw_ask.text().strip()))
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._ask_key)
+        self.btw_ask.input.add_controller(keys)
+        self.btw_ask.send.connect("clicked", lambda *_: self.ask_typed())
+        btw_page.append(self.btw_ask)
         self.btw_scroll = self._scrolled(self.btw_list)
         # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
         self.btw_list.set_margin_start(0)
@@ -10229,11 +10238,34 @@ class SidePanel(Gtk.Box):
         self.btw_list.prepend(sq)
         sq.set_expanded(True)
 
-    def new_side_question(self):
-        """A side question with no question yet, at the top, its box focused for the first."""
+    ASK_HEIGHT = 63  # (px: the box's least, so its pill's as tall as the one a page with none shows: _empty's)
+
+    def _ask_key(self, _c, keyval, _code, state):
+        """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
+        code block, is a new line: as in a side question's own box."""
+        if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            markdown = self.btw_ask.markdown
+            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
+                                                               or markdown.code_state()[0]):
+                return markdown.newline()
+            self.ask_typed()
+            return True
+        return False
+
+    def ask_typed(self):
+        """The question typed over the list: a side question of its own, at the top, open under its line; the box
+        emptied for the next. Kept there if it couldn't be asked (said in the window's note)."""
+        question = self.btw_ask.text().strip()
+        if not question:
+            return None
         sq = SideQuestion(self.win)
         self.add_side_question(sq)
-        sq.composer.grab_focus()
+        if not sq.start(question):
+            self.drop_side_question(sq)
+            return None
+        self.btw_ask.input.get_buffer().set_text("")
         return sq
 
     def side_questions(self):

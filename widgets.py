@@ -2544,8 +2544,8 @@ class PictureWatch:
 
 def image_widget(data, max_edge=480, path=None, name=None, url=None):
     """A picture whose natural size is bounded (a bare Gtk.Picture grows to the image size).
-    Click to view it large; right-click to copy it or open it / its folder. A small button in
-    the top-left corner opens it: in the browser (a web image, globe) or the default app (file)."""
+    Click to view it large; right-click to copy it or open it / its folder. Where it's from opens it as a link
+    (IMAGE_LINK, given by whoever shows that: a Read's header, the line over a markdown image)."""
     dims = image_dims(data)
     if not dims:  # (a format whose header image_dims can't read: decode it once to learn its size)
         tex = scaled_texture(data, 100_000)
@@ -2554,16 +2554,30 @@ def image_widget(data, max_edge=480, path=None, name=None, url=None):
     pic = FixedPicture(size=fit_size(*dims, max_edge), load=lambda scale: scaled_texture(data, max_edge, scale))
     pic.add_css_class("md-image")
     acts = make_image_interactive(pic, data, path, name, url)
-    corner = Gtk.Button(icon_name=globe_icon() if url else "document-open-symbolic",
-                        tooltip_text="Open in browser" if url else "Open with default app",
-                        halign=Gtk.Align.START, valign=Gtk.Align.START, margin_start=6, margin_top=6)
-    corner.add_css_class("osd")
-    corner.add_css_class("circular")
-    corner.add_css_class("image-corner")
-    corner.connect("clicked", lambda *_: acts.open_in_browser() if url else acts.open())
     box = Gtk.Overlay(child=pic, halign=Gtk.Align.START)
-    box.add_overlay(corner)
-    box.image_actions, box.picture, box.corner = acts, pic, corner
+    box.image_actions, box.picture = acts, pic
+    return box
+
+
+IMAGE_LINK = "baude-image:open"  # (a link that opens its image as ImageActions.launch does)
+
+
+def image_link_markup(text, acts):
+    """text as the link that opens an image (acts: its ImageActions): a web one in the browser, a file in its app."""
+    tip = "Open in browser" if acts.url else "Open with default app"
+    return f'<a href="{IMAGE_LINK}" title="{tip}">{html.escape(text, quote=False)}</a>'
+
+
+def with_image_link(image, text):
+    """image (image_widget's) under a line with where it's from (text: its path or URL), a link that opens it."""
+    link = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+    link.set_markup(image_link_markup(text, image.image_actions))
+    link.add_css_class("image-link")
+    link.connect("activate-link", lambda _l, uri: uri == IMAGE_LINK and (image.image_actions.launch() or True))
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, halign=Gtk.Align.START)
+    box.append(link)
+    box.append(image)
+    box.link = link
     return box
 
 
@@ -3352,6 +3366,13 @@ class ImageActions:
 
     def open_in_browser(self):
         Gtk.UriLauncher(uri=self.url).launch(self.widget.get_root(), None, None)
+
+    def launch(self):
+        """Opened from where it's from (IMAGE_LINK): a web image in the browser, a file in its default app."""
+        if self.url:
+            self.open_in_browser()
+        else:
+            self.open()
 
 
 def toast(widget, text):
@@ -4228,7 +4249,7 @@ class Lightbox(Gtk.Box):
         self.source = self.where_from()
         if self.source is not None:
             widget = self.items[self.index]
-            holder = widget.get_parent()  # (image_widget's overlay: its corner button goes with it)
+            holder = widget.get_parent()  # (image_widget's overlay)
             self.hidden = holder if getattr(holder, "image_actions", None) is not None else widget
             self.hidden.set_opacity(0.0)
         self.stage.set_overflow(Gtk.Overflow.VISIBLE)  # (it starts where it was, not only inside here)
@@ -6008,12 +6029,12 @@ class MarkdownView(Gtk.Box):
         return sel_label(html.escape(str(b)))
 
     def render_image(self, alt, src):
-        path = src[7:] if src.startswith("file://") else src
-        path = os.path.join(self.base_dir, os.path.expanduser(path))
+        written = src[7:] if src.startswith("file://") else src  # (the path, as the reply has it: over the image)
+        path = os.path.join(self.base_dir, os.path.expanduser(written))
         if "://" not in src or src.startswith("file://"):
             try:
                 with open(path, "rb") as f:
-                    return image_widget(f.read(), path=path, name=alt)
+                    return with_image_link(image_widget(f.read(), path=path, name=alt), written)
             except (OSError, GLib.Error):
                 pass
         link = sel_label(f'Image: <a href="{html.escape(src)}">{html.escape(alt or src)}</a>')
@@ -6030,7 +6051,7 @@ class MarkdownView(Gtk.Box):
                     link.set_tooltip_text(f"Couldn't show the image: {e.message}")
                     return
                 holder.remove(link)
-                holder.append(pic)
+                holder.append(with_image_link(pic, src))
             else:
                 link.set_tooltip_text(f"Couldn't load the image: {error}")
         fetch_web_image(src, done)
@@ -7036,7 +7057,6 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }
-.image-corner { min-width: 26px; min-height: 26px; padding: 0; opacity: 0.85; }
 .md-table-scroll { margin: 2px 0; }
 .md-table { border: 1px solid @baude_rule; border-radius: 8px; }
 .md-table .md-head { background: @baude_raised; padding: 5px 12px;
@@ -7405,22 +7425,90 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
+.baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
 """
+# Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
+# theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
+# no stylesheet names isn't drawn. Below everything, each of libadwaita's names as the theme's colour it stands for: a
+# theme that names it itself is above, and its own.
+BELOW_GTK_THEME_CSS = """
+@define-color window_bg_color @theme_bg_color;
+@define-color window_fg_color @theme_fg_color;
+@define-color view_bg_color @theme_base_color;
+@define-color view_fg_color @theme_text_color;
+@define-color sidebar_bg_color @window_bg_color;
+@define-color sidebar_fg_color @window_fg_color;
+@define-color card_bg_color @view_bg_color;
+@define-color card_fg_color @view_fg_color;
+@define-color popover_bg_color @window_bg_color;
+@define-color popover_fg_color @window_fg_color;
+@define-color borders alpha(@window_fg_color, 0.15);
+:root { --border-color: color-mix(in srgb, currentColor 15%, transparent); --card-shade-color: rgb(0 0 6 / 7%); }
+/* (a dialog's sheet over the window: its fill, its edge, its shadow and the dimming under it are libadwaita's, and
+   most themes don't draw them (some fill only a window); without them the sheet runs into the window, or the window
+   shows through it. The fill the window's, the edge in the theme's border colour; a theme that draws them, its own) */
+floating-sheet > sheet, bottom-sheet > sheet { background-color: @window_bg_color;
+  box-shadow: 0 0 0 1px @borders, 0 0 14px 2px rgb(0 0 6 / 3%), 0 0 5px 2px rgb(0 0 6 / 10%); }
+/* (a toast: libadwaita's, which a theme drawing no toasts leaves see-through, its text on whatever's under it) */
+toast { background-color: #505053; color: white; margin: 12px 12px 24px; border-radius: 150px; border-spacing: 6px;
+  padding: 6px 6px 6px 12px; box-shadow: 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 6px 2px rgb(0 0 6 / 3%); }
+toast > widget { margin: 0 6px; }
+"""
+# What below the theme depends on whether it's light or dark (theme_dark): the dimming under a dialog, the status
+# colours (a theme without its own), as libadwaita has them light and dark.
+BELOW_GTK_THEME_SHADE = {False: ("rgb(0 0 6 / 14%)", "#1b8553", "#9c6e03", "#c01c28"),
+                         True: ("rgb(0 0 6 / 50%)", "#78e9ab", "#ffc252", "#ff938c")}
+
+
+def gtk_themed():
+    """Whether a GTK theme draws the apps: GTK_THEME set (even empty, as libadwaita has it: it loads none of its
+    stylesheet then)."""
+    return "GTK_THEME" in os.environ
+
+
+def below_gtk_theme_css(dark):
+    """BELOW_GTK_THEME_CSS, light or dark, and Baude's accent: what accent_rgba and accent_text_rgba have, so what the
+    CSS draws in it and what's drawn here are the one colour (a theme's own accent, if it names one, above)."""
+    dim, success, warning, error = BELOW_GTK_THEME_SHADE[dark]
+    return (BELOW_GTK_THEME_CSS + f"floating-sheet > dimming, bottom-sheet > dimming {{ background-color: {dim}; }}\n"
+            f"@define-color success_color {success};\n@define-color warning_color {warning};\n"
+            f"@define-color error_color {error};\n@define-color accent_bg_color {accent_rgba().to_string()};\n"
+            f"@define-color accent_color {accent_text_rgba().to_string()};\n")
+
+
+def theme_dark():
+    """Whether the GTK theme is dark: its views' colour (as it's resolved, the theme's or below it) dark."""
+    probe = Gtk.Label(css_classes=["baude-theme-probe"])
+    c = probe.get_color()
+    return c.alpha > 0 and 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue < 0.5
 
 
 def theme_css(*app_css):
     """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
     (libadwaita's, or a GTK_THEME's). app_css: the app's own stylesheets besides CSS (Record's), whose corners go
-    square with Baude's under a square theme (square_corners)."""
+    square with Baude's under a square theme (square_corners). Under a theme, light or dark is the theme's: what
+    Baude draws in its own colours (code's, the accent's shade, a diagram's) is then drawn for the theme's background,
+    not for the system's light or dark."""
     display = Gdk.Display.get_default()
     if display is None or getattr(display, "baude_theme_css", None):
         return
     css = Gtk.CssProvider()
-    themed = bool(os.environ.get("GTK_THEME"))
+    themed = gtk_themed()
     css.load_from_string(UNDER_GTK_THEME_CSS if themed else OVER_ADWAITA_CSS)
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     display.baude_theme_css = css
     if themed:
+        below = Gtk.CssProvider()
+        below.load_from_string(BELOW_GTK_THEME_CSS)
+        Gtk.StyleContext.add_provider_for_display(display, below, Gtk.STYLE_PROVIDER_PRIORITY_FALLBACK)
+        dark = theme_dark()
+        Adw.StyleManager.get_default().set_color_scheme(
+            Adw.ColorScheme.FORCE_DARK if dark else Adw.ColorScheme.FORCE_LIGHT)
+        below.load_from_string(below_gtk_theme_css(dark))
+        display.baude_below_theme = below
+        # (the system's accent changed: what's drawn here follows it, and so does the CSS)
+        Adw.StyleManager.get_default().connect("notify::accent-color",
+                                               lambda *_: below.load_from_string(below_gtk_theme_css(dark)))
         display.baude_rounded_sheets = (CSS, *app_css)
         _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
 
@@ -7711,6 +7799,9 @@ def apply_accent(display):
     name = name if name in ACCENTS else None
     rgba = Adw.AccentColor.to_rgba(ACCENTS[name]).to_string() if name else None
     css = f"@define-color accent_bg_color {rgba};\n:root {{ --accent-bg-color: {rgba}; }}" if name else ""
+    if name and gtk_themed():  # (no libadwaita to make @accent_color of it: what accent_text_rgba has)
+        text = Adw.AccentColor.to_standalone_rgba(ACCENTS[name], Adw.StyleManager.get_default().get_dark())
+        css += f"\n@define-color accent_color {text.to_string()};"
     if _accent["provider"] is None:
         _accent["provider"] = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(display, _accent["provider"], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
@@ -7942,6 +8033,8 @@ def macos_appearance():
     rt.class_addMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p]
 
     def changed(_self, _sel, _path, _app, _change, _context):
+        if gtk_themed():  # (light or dark is the theme's: theme_css)
+            return
         name = objc_send(objc_send(app, b"effectiveAppearance"), b"name")
         dark = b"Dark" in (objc_send(name, b"UTF8String", ret=ctypes.c_char_p) or b"") if name else False
         Adw.StyleManager.get_default().set_color_scheme(
@@ -8034,8 +8127,9 @@ class RefPalette(Adw.Dialog):
     in any order; the best match first), in a table as the Kubernetes view's: Name (with the logo its links have),
     Kind, Where. Enter, or a click, opens it (on_open(item): Baude opens a looked-up name as its link does, Record
     where it is, in its viewers); Up and Down (Page Up, Page Down) pick; Esc closes. The catalogue is made afresh if
-    it's old, and the table follows. space: a lookup.SearchSpace (Baude's of its chat's Signal, Record's of its
-    notebook's folders)."""
+    it's old, and the table follows, a part at a time as it comes, dots at the bottom left till it's all in. space: a
+    lookup.SearchSpace (Baude's what @ lists: every host's chats and the chat's folder's names from its host; Record's
+    its notebook's folders, the chats and the notebooks)."""
     LIMIT = 400  # rows shown at most (a glossary has thousands)
 
     def __init__(self, win, space, on_open):
@@ -8058,19 +8152,20 @@ class RefPalette(Adw.Dialog):
                                      lambda pos: self.choose(self.store.get_item(pos)))
         self.scroll = Gtk.ScrolledWindow(child=self.table, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         box.append(self.scroll)
-        self.count = Gtk.Label(xalign=0)
+        # (as @'s list has it, PickList: dots at the left while more names are on their way, the count at the right)
+        self.count = Gtk.Label(xalign=1, hexpand=True)
         self.count.add_css_class("dim-label")
         self.count.add_css_class("caption")
-        # (spinning while the catalogue is made: the count isn't final yet)
-        self.spinner = Adw.Spinner(visible=False, width_request=12, height_request=12)
+        self.dots = WorkingDots()
+        self.dots.add_css_class("dim-label")
         foot = Gtk.Box(spacing=6)
+        foot.append(self.dots)
         foot.append(self.count)
-        foot.append(self.spinner)
         box.append(foot)
         self.set_child(box)
-        # (while the catalogue is made: checked for, to list it once it's in)
+        # (while the catalogue is made: checked for, to list what's come in as it comes)
         self.waiting = self.space.refresh(self.catalogue_in)
-        self.spinner.set_visible(self.waiting is not None)
+        self.dots.set_working(self.waiting is not None)
         self.connect("closed", lambda *_: self.waiting and GLib.source_remove(self.waiting))
         self.items = self.space.items()
         self.fill()
@@ -8133,15 +8228,27 @@ class RefPalette(Adw.Dialog):
 
     # ---- filling and picking
     def catalogue_in(self):
-        self.waiting = None
-        self.spinner.set_visible(False)
+        """What's come in listed (all of it, or a part, more on its way: waited for in turn), what's picked kept picked
+        if it's still there and isn't the first."""
+        row = self.selection.get_selected_item() if self.selection.get_selected() else None
+        self.waiting = self.space.refresh(self.catalogue_in) if self.space.busy else None
+        self.dots.set_working(self.waiting is not None)
         self.items = self.space.items()
         self.fill()
+        if row is not None:  # (the same row: two folders, or two hosts, can have a name)
+            same = lambda it: all(it.get(k) == row.item.get(k) for k in ("surface", "what", "summary", "host", "root"))  # noqa: E731
+            at = next((i for i in range(self.store.get_n_items()) if same(self.store.get_item(i).item)), None)
+            if at is not None:
+                self.selection.set_selected(at)
+                self.table.scroll_to(at, None, Gtk.ListScrollFlags.NONE, None)
 
     def fill(self):
         q = self.entry.get_text().strip().lower()
         self.items = self.space.items()
         shown, matched = self.space.search(q, self.LIMIT)
+        if self.waiting is None and self.space.busy:  # (made afresh since, while it's up: a search can start it)
+            self.waiting = self.space.refresh(self.catalogue_in)
+            self.dots.set_working(self.waiting is not None)
         self.store.splice(0, self.store.get_n_items(), [RefPaletteRow(it, q.split()) for it in shown])
         if self.store.get_n_items():
             self.selection.set_selected(0)

@@ -1882,9 +1882,10 @@ class Spaces(lookup.SearchSpace):
                 GLib.source_remove(waiting)
         if not self.busy:
             return None
+        waiting_on = [s for s in self.spaces if s.busy]
 
-        def check():
-            if self.busy:
+        def check():  # (once any of them is in: listed then, the rest waited for in turn, as the caller asks again)
+            if all(s.busy for s in waiting_on):
                 return True
             self._items = None
             for s in self.spaces:
@@ -4343,7 +4344,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.picks.show(len(self.pop_shown), at, note, rect, coming=space is not None and space.busy)
 
     def _catalogued(self):
-        self.waiting = None
+        space = self.win.space()  # (a folder's in, another's on its way: waited for in turn, the list up or not)
+        self.waiting = space.refresh(self._catalogued) if space is not None and space.busy else None
         self.github_changed()
 
     def github_changed(self):
@@ -5265,8 +5267,9 @@ class Reader(Gtk.Box):
                                   widgets.message_key(row.item["text"]) in self.names.said])
 
     def _catalogued(self):
-        """The folder's names are in: the replies shown, linked again (each with its logo)."""
-        self.waiting = None
+        """The folder's names are in (or one folder's of several, the rest waited for): the replies shown, linked again
+        (each with its logo)."""
+        self.waiting = self.space.refresh(self._catalogued) if self.space is not None and self.space.busy else None
         if self.names is not None:
             self.names.update()
         self.as_mine(lambda: [row.prose.relink() for row in self.rows if row.item["role"] == "assistant"])

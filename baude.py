@@ -147,7 +147,7 @@ from widgets import (  # noqa: E402,F401
     _memo_bytes, _settings_path, _web_images, _web_waiting, bullet_for, code_spans,
     HostPicker, code_style, discard, editor_args, editor_command, ellipsize_dropdown, empty_label,
     ensure_icons, fetch_web_image, file_href, find_attrs, find_label, fit_size,
-    fmt_scale, globe_icon, image_cache_path, image_dims, image_widget, link_markup,
+    IMAGE_LINK, fmt_scale, globe_icon, image_cache_path, image_dims, image_link_markup, image_widget, link_markup,
     link_paths, load_settings, make_image_interactive, markdown_blocks,
     markdown_parse, markdown_table, on_label_link, open_code, open_in_editor, paned_grip,
     pretty_path, ref_code_markup, ref_command, ref_commit_range, ref_decision_markup, ref_epoch,
@@ -5846,6 +5846,8 @@ class ToolCard(Gtk.Box):
         self.title = Gtk.Label(xalign=0)
         self.header = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True, selectable=True)
         self.header.set_can_focus(False)  # selectable for copying, but not a tab stop in every card
+        self.image_acts = None  # (a Read of an image: its path in the header the link that opens it)
+        self.header.connect("activate-link", lambda _l, uri: uri == IMAGE_LINK and (self.image_acts.launch() or True))
         toggles = self.toggles = Gtk.Box(spacing=4)
         for w in (self.title, toggles, self.header):
             self.line.append(w)
@@ -5941,13 +5943,16 @@ class ToolCard(Gtk.Box):
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
         shown = html.escape(s)
-        if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
+        if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):
+            shown = image_link_markup(s, self.image_acts)
+        elif self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
         markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)
-        self.header.set_attributes(Pango.parse_markup(markup, -1, "\0")[1])
+        # (Pango's markup has no links: the label draws its own)
+        self.header.set_attributes(Pango.parse_markup(re.sub(r"</?a\b[^>]*>", "", markup), -1, "\0")[1])
 
     def show_output(self):
         self.toggles.set_visible(True)
@@ -6052,7 +6057,10 @@ class ToolCard(Gtk.Box):
         for data in images:
             try:
                 path = self.input.get("file_path") if self.base == "Read" else None
-                self.media_box.append(image_widget(data, path=path))
+                image = image_widget(data, path=path)
+                self.media_box.append(image)
+                if path and self.image_acts is None:
+                    self.image_acts = image.image_actions
             except GLib.Error:
                 self.media_box.append(sel_label("[image could not be decoded]"))
         self.artifact = artifact_from_tool(self.input, text) if self.base == "Artifact" else None
@@ -8849,12 +8857,16 @@ class SessionSidebar(Gtk.Box):
             self.fill()
             return
         info = getattr(row, "info", None)
-        if info is None or info.get("unsaved") or info.get("ghost") or info["id"] == self.win.session_id:
+        if info is None or info.get("ghost"):
             return  # (a ghost: a chat Meta's deleted, its transcript in Baude's trash)
-        if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
-            self.win.open_remote_soon(info)
+        self.win.show_chat()  # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while
+        # its transcript's fetched, this one too)
+        if info.get("remote") is not None and not info.get("unsaved") and info["id"] != self.win.session_id:
+            self.win.open_remote_soon(info)  # (its transcript fetched first)
             return
-        self.win.opening_remote = None  # (another picked meanwhile: not opened after all)
+        self.win.opening_remote = None  # (another picked meanwhile, this one too: not opened after all)
+        if info.get("unsaved") or info["id"] == self.win.session_id:
+            return
         self.win.switch_to(lambda: self.win.resume_session(info))
 
     def focus_search(self):
@@ -9283,7 +9295,9 @@ class HostFolder:
             here = host_key(self.remote)  # (that host's: its paths are paths there)
             self.catalogue = tuple(
                 {**self.DEFAULTS, **{k: v for k, v in it.items() if isinstance(v, type(self.DEFAULTS.get(k, v)))},
-                 "path": None, "line": None, "host": here}
+                 "path": None, "line": None, "host": here,
+                 "host_path": it.get("path") if isinstance(it.get("path"), str) else None,  # (there, for ⌘K: read_file)
+                 "host_line": it.get("line") if isinstance(it.get("line"), int) else None}
                 for it in reply["items"] if isinstance(it, dict) and isinstance(it.get("surface"), str))
         if ok and reply.get("busy"):  # (not all made yet: what there is listed, the rest waited for there)
             return self.remote.request({"op": "catalogue", "cwd": self.root, "wait": True}, self._got)
@@ -9502,11 +9516,16 @@ class BaudeMeta(meta.MetaChat):
     def open_chat(self, info):
         """A chat's row clicked (show chats): it's opened, as the sidebar opens one."""
         win = self.win
+        # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while its transcript's
+        # fetched; another picked meanwhile isn't opened after all, this one picked again too)
+        win.show_chat()
         if info["id"] == win.session_id:
+            win.opening_remote = None
             return
         if info.get("remote") is not None:
             win.open_remote_soon(info)
         else:
+            win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
             win.switch_to(lambda: win.resume_session(info))
 
     def chats_rows(self, refs):
@@ -11159,11 +11178,41 @@ class SearchSpace(lookup.SearchSpace):
 
 
 class RefPalette(widgets.RefPalette):
-    """⌘K in Baude: the glossary's search of its chat's Signal (SearchSpace), a name opened as its link is (each item's
-    open, ref_palette_items)."""
+    """⌘K in Baude: what @ lists (MetaNames): every host's chats, and the names the open chat's folder has, made on its
+    host (this machine's Signal's, or fetched from the host it runs on, listed as they come). Opened: palette_open."""
 
     def __init__(self, win):
-        super().__init__(win, SearchSpace(win.catalogue_signal()), lambda item: item["open"](win))
+        super().__init__(win, MetaNames(win), lambda item: palette_open(win, item))
+
+
+def palette_open(win, item):
+    """A ⌘K row opened: a name of this machine's as its link is (its open, ref_palette_items); a chat, as the sidebar
+    opens it (the open one: its tab shown); another host's pull request or issue on GitHub, its file (or a manifest's
+    object, at its manifest) read from it and shown in a tab, and anything else of it said, as Baude's views of
+    branches, clusters and databases look at this machine."""
+    if (opened := item.get("open")) is not None:
+        return opened(win)
+    if item.get("kind") == "chat":
+        info = next((i for i in all_chats(win.sidebar) if i["id"] == item.get("id")), None)
+        if info is None:
+            return None
+        if info["id"] == win.session_id:
+            return win.tabs.show("chat")
+        if info.get("remote") is not None:
+            return win.open_remote_soon(info)
+        win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
+        return win.switch_to(lambda: win.resume_session(info))
+    entry = item.get("entry") or {}
+    if (listed := entry.get("github")) is not None:
+        return fixview.open_github(win, listed)
+    r, host = win.remote, item.get("host")
+    on = remote_name(r) if r is not None and host == host_key(r) else "another host"
+    first = (entry.get("sources") or [["", ""]])[0]
+    manifest = item.get("kind") == "k8s" and entry.get("hint") != "context" and \
+        not str(first[0]).endswith(" running") and first[1]  # (an object written in a file there, not one running)
+    if (item.get("kind") == "file" or manifest) and item.get("host_path") and on != "another host":
+        return win.show_remote_file(r, item["host_path"], item.get("host_line"))
+    return win.ref_toast(f"{item['surface']}: {(item.get('what') or 'a name').lower()} on {on}")
 
 
 class RefPopover(AnchoredPopover):
@@ -13679,11 +13728,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_tasks_indicator()
 
     # ---- swapping the chat, with Claude's fade: the chat goes lighter, swaps, and the new one comes back
-    def switch_to(self, action):
+    def switch_to(self, action, show=True):
         """Swap the chat (another session, a new one, another folder) after a short fade, so the swap is seen.
         Clicks while it's faded (or a slow session still loading) don't start the fade again: the chat stays
-        faded and the last one wins (Fade.swap)."""
+        faded and the last one wins (Fade.swap). The chat's tab is shown first, whatever was (the Feedback tab, a
+        file's code), so the swap's seen and what's picked is what's shown; show False: not (a network chat's, once
+        it's fetched: shown as it was picked, and what's been shown since is left in front)."""
+        if show:
+            self.show_chat()
         self.chat_fade.swap(action)
+
+    def show_chat(self):
+        """The chat's tab shown (from the Feedback tab, a file's code)."""
+        self.tabs.show("chat")
 
     def new_session(self, run_in=None):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
@@ -16466,7 +16523,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
         def fetched():
             if self.opening_remote == info["id"] and not getattr(self, "let_go_done", False):
-                self.switch_to(lambda: self.resume_session(info))
+                self.switch_to(lambda: self.resume_session(info), show=False)
         self.sync_remote(r, info["id"], fetched)
 
     def open_remote(self, info):
@@ -16878,6 +16935,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """New session, on another host (r, picked beside it): a blank chat there, opened to be written in, in the
         folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
         once it's written in, as a new chat here is."""
+        self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
         picked = self.sidebar.group_filter()
         group = next(iter(picked)) if picked is not None and len(picked) == 1 else ""
         model = self.model if self.model and model_program(self.model) == "claude" else None
@@ -16924,8 +16982,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         raw = urllib.parse.unquote(m[1])
         raw = home + raw[1:] if raw == "~" or raw.startswith("~/") else raw
         cwd = (r.sessions.get(self.session_id) or {}).get("cwd") or home
-        path, line = os.path.normpath(os.path.join(cwd, raw)), int(m[2] or m[3]) if m[2] or m[3] else None
+        self.show_remote_file(r, os.path.normpath(os.path.join(cwd, raw)), int(m[2] or m[3]) if m[2] or m[3] else None)
+        return True
 
+    def show_remote_file(self, r, path, line=None):
+        """A file on r's host, fetched from it (read_file) and shown in a tab, as a file here is (show_code)."""
         def shown(reply):
             data = base64.b64decode(reply.get("data") or "") if reply.get("op") == "file" else b""
             if reply.get("op") != "file" or reply.get("error") or b"\0" in data[:8192]:
@@ -16933,7 +16994,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return
             self.show_code(path, line, text=data.decode("utf-8", "replace"), note=f"on {remote_name(r)}")
         r.request({"op": "read_file", "path": path}, shown)
-        return True
 
     def show_sessions(self):
         self.sidebar_slide.set_shown(True)

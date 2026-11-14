@@ -2624,15 +2624,15 @@ def test_web_images(app):
             assert_drawn(pics[0], 300, 150)
             acts = pics[0].image_actions
             assert acts.url == f"{base}/pic.png"
-            overlay = pics[0].get_parent()
+            link = pics[0].get_parent().get_parent().link
             opened = []
             orig = Gtk.UriLauncher.launch
             Gtk.UriLauncher.launch = lambda self, *a: opened.append(self.get_uri())
             try:
-                overlay.corner.emit("clicked")
+                link.emit("activate-link", baude.IMAGE_LINK)
             finally:
                 Gtk.UriLauncher.launch = orig
-            assert opened == [f"{base}/pic.png"], "the globe opens it in the browser"
+            assert opened == [f"{base}/pic.png"], "its URL over it opens it in the browser"
             wait_for(lambda: sum(1 for l in find(view, Gtk.Label) if (l.get_tooltip_text() or "").startswith("Couldn't"))
                      == 2, "the 404 and the non-image stay links, with the reason on hover")
             # streaming re-renders the markdown: the image comes from the cache, no second download
@@ -2642,22 +2642,22 @@ def test_web_images(app):
         close(win)
 
 
-def test_local_image_corner(app):
+def test_local_image_link(app):
     win = app.window()
     try:
         path = make_image(os.path.join(TMP, "corner.png"), 100, 80)
         view = baude.MarkdownView(f"![x]({path})")
         win.transcript.append(view)
         pic = find(view, Gtk.Picture)[0]
-        overlay = pic.get_parent()
+        link = pic.get_parent().get_parent().link
         opened = []
         orig = Gtk.FileLauncher.launch
         Gtk.FileLauncher.launch = lambda self, *a: opened.append(self.get_file().get_path())
         try:
-            overlay.corner.emit("clicked")
+            link.emit("activate-link", baude.IMAGE_LINK)
         finally:
             Gtk.FileLauncher.launch = orig
-        assert opened == [path], "the file icon opens it with the default app"
+        assert opened == [path], "its path over it opens it with the default app"
     finally:
         close(win)
 
@@ -14381,6 +14381,8 @@ def test_ref_palette(app):
         assert sc.get_action().activate(Gtk.ShortcutActionFlags(0), win, None)
         wait_for(lambda: isinstance(win.get_visible_dialog(), baude.RefPalette), "the palette")
         pal = win.get_visible_dialog()
+        pal.space.chat_items = lambda: []  # (the glossary's and the catalogue's names: the chats it lists too, aside)
+        pal.fill()
         wait_for(lambda: win.get_focus() is not None and win.get_focus().is_ancestor(pal.entry), "its entry focused")
 
         def shown():
@@ -14425,9 +14427,10 @@ def test_ref_palette(app):
         win.open_db_name = lambda table, *a, **kw: calls.append(("db", table))
         try:
             pal = baude.RefPalette(win)
+            pal.space.chat_items = lambda: []
             pal.present(win)
             wait_for(lambda: win.get_visible_dialog() is pal and pal.waiting is not None, "waiting for the catalogue")
-            assert pal.spinner.get_visible(), "spinning: the count isn't final yet"
+            assert pal.dots.get_visible(), "the dots: more names on their way"
             stub.catalogue = {
                 "orders-api": {"kind": "k8s", "hint": None, "sources": [("Deployment running", "k3d-dev · shop"),
                                                                        ("Deployment", "k8s/orders.yaml")]},
@@ -14438,7 +14441,7 @@ def test_ref_palette(app):
                 "relay_gen_job": {"kind": "symbol", "hint": None, "sources": [("Database table", "relay (pg-1)")]},
                 "relay_gen_job_event": {"kind": "symbol", "hint": None, "sources": [("Database table", "relay (pg-1)")]}}
             stub.catalogue_busy = False
-            wait_for(lambda: pal.waiting is None and pal.count.get_label() == "10 out of 10" and not pal.spinner.get_visible(), "the catalogue listed")
+            wait_for(lambda: pal.waiting is None and pal.count.get_label() == "10 out of 10" and not pal.dots.get_visible(), "the catalogue listed")
             logos = {pal.store.get_item(i).item["surface"]: pal.store.get_item(i).item["icon"]
                      for i in range(pal.store.get_n_items())}
             assert pal.shown().count("staging") == 1

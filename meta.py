@@ -164,8 +164,8 @@ def listed_models(offered=None):
             out.append(m)
     entry = model_entry(model(), offered)
     if entry and all(m[0] != entry[0] for m in out):
-        mine = providerslib.kind(described(entry, known))
-        same = next((i for i, m in enumerate(out) if m[3] is not None and providerslib.kind(described(m, known)) == mine
+        mine = described(entry, known)
+        same = next((i for i, m in enumerate(out) if m[3] is not None and providerslib.same(described(m, known), mine)
                      and providerslib.where(m[3])[0] != providerslib.where(entry[3])[0]), None) \
             if entry[3] is not None and entry[0] in known else None
         if same is not None:  # (Meta's own, the same one as the provider's: listed once, as Meta's)
@@ -179,10 +179,11 @@ def listed_models(offered=None):
 
 def described(m, known=None):
     """An entry of models() as providers has a model: {value, displayName, provider}, and what it's served as, its
-    window and its version where they're said (known: providers.entries())."""
+    window, its version and its digest where they're said (known: providers.entries())."""
     known = providerslib.entries() if known is None else known
     return {"value": m[0], "displayName": m[1], "provider": m[3]} | \
-        {k: v for k, v in (known.get(m[0]) or {}).items() if k in ("resolvedModel", "id", "window", "version")}
+        {k: v for k, v in (known.get(m[0]) or {}).items()
+         if k in ("resolvedModel", "id", "window", "version", "digest")}
 
 
 def alike(offered=None, known=None):
@@ -727,8 +728,8 @@ def provider_picked(chat, pid):
     entry = model_entry(model(), offered)
     if entry and providerslib.has_runtime(entry[3]) and providerslib.where(entry[3])[0] != providerslib.where(pid)[0]:
         known = providerslib.entries()
-        mine = providerslib.kind(described(entry, known))
-        there = next((m for m in offered if m[3] == pid and providerslib.kind(described(m, known)) == mine), None)
+        mine = described(entry, known)
+        there = next((m for m in offered if m[3] == pid and providerslib.same(described(m, known), mine)), None)
         if there is not None:
             model_picked(chat, there[0])
             return

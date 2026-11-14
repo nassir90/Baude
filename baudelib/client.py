@@ -450,7 +450,7 @@ class Network:
         r.command = command or None
         r.wake.set()
         self.link(r)
-        self.save()
+        self.save(force=True)
 
     # ---- the mesh: this machine's host process linked to each host given by hand, the link used both ways, and
     # every member it reaches known here, reached through it (baudelib/mesh.py)
@@ -471,7 +471,7 @@ class Network:
         r.untold = True
         if (here := self.here_alive(4)) is not None and not r.mine:
             self.tell(r, here)
-        self.save()
+        self.save(force=True)
         self.changed()
 
     def tell(self, r, here):
@@ -630,11 +630,12 @@ class Network:
                 fn()
         self.dispatch(tell)
 
-    def save(self):
+    def save(self, force=False):
         """servers.json: every host reached or given by hand, and what's in it that isn't known here (put there
-        meanwhile: take_saved takes it up), not written over. (readonly: not written.)"""
+        meanwhile: take_saved takes it up), not written over. (readonly: not written, but for force: a change the user
+        made here, a host deactivated, say.)"""
         self.saved_at = time.time()
-        if self.readonly:
+        if self.readonly and not force:
             return
         on_disk = self.saved()
         with self.lock:

@@ -368,6 +368,7 @@ class Server:
                 continue
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
+        self.notes_seen = notes.stamp()  # (records.json here as last looked at: info's notes, _look)
         self.socket_path = socket_path or wire.socket_path()
         self.catalogue_lock, self.catalogue_asked = threading.Lock(), {}  # (catalogue's: when each folder was first asked for)
         self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
@@ -465,7 +466,8 @@ class Server:
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
                 "init": self.me.get("init") or None, "commit": self.commit, "update": self.update,
-                "providers": self.mesh.providers_here(), "mesh": self.mesh.view()}
+                "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
+                "notes": self.notes_seen}  # (Record's notebooks here, as written last: notes.stamp)
 
     def mesh_changed(self):
         """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with
@@ -753,7 +755,7 @@ class Server:
             def notes_op():  # of its own: a change waits on the Record running here)
                 try:
                     reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
-                                      else notes.listing()))
+                                      else notes.listing(msg.get("have"))))
                 except Exception as e:  # noqa: BLE001 (said to the Record that asked)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=notes_op, daemon=True, name="notes").start()
@@ -1423,7 +1425,11 @@ class Server:
             not getattr(s.proc, "stopping", False) and models.program(s.meta.get("model"))["resumes"]
 
     def _look(self, pinged):
-        """One look (_watch): (when subscribers were last pinged)."""
+        """One look (_watch): (when subscribers were last pinged). Record's notebooks here written since the last:
+        subscribers told too (info's notes), so a Record elsewhere showing them lists them again."""
+        if (seen := notes.stamp()) != self.notes_seen:
+            with self.lock:
+                self.notes_seen, self.dirty = seen, True
         with self.lock:
             for s in list(self.sessions.values()):
                 grew = self.rescan(s)

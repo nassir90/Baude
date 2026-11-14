@@ -13084,13 +13084,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.control({"subtype": "interrupt"})
             self.note("interrupt requested")
 
+    def model_said(self, value):
+        """A model's name as a note says it, its provider's with it: Qwen3 4B (MLX)."""
+        return getattr(self, "model_names", {}).get(value) or self.model_dd.label()
+
     def on_model_changed(self, value):
         was = self.model
         if value == was:  # (the one it's on)
             return
         self.outgrown = False  # (another model's window: as its usage says)
         if self.remote is not None and model_program(value) != model_program(was):
-            label = self.model_dd.label()
+            label = self.model_said(value)
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
             return
@@ -13100,19 +13104,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sync_effort_choices()
         self.sync_local()
         if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
-            self.note(f"model → {self.model_dd.label()}: a new conversation")
+            self.note(f"model → {self.model_said(value)}: a new conversation")
             self.restart_proc(resume=False)
             return
         if self.remote is None and value != was and \
                 (model_program(value) == "pi" or modelslib.runs_on(value) != modelslib.runs_on(was)):
             # (pi-claude serves one model, and one on another host runs there: pi's session goes on, kept on the chat's
             # host; a network session's server starts it again on the new one itself)
-            self.note(f"model → {self.model_dd.label()}")
+            self.note(f"model → {self.model_said(value)}")
             self.restart_proc(resume=True)
             return
         if self.proc:
             self.proc.control({"subtype": "set_model", "model": value})
-            self.note(f"model → {self.model_dd.label()}")
+            self.note(f"model → {self.model_said(value)}")
             self.refresh_effort()  # the CLI may change or drop the effort with the model
             self.refresh_context()  # different models have different windows
         else:
@@ -13314,7 +13318,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 p.get("name") or p.get("id")
             pid, models = providerslib.elsewhere(p, host["id"])
             out.append((f"{host['id']}|{p['id']}", hname, pname,
-                        [m | {"providerName": f"{pname} · {hname}"} |
+                        [m | {"providerName": f"{hname} / {pname}"} |
                          ({} if providerslib.has_runtime(pid) else {"displayName": f"{m['displayName']} · {hname}"})
                          for m in models]))
         return out
@@ -13362,16 +13366,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.provider_dd.select(key if runtime else None)
         self.provider_dd.set_sensitive(runtime)
         self.provider_dd.set_visible(bool(found) and not (shown and pid is None))  # (Claude's: none)
+        says = runtime and self.provider_dd.get_visible() and self.provider_dd.value() is not None
         (self.provider_dd.add_css_class if len(found) == 1 else self.provider_dd.remove_css_class)("one-provider")
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
                                           (" (the only one there is)" if len(found) == 1 else ""))
-        chosen = next((ms for k, _h, _l, ms in found if k == key), [])
+        chosen = next(((ms, label) for k, _h, label, ms in found if k == key), ([], None))
         listed = [m for m in self.models_info.values() if m["value"] != "default" and
                   (model_program(m["value"]) == "claude" or not providerslib.has_runtime(
-                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen)
+                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen[0])
         if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
             listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
-        self.model_dd.set_choices([(m["value"], m.get("displayName") or m["value"]) for m in listed] or MODELS)
+        names = [(m["value"], m.get("displayName") or m["value"]) for m in listed]
+        self.model_names = dict(names)
+        bare = {m["value"] for m in chosen[0]} if says else set()  # (the picker beside it says their provider)
+        self.model_dd.set_choices([(v, providerslib.bare_name(name, chosen[1]) if v in bare else name)
+                                   for v, name in names] or MODELS)
         if shown:
             self.model_dd.select(shown)
 

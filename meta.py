@@ -682,10 +682,14 @@ def model_row(chat):
     state = {"values": [], "syncing": False}
 
     def sync():
-        offered = listed_models()
+        every = models()
+        offered = listed_models(every)
         entry = model_entry(model(), offered)
+        pid = provider(every) if providerslib.has_runtime(entry[3] if entry else None) else None  # (Provider says it)
+        host, name = providerslib.where(pid) if pid else (None, None)
         state["values"], state["syncing"] = [m[0] for m in offered], True
-        row.set_model(Gtk.StringList.new([m[1] for m in offered]))
+        row.set_model(Gtk.StringList.new([providerslib.bare_name(m[1], name, host) if pid and m[3] == pid else m[1]
+                                          for m in offered]))
         row.set_selected(offered.index(entry) if entry else 0)
         state["syncing"] = False
 

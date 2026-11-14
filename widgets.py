@@ -5980,8 +5980,8 @@ def ellipsize_dropdown(dd, chars=30):
 
 class HostPicker(Gtk.MenuButton):
     """A picker of choices by host, as ⋮'s menu lists its sections: each host's name a header, its choices under it,
-    a rule between hosts. Its button shows the choice picked, shortened with … past chars. on_pick(key) for the
-    user's picks only, not for select() or set_choices()."""
+    a rule between hosts. Its button shows the choice picked after its host's name (local / MLX), shortened with … past
+    chars. on_pick(key) for the user's picks only, not for select() or set_choices()."""
 
     def __init__(self, tooltip, on_pick, chars=30):
         super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice"])
@@ -6009,7 +6009,7 @@ class HostPicker(Gtk.MenuButton):
                 item = Gio.MenuItem.new(label, None)
                 item.set_action_and_target_value("hostpicker.pick", GLib.Variant.new_string(key))
                 section.append_item(item)
-                self.labels[key] = f"{label} · {host}"
+                self.labels[key] = f"{host} / {label}"
             menu.append_section(host, section)
         self.set_menu_model(menu)
         self.select(self.value())

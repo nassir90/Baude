@@ -64,13 +64,13 @@ def provider_of(value):
 
 
 def provider_name(pid, settings=None):
-    """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name (another host's in the mesh: Ollama · studio)."""
+    """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name (another host's in the mesh: studio / Ollama)."""
     if pid in NAMES:
         return NAMES[pid]
-    if isinstance(pid, str) and pid.startswith(modelslib.AGENT):  # (another host's, run there: Apple · studio)
+    if isinstance(pid, str) and pid.startswith(modelslib.AGENT):  # (another host's, run there: studio / Apple)
         member, _, inner = pid[len(modelslib.AGENT):].partition("/")
         host = next((m["host"] for m in mesh_agents() if m["provider"] == pid), member[:8])
-        return f"{NAMES.get(inner, inner)} · {host}"
+        return f"{host} / {NAMES.get(inner, inner)}"
     if isinstance(pid, str) and pid.startswith("openai/"):
         ep = next((e for e in endpoints(settings) + mesh_endpoints() if e["id"] == pid[len("openai/"):]), None)
         return ep["name"] if ep else pid[len("openai/"):]
@@ -92,6 +92,15 @@ def model_name(value):
     if pid and pid.startswith("openai/"):
         return f"{value.split('/', 2)[2]} ({provider_name(pid)})"
     return value
+
+
+def bare_name(name, provider, host=None):
+    """A model's name without its provider's and its host's, for a list beside a picker that says them: "Qwen3 4B" for
+    "Qwen3 4B (MLX)" of MLX, and for "Qwen3 4B (MLX) · studio" of studio's. Any other name as it is."""
+    for end in ((f" · {host}",) if host else ()) + ((f" ({provider})",) if provider else ()):
+        if name.endswith(end) and len(name) > len(end):
+            name = name[:-len(end)]
+    return name
 
 
 def has_runtime(pid):
@@ -166,7 +175,7 @@ def endpoints(st=None):
 
 def mesh_endpoints():
     """Other hosts' providers in the mesh that serve HTTP, as endpoints on this machine (baudelib.mesh.endpoints: its
-    host process's proxy, which runs each request there): [{"id", "name" (Ollama · studio), "host" (studio),
+    host process's proxy, which runs each request there): [{"id", "name" (studio / Ollama), "host" (studio),
     "provider" (Ollama), "url", "key", "window":
     None, "models": [{"id", "displayName", "window", "tools", "input"}]}]; [] with no mesh here."""
     try:
@@ -182,7 +191,7 @@ def mesh_endpoints():
             if not (isinstance(provider, str) and provider and isinstance(host, str) and host):  # (a host process
                 # here that names them only as "Ollama on studio")
                 provider, _, host = str(e.get("name") or e["id"]).rpartition(" on ")
-            out.append({"id": e["id"], "name": f"{provider} · {host}" if provider else host, "host": host,
+            out.append({"id": e["id"], "name": f"{host} / {provider}" if provider else host, "host": host,
                         "provider": provider, "url": e["url"].rstrip("/"),
                         "key": e.get("key") if isinstance(e.get("key"), str) else None, "window": None,
                         "models": [m for m in e.get("models") or [] if isinstance(m, dict) and isinstance(m.get("id"), str)]})
@@ -203,7 +212,7 @@ def mesh_agents():
         pid, models = elsewhere({"id": str(a.get("provider") or ""), "models": [
             m for m in a.get("models") or [] if isinstance(m, dict) and isinstance(m.get("value"), str)]}, a["host"])
         host = str(a.get("host_name") or a["host"][:8])
-        out += [m | {"host": host, "providerName": f"{a.get('provider_name') or a.get('provider')} · {host}"}
+        out += [m | {"host": host, "providerName": f"{host} / {a.get('provider_name') or a.get('provider')}"}
                 for m in models]
     return out
 

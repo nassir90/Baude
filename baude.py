@@ -7802,6 +7802,8 @@ class SessionSidebar(Gtk.Box):
         self.host_dd.add_css_class("flat")
         self.host_dd.add_css_class("new-host")
         self.host_dd.set_valign(Gtk.Align.CENTER)
+        if (popup := next((w for w in walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
+            popup.connect("show", lambda *_: network().look())  # (opened: a server started a moment ago, offered)
         new_row = Gtk.Box(spacing=2)
         new_row.append(self.new_btn)
         new_row.append(self.host_dd)
@@ -9801,7 +9803,7 @@ class BaudeMeta(meta.MetaChat):
         hosts, groups = sidebar.host_filter(), sidebar.group_filter()
         lines.append("hosts: " + ", ".join(name + (f" ({note})" if note else "") for _k, name, note in
                                            sidebar.known_hosts()) +
-                     f" · listed: {'all' if hosts is None else ', '.join(sorted(hosts))}")
+                     f" · listed: {', '.join(n for k, n, _n in sidebar.known_hosts() if k in hosts)}")
         lines.append("groups: " + ", ".join(f"{label} {counts.get(k, 0)}" for k, label, _n in sidebar.known_groups()) +
                      f" · listed: {'all' if groups is None else ', '.join(g or 'No group' for g in sorted(groups))}")
         lines.append(f"chats: {len(infos)}, {sum(i['id'] in archived or bool(i.get('archived')) for i in infos)} "

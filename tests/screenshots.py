@@ -1278,7 +1278,7 @@ def _(app):
                              "its own, which this machine doesn't have")
 def _(app):
     models_server()
-    win = network_window(app)
+    win = network_window(app, host=None)  # (gpu-mac is on this machine: its sessions are local's)
     T.wait_for(lambda: sidebar_row(win, "Sketch the release checklist") is not None, "gpu-mac's session")
     win.sidebar.on_activate(win.sidebar.list, sidebar_row(win, "Sketch the release checklist"))
     T.wait_for(lambda: win.remote is not None and win.proc is not None and "apple" in win.model_dd.values, "its models")
@@ -2152,7 +2152,7 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, sidebar_hosts=None, sidebar_groups=None,
+                        signal_reader=False, sidebar_network=None, new_session_host=None, sidebar_groups=None,
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)

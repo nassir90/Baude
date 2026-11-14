@@ -8141,9 +8141,9 @@ class RefPalette(Adw.Dialog):
         self.dots.set_working(self.waiting is not None)
         self.items = self.space.items()
         self.fill()
-        if row is not None:
-            at = next((i for i in range(self.store.get_n_items())
-                       if self.store.get_item(i).item["surface"] == row.item["surface"]), None)
+        if row is not None:  # (the same row: two folders, or two hosts, can have a name)
+            same = lambda it: all(it.get(k) == row.item.get(k) for k in ("surface", "what", "summary", "host", "root"))  # noqa: E731
+            at = next((i for i in range(self.store.get_n_items()) if same(self.store.get_item(i).item)), None)
             if at is not None:
                 self.selection.set_selected(at)
                 self.table.scroll_to(at, None, Gtk.ListScrollFlags.NONE, None)

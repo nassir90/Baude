@@ -11,6 +11,10 @@ process (wire.reach, via mesh) and asks it to run the program (op agent: Run, on
 - out {line}, err {line}: what it says, on stdout and stderr; exit {code}: it's gone;
 - mcp_open {conn, name}: the program's started an MCP server (a relay, baude_headless.py mcp-relay, on that side): it's
   started here; mcp {conn, line}: a line for the one or the other; mcp_close {conn}: it's gone, on either side.
+
+A pi model's session is the chat's host's: a copy of its file goes with op agent (sessions) for pi to take it up from,
+and what pi adds to it comes back as it's added, as pi-claude's baude_pi_session lines (session.ts, a pi extension),
+kept here by PiSession, not passed on.
 """
 import base64
 import itertools
@@ -110,9 +114,8 @@ def retarget(data, cwd):
     return json.dumps({**head, "cwd": cwd}, separators=(",", ":"), ensure_ascii=False).encode() + nl + rest
 
 
-def pack(root, ids, seen=None, cwd=None):
-    """A session's files under root (its entries: names with one of ids in them), {path in root: base64}, those that
-    have changed since seen ({path: stamp}, updated), each said to be cwd's (retarget) if it's given; at most
+def pack(root, ids):
+    """A session's files under root (its entries: names with one of ids in them), {path in root: base64}; at most
     SESSIONS_MAX bytes of them."""
     out, size = {}, 0
     try:
@@ -126,30 +129,21 @@ def pack(root, ids, seen=None, cwd=None):
         for folder, _dirs, files in walked:
             for f in files:
                 path = os.path.join(folder, f) if f else folder
-                try:
-                    st = os.lstat(path)
-                except OSError:
+                if not os.path.isfile(path) or os.path.islink(path):
                     continue
-                rel = os.path.relpath(path, root)
-                stamp = (st.st_mtime_ns, st.st_size)
-                if not os.path.isfile(path) or os.path.islink(path) or (seen or {}).get(rel) == stamp:
-                    continue
-                size += st.st_size
-                if size > SESSIONS_MAX:
-                    return out
                 try:
+                    size += os.path.getsize(path)
+                    if size > SESSIONS_MAX:
+                        return out
                     with open(path, "rb") as fh:
-                        out[rel] = base64.b64encode(retarget(fh.read(), cwd)).decode()
+                        out[os.path.relpath(path, root)] = base64.b64encode(fh.read()).decode()
                 except OSError:
                     continue
-                if seen is not None:
-                    seen[rel] = stamp
     return out
 
 
-def unpack(root, files, ids, seen=None, cwd=None):
-    """files (pack's) written under root, those of a session's (ids) only, each said to be cwd's (retarget) if it's
-    given; seen: their stamps, as written."""
+def unpack(root, files, ids, cwd):
+    """files (pack's) written under root, those of a session's (ids) only, each said to be cwd's (retarget)."""
     for rel, data in (files or {}).items() if isinstance(files, dict) else ():
         if not _within(rel, ids) or not isinstance(data, str):
             continue
@@ -159,11 +153,62 @@ def unpack(root, files, ids, seen=None, cwd=None):
             with open(path + ".part", "wb") as fh:
                 fh.write(retarget(base64.b64decode(data), cwd))
             os.replace(path + ".part", path)
-            if seen is not None:
-                st = os.stat(path)
-                seen[rel] = (st.st_mtime_ns, st.st_size)
         except (OSError, ValueError):
             continue
+
+
+def line(entry):
+    """A pi session file's line for an entry, as pi writes it (JSON.stringify's)."""
+    return json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
+
+
+class PiSession:
+    """(the chat's host) A chat's pi session file, kept as pi run on another host adds to it: each notice of
+    session.ts's (pi-claude's baude_pi_session) puts the entries it has after the first from, appended where that's
+    the end of it, else the file written again; its first line said to be the chat's folder's (cwd), where pi run here
+    takes it up."""
+
+    def __init__(self, root, sid, cwd):
+        self.root, self.sid, self.cwd, self.path, self.lines = root, sid, cwd, None, []
+        try:
+            found = [os.path.join(root, n) for n in os.listdir(root) if sid in n and n.endswith(".jsonl")]
+        except OSError:
+            found = []
+        for path in sorted(found, key=os.path.getmtime, reverse=True):  # (the newest of its, as pi would have it)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    rows = f.read().splitlines()
+                head = json.loads(rows[0]) if rows else {}
+            except (OSError, ValueError):
+                continue
+            if isinstance(head, dict) and head.get("type") == "session" and head.get("id") == sid:
+                self.path, self.lines = path, [r for r in rows[1:] if r.strip()]
+                break
+
+    def take(self, said):
+        """A notice: False if it's of no use (another session's, or entries missing before it)."""
+        header, start, entries = said.get("header"), said.get("from"), said.get("entries")
+        if not isinstance(header, dict) or header.get("id") != self.sid or not isinstance(start, int) or \
+                not isinstance(entries, list) or not 0 <= start <= len(self.lines):
+            return False
+        new = [line(e) for e in entries if isinstance(e, dict)]
+        appending = self.path is not None and start == len(self.lines)
+        self.lines = self.lines[:start] + new
+        if self.path is None:
+            when = str(header.get("timestamp") or "").replace(":", "-").replace(".", "-") or "session"
+            self.path = os.path.join(self.root, f"{when}_{self.sid}.jsonl")
+        try:
+            os.makedirs(self.root, exist_ok=True)
+            if appending:
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write("".join(n + "\n" for n in new))
+            else:
+                with open(self.path + ".part", "w", encoding="utf-8") as f:
+                    f.write("".join(n + "\n" for n in [line({**header, "cwd": self.cwd}), *self.lines]))
+                os.replace(self.path + ".part", self.path)
+        except OSError:
+            return False
+        return True
 
 
 def later(seconds, fn):
@@ -214,13 +259,16 @@ class ProxiedProc(ClaudeProc):
                                                      ",".join(self.host_tools)]}
         sid = resume or got.get("--session-id")
         persist = "--no-session-persistence" not in got
-        # (pi's session of it lives here, on the chat's host: carried to the model's host with it, and back as it's
-        # written there, each turn and as it ends)
+        # (pi's session of it lives here, on the chat's host: a copy carried to the model's host for pi to take it up
+        # there; what pi adds to it sent back as it's added, session.ts's notices, and kept here: PiSession)
         self.ids = [sid] if persist and sid and models.model_program(inner) == "pi" else []
+        self.pi_session = PiSession(pi_sessions(), sid, self.cwd) if self.ids else None
+        shipped = pack(pi_sessions(), [os.path.basename(self.pi_session.path)]) \
+            if self.pi_session is not None and self.pi_session.path else {}  # (its file, the one pi takes up here)
         self.ask_for = {"op": "agent", "req": 1, "model": inner, "mode": mode, "effort": effort, "resume": sid,
                         "system_prompt": got.get("--system-prompt"), "persist": persist,
                         "servers": sorted(self.servers), "cwd": self.cwd,
-                        "sessions": pack(pi_sessions(), self.ids) if self.ids else {}}
+                        "sessions": shipped}
         self.ch, self.waiting, self.lock = None, [], threading.Lock()
         self.relays = {}  # (conn: the MCP server started here for it)
         self.p, self.ended = _Ended(self, ["agent", self.member, inner]), False
@@ -261,7 +309,11 @@ class ProxiedProc(ClaudeProc):
                     said = json.loads(msg.get("line") or "")
                 except ValueError:
                     said = {"type": "_stderr", "text": str(msg.get("line"))}
-                if isinstance(said, dict):
+                if isinstance(said, dict) and said.get("type") == "system" and \
+                        said.get("subtype") == "baude_pi_session":  # (pi's session as it's added to: kept here)
+                    if self.pi_session is None or not self.pi_session.take(said):
+                        self._say("pi's session couldn't be kept on this host as it was written")
+                elif isinstance(said, dict):
                     self.dispatch(lambda m=bare(said): self.on_msg(self, m))
             elif op == "err":
                 self._say(str(msg.get("line") or ""))
@@ -271,8 +323,6 @@ class ProxiedProc(ClaudeProc):
                 self._to_server(msg.get("conn"), msg.get("line"))
             elif op == "mcp_close":
                 self._close(msg.get("conn"))
-            elif op == "sessions" and self.ids:  # (pi's session, as it's written there: kept here)
-                unpack(pi_sessions(), msg.get("files"), self.ids)
             elif op == "exit":
                 code = msg.get("code") if isinstance(msg.get("code"), int) else 1
                 break
@@ -386,13 +436,14 @@ class Run:
         self.server, self.conn, self.id, self.token = server, conn, secrets.token_hex(8), secrets.token_hex(16)
         self.relays, self.numbers, self.lock, self.gone = {}, itertools.count(1), threading.Lock(), False
         self.folder = tempfile.mkdtemp(prefix="baude-agent-")
-        # (pi's session, the caller's: here only while it runs, what's written sent back as it is)
+        # (pi's session, the caller's: a copy here for pi to take it up from, said to be this run's folder's, where
+        # pi-claude's run; what pi adds to it is sent to the caller as it's added, session.ts)
         self.ids = [resume] if resume and msg.get("persist") is not False and models.model_program(model) == "pi" \
             else []
-        self.sessions, self.stamps = os.path.join(self.folder, "sessions"), {}
+        self.sessions = os.path.join(self.folder, "sessions")
         self.told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
-        if self.ids:  # (said to be this run's folder's, as pi-claude's run in it; the chat's folder's going back)
-            unpack(self.sessions, msg.get("sessions"), self.ids, self.stamps, os.path.realpath(self.folder))
+        if self.ids:
+            unpack(self.sessions, msg.get("sessions"), self.ids, os.path.realpath(self.folder))
         cfg = {"mcpServers": {n: {"command": sys.executable,
                                   "args": [HEADLESS, "mcp-relay", "--socket", server.socket_path, self.id, n,
                                            self.token]} for n in names}}
@@ -408,7 +459,7 @@ class Run:
             self.p = subprocess.Popen(args, cwd=self.folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, text=True, bufsize=1,
                                       env=claude_env() | {"BAUDE_TOOLS_CWD": self.told[:4096]} |
-                                      ({"BAUDE_PI_SESSIONS": self.sessions} if self.ids else {}))
+                                      ({"BAUDE_PI_SESSIONS": self.sessions, "BAUDE_PI_RELAY": "1"} if self.ids else {}))
         except OSError:
             shutil.rmtree(self.folder, ignore_errors=True)
             raise
@@ -418,19 +469,11 @@ class Run:
     def _read(self, stream, op):
         for line in stream:
             if line.strip():
-                if op == "out" and self.ids and '"result"' in line:  # (a turn's end: its session as it is, first)
-                    self.sync()
                 self.conn.send({"op": op, "line": line.rstrip("\n")})
         if op == "out":
             code = self.p.wait()
-            self.sync()
             self.conn.send({"op": "exit", "code": code})
             self.end()
-
-    def sync(self):
-        """pi's session, what's been written of it since it was last sent: sent to the caller, whose it is."""
-        if self.ids and (files := pack(self.sessions, self.ids, self.stamps, self.told)):
-            self.conn.send({"op": "sessions", "files": files})
 
     def take(self, msg):
         """A message from the caller."""

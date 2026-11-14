@@ -5328,9 +5328,17 @@ class MarkdownView(Gtk.Box):
         if text:
             self.set_text(text)
 
+    relink_due = None  # (its "map" handler, while it's out of sight with links that changed)
+
     def relink(self):
         """Draw the same text again with the links as they are now: blocks whose markup changed are
-        updated in place (a table's cells, a code block's names, the same way); nothing else is touched."""
+        updated in place (a table's cells, a code block's names, the same way); nothing else is touched. Out of
+        sight (a far part of a long chat, a subagent's view not open), as it's next seen: Signal finds names all
+        through a scroll, and a long chat has many replies naming each."""
+        if not self.get_mapped():
+            if self.relink_due is None:
+                self.relink_due = self.connect("map", MarkdownView._relink_seen)
+            return
         if self.streaming is not None:
             self.streaming[0] = None  # (the blocks it settled have the links as they were: the next frame reads all)
         if self.pending is not None:
@@ -5351,6 +5359,11 @@ class MarkdownView(Gtk.Box):
             elif new[0] == "table":
                 relink_table(self.widgets[i])  # (likewise: a table's blocks hold its text, not its markup)
         self.blocks = blocks
+
+    def _relink_seen(self):
+        self.disconnect(self.relink_due)
+        self.relink_due = None
+        self.relink()
 
     def append(self, delta):
         if self.streaming is None:

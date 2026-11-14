@@ -9886,6 +9886,7 @@ class SidePanel(Gtk.Box):
         box = self.agent_boxes.get(tool_use_id)
         if box is None:
             return
+        self.win.subagent_opened(tool_use_id)
         self.current = tool_use_id
         task = next((t for t in self.win.tasks.values() if t.get("tool_use_id") == tool_use_id), {})
         self.detail_title.set_text(task.get("description") or "Subagent")
@@ -10756,9 +10757,19 @@ class SignalPage(Gtk.Stack):
         return label
 
     def changed(self):
-        """Something changed: rebuild once, before the next frame."""
+        """Something changed: rebuild once, before the next frame; while the page isn't shown, as it's next shown
+        (its list is every name the chat has, and Signal says it changed with each name it finds)."""
+        if not self.get_mapped():
+            if getattr(self, "due", None) is None:
+                self.due = self.connect("map", SignalPage._shown_due)
+            return
         if self.soon is None:
             self.soon = GLib.idle_add(self._rebuild_soon)
+
+    def _shown_due(self):
+        self.disconnect(self.due)
+        self.due = None
+        self.rebuild()
 
     def _rebuild_soon(self):
         self.soon = None
@@ -11486,6 +11497,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.panel_slide.closed_by_drag = self.panel_closed_by_drag
         self.panel.connect("notify::visible", lambda *_: self.panel.get_visible() and self.place_split())
         self.sidebar = SessionSidebar(self)
+        for pane in (self.sidebar.scroller, self.panel.meta.scroll):  # (see pane_moving)
+            pane.get_vadjustment().connect("value-changed", BaudeWindow.pane_scrolled, self)
         network().listen(self.on_network)
         providerslib.listen(self.providers_found)  # (Ollama started, a model pulled, an endpoint added: the pickers)
         self.outer = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.sidebar,
@@ -11910,6 +11923,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def chat_moving(self):
         """Scrolled by the reader, and not still since (chat_still): what's drawn ahead waits for that."""
         return self.still_timer is not None or self.scroll_glide.gliding()
+
+    PANE_STILL_S = 0.3
+    pane_moved = 0.0
+
+    @staticmethod
+    def pane_scrolled(_adj, win):
+        win.pane_moved = time.monotonic()
+
+    def pane_moving(self):
+        """The left pane or Meta scrolled in the last PANE_STILL_S: the chat's earlier messages aren't drawn ahead
+        meanwhile (fill_frame), as they'd take the frame those need."""
+        return time.monotonic() - self.pane_moved < self.PANE_STILL_S
 
     stick_bottom = property(lambda self: self.follow.stick, lambda self, on: setattr(self.follow, "stick", on))
 
@@ -14828,7 +14853,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.on_task_event("task_started", info)
         self.tasks[info["task_id"]]["from_file"] = True
         if info["task_type"] == "local_agent":
-            self.follow_subagent(info["task_id"], card.tool_id)
+            self.follow_subagent(info["task_id"], card.tool_id, opened=False)
 
     def task_from_note(self, note):
         tid = note.get("task_id")
@@ -14854,18 +14879,27 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return os.path.join(base[:-len(".jsonl")], "subagents", f"agent-{agent_id}.jsonl") \
             if base and base.endswith(".jsonl") else None
 
-    def follow_subagent(self, agent_id, tool_use_id):
-        """Draw a subagent's own transcript in its side-panel view, and keep reading it."""
+    def follow_subagent(self, agent_id, tool_use_id, opened=True):
+        """Draw a subagent's own transcript in its side-panel view, and keep reading it; one in the history drawn
+        (not opened), from when its view's first opened (subagent_opened): a long chat has many, each as long as a
+        chat, and scrolling up through the history comes to them all."""
         path = self.subagent_path(agent_id)
         if not path:
             return
         self.sub_tails[agent_id] = {"path": path, "offset": 0, "partial": b"", "tool_use_id": tool_use_id,
-                                    "first": True}
+                                    "first": True, "opened": opened}
         self.read_subagent(agent_id)
+
+    def subagent_opened(self, tool_use_id):
+        """Its view opened in the side panel: its transcript drawn there now, if it waited for that."""
+        for agent_id, st in list(self.sub_tails.items()):
+            if st["tool_use_id"] == tool_use_id and not st["opened"]:
+                st["opened"] = True
+                self.read_subagent(agent_id)
 
     def read_subagent(self, agent_id):
         st = self.sub_tails.get(agent_id)
-        if st is None or not os.path.exists(st["path"]):
+        if st is None or not st["opened"] or not os.path.exists(st["path"]):
             return
         lines, st["offset"], st["partial"] = read_appended(st["path"], st["offset"], st["partial"])
         for kind, content, *rest in history_items(lines, sidechain=True):
@@ -15264,6 +15298,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.fill_tick = None
             return GLib.SOURCE_REMOVE
         moving = self.chat_moving()
+        if not moving and self.pane_moving():
+            return GLib.SOURCE_CONTINUE
         job = self.next_fill(moving)
         if job is None:
             if self.fill_sweeping:

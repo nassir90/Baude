@@ -12248,6 +12248,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.scroller.get_vadjustment().set_value(value)
 
     def set_busy(self, busy):
+        if busy and not getattr(self, "busy", False):
+            self.said_last = None  # (a turn starting: what the last one said isn't this one's)
         self.busy = busy
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
@@ -13253,6 +13255,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return getattr(self, "model_names", {}).get(value) or self.model_dd.label()
 
     def on_model_changed(self, value):
+        self.move_after_turn = None  # (a model picked mid-turn: that one, not a provider's picked before it)
         was = self.model
         if value == was:  # (the one it's on)
             return
@@ -13596,7 +13599,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
         self.move_after_turn = None
         if key in getattr(self, "alike_keys", {}):
-            self.on_model_changed(self.alike_keys[key])
+            self.move_to(self.alike_keys[key])
             return
         self.provider_key = key
         save_settings(provider=key)
@@ -13606,13 +13609,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         there = next((m for m in getattr(self, "provider_models", {}).get(key, []) if mine and
                       m["value"] != self.model and providerslib.kind(m) == providerslib.kind(mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
-            if getattr(self, "busy", False):  # (moving now would stop the reply: h_result moves it)
-                self.move_after_turn = (self.session_id, there["value"])
-                self.sync_providers()
-                return
-            self.on_model_changed(there["value"])
+            self.move_to(there["value"])
             return
         self.sync_providers()
+
+    def move_to(self, value):
+        """The chat's model to its copy on another host (a provider picked): now, or mid-turn once the turn's over
+        (moving restarts pi or claude, which would stop the reply), if its claude's still the one running it."""
+        if getattr(self, "busy", False) and self.proc is not None:
+            self.move_after_turn = (self.proc, value)
+            self.sync_providers()
+        else:
+            self.on_model_changed(value)
 
     def providers_found(self):
         """This machine's providers changed (found again: Ollama started, a model pulled): the pickers as they are now."""
@@ -16221,7 +16229,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] == self.session_id:  # (a provider picked while it ran: its copy of the model now)
+        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its copy of the model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)

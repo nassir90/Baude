@@ -2544,8 +2544,8 @@ class PictureWatch:
 
 def image_widget(data, max_edge=480, path=None, name=None, url=None):
     """A picture whose natural size is bounded (a bare Gtk.Picture grows to the image size).
-    Click to view it large; right-click to copy it or open it / its folder. A small button in
-    the top-left corner opens it: in the browser (a web image, globe) or the default app (file)."""
+    Click to view it large; right-click to copy it or open it / its folder. Where it's from opens it as a link
+    (IMAGE_LINK, given by whoever shows that: a Read's header, the line over a markdown image)."""
     dims = image_dims(data)
     if not dims:  # (a format whose header image_dims can't read: decode it once to learn its size)
         tex = scaled_texture(data, 100_000)
@@ -2554,16 +2554,30 @@ def image_widget(data, max_edge=480, path=None, name=None, url=None):
     pic = FixedPicture(size=fit_size(*dims, max_edge), load=lambda scale: scaled_texture(data, max_edge, scale))
     pic.add_css_class("md-image")
     acts = make_image_interactive(pic, data, path, name, url)
-    corner = Gtk.Button(icon_name=globe_icon() if url else "document-open-symbolic",
-                        tooltip_text="Open in browser" if url else "Open with default app",
-                        halign=Gtk.Align.START, valign=Gtk.Align.START, margin_start=6, margin_top=6)
-    corner.add_css_class("osd")
-    corner.add_css_class("circular")
-    corner.add_css_class("image-corner")
-    corner.connect("clicked", lambda *_: acts.open_in_browser() if url else acts.open())
     box = Gtk.Overlay(child=pic, halign=Gtk.Align.START)
-    box.add_overlay(corner)
-    box.image_actions, box.picture, box.corner = acts, pic, corner
+    box.image_actions, box.picture = acts, pic
+    return box
+
+
+IMAGE_LINK = "baude-image:open"  # (a link that opens its image as ImageActions.launch does)
+
+
+def image_link_markup(text, acts):
+    """text as the link that opens an image (acts: its ImageActions): a web one in the browser, a file in its app."""
+    tip = "Open in browser" if acts.url else "Open with default app"
+    return f'<a href="{IMAGE_LINK}" title="{tip}">{html.escape(text, quote=False)}</a>'
+
+
+def with_image_link(image, text):
+    """image (image_widget's) under a line with where it's from (text: its path or URL), a link that opens it."""
+    link = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+    link.set_markup(image_link_markup(text, image.image_actions))
+    link.add_css_class("image-link")
+    link.connect("activate-link", lambda _l, uri: uri == IMAGE_LINK and (image.image_actions.launch() or True))
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, halign=Gtk.Align.START)
+    box.append(link)
+    box.append(image)
+    box.link = link
     return box
 
 
@@ -3352,6 +3366,13 @@ class ImageActions:
 
     def open_in_browser(self):
         Gtk.UriLauncher(uri=self.url).launch(self.widget.get_root(), None, None)
+
+    def launch(self):
+        """Opened from where it's from (IMAGE_LINK): a web image in the browser, a file in its default app."""
+        if self.url:
+            self.open_in_browser()
+        else:
+            self.open()
 
 
 def toast(widget, text):
@@ -4228,7 +4249,7 @@ class Lightbox(Gtk.Box):
         self.source = self.where_from()
         if self.source is not None:
             widget = self.items[self.index]
-            holder = widget.get_parent()  # (image_widget's overlay: its corner button goes with it)
+            holder = widget.get_parent()  # (image_widget's overlay)
             self.hidden = holder if getattr(holder, "image_actions", None) is not None else widget
             self.hidden.set_opacity(0.0)
         self.stage.set_overflow(Gtk.Overflow.VISIBLE)  # (it starts where it was, not only inside here)
@@ -6008,12 +6029,12 @@ class MarkdownView(Gtk.Box):
         return sel_label(html.escape(str(b)))
 
     def render_image(self, alt, src):
-        path = src[7:] if src.startswith("file://") else src
-        path = os.path.join(self.base_dir, os.path.expanduser(path))
+        written = src[7:] if src.startswith("file://") else src  # (the path, as the reply has it: over the image)
+        path = os.path.join(self.base_dir, os.path.expanduser(written))
         if "://" not in src or src.startswith("file://"):
             try:
                 with open(path, "rb") as f:
-                    return image_widget(f.read(), path=path, name=alt)
+                    return with_image_link(image_widget(f.read(), path=path, name=alt), written)
             except (OSError, GLib.Error):
                 pass
         link = sel_label(f'Image: <a href="{html.escape(src)}">{html.escape(alt or src)}</a>')
@@ -6030,7 +6051,7 @@ class MarkdownView(Gtk.Box):
                     link.set_tooltip_text(f"Couldn't show the image: {e.message}")
                     return
                 holder.remove(link)
-                holder.append(pic)
+                holder.append(with_image_link(pic, src))
             else:
                 link.set_tooltip_text(f"Couldn't load the image: {error}")
         fetch_web_image(src, done)
@@ -7036,7 +7057,6 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }
-.image-corner { min-width: 26px; min-height: 26px; padding: 0; opacity: 0.85; }
 .md-table-scroll { margin: 2px 0; }
 .md-table { border: 1px solid @baude_rule; border-radius: 8px; }
 .md-table .md-head { background: @baude_raised; padding: 5px 12px;

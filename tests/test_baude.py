@@ -2624,15 +2624,15 @@ def test_web_images(app):
             assert_drawn(pics[0], 300, 150)
             acts = pics[0].image_actions
             assert acts.url == f"{base}/pic.png"
-            overlay = pics[0].get_parent()
+            link = pics[0].get_parent().get_parent().link
             opened = []
             orig = Gtk.UriLauncher.launch
             Gtk.UriLauncher.launch = lambda self, *a: opened.append(self.get_uri())
             try:
-                overlay.corner.emit("clicked")
+                link.emit("activate-link", baude.IMAGE_LINK)
             finally:
                 Gtk.UriLauncher.launch = orig
-            assert opened == [f"{base}/pic.png"], "the globe opens it in the browser"
+            assert opened == [f"{base}/pic.png"], "its URL over it opens it in the browser"
             wait_for(lambda: sum(1 for l in find(view, Gtk.Label) if (l.get_tooltip_text() or "").startswith("Couldn't"))
                      == 2, "the 404 and the non-image stay links, with the reason on hover")
             # streaming re-renders the markdown: the image comes from the cache, no second download
@@ -2642,22 +2642,22 @@ def test_web_images(app):
         close(win)
 
 
-def test_local_image_corner(app):
+def test_local_image_link(app):
     win = app.window()
     try:
         path = make_image(os.path.join(TMP, "corner.png"), 100, 80)
         view = baude.MarkdownView(f"![x]({path})")
         win.transcript.append(view)
         pic = find(view, Gtk.Picture)[0]
-        overlay = pic.get_parent()
+        link = pic.get_parent().get_parent().link
         opened = []
         orig = Gtk.FileLauncher.launch
         Gtk.FileLauncher.launch = lambda self, *a: opened.append(self.get_file().get_path())
         try:
-            overlay.corner.emit("clicked")
+            link.emit("activate-link", baude.IMAGE_LINK)
         finally:
             Gtk.FileLauncher.launch = orig
-        assert opened == [path], "the file icon opens it with the default app"
+        assert opened == [path], "its path over it opens it with the default app"
     finally:
         close(win)
 

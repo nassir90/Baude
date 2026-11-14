@@ -12748,6 +12748,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc = ClaudeProc(self.on_msg, self.on_exit, self.run_cwd, self.model, run["mode"], run["resume"],
                                    run["effort"], extra=run["extra"], exe=run["exe"])
             self.proc.resumed = resume
+            if self.resume_reason and self.resume_reason[0] == self.session_id:  # (its last claude here exited: on_exit)
+                if run["resume"]:  # (Apple's model starts afresh: nothing resumed)
+                    self.note(f"— Resumed from {self.resume_reason[1]} —")
+                self.resume_reason = None
             self.pending.clear()
         except OSError as e:
             self.note(f"failed to start claude: {e}")
@@ -13111,8 +13115,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.set_busy(False)
             self.remote_view()
             return
-        if code != 0 and self.session_id:  # (nothing said now: the next message resumes it, and says why: send_text)
-            self.resume_reason = (self.session_id, "claude binary error")
+        if code != 0 and self.session_id and not self.resume_pending:  # (nothing said now: the claude started next
+            self.resume_reason = (self.session_id, "claude binary error")  # resumes it, and says why: start_proc. One
+            # only showing a session it isn't running (resume_pending): nothing to resume)
         self.proc = None
         self.set_busy(False)
 
@@ -13144,10 +13149,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return False
 
     def on_send(self):
-        if self.composer_box.gates and not self.busy:  # (the context exhausted, a host gone or its connection dropped)
-            return
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
+        if self.composer_box.gates and not self.busy and not (typed in ("/clear", "/new", "/cd", "/login", "/logout") or
+                                                              typed.startswith(("/cd ", "/login "))):
+            return  # (the context exhausted, a host gone or its connection dropped: only what Baude does itself goes)
         if (typed in ("/login", "/logout") or typed.startswith("/login ")) and self.remote is not None \
                 and not self.remote.local:  # (signing in is a machine's: another's claude signs in there)
             buf.set_text("")
@@ -13220,9 +13226,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 buf.set_text(text)
                 return
         if self.proc is None:
-            if self.remote is None and self.resume_reason and self.resume_reason[0] == self.session_id:
-                self.note(f"— Resumed from {self.resume_reason[1]} —")  # (its claude here exited: on_exit)
-            self.resume_reason = None
             self.start_proc()
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
             buf.set_text(text)

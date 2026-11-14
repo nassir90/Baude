@@ -699,17 +699,17 @@ def provider_row(chat):
     def sync():
         offered = models()
         found = providers_offered(offered)
-        hosts = {}
+        hosts = {HERE_NAME: []}  # (this machine's first)
         for pid, _name in found:
             host, name = providerslib.where(pid)
             hosts.setdefault(host or HERE_NAME, []).append((pid, name))
-        picker.set_choices(list(hosts.items()))
+        picker.set_choices([(host, choices) for host, choices in hosts.items() if choices])
         entry = model_entry(model(), offered)
-        runtime = providerslib.has_runtime(entry[3] if entry else providerslib.provider_of(model()))
-        claude = model_program(model()) == "claude"
+        pid = entry[3] if entry else providerslib.provider_of(model())
+        runtime = providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
         picker.select(provider(offered) if runtime else None)
         row.set_sensitive(runtime)
-        row.set_visible(bool(found) and not claude)
+        row.set_visible(bool(found) and pid is not None)  # (Claude's: none)
         (row.add_css_class if len(found) == 1 else row.remove_css_class)("one-provider")
     row.sync = sync
     sync()

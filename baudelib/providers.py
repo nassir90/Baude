@@ -94,9 +94,12 @@ def where(pid):
     """(its host's name, None for this machine; its own name) of a provider: ("studio", "Ollama") for another host's in
     the mesh, (None, "MLX") for this machine's."""
     if isinstance(pid, str) and pid.startswith("openai/"):
-        ep = next((e for e in mesh_endpoints() if e["id"] == pid[len("openai/"):]), None)
+        eid = pid[len("openai/"):]
+        ep = next((e for e in mesh_endpoints() if e["id"] == eid), None)
         if ep is not None:
             return ep["host"], ep["provider"] or ep["host"]
+        if m := re.fullmatch(r"mesh-([a-z0-9]+)-(.+)", eid):  # (a member gone from the mesh: by what its id says)
+            return m[1], m[2]
     return None, provider_name(pid)
 
 

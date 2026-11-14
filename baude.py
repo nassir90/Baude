@@ -13170,7 +13170,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.model = model
         if model:
             self.follow_model(model)
-            self.sync_providers()
+        self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
 
@@ -13315,14 +13315,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             kept = load_settings().get("provider")
             key = kept if kept in keys else keys[0] if keys else None
         self.provider_key = key
-        hosts = {}
+        hosts = {}  # (by host, its key's: two hosts of a name are two)
         for k, host, label, *_ in found:
-            hosts.setdefault(host, []).append((k, label))
-        self.provider_dd.set_choices(list(hosts.items()))
-        runtime = not shown or self.provider_key_of(shown) is not None  # (not Apple's: on Apple's, picked is none)
+            hosts.setdefault(k.split("|", 1)[0], (host, []))[1].append((k, label))
+        self.provider_dd.set_choices(list(hosts.values()))
+        pid = ((self.models_info.get(shown) or {}).get("provider") or providerslib.provider_of(shown)) if shown else None
+        runtime = not shown or providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
         self.provider_dd.select(key if runtime else None)
         self.provider_dd.set_sensitive(runtime)
-        self.provider_dd.set_visible(bool(found) and not (shown and model_program(shown) == "claude"))
+        self.provider_dd.set_visible(bool(found) and not (shown and pid is None))  # (Claude's: none)
         (self.provider_dd.add_css_class if len(found) == 1 else self.provider_dd.remove_css_class)("one-provider")
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
                                           (" (the only one there is)" if len(found) == 1 else ""))

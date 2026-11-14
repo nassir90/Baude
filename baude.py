@@ -9869,6 +9869,7 @@ class SidePanel(Gtk.Box):
         self.artifact_empty.set_visible(False)
 
     def reset(self):
+        self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)
         for chip in self.artifact_rows.values():
             self.artifact_list.remove(chip)
             discard(chip)
@@ -9900,8 +9901,7 @@ class SidePanel(Gtk.Box):
             btn = Gtk.ToggleButton(label="View", valign=Gtk.Align.CENTER, focus_on_click=False,
                                    tooltip_text="Open this subagent in the side panel")
             btn.add_css_class("tool-toggle")  # (as Prompt is, beside it)
-            btn.connect("toggled", lambda b: b.get_active() and (b.set_active(False), self.win.show_panel(True, "agents"),
-                                                                self.open_agent(tid)))
+            btn.connect("toggled", lambda b: b.get_active() and (b.set_active(False), self.view_agent(tid)))
             card.toggles.append(btn)
             card.view_btn = btn
         if card.state != "error":
@@ -9969,7 +9969,7 @@ class SidePanel(Gtk.Box):
 
     current = None
 
-    def open_agent(self, tool_use_id):
+    def open_agent(self, tool_use_id, from_row=True):
         box = self.agent_boxes.get(tool_use_id)
         if box is None:
             return
@@ -9982,14 +9982,21 @@ class SidePanel(Gtk.Box):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
         row = self.agent_rows.get(tool_use_id)
-        if self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, if it's seen)
+        if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
             self.agent_expand.open("detail", row, self.row_title(row), *self.detail_parts(), within=self.agent_scroll)
         else:
             self.agent_stack.set_visible_child_name("detail")
         self.show_page("agents")
 
+    def view_agent(self, tool_use_id):
+        """A subagent's View: its page, opened from its row only if the list's already being looked at (shown just
+        now, its row's never been seen where it is)."""
+        seen = self.agent_list.get_mapped() and self.agent_stack.get_visible_child_name() == "list"
+        self.win.show_panel(True, "agents")
+        self.open_agent(tool_use_id, from_row=seen)
+
     def detail_parts(self):
-        """A subagent's page's parts, as ExpandStack opens it: its title, its square, and what fades in."""
+        """A subagent's page's parts, as ExpandStack opens it: its title, its square, and the rest of it."""
         return self.detail_title, self.detail_holder, (self.agent_back, self.detail_info)
 
     @staticmethod

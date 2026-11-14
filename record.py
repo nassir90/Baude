@@ -407,9 +407,9 @@ def network():
     """The hosts there are, as Baude knows them (baudelib.client.Network: this machine's host process, by its socket,
     and those it's linked to, and those given by where ssh goes): one for the app, started when it's first wanted."""
     if not _NETWORK:
-        _NETWORK.append(baudelib.client.Network(
+        _NETWORK.append(baudelib.client.Network(  # (servers.json Baude's to keep: read here, not written)
             lambda fn: GLib.idle_add(lambda: fn() and False),
-            hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()]))
+            hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()], readonly=True))
     return _NETWORK[0]
 
 
@@ -428,12 +428,15 @@ class Store:
     picked host's, so all that reads and changes them works on those; a change to another's is sent to it as it's
     saved (push), and what it has is taken in as it's listed (take)."""
 
+    UNSENT = "\0unsent"  # (in remote_base, for what a host wasn't sent after all: it differs, so it's sent again)
+
     def __init__(self):
         self.path = os.path.join(data_dir(), "records.json")
-        self.host, self.picked = HERE_HOST, HERE_HOST  # (the host shown; the one picked, kept: shown once it's there)
-        self.host_name = THIS_MACHINE  # (the host shown, by its name)
+        self.host, self.picked = HERE_HOST, HERE_HOST  # (the host shown; the one picked, kept: Window.show_host)
+        self.host_name = self.picked_name = THIS_MACHINE  # (by name: the one picked's kept too, for while it's unknown)
         self.local, self.remote, self.remote_base = [], {}, {}  # (this machine's; another's, by its key; as it has them)
         self.loading = set()  # (hosts whose notebooks are asked for, not listed yet)
+        self.unsent = {}  # (host: a change to it wasn't taken: Window.send_notes's count then; sent again with the next)
         self.sender = None  # (fn(host, changes): a change sent to a host, Window.send_notes)
         self.notebooks, saved_notes = [], None
         self.full_width = not os.path.exists(self.path)  # (☰ → Full-width text, as Baude's: on for a new installation)
@@ -452,6 +455,7 @@ class Store:
                 saved = json.load(f)
                 self.notebooks = saved.get("records", [])
                 self.picked = saved.get("host") if isinstance(saved.get("host"), str) else HERE_HOST
+                self.picked_name = saved.get("host_name") if isinstance(saved.get("host_name"), str) else self.picked
                 self.full_width = bool(saved.get("full_width"))
                 saved_notes = saved.get("notes")  # ("markdown": the notes are; else Zim's markup, from before)
                 self.zoom = float(saved.get("zoom") or 1.0)
@@ -520,20 +524,22 @@ class Store:
                     t["pages"].update(b["pages"])
             t["host"] = name
             out.append(t)
-        listed, was = {b["id"] for b in books}, self.remote_base.get(host) or {}
-        out[:0] = [t for t in have if t.get("id") not in listed and t.get("id") not in was]  # (made here meanwhile)
+        listed, was = {b["id"] for b in books}, self.remote_base.get(host)
+        if was is not None:  # (made here meanwhile, not sent yet: kept)
+            out[:0] = [t for t in have if t.get("id") not in listed and t.get("id") not in was]
         have[:] = out
         self.remote_base[host] = {b["id"]: copy.deepcopy(b) for b in books}
         self.loading.discard(host)
         if host == self.host:
             self.mirror_pages()
 
-    def push(self):
-        """The host shown, if it's another: what's changed of its notebooks here since it last had them, sent to it
-        (sender): a notebook made, dropped, renamed, its pages set or deleted."""
-        host = self.host
+    def push(self, host=None):
+        """A host's notebooks (the one shown's, if not said), if it's another: what's changed of them here since it
+        last had them (or wasn't sent after all: failed), sent to it (sender): a notebook made, dropped, renamed, its
+        pages set or deleted. True if anything was."""
+        host = host or self.host
         if host == HERE_HOST or host in self.loading or self.sender is None:
-            return
+            return False
         base = self.remote_base.setdefault(host, {})
         now = {t["id"]: notes.shared(t) for t in self.remote.get(host, [])}
         changes = []
@@ -555,6 +561,24 @@ class Store:
         if changes:
             self.remote_base[host] = copy.deepcopy(now)
             self.sender(host, changes)
+        return bool(changes)
+
+    def failed(self, host, changes):
+        """Changes a host didn't take: marked in what it's said to have (remote_base), so the next push sends them
+        again (a notebook made: made again; dropped: dropped again; a name, a page: set again), and nothing else."""
+        base = self.remote_base.setdefault(host, {})
+        for c in changes:
+            if c.get("new"):
+                base.pop(c["id"], None)
+                continue
+            if c.get("drop"):
+                base.setdefault(c["id"], {"id": c["id"], "name": self.UNSENT, "pages": {}})
+                continue
+            was = base.setdefault(c["id"], {"id": c["id"], "name": self.UNSENT, "pages": {}})
+            if "name" in c:
+                was["name"] = self.UNSENT
+            for p in c.get("pages") or {}:
+                was["pages"][p] = self.UNSENT
 
     def apply_here(self, changes):
         """Changes another machine's Record made to this machine's notebooks (handed over by the host process here:
@@ -592,9 +616,12 @@ class Store:
     BACKUP_EVERY, BACKUPS = 600, 50  # a copy of what was saved before, at most every 10 minutes; the last 50 kept
 
     def new(self, name):
-        """A new one, "fresh" until it's named or anything's put in it (is_blank: a blank one isn't kept)."""
+        """A new one, "fresh" until it's named or anything's put in it (is_blank: a blank one isn't kept); on the host
+        shown."""
         t = {"id": uuid.uuid4().hex[:12], "name": name, "created": time.time(), "pages": {HOME: ""},
              "folders": [], "messages": [], "fresh": True}
+        if self.host != HERE_HOST:
+            t["host"] = self.host_name  # (its pages' files with that host's: page_paths)
         self.notebooks.insert(0, t)
         self.save_now()
         return t
@@ -607,8 +634,15 @@ class Store:
             not t.get("folders") and not t.get("messages")
 
     def delete(self, notebook):
-        self.notebooks = [t for t in self.notebooks if t["id"] != notebook["id"]]
-        self.save_now()
+        """A notebook gone, from whichever host's it is (that one, not one of the same id: the host shown may have
+        changed since it was asked for)."""
+        for host, books in [(HERE_HOST, self.local), *self.remote.items()]:
+            if any(t is notebook for t in books):
+                books[:] = [t for t in books if t is not notebook]
+                self.save_now()
+                if host != self.host:
+                    self.push(host)
+                return
 
     def mirror_pages(self):
         """Every page of notes as a plain file too, read-only, in a folder that's Record's own: pages/<notebook>/<page>.md.
@@ -617,10 +651,13 @@ class Store:
         but what's been written here. What's kept is records.json: a file that can't be written here stops neither that nor
         the other files."""
         root = os.path.join(data_dir(), "pages")
-        every = self.local + (self.notebooks if self.host != HERE_HOST else [])  # (another host's: hosts/<it>/)
-        self.page_files = {key: os.path.join(root, rel) for key, rel in page_paths(every).items()}
-        books = {t.get("id"): t["pages"] for t in every}
-        wanted = {path: books[book][name] for (book, name), path in self.page_files.items()}
+        shown = [("", self.local)] + ([(self.host, self.notebooks)] if self.host != HERE_HOST else [])
+        self.page_files, wanted = {}, {}  # (by host too: another's notebook of the same id, as a copied records.json has)
+        for host, books in shown:  # (another host's in hosts/<its name>/: page_paths)
+            pages = {t.get("id"): t["pages"] for t in books}
+            for (book, name), rel in page_paths(books).items():
+                self.page_files[host, book, name] = path = os.path.join(root, rel)
+                wanted[path] = pages[book][name]
         failed = None
         gone = self.mirrored.keys() - wanted.keys()
         for path in gone:
@@ -654,7 +691,7 @@ class Store:
     def page_file(self, notebook, name):
         """A page's file, as the page is now (None if it couldn't be written)."""
         self.save_now()
-        path = self.page_files.get((notebook.get("id"), name))
+        path = self.page_files.get(("" if not notebook.get("host") else self.host, notebook.get("id"), name))
         return path if path and self.mirrored.get(path) == notebook["pages"].get(name) else None
 
     def flush(self):
@@ -678,7 +715,7 @@ class Store:
         self.backup()
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"records": self.local, "host": self.picked, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
+            json.dump({"records": self.local, "host": self.picked, "host_name": self.picked_name, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
                        "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
@@ -1005,8 +1042,8 @@ its folders.
 
 The notebooks are on hosts, the user's machines: local is this one. A place is host / notebook / page, and you're \
 told where the user is (Open: host / notebook / page) as it changes. Only the picked host's notebooks are listed, and \
-your tools work on those: a tool's host, if you give it, is that one. set_setting notes_host picks another (what \
-it has is listed a moment later).
+your tools work on those: a tool's host, if you give it, is that one. The user picks the host; to take them to \
+another, show button:host (items: its name) for them to press.
 
 You never write a page's text yourself. To change it (fill a passage in, rewrite one, add to it), call propose_edit \
 with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
@@ -5608,25 +5645,6 @@ class RecordChat(meta.MetaChat):
             lambda: widgets.settings_switch(backup, backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                             "win.backupall"), bool)
 
-        def hosts():
-            return [n for _k, n in win.note_hosts()]
-
-        def host_set(name):
-            win.pick_host(next((k for k, n in win.note_hosts() if n == name), HERE_HOST))
-
-        def host_row():
-            names = hosts()
-            r = Adw.ComboRow(title=f"{book(plural=True)}' host",
-                             subtitle=f"The machine whose {book(plural=True).lower()} are listed",
-                             model=Gtk.StringList.new(names),
-                             selected=names.index(win.store.host_name) if win.store.host_name in names else 0)
-            r.connect("notify::selected", lambda r, _p: r.get_selected() < len(names) and
-                      host_set(names[r.get_selected()]))
-            return r
-        out["notes_host"] = meta.Setting(
-            "notes_host", f"{book(plural=True)}' host", lambda: win.store.host_name, host_set, host_row, hosts,
-            note=f"the host whose {book(plural=True).lower()} are listed and opened, by its name (local: this machine), "
-                 "as the dropdown beside Notebooks has it; your tools work on its notebooks, listed a moment after")
         return out
 
     def told(self):
@@ -6056,7 +6074,7 @@ class RecordChat(meta.MetaChat):
     def index_lines(self):
         nb, store, lines = self.notebook, self.win.store, []
         lines.append(f"open: {self.win.place()} · hosts: " + ", ".join(n for _k, n in self.win.note_hosts()) +
-                     " (notes_host picks one)")
+                     " (button:host opens one)")
         if store.host in store.loading:
             lines.append(f"{store.host_name}'s notebooks: being listed")
         if nb is not None:
@@ -6240,9 +6258,19 @@ class RecordChat(meta.MetaChat):
 
     def buttons(self):
         return {"delete_notebook": f"Delete the {book().lower()} open and its pages (asks first; "
-                                   "can't be undone)"}
+                                   "can't be undone)",
+                "host": f"Open a host (items: its name): its {book(plural=True).lower()} listed"}
 
     def button(self, action, items):
+        if action == "host" and items:
+            hosts = self.win.note_hosts()
+            key = next((k for k, n in hosts if n.lower() == str(items[0]).strip().lower()), None)
+            if key is None:
+                raise ValueError(f"No host {items[0]!r}: they're {', '.join(n for _k, n in hosts)}.")
+            btn = Gtk.Button(label=f"Open {dict(hosts)[key]}")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda *_: self.win.pick_host(key))
+            return btn
         if action != "delete_notebook" or self.notebook is None:
             raise ValueError(f"There's no button {action}: app_index buttons lists them.")
         btn = Gtk.Button(label=f"Delete {full_name(self.notebook)}…")
@@ -6374,8 +6402,8 @@ class RecordChat(meta.MetaChat):
         store, name = self.win.store, str(args.get("host") or "").strip()
         names = [n for _k, n in self.win.note_hosts()]
         if name and name.lower() != store.host_name.lower():
-            raise ValueError(f"Your tools work on the host picked, {store.host_name}: set_setting notes_host {name} "
-                             "first, and call again once its notebooks are listed." if name.lower() in map(str.lower, names)
+            raise ValueError(f"Your tools work on the host picked, {store.host_name}: show button:host {name} for the "
+                             "user to open it, and call again once they have." if name.lower() in map(str.lower, names)
                              else f"There's no host {name!r}: they're {', '.join(names)}.")
         if store.host in store.loading:
             raise ValueError(f"{store.host_name}'s notebooks are still being listed: call again in a moment.")
@@ -6787,6 +6815,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         books = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
+        # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
+        self.host_banner = Adw.Banner(use_markup=True)
+        books.append(self.host_banner)
         books.append(self.pages)
         self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,
                                                lambda: self.fold_books(not self.store.books_folded),
@@ -6802,10 +6833,13 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.host_dd.add_css_class("notes-host")
         self.host_dd.set_valign(Gtk.Align.CENTER)
         if (popup := next((w for w in widgets.walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
-            popup.connect("show", lambda *_: network().look())  # (opened: a host started a moment ago, offered)
+            popup.connect("show", lambda *_: (self.start_network(), network().look()))  # (opened: the hosts looked
+            # for, one started a moment ago offered)
         self.books_head.insert_child_after(self.host_dd, self.books_head.arrow.get_next_sibling())
         self.books_head.name.set_ellipsize(Pango.EllipsizeMode.NONE)  # (Notebooks whole: the host's name gives way)
-        self.sends, self.list_again = {}, set()  # (changes sent to a host, not answered yet; hosts to list once they are)
+        self.sends, self.sent = {}, {}  # (by host: changes sent it, not answered yet; sent it at all, this run)
+        self.list_again, self.asked = set(), set()  # (hosts to list once what's sent is answered; being listed)
+        self.host_up, self.net_on = {}, False  # (by host: there, as last seen; the hosts looked for: start_network)
         books.append(self.books_head)
         self.notebook_list = Gtk.ListBox()
         self.notebook_list.add_css_class("navigation-sidebar")
@@ -7002,8 +7036,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.connect("close-request", lambda *_: self.store.save_now() and False)
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
         self.store.sender = self.send_notes
-        network().listen(self.on_network)  # (the hosts there are: New session's in Baude, the notebooks' here)
-        self.on_network()
+        self.host_dd.set_choices(self.note_hosts())
+        self.host_dd.select(self.store.picked)
+        if self.store.picked != HERE_HOST:  # (another host picked when it last closed: its notebooks, there or not)
+            self.start_network()
+            self.show_host(self.store.picked)
         widgets.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
         widgets.warm_shaders(self)  # (after its first frame)
@@ -7349,7 +7386,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         """Every BACKUP_EVERY, all the notebooks in the one zip in place of the last (backup_zip), if they've changed. With the
         glossary and the chats (Settings) they may have whether or not the notebooks have. With nothing written anywhere it's
         left as it is: that's more likely notes that couldn't be read (Store) than notes that are gone."""
-        written = any(text.strip() for notebook in self.store.notebooks for text in notebook["pages"].values())
+        written = any(text.strip() for notebook in self.store.local for text in notebook["pages"].values())
         if written and not self.zipping and (self.store.unzipped or self.store.backup_all):
             self.zipping, self.store.unzipped = True, False
 
@@ -7358,7 +7395,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 if error:
                     self.store.unzipped = True  # (the next time)
                     print(f"Record: the backup: {error}", file=sys.stderr)
-            self.export(self.store.notebooks, backup_zip(), self.store.backup_all, done)
+            self.export(self.store.local, backup_zip(), self.store.backup_all, done)
         return True
 
     @staticmethod
@@ -7511,13 +7548,16 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     # ---- hosts: another machine's notebooks, through its host process (baudelib.notes), as Baude has its chats
     def note_hosts(self):
-        """[(key, name)]: the hosts whose notebooks can be listed: this machine (local), then each other that's there
-        and not deactivated, by its name, as Baude's New session lists them."""
+        """[(key, name)]: the hosts whose notebooks can be listed, as Baude's New session lists them: this machine
+        (local), then every other known, by its name (one that's gone or deactivated too: picked, it says so,
+        show_host_state); and the one picked, by the name it had, while it isn't known."""
         out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
-        for r in sorted(network().alive(), key=lambda r: remote_name(r).lower()):
-            if (key := host_key(r)) not in seen and not r.deactivated:
+        for r in sorted(network().remotes() if _NETWORK else (), key=lambda r: remote_name(r).lower()):
+            if (key := host_key(r)) not in seen:
                 seen.add(key)
                 out.append((key, remote_name(r)))
+        if self.store.picked not in seen:
+            out.append((self.store.picked, self.store.picked_name or self.store.picked))
         return out
 
     def place(self):
@@ -7529,27 +7569,92 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         return " / ".join([self.store.host_name, full_name(self.current), *([page] if page else [])])
 
     def host_remote(self, key):
-        """A host's Remote, by its key, while it's there (None for this machine's)."""
-        return next((r for r in network().alive() if host_key(r) == key and key != HERE_HOST), None)
+        """A host's Remote, by its key, there or not (None for this machine, or one not known)."""
+        if key == HERE_HOST or not _NETWORK:
+            return None
+        return next((r for r in network().remotes() if host_key(r) == key), None)
+
+    @staticmethod
+    def reachable(r):
+        return r is not None and r.state == "alive" and not r.deactivated
+
+    def start_network(self):
+        """The hosts looked for (baudelib.client.Network): once, as the dropdown's first opened, or at the start with
+        another host picked. (Not before: a Record that's only this machine's reaches no other.)"""
+        if not self.net_on:
+            self.net_on = True
+            network().listen(self.on_network)
+            self.on_network()
 
     def on_network(self):
-        """The hosts changed: the dropdown's as they are, on the host picked (this machine's while it isn't there)."""
+        """The hosts changed: the dropdown's as they are, on the host picked; the one shown, back, listed again (what
+        wasn't sent it, sent first: list_notes); what's in its way said (show_host_state)."""
+        store = self.store
+        for r in network().remotes():  # (the one picked, known by another key now: by that one)
+            if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:
+                self.rekey_host(store.picked, host_key(r))
         hosts = self.note_hosts()
         self.host_dd.set_choices(hosts)
-        want = self.store.picked if self.store.picked in dict(hosts) else HERE_HOST
-        if want != self.store.host:
-            self.show_host(want, dict(hosts)[want])
-        self.host_dd.select(self.store.host)
+        self.host_dd.select(store.picked)
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
+        if store.host != HERE_HOST:
+            r = self.host_remote(store.host)
+            if r is not None and remote_name(r) != store.host_name:
+                store.host_name = store.picked_name = remote_name(r)
+            up = self.reachable(r)
+            if up and not self.host_up.get(store.host):
+                self.list_notes(store.host)
+            self.host_up[store.host] = up
+        self.show_host_state()
+
+    def rekey_host(self, old, new):
+        store = self.store
+        for d in (store.remote, store.remote_base, store.unsent, self.sends, self.sent, self.host_up):
+            if old in d:
+                d[new] = d.pop(old)
+        for s in (store.loading, self.asked, self.list_again):
+            if old in s:
+                s.discard(old)
+                s.add(new)
+        if store.host == old:
+            store.host = new
+        if store.picked == old:
+            store.picked = new
+            store.save()
+
+    def host_state(self):
+        """What's in the way of the host shown, as Baude's banner says it over a host's chats, or None: it's there (or
+        it's this machine)."""
+        store = self.store
+        if store.host == HERE_HOST:
+            return None
+        r, name = self.host_remote(store.host), store.host_name
+        if r is None:
+            return f"Looking for {name} on the network…"
+        if self.reachable(r):
+            return None
+        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
+            if r.state == "dead" else f"Looking for {name} on the network…"
+
+    def show_host_state(self):
+        """The host shown isn't there (or is deactivated): said in the banner over the left bar, its notebooks as
+        they were last listed; what's changed in them is sent once it's back."""
+        said = self.host_state()
+        if said is not None:
+            self.host_banner.set_title(GLib.markup_escape_text(said))
+        self.host_banner.set_revealed(said is not None)
 
     def pick_host(self, key):
-        """A host picked in the dropdown (or by Meta: notes_host): its notebooks listed, and kept as the one picked."""
-        self.store.picked = key
+        """A host picked in the dropdown (or with Meta's button:host): its notebooks listed; kept, across restarts
+        and while it's gone."""
+        self.store.picked, self.store.picked_name = key, dict(self.note_hosts()).get(key, THIS_MACHINE)
         self.store.save()
-        self.show_host(key, dict(self.note_hosts()).get(key, THIS_MACHINE))
+        if key != HERE_HOST:
+            self.start_network()
+        self.show_host(key)
 
-    def show_host(self, key, name):
+    def show_host(self, key):
         """The notebooks listed, a host's: the open one closed (its changes sent first), the first of the new host's
         opened once they're listed (list_notes)."""
         store = self.store
@@ -7559,15 +7664,17 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.notebook_list.unselect_all()
         if self.current is not None:
             self._show(None)
-        store.host, store.host_name = key, name
+        store.host, store.host_name = key, dict(self.note_hosts()).get(key, store.picked_name)
         if key != HERE_HOST and key not in store.remote_base:
             store.loading.add(key)  # (nothing sent to it till what it has is listed)
         store.mirror_pages()
         self.fill_sidebar()
         if key != HERE_HOST:
+            self.host_up[key] = self.reachable(self.host_remote(key))
             self.list_notes(key)
         self.open_first()
         self.host_dd.select(key)
+        self.show_host_state()
 
     def open_first(self):
         first = self.notebook_list.get_row_at_index(0)
@@ -7577,17 +7684,26 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self._show(None)
 
     def list_notes(self, key):
-        """A host's notebooks asked for (op notes), and taken in as it lists them (Store.take): once the changes sent
-        it are answered, so none's undone by a list made before them."""
+        """A host's notebooks asked for (op notes), and taken in as it lists them (Store.take). Not while what's
+        been changed here isn't on it: what wasn't sent, sent again first (Store.failed), and any list asked for
+        before a change was sent, asked for again once the changes are answered: none's undone by an older list."""
         r = self.host_remote(key)
-        if r is None:
+        if not self.reachable(r) or key in self.asked:
             return
+        self.asked.add(key)
+        at = self.sent.get(key, 0)
 
         def got(reply):
+            self.asked.discard(key)
             store = self.store
-            store.flush()  # (what's typed since: sent first, and listed again after)
-            if self.sends.get(key):
+            if key == store.host:
+                store.flush()  # (what's typed since: sent first, and listed again after)
+                store.push(key)  # (what wasn't sent it before: sent now)
+            if self.sends.get(key) or self.sent.get(key, 0) != at or store.unsent.get(key) is not None:
                 self.list_again.add(key)
+                if not self.sends.get(key) and key == store.host:  # (nothing on its way: asked again now)
+                    self.list_again.discard(key)
+                    GLib.timeout_add(500, lambda: self.list_notes(key) and False)
                 return
             if reply.get("op") != "notes" or reply.get("error"):
                 store.loading.discard(key)
@@ -7604,20 +7720,26 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         r.request({"op": "notes"}, got)
 
     def send_notes(self, key, changes):
-        """Changes to a host's notebooks, sent it (Store.push). One it doesn't take: said, and everything it was last
-        listed with sent again with the next change."""
-        r = self.host_remote(key)
-        if r is None:
-            self.store.remote_base.pop(key, None)
-            self.toast("Not saved: that host isn't there")
+        """Changes to a host's notebooks, sent it (Store.push). Those it doesn't take (it's gone, or says no): kept to
+        send again (Store.failed), with the next change or once it's back."""
+        r, store = self.host_remote(key), self.store
+        self.sent[key] = seq = self.sent.get(key, 0) + 1
+        if not self.reachable(r):
+            store.failed(key, changes)
+            store.unsent[key] = seq
             return
         self.sends[key] = self.sends.get(key, 0) + 1
 
         def done(reply):
             self.sends[key] -= 1
             if reply.get("op") != "notes" or reply.get("error"):
-                self.store.remote_base.pop(key, None)  # (all of it sent again, as new to it: notes.apply)
-                self.toast(f"{remote_name(r)} didn't save the change: {reply.get('error') or 'no answer'}")
+                if store.unsent.get(key) is None:
+                    self.toast(f"{remote_name(r)} didn't save the change: {reply.get('error') or 'no answer'}")
+                store.failed(key, changes)
+                store.unsent[key] = self.sent[key]
+                self.list_again.discard(key)  # (listed again as it comes back, or the window does: not at once)
+            elif store.unsent.get(key) is not None and seq > store.unsent[key]:
+                del store.unsent[key]  # (sent after what failed was marked: it had it)
             if not self.sends[key] and key in self.list_again:
                 self.list_again.discard(key)
                 self.list_notes(key)
@@ -7626,10 +7748,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def notes_here(self, changes):
         """Changes another machine's Record made to this one's notebooks (record.listen): made, and shown."""
         if not notes.changes_ok(changes):
-            return
+            return False
         self.store.apply_here(changes)
         if self.store.host == HERE_HOST:
             self.notes_changed()
+        return True
 
     def notes_changed(self, fresh=False):
         """The notebooks listed changed under the window (another host's listed, or changed from elsewhere): rows added
@@ -8557,7 +8680,8 @@ def hand_over(request, path=None):
 def listen(on_request):
     """Be the Record that's running: a later start's request goes to on_request(dict), on the main loop. (Two would
     each save records.json over the other's.) So does a change to this machine's notebooks from another's Record
-    ({"notes": changes}, from the host process here: notes.write), answered "notes" so it knows it's taken."""
+    ({"notes": changes}, from the host process here: notes.write): answered "notes" once on_request has made it (it
+    says True), so it's in records.json when the host process next lists them; "no" if it couldn't be, in time."""
     import socket
     path = socket_path()
     if os.path.exists(path):
@@ -8574,10 +8698,14 @@ def listen(on_request):
                     request = json.loads(conn.makefile().readline() or "{}")
                     if not isinstance(request, dict):
                         continue
-                    if "notes" in request and not notes.changes_ok(request["notes"]):
-                        conn.sendall(b"no\n")
+                    if "notes" in request:
+                        made, ready = [], threading.Event()
+                        if notes.changes_ok(request["notes"]):
+                            GLib.idle_add(lambda r=request: (made.append(on_request(r)), ready.set()) and False)
+                        ready.wait(4)  # (within notes.write's wait: told no, it's sent again later)
+                        conn.sendall(b"notes\n" if made and made[0] else b"no\n")
                         continue
-                    conn.sendall(b"notes\n" if "notes" in request else b"ok\n")
+                    conn.sendall(b"ok\n")
                 except (OSError, ValueError):
                     continue
             GLib.idle_add(lambda r=request: on_request(r) and False)
@@ -8647,6 +8775,10 @@ class App(Adw.Application):
                 print("record: no Dock icon:", e, file=sys.stderr)
         else:
             themed_icon()
+        try:  # (first: a change from another machine's Record waits for the window, not written under it: notes.write)
+            self.server = listen(self.request)
+        except OSError as e:
+            print("record: another start won't find this one:", e, file=sys.stderr)
         self.win = Window(self)
         widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         state = None
@@ -8667,12 +8799,18 @@ class App(Adw.Application):
                                           blocked=lambda waiting: self.win is not None and self.win.update_waiting(waiting))
         if self.chat:
             self.win.open_chat(self.chat)
-        try:
-            self.server = listen(lambda r: (self.win.notes_here(r["notes"]) if "notes" in r
-                                            else self.win.open_chat(r["chat"]) if r.get("chat")
-                                            else self.win.present()))
-        except OSError as e:
-            print("record: another start won't find this one:", e, file=sys.stderr)
+
+    def request(self, r):
+        """A later start's request (listen), or another machine's change to the notebooks here: True if it's made."""
+        if self.win is None:
+            return False
+        if "notes" in r:
+            return self.win.notes_here(r["notes"])
+        if r.get("chat"):
+            self.win.open_chat(r["chat"])
+        else:
+            self.win.present()
+        return True
 
 
 def main():

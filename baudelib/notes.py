@@ -96,11 +96,12 @@ def apply(notebooks, changes):
             by_id[c["id"]] = t
         if c.get("name") is not None:
             t["name"] = c["name"]
+        pages = t.setdefault("pages", {})
         for name, text in (c.get("pages") or {}).items():
             if text is None:
-                t["pages"].pop(name, None)
+                pages.pop(name, None)
             else:
-                t["pages"][name] = text
+                pages[name] = text
         done.append(c["id"])
     return done
 

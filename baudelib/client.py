@@ -363,8 +363,9 @@ class Network:
     hosts: ssh destinations to know too. None is looked for on the network: this machine's is found by its socket,
     another's is given by where ssh goes."""
 
-    def __init__(self, dispatch, home=None, hosts=()):
+    def __init__(self, dispatch, home=None, hosts=(), readonly=False):
         self.dispatch, self.home = dispatch, home or network_home()
+        self.readonly = readonly  # (servers.json read, never written: Record's, Baude's being the one that keeps it)
         self.servers, self.listeners, self.lock = {}, [], threading.RLock()
         self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
@@ -631,8 +632,10 @@ class Network:
 
     def save(self):
         """servers.json: every host reached or given by hand, and what's in it that isn't known here (put there
-        meanwhile: take_saved takes it up), not written over."""
+        meanwhile: take_saved takes it up), not written over. (readonly: not written.)"""
         self.saved_at = time.time()
+        if self.readonly:
+            return
         on_disk = self.saved()
         with self.lock:
             servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
@@ -644,9 +647,10 @@ class Network:
         target = os.path.join(self.home, "servers.json")
         try:
             os.makedirs(self.home, exist_ok=True)
-            with open(target + ".tmp", "w", encoding="utf-8") as f:
+            tmp = f"{target}.{os.getpid()}.tmp"  # (another process's write at once: not into the same file)
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-            os.replace(target + ".tmp", target)
+            os.replace(tmp, target)
         except OSError:
             pass
 

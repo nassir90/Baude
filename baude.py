@@ -14155,7 +14155,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # ---- inference providers: where the models besides Claude's run (Ollama, MLX, Apple's, an OpenAI-compatible
     # server), by host: this machine's, and every other member's of the mesh (network().providers()). Picked left of
     # the model picker, which lists Claude's (claude's: not a provider, bound to where it runs), then the provider's.
-    # Picking a provider changes the list; picking a model changes the chat's model, never its host: the chat stays
+    # Picking a provider changes the list and puts the chat on its model (the same one, else its first); picking a model
+    # changes the chat's model. Neither changes its host: the chat stays
     # where it is, with its files, and another host's model runs for it through the mesh's proxy where it serves an API,
     # else as an agent there whose tools are the chat's host's (providers.elsewhere). Where a chat lives is picked as
     # it's made (New Session's host), or by Meta. The picker's on the provider of the chat's model, as it's opened or
@@ -14319,9 +14320,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def on_provider_changed(self, key):
         """A provider picked: the model picker lists its models after Claude's; kept for the chats after
-        (settings.json's provider). The chat goes on with its own model till one's picked, unless the provider has the
-        same one (alike: its own on another host): the chat's model is then that host's. On Apple's model, another
-        host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
+        (settings.json's provider). The chat's model is the provider's, as a model picked is: the same one as its own
+        where the provider has it (alike: its own on another host), else the provider's first. On Apple's model,
+        another host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
         self.move_after_turn = None
         if key in getattr(self, "alike_keys", {}):
             self.move_to(self.alike_keys[key])
@@ -14335,6 +14336,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                       m["value"] != self.model and providerslib.same(m, mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
             self.move_to(there["value"])
+            return
+        theirs = getattr(self, "provider_models", {}).get(key, [])
+        if theirs and self.provider_key_of(self.model) != key and \
+                not any(m["value"] == self.model for m in theirs):  # (not on one of its already: its first)
+            self.move_to(theirs[0]["value"])
             return
         self.sync_providers()
 
@@ -17015,7 +17021,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its copy of the model now)
+        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)

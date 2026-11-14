@@ -8875,7 +8875,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.status = StatusSlot("running")  # (a spinner while it answers; a mark only for one that failed)
         self.status.set_visible(False)
         head.append(self.status)
-        self.title = Gtk.Label(label=question or "New side question", xalign=0, hexpand=True, wrap=True,
+        self.title = Gtk.Label(label=question or "", xalign=0, hexpand=True, wrap=True,
                                wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.title.add_css_class("title")  # (as a subagent's row's)
         head.append(self.title)

@@ -105,11 +105,17 @@ def proxied(value):
     return (member, inner) if member and inner else None
 
 
+def same_kind(a, b):
+    """Can a conversation go on from model b to model a: the same program runs them, on the same host (another's,
+    as an agent of its, keeps its own sessions: proxied)?"""
+    return model_program(a) == model_program(b) and (proxied(a) or (None,))[0] == (proxied(b) or (None,))[0]
+
+
 def model_program(value):
     """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude". A
     model run on another host as an agent: what runs it there."""
-    if (agent := proxied(value)) is not None:
-        return model_program(agent[1])
+    if (agent := proxied(value)) is not None:  # (only a model with no API is run so: Apple's, else MLX's)
+        return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
     if value == APPLE_MODEL["value"]:
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):

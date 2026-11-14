@@ -80,11 +80,20 @@ def bare(msg):
     return msg
 
 
-class _Ended:
-    """Its Popen, as callers wait on it: poll, wait, terminate."""
+def later(seconds, fn):
+    """fn in seconds, on a thread that doesn't keep the process up."""
+    t = threading.Timer(seconds, fn)
+    t.daemon = True
+    t.start()
 
-    def __init__(self, proc):
-        self.proc, self.code, self.done = proc, None, threading.Event()
+
+class _Ended:
+    """Its Popen, as callers wait on it and say what it is: poll, wait, terminate; pid (none here), args."""
+
+    pid = None
+
+    def __init__(self, proc, args):
+        self.proc, self.args, self.code, self.done = proc, args, None, threading.Event()
 
     def poll(self):
         return self.code
@@ -108,6 +117,7 @@ class ProxiedProc(ClaudeProc):
         self.asks = {}
         self.member, inner = split(model)
         self.cwd = cwd if cwd and os.path.isdir(cwd) else os.path.expanduser("~")
+        self.env = os.environ | (env or {})  # (the caller's, as its claude would have it: its tools' here)
         got = flags(extra)
         tools = got["--tools"].split(",") if "--tools" in got else None
         self.servers = mcp_servers(got.get("--mcp-config"))
@@ -122,7 +132,7 @@ class ProxiedProc(ClaudeProc):
                         "cwd": self.cwd}
         self.ch, self.waiting, self.lock = None, [], threading.Lock()
         self.relays = {}  # (conn: the MCP server started here for it)
-        self.p, self.ended = _Ended(self), False
+        self.p, self.ended = _Ended(self, ["agent", self.member, inner]), False
         threading.Thread(target=self._run, args=({"via": "mesh", "host": self.member, "path": path},),
                          daemon=True, name="agent-proxy").start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None})
@@ -144,10 +154,13 @@ class ProxiedProc(ClaudeProc):
             ch.close()
             return self._end(1)
         with self.lock:
-            self.ch = ch
-            waiting, self.waiting = self.waiting, []
-        for msg in waiting:
-            ch.send(msg)
+            if self.ended:  # (given up on, or killed, while it was being started there: stopped there too)
+                ch.send({"op": "kill"})
+                ch.close()
+                return None
+            for msg in self.waiting:  # (what was said meanwhile, in its order, before anything said from now on)
+                ch.send(msg)
+            self.ch, self.waiting = ch, []
         ch.keep_alive()
         code = 1
         for msg in ch:
@@ -176,16 +189,22 @@ class ProxiedProc(ClaudeProc):
 
     def _open(self, conn, name):
         server = self.servers.get(name)
-        if server is None or not isinstance(conn, int):
+        if server is None or not isinstance(conn, int) or self.ended:
             return self._send({"op": "mcp_close", "conn": conn})
         try:
             p = subprocess.Popen([server["command"], *[str(a) for a in server.get("args") or []]], cwd=self.cwd,
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                                 bufsize=1, env=os.environ | {k: str(v) for k, v in (server.get("env") or {}).items()})
+                                 bufsize=1, env=self.env | {k: str(v) for k, v in (server.get("env") or {}).items()})
         except OSError as e:
             self._say(f"couldn't start the {name} tools here: {e}")
             return self._send({"op": "mcp_close", "conn": conn})
-        self.relays[conn] = p
+        with self.lock:
+            ended = self.ended
+            if not ended:
+                self.relays[conn] = p
+        if ended:  # (it ended as this was started: not kept)
+            p.kill()
+            return None
 
         def read():
             for line in p.stdout:
@@ -212,7 +231,7 @@ class ProxiedProc(ClaudeProc):
                 p.stdin.close()
             except (OSError, ValueError):
                 pass
-            threading.Timer(2, lambda: p.poll() is None and p.kill()).start()
+            later(2, lambda: p.poll() is None and p.kill())
 
     def _send(self, msg):
         with self.lock:
@@ -232,8 +251,9 @@ class ProxiedProc(ClaudeProc):
             self._close(conn)
         if ch is not None:
             ch.close()
-        self.p.code = code
-        self.p.done.set()
+        if not self.p.done.is_set():
+            self.p.code = code
+            self.p.done.set()
         self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):
@@ -247,10 +267,13 @@ class ProxiedProc(ClaudeProc):
             return
         with self.lock:
             ch = self.ch
-        if ch is None:  # (not there yet: given up on)
+        if ch is None:  # (not there yet: given up on, and stopped there if it's started yet: _run)
             return self._end(-1)
+        if not self.p.done.is_set():  # (gone, to who waits on it: told to go, nothing of it holds anything here)
+            self.p.code = -1
+            self.p.done.set()
         ch.send({"op": "kill"})
-        threading.Timer(5, lambda: self._end(-1)).start()  # (no word back: gone anyway)
+        later(5, lambda: self._end(-1))  # (no word back: gone anyway)
 
 
 class Run:
@@ -282,9 +305,13 @@ class Run:
         if msg.get("persist") is False:
             args += ["--no-session-persistence"]
         told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
-        self.p = subprocess.Popen(args, cwd=self.folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1,
-                                  env=claude_env() | {"BAUDE_TOOLS_CWD": told[:4096]})
+        try:
+            self.p = subprocess.Popen(args, cwd=self.folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True, bufsize=1,
+                                      env=claude_env() | {"BAUDE_TOOLS_CWD": told[:4096]})
+        except OSError:
+            shutil.rmtree(self.folder, ignore_errors=True)
+            raise
         threading.Thread(target=self._read, args=(self.p.stdout, "out"), daemon=True, name="agent-out").start()
         threading.Thread(target=self._read, args=(self.p.stderr, "err"), daemon=True, name="agent-err").start()
 
@@ -320,7 +347,7 @@ class Run:
         elif op == "mcp_close":
             relay = self.relays.pop(msg.get("conn"), None)
             if relay is not None:
-                relay.close()
+                close_conn(relay)
 
     def relay(self, conn, msg):
         """A relay of the program's (mcp-relay) connected, for its server name: the caller starts that server, and
@@ -351,11 +378,17 @@ class Run:
             relays, self.relays = list(self.relays.values()), {}
         if self.p.poll() is None:
             self.p.terminate()
-            threading.Timer(5, lambda: self.p.poll() is None and self.p.kill()).start()
+            later(5, lambda: self.p.poll() is None and self.p.kill())
         for r in relays:
-            r.close()
+            close_conn(r)
         shutil.rmtree(self.folder, ignore_errors=True)
         self.server.agent_runs.pop(self.id, None)
+
+
+def close_conn(conn):
+    """A host process's connection (server.Conn) let go of, its socket too: what's at the other end hears it's gone."""
+    conn.close()
+    conn.channel.close()
 
 
 def relay(socket_path, run, name, token):

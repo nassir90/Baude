@@ -13076,8 +13076,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if value == was:  # (the one it's on)
             return
         self.outgrown = False  # (another model's window: as its usage says)
-        if self.remote is not None and model_program(value) != model_program(was):
-            label = self.model_dd.label()
+        if self.remote is not None and not modelslib.same_kind(value, was):  # (another program, or one run on
+            label = self.model_dd.label()  # another host, whose sessions are its own)
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
             return
@@ -13086,7 +13086,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
-        if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
+        if self.remote is None and not modelslib.same_kind(value, was):  # (Claude's to Apple's: another program; or
+            # one run on another host, whose sessions are its own)
             self.note(f"model → {self.model_dd.label()}: a new conversation")
             self.restart_proc(resume=False)
             return
@@ -13283,9 +13284,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if own == HERE_HOST:
             add(own, THIS_MACHINE, modelslib.runnable_models(wait=False))
             theirs = set()
-        else:
-            add(own, remote_name(self.remote), [m for m in self.models_info.values() if m["value"] != "default"])
+        else:  # (its own, as it lists them: not those of other hosts' it runs, which are kept beside them)
+            add(own, remote_name(self.remote), [m for m in self.models_info.values() if m["value"] != "default" and
+                                                not modelslib.proxied(m["value"]) and
+                                                not m["value"].startswith("openai/mesh-")])
             theirs = {self.remote.info.get("id"), own}
+        if self.runs_here():  # (Baude's own claude runs it: no host process here to reach another host's from)
+            return out
         for p in network().providers():
             host = p.get("host") or {}
             if (host.get("here") if own == HERE_HOST else host.get("id") in theirs) or not p.get("models") or \

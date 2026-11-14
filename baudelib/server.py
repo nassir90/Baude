@@ -651,6 +651,8 @@ class Server:
         except OSError:
             pass
         self.mesh.stop()
+        for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
+            run.end()
         with self.lock:
             for c in list(self.conns):
                 c.close()
@@ -754,6 +756,8 @@ class Server:
         if op == "infer":
             return self.mesh.infer(conn, msg)
         if op == "agent":  # (a model of this machine's, run here as an agent for a chat elsewhere: agentproxy)
+            if getattr(conn, "agent_run", None) is not None:
+                return reply("error", error="this connection runs an agent already")
             run = agentproxy.Run(self, conn, msg)
             with self.lock:
                 self.agent_runs[run.id] = run
@@ -1053,7 +1057,7 @@ class Server:
             self.ensure_proc(s)
             return
         if sub == "set_model" and request.get("model") and \
-                models.model_program(request["model"]) != models.model_program(s.meta.get("model")):
+                not models.same_kind(request["model"], s.meta.get("model")):
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid,
                 "error": "another kind of model can't carry this conversation on: start a session with it"}}})

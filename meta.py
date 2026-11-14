@@ -1989,14 +1989,25 @@ class MetaChat(Gtk.Box):
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         agent = self.agent
-        if not available():  # (its host gone from the mesh, or its model: said so, till another's picked)
+        if not available():  # (its host gone from the mesh, or its model: said so, till it's back or another's picked)
             self.exhausted.set(True, UNAVAILABLE)
+            if not getattr(self, "unavailable_watch", None):
+                self.unavailable_watch = GLib.timeout_add_seconds(self.UNAVAILABLE_EVERY, self._unavailable_check)
         elif agent is not None and not agent.closed and not agent.fresh:
             self._context_now()
         elif self.used is not None:
             self.show_usage({"totalTokens": self.used, "maxTokens": agent.window if agent else window(model())})
         else:
             self.exhausted.set(False)
+
+    UNAVAILABLE_EVERY = 5  # (s between looks at whether Meta's model is back in the mesh, while it isn't)
+
+    def _unavailable_check(self):
+        if not available():
+            return True
+        self.unavailable_watch = None  # (back: its box as it should be now)
+        self.model_changed()
+        return False
 
     def show_usage(self, usage):
         """What the session says it's used of its window (usage): in the window of the model picked, if it's another

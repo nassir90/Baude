@@ -9039,8 +9039,12 @@ class SideQuestion(Gtk.ListBoxRow):
             info = find_session(win.session_id) if win.session_id else None
             fork = ["--fork-session"] if info else []  # nothing saved yet: a fresh, context-free side chat
             self.forked = bool(info)
-            self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
-                                   info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+            try:
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
+                                       info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+            except OSError as e:  # (claude not there, or the chat's folder gone: said, as the chat's own would be)
+                win.note(f"the side question couldn't be asked: {e}")
+                self.proc = None
         if self.proc is None:
             return False
         self.title.set_label(question)
@@ -12342,7 +12346,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
-        draft (its caret and attachments too), a Feedback note put aside, the Feedback tab's reply."""
+        draft (its caret and attachments too), a side question typed over their list, a Feedback note put aside, the
+        Feedback tab's reply."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
         return {
@@ -12353,6 +12358,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
             "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
             "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
+            "btw_draft": widgets.typed_text(self.panel.btw_ask.input),  # (a side question typed, not yet asked)
             "attachments": [a.state() for a in self.attachments],
             "feedback_draft": self.feedback_draft.state() if self.feedback_draft else None,
             "fixes": fixes_page.state() if fixes_page else None, "fixes_shown": self.tabs.current() is fixes_page,
@@ -12376,6 +12382,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if state.get("draft"):
             self.input.get_buffer().set_text(state["draft"])
             widgets.put_caret(self.input, state.get("caret"))
+        if state.get("btw_draft"):
+            self.panel.btw_ask.input.get_buffer().set_text(state["btw_draft"])
         for att in state.get("attachments") or ():
             self.add_attachment(Attachment.from_state(att))
         if state.get("feedback_draft"):

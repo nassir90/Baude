@@ -2209,7 +2209,8 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, new_session_host=None, new_session_host_name=None, sidebar_groups=None,
+                        signal_reader=False, sidebar_network=None, new_session_host=None, new_session_host_name=None,
+                        sidebar_groups=None,
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)

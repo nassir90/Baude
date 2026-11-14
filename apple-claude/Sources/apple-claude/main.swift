@@ -7,6 +7,8 @@ import FoundationModels
 // skips the permission question); and, as claude does for Meta, --system-prompt (the model's instructions, in place
 // of its own), --tools (Exec only if Bash is among them) and --mcp-config (stdio servers, whose tools the model calls,
 // each told to Baude as claude's are: mcp__<server>__<tool>).
+// It answers rewind_conversation as claude does (a revert of a message of yours): the model's session made again from
+// its transcript as it was before that message, so the model sees only what came before it.
 
 let modelName = "apple-foundation-model"
 let args = CommandLine.arguments
@@ -144,8 +146,19 @@ final class Agent: @unchecked Sendable {
     private var waiting: [String: CheckedContinuation<[String: Any], Never>] = [:]
     private var running: Process?
     private var cancelled = false
-    private let prompts: AsyncStream<String>
-    private let promptsIn: AsyncStream<String>.Continuation
+    private let prompts: AsyncStream<Prompt>
+    private let promptsIn: AsyncStream<Prompt>.Continuation
+    /// Where each message of yours (by the uuid Baude gave it) began in the session's transcript, and which session
+    /// that was (a session started again, its context full, has none of them).
+    private var places: [String: (session: ObjectIdentifier, at: Int)] = [:]
+    /// Bumped by a revert: a message sent before it and not taken up yet goes with it.
+    private var generation = 0
+
+    struct Prompt: Sendable {
+        let text: String
+        let uuid: String?
+        let generation: Int
+    }
 
     static let maxCommands = 8
     static let instructions = """
@@ -156,7 +169,7 @@ final class Agent: @unchecked Sendable {
         """
 
     init() {
-        (prompts, promptsIn) = AsyncStream.makeStream(of: String.self)
+        (prompts, promptsIn) = AsyncStream.makeStream(of: Prompt.self)
         if let m = flag("--permission-mode") { mode = m == "manual" ? "default" : m }
         mcpTools = Task { await MCPServer.connectAll(agent: self) }
     }
@@ -186,6 +199,12 @@ final class Agent: @unchecked Sendable {
                 return
             case "set_permission_mode":
                 lock.lock(); mode = request["mode"] as? String ?? mode; lock.unlock()
+            case "rewind_conversation":
+                let id = msg["request_id"] ?? ""
+                let target = request["target_message_uuid"] as? String
+                let kept = request["baude_kept"] as? [[String: Any]]
+                Task { await self.rewind(to: target, kept: kept, requestID: id) }
+                return
             default: break
             }
             emit(["type": "control_response", "response": ["subtype": "success", "request_id": msg["request_id"] ?? "",
@@ -204,7 +223,9 @@ final class Agent: @unchecked Sendable {
             let answer = r["subtype"] as? String == "success" ? (r["response"] as? [String: Any] ?? [:]) : [:]
             resolve(rid, answer.isEmpty ? ["behavior": "deny", "message": "Permission denied by user"] : answer)
         case "user":
-            promptsIn.yield(Agent.text(of: (msg["message"] as? [String: Any])?["content"]))
+            let g = lock.withLock { generation }
+            promptsIn.yield(Prompt(text: Agent.text(of: (msg["message"] as? [String: Any])?["content"]),
+                                   uuid: msg["uuid"] as? String, generation: g))
         default: break
         }
     }
@@ -224,7 +245,8 @@ final class Agent: @unchecked Sendable {
     /// Runs the user's messages one after another.
     func serve() async {
         for await prompt in prompts {
-            let t = Task { await self.runTurn(prompt) }
+            if lock.withLock({ prompt.generation != generation }) { continue }  // (sent before a revert: gone with it)
+            let t = Task { await self.runTurn(prompt.text, uuid: prompt.uuid) }
             lock.withLock { task = t }
             await t.value
             lock.withLock { task = nil }
@@ -241,7 +263,7 @@ final class Agent: @unchecked Sendable {
         terminateRunning()
     }
 
-    func runTurn(_ prompt: String) async {
+    func runTurn(_ prompt: String, uuid: String? = nil) async {
         let start = Date()
         let turn = Turn()
         lock.withLock { self.turn = turn }
@@ -249,6 +271,10 @@ final class Agent: @unchecked Sendable {
         do {
             if let problem = Availability.problem { throw Failure(problem) }
             let session = await currentSession()
+            if let uuid {
+                let at = session.transcript.count
+                lock.withLock { places[uuid] = (ObjectIdentifier(session), at) }
+            }
             for try await snapshot in session.streamResponse(to: prompt) {
                 turn.feed(snapshot.content)
             }
@@ -289,6 +315,48 @@ final class Agent: @unchecked Sendable {
         emit(["type": "control_response", "response": ["subtype": "success", "request_id": requestID,
               "response": ["categories": [Any](), "totalTokens": used, "maxTokens": size,
                            "percentage": size > 0 ? Double(used) * 100 / Double(size) : 0] as [String: Any]] as [String: Any]])
+    }
+
+    /// A revert (rewind_conversation): a turn at it stopped, and the session made again from its transcript up to where
+    /// that message began. One from before this session (the program started again, or the context filled) isn't in
+    /// it: the session's made from kept instead, what Baude's record has before it (the server's: baude_kept).
+    func rewind(to target: String?, kept: [[String: Any]]?, requestID: Any) async {
+        let t = lock.withLock { () -> Task<Void, Never>? in generation += 1; return task }
+        if t != nil {
+            interrupt()
+            await t?.value
+        }
+        let tools = await tools()
+        let made = lock.withLock { () -> Bool in
+            let place = target.flatMap { places[$0] }
+            if let session, let place, place.session == ObjectIdentifier(session) {
+                let kept = Array(session.transcript.prefix(place.at))
+                let s = LanguageModelSession(tools: tools, transcript: Transcript(entries: kept))
+                self.session = s
+                let id = ObjectIdentifier(s)
+                places = places.filter { $0.value.session == ObjectIdentifier(session) && $0.value.at < place.at }
+                    .mapValues { (id, $0.at) }
+                return true
+            } else if let kept {
+                var entries = [Transcript.Entry.instructions(Transcript.Instructions(
+                    segments: [.text(Transcript.TextSegment(content: flag("--system-prompt") ?? Agent.instructions))],
+                    toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }))]
+                for item in kept {
+                    let text = item["text"] as? String ?? ""
+                    let segment = Transcript.Segment.text(Transcript.TextSegment(content: text))
+                    entries.append(item["role"] as? String == "assistant"
+                                   ? .response(Transcript.Response(assetIDs: [], segments: [segment]))
+                                   : .prompt(Transcript.Prompt(segments: [segment])))
+                }
+                session = LanguageModelSession(tools: tools, transcript: Transcript(entries: entries))
+                places = [:]
+                return true
+            }
+            return false
+        }
+        emit(["type": "control_response", "response": ["subtype": "success", "request_id": requestID,
+              "response": (made ? ["rewound": true] : ["rewound": false, "error": "Apple's model has no record of that message"])
+                as [String: Any]] as [String: Any]])
     }
 
     func currentSession() async -> LanguageModelSession {

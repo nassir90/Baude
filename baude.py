@@ -14001,9 +14001,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return bubble
 
     def can_revert(self):
-        """Whether a message of yours can be reverted here: claude's chats can (it cuts its conversation itself:
-        rewind_conversation); pi's and Apple's models' can't, nor a chat that's only read here (live_elsewhere)."""
-        return model_program(self.model) == "claude" and not self.live_elsewhere()
+        """Whether a message of yours can be reverted here: every model's chat can (its program cuts the conversation:
+        rewind_conversation, which claude has, and pi-claude and apple-claude answer as it does), but not one that's
+        only read here (live_elsewhere)."""
+        return not self.live_elsewhere()
+
+    def program_name(self):
+        """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
+        return {"pi": "pi", "apple": "Apple's model"}.get(model_program(self.model), "claude")
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
@@ -14104,7 +14109,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if self.proc is None:
                 self.start_proc()
             if self.proc is None:
-                self.note("Couldn't revert: claude isn't running")
+                self.note(f"Couldn't revert: {self.program_name()} isn't running")
                 return
         finally:
             if rev["turn"].is_ancestor(self.transcript):
@@ -14126,7 +14131,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         response = response or {}
         if not response.get("rewound"):
             why = next((v for k, v in response.items() if k != "rewound" and isinstance(v, str)), None)
-            return self.revert_refused(rev, why or "claude said no")
+            return self.revert_refused(rev, why or f"{self.program_name()} said no")
         if self.reverting is not rev or not rev["turn"].is_ancestor(self.transcript):  # (another chat opened meanwhile)
             return
         self.reverting = None

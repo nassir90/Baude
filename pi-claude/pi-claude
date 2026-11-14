@@ -8,6 +8,8 @@ Of the flags Baude passes it uses --model (a value in models.json, or a served m
 ~/.local/share/baude/pi/sessions), --effort (the thinking level, for a model that thinks) and --permission-mode. pi
 starts with the first message and stops with this. Each of pi's tool calls is put to Baude as a permission question,
 through ask.ts (a pi extension), and shown to it as Claude's tool of that kind (bash as Bash, read as Read, ...).
+It answers rewind_conversation as claude does (a revert of a message of yours: pi's session moved back to before it,
+through revert.ts, a pi extension); each message's uuid is kept on it as pi saves it, for that.
 
 As claude does for Meta, it also takes --system-prompt (pi's, in place of its own), --tools (Claude's tools, as pi's),
 --mcp-config (stdio servers, whose tools pi calls through its own MCP support, named mcp__<server>__<tool> as
@@ -451,6 +453,7 @@ class Engine:
         self.ids = iter(range(1, 1 << 62))
         self.queue = []
         self.turn = None
+        self.rewinds = {}  # uuid of a message being reverted -> Baude's request id (revert.ts answers)
 
     # starting
 
@@ -469,7 +472,10 @@ class Engine:
             self.failed = str(e)
         self.ready.set()
         for item in self.queue:
-            self.prompt(*item, again=False)
+            if isinstance(item, tuple) and item and item[0] is Engine.REWIND:
+                self.rewind(*item[1:])
+            else:
+                self.prompt(*item, again=False)
         self.queue.clear()
 
     def _pi(self):
@@ -492,7 +498,7 @@ class Engine:
         args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", provider, "--model", model["repo"],
                 *(("--session-dir", sessions, "--session-id", session_id) if keep_session else ("--no-session",)),
                 "--thinking", thinking, "--no-extensions",
-                "-e", os.path.join(HERE, "ask.ts"), "--no-skills", "--no-prompt-templates", "--no-themes",
+                "-e", os.path.join(HERE, "ask.ts"), "-e", os.path.join(HERE, "revert.ts"), "--no-skills", "--no-prompt-templates", "--no-themes",
                 "--no-approve", "--offline"]
         if RELAY and keep_session:
             args += ["-e", os.path.join(HERE, "session.ts")]
@@ -550,12 +556,12 @@ class Engine:
             self.pi.stdin.write((json.dumps(cmd | {"id": cid}) + "\n").encode())
             self.pi.stdin.flush()
 
-    def prompt(self, text, images, again=True):
+    def prompt(self, text, images, uuid=None, again=True):
         if again and self.failed and kind != "mlx" and self.pi is None and self.turn is None:  # (its server wasn't
             self.failed, self.started = None, False  # there, or the model wouldn't load: tried again with this message)
             self.ready.clear()
         if not self.ready.is_set():
-            self.queue.append((text, images))
+            self.queue.append((text, images, uuid))
             self.start()
             return
         busy = self.turn is not None
@@ -575,7 +581,36 @@ class Engine:
             if not r.get("success") and self.turn:
                 self.turn["error"] = r.get("error") or "pi didn't take the message"
                 self.end_turn()
-        self.send(cmd, accepted)
+        if uuid:  # (kept on the message as pi saves it, matched by its text: what a revert names, revert.ts; the
+            # message sent once pi's taken it)
+            self.send({"type": "prompt", "message": "/baude-uuid " + json.dumps({"uuid": uuid, "text": text})},
+                      lambda _r: self.send(cmd, accepted))
+        else:
+            self.send(cmd, accepted)
+
+    REWIND = object()
+
+    def rewind(self, rid, uuid, index, count=None):
+        """rewind_conversation, as claude's: pi's session moved back to before the message of yours with this uuid (or
+        the index-th of yours, for one saved before revert.ts), a turn at it stopped and what was to follow dropped.
+        Answered once revert.ts says it's done: {"rewound": true}, else why not."""
+        if not self.ready.is_set():  # (not started yet: pi's taken the session up first)
+            self.queue.append((Engine.REWIND, rid, uuid, index, count))
+            self.start()
+            return
+        if self.failed or self.pi is None:
+            return reply(rid, {"rewound": False, "error": self.failed or "pi isn't running"})
+        self.deny_all("The user reverted this")
+        self.rewinds[uuid] = rid
+        self.send({"type": "clear_queue"})
+        self.send({"type": "prompt", "message": "/baude-rewind " + json.dumps({"uuid": uuid, "index": index,
+                                                                         "count": count})})
+
+    def rewound(self, said):
+        rid = self.rewinds.pop(said.get("uuid"), None)
+        if rid is not None:
+            reply(rid, {"rewound": True} if said.get("ok") else {"rewound": False,
+                                                                 "error": said.get("why") or "pi wouldn't revert"})
 
     def _read_pi(self):
         for line in self.pi.stdout:
@@ -687,12 +722,15 @@ class Engine:
 
     def on_dialog(self, rec):
         method, did = rec.get("method"), rec.get("id")
-        if method == "notify" and RELAY:  # (session.ts's: what pi's added to its session, for the chat's host)
+        if method == "notify":
             try:
                 said = json.loads(rec.get("message") or "")
             except ValueError:
                 said = None
-            if isinstance(said, dict) and said.get("baude") == "pi_session":
+            if isinstance(said, dict) and said.get("baude") == "rewound":  # (revert.ts's answer)
+                self.rewound(said)
+            elif RELAY and isinstance(said, dict) and said.get("baude") == "pi_session":  # (session.ts's: what pi's
+                # added to its session, for the chat's host)
                 emit({"type": "system", "subtype": "baude_pi_session", "session_id": session_id,
                       **{k: said.get(k) for k in ("header", "from", "entries")}})
             return
@@ -780,6 +818,9 @@ def handle(msg):
             reply(rid)
             emit({"type": "system", "subtype": "status", "status": None, "permissionMode": mode,
                   "session_id": session_id})
+        elif sub == "rewind_conversation" and keep_session:
+            engine.rewind(rid, req.get("target_message_uuid"), req.get("baude_prompt_index"),
+                          req.get("baude_prompt_count"))
         elif sub == "interrupt":
             engine.deny_all("Interrupted by the user")
             if engine.ready.is_set() and not engine.failed:
@@ -793,8 +834,9 @@ def handle(msg):
         engine.on_permission(r.get("request_id"), answer or {"behavior": "deny", "message": "Permission denied"})
     elif t == "user":
         content = (msg.get("message") or {}).get("content")
+        said = msg.get("uuid")  # (the message's, as Baude names it: what a revert names, revert.ts)
         if isinstance(content, str):
-            return engine.prompt(content, [])
+            return engine.prompt(content, [], said)
         texts, images = [], []
         for b in content or []:
             if b.get("type") == "text":
@@ -804,7 +846,7 @@ def handle(msg):
         if images and "image" not in model["input"]:
             texts.append(f"[{len(images)} image(s) {model['displayName']} can't see]")
             images = []
-        engine.prompt("\n".join(texts), images)
+        engine.prompt("\n".join(texts), images, said)
 
 
 def main():

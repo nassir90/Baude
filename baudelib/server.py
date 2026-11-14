@@ -179,7 +179,8 @@ class Session:
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
-        self.queued = []          # messages sent at a turn, kept once it's over (Server.keep)
+        self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
+        self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
         self.routes = {}          # request id sent on -> (conn, its own request id or the server's callback, undo)
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
         self.agents = None        # its subagents' files, as last looked at: {name: (size, mtime_ns)}
@@ -1049,9 +1050,9 @@ class Server:
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
-                s.queued.append(msg.get("message") or {})
+                s.queued.append((msg.get("message") or {}, msg.get("uuid")))
             else:
-                self.keep(s, "user", msg.get("message") or {})
+                self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
             s.busy, s.used, s.meta["said"] = True, time.time(), time.time()
             self.save(s)
             self.changed()
@@ -1106,6 +1107,17 @@ class Server:
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid, "error": str(e)}}})
         on = f"srv_{next(self.rids)}"
+        if sub == "rewind_conversation" and s.kept():  # (pi's and Apple's: the model's cut, by its program; the
+            # transcript's, here, once it's made)
+            path = os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
+            found = transcripts.rewind_target(path, request.get("target_message_uuid"))
+            if found is None:
+                return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
+                    "subtype": "success", "request_id": rid,
+                    "response": {"rewound": False, "error": "that message isn't in this chat's record"}}}})
+            s.rewinds[on], index, count, before = found
+            msg = {**msg, "request": {**request, "baude_prompt_index": index, "baude_prompt_count": count,
+                                      "baude_kept": before}}  # (Apple's, its session made again from them)
         s.routes[on] = (conn, rid, undo)
         proc.send({**msg, "request_id": on})
         self.changed()
@@ -1135,6 +1147,11 @@ class Server:
                     s.waiting_init = []
                 elif rid in s.routes:
                     conn, theirs, undo = s.routes.pop(rid)
+                    if rid in s.rewinds:  # (a revert its program made: marked in the transcript kept here)
+                        last = s.rewinds.pop(rid)
+                        if r.get("subtype") == "success" and (r.get("response") or {}).get("rewound"):
+                            self.keep_rewind(s, last)
+                            s.queued = []  # (sent after it, at the turn it stopped: gone with it)
                     applied = (r.get("response") or {}).get("applied") if r.get("subtype") == "success" else None
                     if isinstance(applied, dict):  # (get_settings: what claude runs with, its own defaults too: kept,
                         for key in ("model", "effort"):  # for when it's asked again and isn't running)
@@ -1197,8 +1214,8 @@ class Server:
                 s.meta.pop("cut", None)
                 self.save(s)
             if kind == "result":
-                for message in s.queued:
-                    self.keep(s, "user", message)
+                for message, said in s.queued:
+                    self.keep(s, "user", message, said)
                 s.queued = []
                 s.busy, s.used = False, time.time()
                 s.asks.clear()
@@ -1286,16 +1303,28 @@ class Server:
         timer.daemon = True
         timer.start()
 
-    def keep(self, s, kind, message):
+    def keep(self, s, kind, message, said=None):
         """(lock held) A message of a session whose program keeps no transcript, kept in the server's, as Claude Code
-        keeps one (what's listed, and what clients mirror, come from it)."""
+        keeps one (what's listed, and what clients mirror, come from it). said: a message of yours's uuid, as the head
+        named it (what a revert names)."""
         if not s.kept() or s.deleted or s.deleting:
             return
         path = os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        rec = {"parentUuid": None, "isSidechain": False, "type": kind, "uuid": str(uuid.uuid4()),
+        rec = {"parentUuid": None, "isSidechain": False, "type": kind, "uuid": said or str(uuid.uuid4()),
                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "sessionId": s.id,
                "cwd": s.meta.get("cwd"), "entrypoint": "baude-server", "message": message}
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n")
+
+    def keep_rewind(self, s, last):
+        """(lock held) A revert its program made, in a session whose transcript is the server's: marked there as claude
+        marks its own (rewind_conversation), so what comes after the record it keeps last is read as gone."""
+        path = os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
+        if not s.kept() or s.deleted or s.deleting or not os.path.exists(path):
+            return
+        rec = {"type": "last-prompt", "leafUuid": last, "rewound": True, "sessionId": s.id,
+               "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n")
 
@@ -1305,6 +1334,7 @@ class Server:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
+            s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()
             s.agents = None  # (what its subagents wrote as it went: looked at again)
             s.note_written()  # (exited: all it's written is there)

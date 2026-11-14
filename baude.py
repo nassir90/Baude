@@ -11279,7 +11279,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         header = Adw.HeaderBar()
         # None = let the CLI decide (settings / account default); shown once it reports back
         self.model = None if opts.model in (None, "default") else opts.model
-        self.mode = "plan"  # read-only until you pick another mode
+        self.mode = "auto"  # until you pick another mode
         self.model_dd = ChoiceDropDown([], "Model", self.on_model_changed)
         # (left of it: the inference providers, by host, whose models it lists after Claude's: sync_providers)
         self.provider_dd = HostPicker("Inference provider", self.on_provider_changed, 24)
@@ -12903,7 +12903,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tail.stop()
         self.update_banner()
         self.clear_transcript()
-        self.read_only_mode()
+        self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
         self.apply_chat_signal()  # (a new chat: the defaults for new chats)
@@ -13450,12 +13450,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         else:
             self.sync_providers()
 
-    def read_only_mode(self):
-        """Every chat opened (a new one, or one picked in the sidebar) starts in Plan, read-only, whatever mode the
-        chat before was left in."""
-        self.mode = "plan"
+    def default_mode(self):
+        """Every chat opened (a new one, or one picked in the sidebar) starts in Auto, whatever mode the chat before
+        was left in."""
+        self.mode = "auto"
         if self.mode_dd.values:
-            self.mode_dd.select("plan")
+            self.mode_dd.select("auto")
 
     def sync_mode(self, mode):
         if not self.mode_dd.values:
@@ -15379,7 +15379,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.apply_chat_signal()
         self.view_session(path)
         self.show_title(info.get("title"))
-        self.read_only_mode()
+        self.default_mode()
         if r.state == "alive" and (r.sessions.get(info["id"]) or {}).get("state") in ("working", "waiting") \
                 and not self.live_elsewhere():  # (at a turn: live, as it goes on, Stop and all; attached once, so
             self.begin_resume()  # what it asks is answered through the one that's attached)
@@ -15778,7 +15778,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         model = self.model if self.model and model_program(self.model) == "claude" else None
         self.note(f"a new session on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
-                   "model": model, "effort": self.effort if model else None, "mode": "plan", "group": group,
+                   "model": model, "effort": self.effort if model else None, "mode": "auto", "group": group,
                    "draft": True, **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))
 
@@ -15862,7 +15862,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.view_session(info["path"])
         if info.get("title"):
             self.show_title(info["title"])
-        self.read_only_mode()
+        self.default_mode()
         if (left := self.take_background(info["id"])) is not None:  # (left mid-turn, still at it: its own claude again)
             self.attach_proc(left)
         else:

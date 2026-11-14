@@ -7012,10 +7012,6 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
-/* (the box a side question's asked in, over their list: an entry's fill, as Search sessions' is) */
-.composer-box.side-question-ask { background-color: alpha(currentColor, 0.1); }
-.side-question-ask textview, .side-question-ask textview > text, .side-question-ask .composer-head {
-  background-color: transparent; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its
    command and output open under it across the card, on the row's fill (half its card shade, as an open expander
    row's), a rule over them; filling the page, on the panel's own */
@@ -7400,6 +7396,11 @@ def load_css():
 OVER_ADWAITA_CSS = """
 .baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
 headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: inherit; }
+/* (the box a side question's asked in, over their list: an entry's fill, as Search sessions' is: a theme's entries
+   have its own, and the box keeps a view's) */
+.composer-box.side-question-ask { background-color: alpha(currentColor, 0.1); }
+.side-question-ask textview, .side-question-ask textview > text, .side-question-ask .composer-head {
+  background-color: transparent; }
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }

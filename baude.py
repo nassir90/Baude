@@ -11557,8 +11557,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
-        # (more said than the model's window holds: said over the box, the box off, till a bigger model or a new chat)
+        # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
+        # new chat)
         self.exhausted = widgets.Exhausted(self.scroller, box_overlay)
+        # (a host's connection dropped: said there too, an ellipsis going, till it's attached again: drop)
+        self.dropped = widgets.GateLine(box_overlay, "network", dots=True)
+        self.drop_running = self.drop_session = None  # (dropped: whether its claude was running then, and the chat)
+        self.drop_timer = self.resume_reason = None  # (resume_reason: (chat, why) the next message resumes it)
+        self.retrying, self.retry_timer, self.retry_dots, self.banner_kind = None, None, 0, None  # (show_retry)
         self.outgrown = False  # (a turn ended with claude saying the prompt's too long: exhausted, show_context)
         root.append(statusbar)
         self.panel = SidePanel(self)
@@ -11849,7 +11855,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def continue_cut(self):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""
-        if self.exhausted.on:
+        if self.composer_box.gates:
             return
         self.cut_pending = None
         self.show_cut(None)
@@ -12255,6 +12261,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
         if not busy and self.proc is not None:
             self.turn_finished = True
+        if not busy and getattr(self, "retrying", None) is not None:
+            self.show_retry(None)  # (the turn's over: not retrying any more)
         self.set_send_button(busy)
         self.update_status()
         self.update_session_state()
@@ -12759,7 +12767,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
                                        always_allow=sorted(self.always_allow))
             except OSError as e:
-                self.note(f"couldn't reach {remote_name(r)}: {e}")
+                if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
+                    self.note(f"couldn't reach {remote_name(r)}: {e}")
+        if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
+            if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
+                self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
+            self.drop_running = self.drop_session = None
         if self.proc is not None:
             self.proc.mode = self.proc.listing.get("mode")
             self.proc.cost_seen = self.total_cost  # (its claude counts on from what the transcript says was spent)
@@ -13074,13 +13087,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.new_session()
             return
         if self.remote is not None:
-            # (-1: let go of without its claude's exit said: its host process went, or restarted onto an update, or
-            # the connection fell silent. The session's kept there as it was, so between turns it's as any chat opened
-            # again: viewed, nothing started till the next message resumes it (begin_resume), and nothing said. A host
-            # that's gone: the banner says so. At a turn, what was sent may never have got there: that's said)
-            if code != -1 or self.busy:
-                self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
-                                                             f"claude exited ({code})") + ". Send a message to carry on.")
+            # (nothing said in the chat. "lost": let go of with no exit said, its host process gone (or restarted onto
+            # an update) or the connection fallen silent: the host keeps the session, its claude going on with a turn
+            # if it's at one, and it's said under the chat till it's attached again (drop). Its claude's own exit, a
+            # code (-1 too): the next message resumes it, and says why)
+            running = bool(getattr(self.proc, "live", False))  # (written in from here: its claude was running)
+            if code == "lost":
+                self.drop(running)
+            elif code != 0:
+                self.resume_reason = (self.session_id, "claude binary error")
+            for waiting in list(self.waiting_cards):  # (what it asked: asked again as it's attached again, if it still
+                if isinstance(waiting, ToolCard):  # waits; a copy: answered() takes it out as it goes)
+                    waiting.answered()
+            self.waiting_cards.clear()
+            self.show_retry(None)
             self.proc = None
             self.set_busy(False)
             self.remote_view()
@@ -13117,7 +13137,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return False
 
     def on_send(self):
-        if self.exhausted.on:
+        if self.composer_box.gates and not self.busy:  # (the context exhausted, a host gone or its connection dropped)
             return
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
@@ -13747,6 +13767,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if proc is not self.proc:
             return False  # leftover output from a process we already replaced
         t = msg.get("type")
+        if t in ("stream_event", "assistant", "result") and not msg.get("parent_tool_use_id"):
+            self.show_retry(None)  # (the model's answering again, or the turn's over)
         if t in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and not self.busy:
             self.set_busy(True)  # the CLI started a turn by itself
         handler = getattr(self, "h_" + str(t).lstrip("_"), None)
@@ -13782,6 +13804,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+        elif st == "api_retry":
+            self.show_retry(msg)
         elif st == "compact_boundary":
             self.note("— conversation compacted —")
             self.refresh_context()
@@ -16154,21 +16178,77 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return False
         return self.tail.in_use() and background_proc(self.session_id) is None
 
+    def drop(self, running):
+        """A host's session's connection dropped (on_exit's "lost"): "Connection to <host> dropped…" under the chat, its
+        send button off, till it's attached again (start_remote_proc, tried every 5 s or so); its host off the network
+        meanwhile: the banner says that instead. running: its claude was running (written in from here), so if it's
+        gone by then, the next message resumes it, and says so."""
+        self.drop_running, self.drop_session = running, self.session_id
+        if self.drop_timer is None:
+            self.drop_timer = GLib.timeout_add_seconds(2, self.watch_drop)
+
+    def watch_drop(self):
+        if self.drop_running is None or self.remote is None or self.drop_session != self.session_id:
+            self.drop_running = self.drop_session = self.drop_timer = None
+            self.update_banner()
+            return False
+        if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                time.monotonic() - getattr(self, "remote_tried", 0.0) > 5:  # (a try waits up to 3 s for its host)
+            self.start_remote_proc()
+        return True
+
+    def show_retry(self, msg):
+        """claude retrying the model's API (its api_retry: the provider overloaded or failing, or not answering): said in
+        the banner, an ellipsis going, till what it says next comes, or the turn's over (msg None)."""
+        if msg is None and self.retrying is None:
+            return
+        self.retrying = msg
+        if msg is not None and self.retry_timer is None:
+            self.retry_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_retry)
+        self.update_banner()
+
+    def tick_retry(self):
+        if self.retrying is None:
+            self.retry_timer = None
+            return False
+        self.retry_dots = self.retry_dots % 3 + 1
+        if self.banner_kind == "retry":
+            self.banner.set_title(self.retry_title())
+        return True
+
+    def retry_title(self):
+        m = self.retrying or {}
+        what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"
+        tries = f", attempt {m['attempt']} of {m['max_retries']}" if m.get("attempt") and m.get("max_retries") else ""
+        n = self.retry_dots or 1
+        return GLib.markup_escape_text(f"{what}: retrying{tries}") + "." * n + f'<span alpha="1">{"." * (3 - n)}</span>'
+
     def update_banner(self):
-        """While another program (not Baude: live_elsewhere) has the session, or a host's session's host isn't there,
-        say so, with no text box (show_composer): two writers would interleave two conversations in one transcript, and
-        a host that's gone has no one to send to."""
+        """While another program (not Baude: live_elsewhere) has the session, say so, with no text box (show_composer):
+        two writers would interleave two conversations in one transcript. While a host's session's host isn't there,
+        or claude's retrying the model's API (show_retry), say so, its send button off (Composer.gate): a host that's
+        gone has no one to send to. A dropped connection with its host there: said under the chat (drop)."""
         live = self.live_elsewhere()
         gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
+        retry = self.retrying is not None and not (gone or live)
+        self.banner_kind = "gone" if gone else "live" if live else "retry" if retry else None
+        self.banner.set_use_markup(retry)
         if gone:
             name = remote_name(self.remote)
             self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen"
                                   if self.remote.state == "dead" else f"Looking for {name} on the network…")
         elif live:
             self.banner.set_title("This session is currently active elsewhere")
+        elif retry:
+            self.banner.set_title(self.retry_title())
         self.banner.set_button_label(None)
-        self.banner.set_revealed(live or gone)
-        self.locked = live or gone
+        self.banner.set_revealed(live or gone or retry)
+        self.locked = live
+        dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
+        if hasattr(self, "dropped"):
+            self.dropped.set(dropped and not gone, f"Connection to {remote_name(self.remote)} dropped" if dropped else None)
+            self.composer_box.gate("host", gone)
+            self.composer_box.gate("retry", self.retrying is not None)
         self.show_composer()
 
     def tail_lines(self, lines):
@@ -16202,9 +16282,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.resume_pending, self.view_path = False, None
         self.tail.stop()
         self.update_banner()
-        if self.resumed_note:
+        reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
+        if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
+            self.note(f"— Resumed from {reason} —")
+        elif self.resumed_note:
             self.note("— resumed —")
-            self.resumed_note = False
+        self.resumed_note, self.resume_reason = False, None
         if (left := self.take_background(self.session_id)) is not None:  # (left mid-turn in a window, still at it)
             self.attach_proc(left)
             return

@@ -713,7 +713,9 @@ class RemoteProc(claude.ClaudeProc):
     """A session on a host (where: wire.reach's), talked to as ClaudeProc talks to a local claude: what's sent goes to its claude (started
     on the server if it isn't running), what it says comes to on_msg. live: everything it says, as it says it; else
     only what it asks (a permission) and the answers to what's asked of it (initialize: its models and commands).
-    kill() lets go of it: the session goes on, on its server. OSError if it can't be reached."""
+    kill() lets go of it: the session goes on, on its server. OSError if it can't be reached. on_exit's code: its
+    claude's exit code, as its host said it; "deleted", the session deleted there; "lost", the connection gone with
+    neither said (its host process went, or the link fell silent)."""
 
     def __init__(self, on_msg, on_exit, where, session_id, live=True, env=None, always_allow=None):
         self.on_msg, self.on_exit = on_msg, on_exit
@@ -751,8 +753,8 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda e=msg.get("error"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": f"the server: {e}"}))
         self.ch.close()
-        if not self.killed:
-            code = -1 if self.code is None else self.code
+        if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
+            code = "lost" if self.code is None else self.code
             self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):

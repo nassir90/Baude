@@ -10153,6 +10153,7 @@ class SidePanel(Gtk.Box):
         # (over them, a pill of its own: the box a new one's asked in, as tall as the pill a page with none shows; Enter
         # and its send button off while it's empty)
         self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
         self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
         self.btw_ask.set_margin_top(10)

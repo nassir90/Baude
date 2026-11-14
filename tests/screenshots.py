@@ -1640,6 +1640,69 @@ def _(app):
     return win
 
 
+@scene("75b-side-question-new", "Side questions' +: a new one asked in its own box, and another waiting for its "
+                                "question", size=(1200 + SIDEBAR, H))
+def _(app):
+    proj = os.path.join(T.TMP, "btw-new-proj")
+    os.makedirs(proj, exist_ok=True)
+    win = app.window(opts(cwd=proj))
+    T.write_session(proj, win.session_id, title="Main chat")
+    win.show_panel(True, "btw")
+    plus = getattr(win.panel, "btw_new", None)
+    if plus is not None:  # (before the +: the page as it was)
+        plus.emit("clicked")
+        first = win.panel.side_questions()[0]
+        if hasattr(first, "composer"):
+            first.composer.get_buffer().set_text("what does make do here?")
+            first.submit()
+        else:
+            first.follow.set_text("what does make do here?")
+            first.follow.emit("activate")
+        T.wait_for(lambda: first.answer is not None and not first.busy, "answer")
+        plus.emit("clicked")
+    return win
+
+
+def _side_questions_three(app, name):
+    proj = os.path.join(T.TMP, name)
+    os.makedirs(proj, exist_ok=True)
+    win = app.window(opts(cwd=proj))
+    T.write_session(proj, win.session_id, title="Main chat")
+    for q in ("what does make do here?", "is the build cached?", "which tests are slow?"):
+        win.ask_side_question(q)
+    T.wait_for(lambda: all(not q.busy for q in win.panel.side_questions()), "answers")
+    return win
+
+
+@scene("75c-side-questions-rows", "Side questions as rows titled with their questions: one open under its line, two "
+                                  "closed", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = _side_questions_three(app, "btw-rows-proj")
+    for q in win.panel.side_questions()[1:]:
+        if hasattr(q, "set_expanded"):
+            q.set_expanded(False)
+    return win
+
+
+@scene("75d-side-question-full", "A side question filling the Side questions page, a back button out",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = _side_questions_three(app, "btw-full-proj")
+    q = win.panel.side_questions()[1]
+    if hasattr(win.panel, "open_side_question"):
+        win.panel.open_side_question(q)
+    return win
+
+
+@scene("75e-side-questions-empty", "The Side questions page with none asked yet", size=(1200 + SIDEBAR, H))
+def _(app):
+    proj = os.path.join(T.TMP, "btw-empty-proj")
+    os.makedirs(proj, exist_ok=True)
+    win = app.window(opts(cwd=proj))
+    win.show_panel(True, "btw")
+    return win
+
+
 @scene("76-tail-background-tasks", "Viewing a session running elsewhere: its background command and subagent "
                                    "(with its own transcript) rebuilt from the files, in the side panel",
        size=(1200 + SIDEBAR, H))

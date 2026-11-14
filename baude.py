@@ -8865,37 +8865,187 @@ class SessionSidebar(Gtk.Box):
 
 # --------------------------------------------------------- side questions --
 
-class SideQuestion(Gtk.Box):
-    """One /btw thread: its own claude, started with
+class SideQuestion(Gtk.ListBoxRow):
+    """One /btw thread, a row of the side panel's Side questions titled with its question: its own claude, started with
         --resume <session> --fork-session --no-session-persistence --permission-mode plan
     so it sees the whole conversation so far but writes nothing (not to the session, not a new
     one), and can't edit anything. Tools that need permission are refused. Follow-ups go to the
-    same process; closing the thread ends it. Any number can run at once."""
+    same process; it ends with the window. Any number can run at once. One made from the pane's + has no question
+    yet: its box takes the first, and its claude starts then.
+    Its thread (inside: the darker inside, the box it's asked in under it, Meta's) opens under its line (toggle: ⌄, −
+    to close it again), the box slimmer there, or fills the page (full: SidePanel.open_side_question, back out of it),
+    the box as Meta's is, its dots and context meter under it."""
 
     PREFACE = ("(This is a side question, asked while you work on the conversation above. Answer it "
                "briefly from what you already know; don't continue the task or use tools.)\n\n")
+    SLIM = 36  # (its box's least height under its line: a line; Meta's, filling the page, two)
+    CONTEXT_EVERY_MS = 1000
 
-    def __init__(self, win, question):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    def __init__(self, win, question=None):
+        super().__init__(activatable=False)
         self.add_css_class("side-question")
-        self.win, self.busy, self.answer = win, False, None
-        head = Gtk.Box(spacing=8)
-        self.dot = StatusDot("working")
-        head.append(self.dot)
-        title = Gtk.Label(label=question, xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
-        title.add_css_class("heading")
-        head.append(title)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close this side question",
-                           valign=Gtk.Align.START)
-        close.add_css_class("flat")
-        close.connect("clicked", lambda *_: self.close())
-        head.append(close)
-        self.append(head)
-        self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.append(self.body)
-        self.follow = Gtk.Entry(placeholder_text="Ask a follow-up…", sensitive=False)
-        self.follow.connect("activate", lambda e: self.ask(e.get_text()) or e.set_text(""))
-        self.append(self.follow)
+        self.win, self.busy, self.answer, self.proc, self.answers = win, False, None, None, {}
+        self.stopped = None  # (the answer stopped: Esc, or the box's stop button)
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(rows)
+        head = Gtk.Box(spacing=12, margin_start=12, margin_end=6, margin_top=8, margin_bottom=8)
+        head.add_css_class("side-question-head")
+        self.status = StatusSlot("running")  # (a spinner while it answers; a mark only for one that failed)
+        self.status.set_visible(False)
+        head.append(self.status)
+        self.title = Gtk.Label(label=question or "New side question", xalign=0, hexpand=True, wrap=True,
+                               wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.title.add_css_class("title")  # (as a subagent's row's)
+        head.append(self.title)
+        self.toggle = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.toggle.add_css_class("flat")
+        self.toggle.connect("clicked", lambda *_: self.set_expanded(not self.expanded()))
+        head.append(self.toggle)
+        self.full = Gtk.Button(icon_name="window-maximize-symbolic", valign=Gtk.Align.CENTER,
+                               tooltip_text="Open this side question in the whole panel")
+        self.full.add_css_class("flat")
+        self.full.add_css_class("side-question-full")
+        self.full.connect("clicked", lambda *_: win.panel.open_side_question(self))
+        head.append(self.full)
+        rows.append(head)
+        # its thread, and the box it's asked in, on the darker inside: under its line, or the page's whole
+        self.inside = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL))  # (set into the row)
+        self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
+                            margin_top=12)
+        self.body.add_css_class("zoomable")
+        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                         visible=False)  # (nothing over its box till something's asked)
+        self.inside.append(self.scroll)
+        comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
+                                   margin_top=10, margin_bottom=10)
+        self.writing = widgets.Composer()
+        self.composer = self.writing.input
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._key)
+        self.composer.add_controller(keys)
+        self.writing.send.connect("clicked", lambda *_: self.stop() if self.busy else self.submit())
+        comp.append(self.writing)
+        self.foot = Gtk.Box(spacing=12)  # (Meta's foot, without its Clear)
+        self.foot.add_css_class("meta-foot")
+        self.dots = widgets.WorkingDots()
+        self.foot.append(self.dots)
+        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
+        self.context_soon = None
+        self.foot.append(self.ctx)
+        comp.append(self.foot)
+        self.inside.append(comp)
+        self.reveal = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        rows.append(self.reveal)
+        self.put_inside_row()
+        self.set_expanded(False)
+        if question and not self.start(question):  # (couldn't be had: kept in its box, as one from +'s, to send again)
+            self.composer.get_buffer().set_text(question)
+
+    def expanded(self):
+        return self.reveal.get_reveal_child()
+
+    def opened(self):
+        """Its thread open under its line, all the way (not opening or closing there)."""
+        return self.reveal.get_reveal_child() and self.reveal.get_child_revealed()
+
+    def set_expanded(self, on):
+        self.reveal.set_reveal_child(on)
+        self.toggle.set_icon_name("list-remove-symbolic" if on else "pan-down-symbolic")
+        self.toggle.set_tooltip_text("Hide this side question" if on else "Show this side question")
+
+    def _box_scroll(self):
+        return self.composer.get_parent()  # (Composer's scrolled window)
+
+    def _slim(self, on):
+        """Its box a line tall, its send button smaller and as far from the box's edges as from its top (CSS's .slim);
+        or Meta's."""
+        (self.writing.add_css_class if on else self.writing.remove_css_class)("slim")
+        actions = self.writing.send.get_parent()
+        actions.set_margin_end(4 if on else 10)
+        actions.set_margin_bottom(4 if on else 10)
+
+    def put_inside_row(self):
+        """Its thread back under its line (from the whole page), as tall as it is, its box slimmer."""
+        if (parent := self.inside.get_parent()) is not None:
+            parent.remove(self.inside)
+        self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        self.scroll.set_propagate_natural_height(True)
+        self.scroll.set_vexpand(False)
+        self.inside.set_vexpand(False)
+        self.inside.set_margin_start(widgets.INSIDE_GAP)
+        box = self._box_scroll()
+        box.set_min_content_height(self.SLIM)
+        # (no scrollbar: a shown one's least length would keep it two lines tall; still scrolled, past nine)
+        box.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
+        self._slim(True)
+        self.foot.set_visible(False)
+        self.reveal.set_child(self.inside)
+
+    def take_inside(self):
+        """Its thread, for the whole page: scrolled there, the box under it Meta's, dots and context meter too."""
+        self.reveal.set_child(None)
+        self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scroll.set_propagate_natural_height(False)
+        self.scroll.set_vexpand(True)
+        self.inside.set_vexpand(True)
+        self.inside.set_margin_start(0)  # (as a subagent's square: none on the main chat's side, its gap's the one)
+        box = self._box_scroll()
+        box.set_min_content_height(56)  # (Composer's own)
+        box.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self._slim(False)
+        self.foot.set_visible(True)
+        return self.inside
+
+    def text(self):
+        return self.writing.text()
+
+    def _key(self, _c, keyval, _code, state):
+        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line; Esc stops the answer:
+        as in Meta's box."""
+        if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            markdown = self.writing.markdown
+            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
+                                                               or markdown.code_state()[0]):
+                return markdown.newline()
+            self.submit()
+            return True
+        if keyval == Gdk.KEY_Escape and self.busy:
+            self.stop()
+            return True
+        return False
+
+    def submit(self):
+        """What's written asked (kept if it couldn't be: said in the window's note, there to send again)."""
+        if self.busy or not self.text().strip():
+            return
+        if self.ask(self.text()) is not False:
+            self.composer.get_buffer().set_text("")
+
+    STOP_WAIT = 3000  # ms for a stopped answer to end (as Meta's), before it's shown stopped anyway
+
+    def stop(self):
+        """The answer stopped: shown stopped, not failed, as its result comes (or after STOP_WAIT, if it doesn't)."""
+        if self.busy and self.proc is not None:
+            self.stopped = answer = self.answer
+            self.proc.control({"subtype": "interrupt"})
+            GLib.timeout_add(self.STOP_WAIT, lambda: self.busy and self.answer is answer and self._stopped() and False)
+
+    def _stopped(self):
+        self._busy(False)
+        self._mark("interrupted")
+
+    def _mark(self, state):
+        """Its line's status: a spinner, a failed or stopped one's mark, or (None) nothing; its page's header's too."""
+        if state is not None:
+            self.status.set_state(state)
+        self.status.set_visible(state is not None)
+        self.win.panel.side_question_status(self)
+
+    def start(self, question):
+        """Its claude, and the first question to it: False if it couldn't be had (said)."""
+        win = self.win
         if not win.runs_here():  # (a chat of Baude's, or a host's: its side question's the host process's too)
             self.proc, self.forked = win.side_question_proc(self.on_msg, self.on_exit)
         else:
@@ -8904,20 +9054,46 @@ class SideQuestion(Gtk.Box):
             self.forked = bool(info)
             self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
                                    info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+        if self.proc is None:
+            return False
+        self.title.set_label(question)
+        self.win.panel.side_question_titled(self)
         self.ask(question, first=True)
+        return True
 
     def ask(self, text, first=False):
         text = (text or "").strip()
+        if text and not first and self.proc is None and self.answer is None:  # (from +: its first question)
+            return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
         if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
             self.body.append(self.win.user_bubble(text, []))
         self.answer = MarkdownView()
         self.body.append(self.answer)
-        self.busy = True
-        self.dot.set_state("working")
-        self.follow.set_sensitive(False)
+        self.scroll.set_visible(True)
+        self._busy(True)
         self.proc.user((self.PREFACE if first else "") + text)
+
+    def _busy(self, busy):
+        self.busy = busy
+        self._mark("running" if busy else None)
+        self.dots.set_working(busy)
+        self.writing.set_busy(busy)
+
+    def refresh_context(self):
+        if self.proc is not None:
+            self.answers[self.proc.control({"subtype": "get_context_usage"})] = self.ctx.set_usage
+
+    def refresh_context_soon(self):
+        """The meter asked again a moment after each step of an answer, at most once a second (as the chat's)."""
+        if self.context_soon is None:
+            self.context_soon = GLib.timeout_add(self.CONTEXT_EVERY_MS, self._context_now)
+
+    def _context_now(self):
+        self.context_soon = None
+        self.refresh_context()
+        return False
 
     def on_msg(self, proc, msg):
         if proc is not self.proc:
@@ -8932,31 +9108,44 @@ class SideQuestion(Gtk.Box):
             for c in msg.get("message", {}).get("content", []):
                 if c.get("type") == "text":
                     self.answer.append(c["text"])
-        elif t == "control_request" and msg.get("request", {}).get("subtype") == "can_use_tool":
+        if t == "assistant" and not msg.get("parent_tool_use_id"):
+            self.refresh_context_soon()  # (each step of the answer)
+        if t == "control_request" and msg.get("request", {}).get("subtype") == "can_use_tool":
             self.proc.respond(msg["request_id"], {"behavior": "deny",
                                                   "message": "Side questions can't run tools that need permission."})
+        elif t == "control_response":
+            r = msg.get("response") or {}
+            then = self.answers.pop(r.get("request_id"), None)
+            if then is not None and r.get("subtype") == "success":
+                then(r.get("response") or {})
         elif t == "result":
-            self.busy = False
-            self.dot.set_state("done")
-            self.follow.set_sensitive(True)
-            if msg.get("is_error") and self.answer is not None and not self.answer.text:
-                self.answer.append(f"*{msg.get('result') or 'The side question failed.'}*")
+            stopped, self.stopped = self.stopped is not None and self.stopped is self.answer, None
+            self._busy(False)
+            if stopped:
+                self._stopped()
+            elif msg.get("is_error"):
+                self._mark("error")
+                if self.answer is not None and not self.answer.text:
+                    self.answer.append(f"*{msg.get('result') or 'The side question failed.'}*")
+            self.refresh_context()
         return False
 
     def on_exit(self, code):
         if self.proc is not None:
-            self.busy = False
-            self.dot.set_state("inactive")
-            self.follow.set_sensitive(False)
+            if self.busy:  # (ended mid-answer)
+                self._busy(False)
+                self._mark("interrupted")
+            self.writing.set_sensitive(False)
         return False
 
     def close(self):
         proc, self.proc = self.proc, None
         if proc:
             proc.kill()
-        if self.get_parent():
-            self.get_parent().remove(self)
-        self.win.panel.side_questions_changed()
+        if self.context_soon is not None:
+            GLib.source_remove(self.context_soon)
+            self.context_soon = None
+        self.win.panel.drop_side_question(self)
 
 
 # ------------------------------------------------------------- side panel --
@@ -9672,7 +9861,7 @@ class BaudeMeta(meta.MetaChat):
                        ", ".join(f"{s['id'][:8]} {s.get('state')}" for s in busy[:8]))
         panel = win.panel
         for n, said in ((len(panel.agent_rows), "subagent"), (len(panel.proc_rows), "background process"),
-                        (len(panel.side_questions()), "side question")):
+                        (len([q for q in panel.side_questions() if q.proc is not None]), "side question")):
             if n:
                 out.append(f"{n} {said}{'s' if n != 1 else ''} in the open chat")
         if self.agent is not None and not self.agent.closed:
@@ -9813,12 +10002,49 @@ class SidePanel(Gtk.Box):
         self.artifact_empty = self._empty("No artifacts yet")
         self.artifact_list.append(self.artifact_empty)
         self.artifact_rows = {}
-        # /btw side questions, newest first
-        self.btw_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        self.btw_empty = self._empty("Ask a side question with /btw <question>\n(it doesn't interrupt or join the chat)")
-        self.btw_empty.set_justify(Gtk.Justification.CENTER)
-        self.btw_list.append(self.btw_empty)
-        page = self.stack.add_titled(self._scrolled(self.btw_list), "btw", "Side questions")
+        # /btw side questions, newest first: rows titled with their questions, each opening under its line or
+        # filling the page, out of its row as a subagent's does (list -> detail: ExpandStack)
+        self.btw_expand = widgets.ExpandStack(vexpand=True)
+        self.btw_stack = self.btw_expand.stack
+        self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.btw_list.add_css_class("boxed-list")
+        self.btw_list.set_placeholder(self._empty("No side questions"))
+        btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        btw_top = Gtk.Box(margin_start=10, margin_end=10, margin_top=6)  # (+: a new one, its question typed in it)
+        self.btw_new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New side question",
+                                  halign=Gtk.Align.END, hexpand=True)
+        self.btw_new.add_css_class("flat")
+        self.btw_new.connect("clicked", lambda *_: self.new_side_question())
+        btw_top.append(self.btw_new)
+        btw_page.append(btw_top)
+        self.btw_scroll = self._scrolled(self.btw_list)
+        # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
+        self.btw_list.set_margin_start(0)
+        self.btw_list.set_margin_end(widgets.INSIDE_GAP)
+        btw_page.append(self.btw_scroll)
+        self.btw_stack.add_named(btw_page, "list")
+        btw_detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # its row, as its header: each part where the row has it across (the list's edge, 1px, counted in), so a row
+        # opening into this only goes up; back at the end, where the row's square is, the row's ⌄ going out
+        top = Gtk.Box(spacing=12, margin_start=13, margin_end=7 + widgets.INSIDE_GAP, margin_top=8, margin_bottom=8)
+        self.btw_status = StatusSlot()
+        self.btw_status.set_visible(False)
+        self.btw_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)  # (not bold: its row's)
+        self.btw_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All side questions",
+                                   valign=Gtk.Align.CENTER)
+        self.btw_back.add_css_class("flat")
+        self.btw_back.add_css_class("side-question-full")  # (the size of the button it's in place of)
+        self.btw_back.connect("clicked", lambda *_: self.close_side_question())
+        top.append(self.btw_status)
+        top.append(self.btw_title)
+        top.append(self.btw_back)
+        btw_detail.append(top)
+        # (the shown one's thread set into the panel as a subagent's is: detail_holder)
+        self.btw_holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True, margin_top=6)
+        btw_detail.append(self.btw_holder)
+        self.btw_stack.add_named(btw_detail, "detail")
+        self.btw_shown = None
+        page = self.stack.add_titled(self.btw_expand, "btw", "Side questions")
         page.set_icon_name("dialog-question-symbolic")
         page = self.stack.add_titled(self._scrolled(self.artifact_list), "artifacts", "Artifacts")
         page.set_icon_name(globe_icon())
@@ -9859,14 +10085,76 @@ class SidePanel(Gtk.Box):
         self.stack.set_visible_child_name(name)
 
     def add_side_question(self, sq):
+        """sq at the top, open under its line."""
+        if self.btw_shown is not None:  # (back to the list, where it is)
+            self.close_side_question()
         self.btw_list.prepend(sq)
-        self.side_questions_changed()
+        sq.set_expanded(True)
+
+    def new_side_question(self):
+        """A side question with no question yet, at the top, its box focused for the first."""
+        sq = SideQuestion(self.win)
+        self.add_side_question(sq)
+        sq.composer.grab_focus()
+        return sq
 
     def side_questions(self):
         return [w for w in walk(self.btw_list) if isinstance(w, SideQuestion)]
 
-    def side_questions_changed(self):
-        self.btw_empty.set_visible(not self.side_questions())
+    def open_side_question(self, sq):
+        """sq's thread filling the page, opening out of its row (its thread under it, if it's open there, the square
+        it opens from), back (close_side_question) into it."""
+        self.btw_expand.finish()  # (one opening or closing: at its end, before the page's changed under it)
+        if self.btw_shown is not None:
+            self.btw_shown.put_inside_row()
+        self.btw_shown = sq
+        self.side_question_titled(sq)
+        self.side_question_status(sq)
+        if self.btw_stack.get_visible_child_name() == "list" and self.stack.get_visible_child_name() == "btw":
+            self.btw_expand.open("detail", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
+                                 across=self.btw_list)
+        else:
+            self.btw_stack.set_visible_child_name("detail")
+        self.btw_holder.append(sq.take_inside())  # (after: the row's picture taken with it in it)
+        self.show_page("btw")
+
+    def btw_parts(self, sq):
+        """How a side question's row turns into its page's header (ExpandStack): its title and status into the
+        header's, its square into back (where it is), its ⌄ going out."""
+        body = sq.inside if sq.opened() else None  # (its thread under its line, if it's all the way open)
+        return {"pairs": [(sq.title, self.btw_title), (sq.status, self.btw_status),
+                          (sq.full.get_child(), self.btw_back.get_child())],
+                "leave": [sq.toggle], "body": body,
+                "rides": [(sq.comp, sq.comp)] if body is not None else []}  # (its box, and its meter on the page)
+
+    def close_side_question(self, animate=True):
+        """Back to the list, the side question shown closing into its row (into its thread under it, if it was open
+        there)."""
+        self.btw_expand.finish()
+        sq, self.btw_shown = self.btw_shown, None
+        if sq is not None and animate and sq.get_parent() is self.btw_list:
+            self.btw_expand.close("list", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
+                                  across=self.btw_list)
+        else:
+            self.btw_stack.set_visible_child_name("list")
+        if sq is not None:
+            sq.put_inside_row()  # (after: the page's picture taken with it in it)
+
+    def side_question_titled(self, sq):
+        if sq is self.btw_shown:
+            self.btw_title.set_text(sq.title.get_label())
+
+    def side_question_status(self, sq):
+        """The header's status as the shown one's row has it."""
+        if sq is self.btw_shown:
+            self.btw_status.set_state(sq.status.state)
+            self.btw_status.set_visible(sq.status.get_visible())
+
+    def drop_side_question(self, sq):
+        if sq is self.btw_shown:
+            self.close_side_question(animate=False)
+        if sq.get_parent() is self.btw_list:
+            self.btw_list.remove(sq)
 
     def update_artifact(self, info):
         old = self.artifact_rows.pop(info["url"], None)
@@ -11862,7 +12150,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         restart_state), a dialog or a capture open, and you at it (the window you're in, something typed, clicked or
         scrolled in it in the last minute). Not the model writing: a turn cut short there is resumed (show_cut)."""
         why = [f"running: {w}" for w in self.own_commands()]
-        if any(sq.follow.get_text().strip() for sq in self.panel.side_questions()):
+        if any(sq.text().strip() and sq.writing.get_sensitive() for sq in self.panel.side_questions()):
             why.append("a side question's reply being written")
         bar = getattr(self, "capture_bar", None)
         if self.get_visible_dialog() is not None or (bar is not None and bar.get_reveal_child()):

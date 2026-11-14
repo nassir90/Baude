@@ -13593,7 +13593,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """A provider picked: the model picker lists its models after Claude's; kept for the chats after
         (settings.json's provider). The chat goes on with its own model till one's picked, unless the provider has the
         same one (alike: its own on another host): the chat's model is then that host's. On Apple's model, another
-        host's Apple model."""
+        host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
+        self.move_after_turn = None
         if key in getattr(self, "alike_keys", {}):
             self.on_model_changed(self.alike_keys[key])
             return
@@ -13605,6 +13606,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         there = next((m for m in getattr(self, "provider_models", {}).get(key, []) if mine and
                       m["value"] != self.model and providerslib.kind(m) == providerslib.kind(mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
+            if getattr(self, "busy", False):  # (moving now would stop the reply: h_result moves it)
+                self.move_after_turn = (self.session_id, there["value"])
+                self.sync_providers()
+                return
             self.on_model_changed(there["value"])
             return
         self.sync_providers()
@@ -13956,6 +13961,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def h_assistant(self, msg):
         m, parent = msg["message"], msg.get("parent_tool_use_id")
+        if parent is None:  # (what a turn ending in an error last said: the error, said once, not again by h_result)
+            said = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text").strip()
+            self.said_last = said.removeprefix("⚠").strip() or self.said_last
         for w in self.blocks.values():  # its streamed text is complete: no frame's delay
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
@@ -16199,8 +16207,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
+        said, self.said_last = getattr(self, "said_last", None), None
         if msg.get("is_error"):
-            self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
+            if (msg.get("result") or "").strip() != said:
+                self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
             if needs_login(msg.get("result")):
@@ -16210,6 +16220,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
+        move, self.move_after_turn = getattr(self, "move_after_turn", None), None
+        if move is not None and move[0] == self.session_id:  # (a provider picked while it ran: its copy of the model now)
+            GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"

@@ -11917,6 +11917,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.history = None        # a loaded session's items not drawn yet (HistoryIndex)
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
         self.reverting = None      # a revert not sent yet: {turn, hidden, draft, asked} (revert_to)
+        self.send_after_result = None  # (a revert made mid-turn: what's in the box sent once the turn's ended: reverted)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
         self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
@@ -12071,7 +12072,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
-        self.send_btn.connect("clicked", lambda *_: self.on_send())
+        self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
+                              else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
         self.attach_row = Gtk.Box(spacing=6)
         self.attach_strip = Gtk.ScrolledWindow(child=self.attach_row, visible=False, vexpand=False,
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -13573,7 +13575,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.remember_place()  # (to open it there again)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
-        self.reverting = None  # (a revert not sent: gone with its chat)
+        if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it)
+            self.input.get_buffer().set_text(self.reverting["draft"])
+            self.reverting = None
+        if self.send_after_result is not None:  # (nor what was to be sent after one)
+            GLib.source_remove(self.send_after_result)
+            self.send_after_result = None
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
@@ -13716,7 +13723,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.on_send()
             return True
         if keyval == Gdk.KEY_Escape and self.reverting is not None:
-            if not self.reverting["asked"]:  # (asked of claude already: its answer settles it)
+            if not self.revert_asked():  # (asked of claude already: its answer settles it)
                 self.cancel_revert()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
@@ -13755,7 +13762,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     self.note(f"/login: {e}")
             return
         if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
-            if (typed or self.attachments) and not self.reverting["asked"]:
+            if (typed or self.attachments) and not self.revert_asked():
                 self.commit_revert()  # (sent: the revert made, then this sent, reverted)
             return
         if self.busy:
@@ -13878,14 +13885,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         draft = None
         if self.reverting is not None:
-            if self.reverting["asked"]:
+            if self.revert_asked():
                 return
             draft = self.reverting["draft"]
             self.cancel_revert(restore_draft=False)
         buf = self.input.get_buffer()
         if draft is None:
             draft = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
-        self.reverting = {"turn": turn, "hidden": [], "draft": draft, "asked": False}
+        self.reverting = {"turn": turn, "hidden": [], "draft": draft, "asked": None}
         w = turn
         while w is not None and w is not self.transcript:  # (it, what's after it, and after what it's in)
             after = w.get_next_sibling() if w is not turn else w
@@ -13900,9 +13907,39 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def hide_reverted(self, widget):
         """A widget hidden while a revert's not sent (revert_to), to be shown again if it's not (cancel_revert)."""
-        if widget is not None and widget.get_visible():
+        if widget is not None and getattr(widget, "zoom_hidden", False):  # (hidden by a zoom, to be shown as it
+            widget.zoom_hidden = False                                     # settles: not now, but with the rest)
+            for side in ("above", "below"):
+                if self.zoom_job is not None and widget in self.zoom_job.get(side, ()):
+                    self.zoom_job[side].remove(widget)
+            self.reverting["hidden"].append(widget)
+        elif widget is not None and widget.get_visible():
             widget.set_visible(False)
             self.reverting["hidden"].append(widget)
+
+    def revert_asked(self):
+        """Whether the pending revert's been asked of claude, and it's still to answer (one gone meanwhile won't)."""
+        asked = self.reverting["asked"] if self.reverting is not None else None
+        return asked is not None and asked[0] is self.proc and asked[1] in self.pending
+
+    def say_now(self, text):
+        """A note shown while a revert's pending, below what's still shown (add hides what comes after the reverted
+        message)."""
+        rev, self.reverting = self.reverting, None
+        try:
+            return self.note(text)
+        finally:
+            self.reverting = rev
+
+    def show_waiting(self, widget):
+        """A permission asked while a revert's pending: what it's in shown again, to be answered (the turn waits on
+        it)."""
+        rev, w = self.reverting, widget
+        while rev is not None and w is not None and w is not self.transcript:
+            if w in rev["hidden"]:
+                rev["hidden"].remove(w)
+                w.set_visible(True)
+            w = w.get_parent()
 
     def cancel_revert(self, restore_draft=True):
         """Esc on a revert not sent: what it hid shown again, and the box as it was before."""
@@ -13922,32 +13959,37 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         sending in it does (send_text)."""
         rev = self.reverting
         turn = rev["turn"]
-        if self.resume_pending:
-            self.begin_resume()
-        if self.proc is None and self.remote is None and not self.runs_here():
-            took = self.take_up()
-            if took is False:  # (This Mac's host process isn't there yet: started, and sent once it is)
-                self.note(f"Starting {THIS_MACHINE}'s host process…")
-                self.local_server(lambda _r: self.reverting is rev and not rev["asked"] and self.commit_revert())
+        self.reverting = None  # (what's said meanwhile shown, not hidden with what's being reverted: add)
+        try:
+            if self.resume_pending:
+                self.begin_resume()
+            if self.proc is None and self.remote is None and not self.runs_here():
+                took = self.take_up()
+                if took is False:  # (This Mac's host process isn't there yet: started, and sent once it is)
+                    self.note(f"Starting {THIS_MACHINE}'s host process…")
+                    self.local_server(lambda _r: self.reverting is rev and not self.revert_asked() and
+                                      self.commit_revert())
+                    return
+                if took is None:
+                    return
+            if self.proc is None:
+                self.start_proc()
+            if self.proc is None:
+                self.note("Couldn't revert: claude isn't running")
                 return
-            if took is None:
-                return
-        if self.proc is None:
-            self.start_proc()
-        if self.proc is None:
-            self.note("Couldn't revert: claude isn't running")
-            return
-        rev["asked"] = True
-        self.request({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid, "interrupt_if_running": True},
-                     lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
+        finally:
+            if rev["turn"].is_ancestor(self.transcript):
+                self.reverting = rev
+        rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid,
+                                 "interrupt_if_running": True})
+        self.pending[rid] = (lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
+        rev["asked"] = (self.proc, rid)
 
     def revert_refused(self, rev, why):
         """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
-        rev["asked"] = False
+        rev["asked"] = None
         if self.reverting is rev:
-            self.reverting = None  # (said below what's still shown, not hidden with what's being reverted: add)
-            self.note(f"Couldn't revert: {why}")
-            self.reverting = rev
+            self.say_now(f"Couldn't revert: {why}")
 
     def reverted(self, rev, response):
         """claude's answer to commit_revert: rewound, the message and all after it gone from the chat, and what's in the
@@ -13961,8 +14003,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.reverting = None
         self.drop_from(rev["turn"])
         self.blocks, self.streamed_ids = {}, set()  # (a turn it stopped: what was half drawn is gone)
+        if self.busy:  # (a turn it stopped, its ending not said yet: what's in the box sent once it is, h_result; or
+            self.send_after_result = GLib.timeout_add(3000, self.send_reverted)  # in a moment, if it never is)
+        else:
+            self.send_reverted(waited=False)
+
+    def send_reverted(self, waited=True):
+        """After a revert's made (reverted): what's in the box sent. waited: once its stopped turn's ended, or a moment
+        after (whichever's first: once)."""
+        if waited and self.send_after_result is None:
+            return False
+        if self.send_after_result is not None:
+            GLib.source_remove(self.send_after_result) if GLib.MainContext.default().find_source_by_id(
+                self.send_after_result) else None
+            self.send_after_result = None
         self.set_busy(False)
         self.on_send()
+        return False
 
     def drop_from(self, widget):
         """widget and everything drawn after it, out of the chat (an earlier chunk it's in: the rest of that, and the
@@ -17017,6 +17074,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
+        if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
+            GLib.idle_add(self.send_reverted)
         GLib.idle_add(lambda: self.follow_checkout() and False)  # (the turn may have moved into a worktree)
         if self.proc is not None:
             self.proc.asks.clear()  # (the turn's over: what it asked and wasn't answered can't be now)
@@ -17174,6 +17233,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             box.append(row)
         waiting = card if card is not None else box
         self.waiting_cards.add(waiting)
+        if self.reverting is not None:  # (asked mid-turn while a revert's pending: shown, once it's in the chat)
+            GLib.idle_add(lambda: self.show_waiting(waiting) and False)
         self.update_session_state()
         proc = self.proc
 

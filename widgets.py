@@ -6576,6 +6576,59 @@ def view_bar(spacing=6, margin_start=12, margin_end=10, margin_top=6, margin_bot
     return bar
 
 
+class ChoiceDropDown(Gtk.DropDown):
+    """A DropDown over (value, label) pairs. on_pick(value) fires for user picks only,
+    not for select()/set_choices() calls that mirror what the CLI reports."""
+
+    def __init__(self, choices, tooltip, on_pick):
+        super().__init__(tooltip_text=tooltip, css_classes=["choice"])
+        # (its list centred under it: GTK's lines up their left sides, and a longer one runs on to the right)
+        if (popup := next((w for w in walk(self) if isinstance(w, Gtk.Popover)), None)) is not None:
+            popup.set_halign(Gtk.Align.CENTER)
+        self.strings = Gtk.StringList()
+        self.set_model(self.strings)
+        self.on_pick, self.values, self.quiet = on_pick, [], False
+        self.set_choices(choices)
+        self.connect("notify::selected", self._changed)
+
+    def _changed(self, *_):
+        if not self.quiet and self.value() is not None:
+            self.on_pick(self.value())
+
+    def _quietly(self, fn):
+        self.quiet = True
+        try:
+            fn()
+        finally:
+            self.quiet = False
+
+    def set_choices(self, choices):
+        """Replace the entries, keeping the current value selected if it is still there."""
+        keep = self.value()
+        def swap():
+            self.values = [v for v, _ in choices]
+            self.strings.splice(0, self.strings.get_n_items(), [lbl for _, lbl in choices])
+            self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
+        self._quietly(swap)
+
+    def select(self, value):
+        """Show `value` as selected (appending it if unknown) without firing on_pick."""
+        def pick():
+            if value not in self.values:
+                self.values.append(value)
+                self.strings.append(value)
+            self.set_selected(self.values.index(value))
+        self._quietly(pick)
+
+    def value(self):
+        i = self.get_selected()
+        return self.values[i] if i < len(self.values) else None
+
+    def label(self):
+        i = self.get_selected()
+        return self.strings.get_string(i) if i < len(self.values) else ""
+
+
 def ellipsize_dropdown(dd, chars=30):
     """dd's button shows its choice shortened with … (a long server or database name would widen the bar past the
     window); its list shows every choice whole."""

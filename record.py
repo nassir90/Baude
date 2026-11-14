@@ -73,6 +73,9 @@ import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's fi
 fontsetup.setup()
 from baudelib.transcripts import task_notification  # noqa: E402  (a background task's ending, as said)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
+import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
+from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
+from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
@@ -103,20 +106,6 @@ def base_name(text):
 
 def full_name(notebook):
     return base_name(notebook["name"]) or "Untitled"
-
-
-def data_dir():
-    d = os.environ.get("RECORD_DATA") or own_data_dir("Record")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def own_data_dir(app):
-    """Where an app of ours keeps its data: ~/Library/Application Support/<app> on macOS, else
-    $XDG_DATA_HOME/<app, lower case>."""
-    if sys.platform == "darwin":
-        return os.path.expanduser(f"~/Library/Application Support/{app}")
-    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), app.lower())
 
 
 def claude_exe():
@@ -262,7 +251,7 @@ def book_folders(notebooks):
     """A folder's name for each notebook, {its id: the name}, no two the same. A folder doesn't come to hold another's pages
     as notebooks come and go: two of one name both go by their ids too."""
     def key(notebook):
-        return unicodedata.normalize("NFC", file_part(base_name(notebook["name"]))).casefold()
+        return notebook.get("host") or "", unicodedata.normalize("NFC", file_part(base_name(notebook["name"]))).casefold()
     names, taken = [key(notebook) for notebook in notebooks], set()
     return {notebook.get("id"): fresh_path(file_part(base_name(notebook["name"])) + (f" ({notebook.get('id')})" if names.count(key(notebook)) > 1 else ""), taken)
             for notebook in notebooks}
@@ -270,11 +259,14 @@ def book_folders(notebooks):
 
 def page_paths(notebooks):
     """Where each page's file goes (Store.mirror_pages, export_zip): {(its notebook's id, its name): a path}, in the
-    notebook's folder (book_folders), a sub-page in a folder named for its parent, as Zim keeps them. No two are the same."""
+    notebook's folder (book_folders), a sub-page in a folder named for its parent, as Zim keeps them; another host's
+    (its "host": Store.take) in hosts/<its name>/. No two are the same."""
     taken, paths, books = set(), {}, book_folders(notebooks)
     for notebook in notebooks:
         for name in sorted(notebook["pages"]):
             folder = books[notebook.get("id")]
+            if notebook.get("host"):
+                folder = os.path.join("hosts", file_part(notebook["host"]) or "host", folder)
             paths[notebook.get("id"), name] = fresh_path(os.path.join(folder, *map(file_part, name.split(":"))), taken) + ".md"
     return paths
 
@@ -406,9 +398,46 @@ def diary_mentions(notebook, term):
     return any(re.search(r"(?<!\w)" + re.escape(t) + r"(?!\w)", p.lower()) for p in notebook["pages"].values())
 
 
+HERE_HOST = "here"  # (the host whose notebooks are shown: this machine's key, as Baude's New session has it)
+THIS_MACHINE = "local"  # (this machine, by name, as Baude says it)
+_NETWORK = []
+
+
+def network():
+    """The hosts there are, as Baude knows them (baudelib.client.Network: this machine's host process, by its socket,
+    and those it's linked to, and those given by where ssh goes): one for the app, started when it's first wanted."""
+    if not _NETWORK:
+        _NETWORK.append(baudelib.client.Network(  # (servers.json Baude's to keep: read here, not written)
+            lambda fn: GLib.idle_add(lambda: fn() and False),
+            hosts=[a for a in os.environ.get("BAUDE_HOSTS", "").split(",") if a.strip()], readonly=True))
+    return _NETWORK[0]
+
+
+def remote_name(r):
+    return r.info.get("name") or r.host
+
+
+def host_key(r):
+    """A host's key in the dropdown: this machine's, for a host process on it (its notebooks are records.json here);
+    else its own."""
+    return HERE_HOST if baudelib.client.is_here(r.info) else r.key
+
+
 class Store:
+    """Record's notebooks (records.json), and another host's while one's picked (Window.pick_host): notebooks is the
+    picked host's, so all that reads and changes them works on those; a change to another's is sent to it as it's
+    saved (push), and what it has is taken in as it's listed (take)."""
+
+    UNSENT = "\0unsent"  # (in remote_base, for what a host wasn't sent after all: it differs, so it's sent again)
+
     def __init__(self):
         self.path = os.path.join(data_dir(), "records.json")
+        self.host, self.picked = HERE_HOST, HERE_HOST  # (the host shown; the one picked, kept: Window.show_host)
+        self.host_name = self.picked_name = THIS_MACHINE  # (by name: the one picked's kept too, for while it's unknown)
+        self.local, self.remote, self.remote_base = [], {}, {}  # (this machine's; another's, by its key; as it has them)
+        self.loading = set()  # (hosts whose notebooks are asked for, not listed yet)
+        self.unsent = {}  # (host: a change to it wasn't taken: Window.send_notes's count then; sent again with the next)
+        self.sender = None  # (fn(host, changes): a change sent to a host, Window.send_notes)
         self.notebooks, saved_notes = [], None
         self.full_width = not os.path.exists(self.path)  # (☰ → Full-width text, as Baude's: on for a new installation)
         self.page_files, self.mirrored = {}, {}  # (each page's file, and what's been written in them: mirror_pages)
@@ -425,6 +454,8 @@ class Store:
             with open(self.path) as f:
                 saved = json.load(f)
                 self.notebooks = saved.get("records", [])
+                self.picked = saved.get("host") if isinstance(saved.get("host"), str) else HERE_HOST
+                self.picked_name = saved.get("host_name") if isinstance(saved.get("host_name"), str) else self.picked
                 self.full_width = bool(saved.get("full_width"))
                 saved_notes = saved.get("notes")  # ("markdown": the notes are; else Zim's markup, from before)
                 self.zoom = float(saved.get("zoom") or 1.0)
@@ -464,6 +495,98 @@ class Store:
         if zim or chats:
             self.save_now()  # (Markdown now, notebooks without chats: kept, not made so again)
 
+    @property
+    def notebooks(self):
+        """The picked host's notebooks: this machine's, else another's as it last listed them (and changed here)."""
+        return self.local if self.host == HERE_HOST else self.remote.setdefault(self.host, [])
+
+    @notebooks.setter
+    def notebooks(self, value):
+        if self.host == HERE_HOST:
+            self.local = value
+        else:
+            self.remote[self.host] = value
+
+    def take(self, host, name, books):
+        """A host's notebooks as it's listed them ([notes.shared]): those known here changed in place (one open stays
+        open), new ones added, gone ones taken out; each marked with the host's name (page_paths)."""
+        have = self.remote.setdefault(host, [])
+        by_id = {t.get("id"): t for t in have}
+        out = []
+        for b in books:
+            t = by_id.get(b["id"])
+            if t is None:
+                t = {"id": b["id"], "name": b["name"], "pages": dict(b["pages"]), "folders": [], "messages": []}
+            else:
+                t["name"] = b["name"]
+                if t["pages"] != b["pages"]:
+                    t["pages"].clear()  # (the same dict: what has the notebook keeps it)
+                    t["pages"].update(b["pages"])
+            t["host"] = name
+            out.append(t)
+        listed, was = {b["id"] for b in books}, self.remote_base.get(host)
+        if was is not None:  # (made here meanwhile, not sent yet: kept)
+            out[:0] = [t for t in have if t.get("id") not in listed and t.get("id") not in was]
+        have[:] = out
+        self.remote_base[host] = {b["id"]: copy.deepcopy(b) for b in books}
+        self.loading.discard(host)
+        if host == self.host:
+            self.mirror_pages()
+
+    def push(self, host=None):
+        """A host's notebooks (the one shown's, if not said), if it's another: what's changed of them here since it
+        last had them (or wasn't sent after all: failed), sent to it (sender): a notebook made, dropped, renamed, its
+        pages set or deleted. True if anything was."""
+        host = host or self.host
+        if host == HERE_HOST or host in self.loading or self.sender is None:
+            return False
+        base = self.remote_base.setdefault(host, {})
+        now = {t["id"]: notes.shared(t) for t in self.remote.get(host, [])}
+        changes = []
+        for i, b in now.items():
+            was = base.get(i)
+            if was is None:
+                changes.append({**b, "new": True})
+                continue
+            c = {"id": i}
+            if b["name"] != was["name"]:
+                c["name"] = b["name"]
+            pages = {p: text for p, text in b["pages"].items() if was["pages"].get(p) != text}
+            pages.update({p: None for p in was["pages"] if p not in b["pages"]})
+            if pages:
+                c["pages"] = pages
+            if len(c) > 1:
+                changes.append(c)
+        changes += [{"id": i, "drop": True} for i in base if i not in now]
+        if changes:
+            self.remote_base[host] = copy.deepcopy(now)
+            self.sender(host, changes)
+        return bool(changes)
+
+    def failed(self, host, changes):
+        """Changes a host didn't take: marked in what it's said to have (remote_base), so the next push sends them
+        again (a notebook made: made again; dropped: dropped again; a name, a page: set again), and nothing else."""
+        base = self.remote_base.setdefault(host, {})
+        for c in changes:
+            if c.get("new"):
+                base.pop(c["id"], None)
+                continue
+            if c.get("drop"):
+                base.setdefault(c["id"], {"id": c["id"], "name": self.UNSENT, "pages": {}})
+                continue
+            was = base.setdefault(c["id"], {"id": c["id"], "name": self.UNSENT, "pages": {}})
+            if "name" in c:
+                was["name"] = self.UNSENT
+            for p in c.get("pages") or {}:
+                was["pages"][p] = self.UNSENT
+
+    def apply_here(self, changes):
+        """Changes another machine's Record made to this machine's notebooks (handed over by the host process here:
+        notes.write): made, and saved. The ids changed."""
+        done = notes.apply(self.local, changes)
+        self.save_now()
+        return done
+
     def _without_chats(self):
         """Notebooks from when each was attached to a chat, made as they are now (a notebook has no chat: Read shows
         the one last opened, whichever notebook's open), once, the file kept first: a chat's folder one of its
@@ -493,9 +616,12 @@ class Store:
     BACKUP_EVERY, BACKUPS = 600, 50  # a copy of what was saved before, at most every 10 minutes; the last 50 kept
 
     def new(self, name):
-        """A new one, "fresh" until it's named or anything's put in it (is_blank: a blank one isn't kept)."""
+        """A new one, "fresh" until it's named or anything's put in it (is_blank: a blank one isn't kept); on the host
+        shown."""
         t = {"id": uuid.uuid4().hex[:12], "name": name, "created": time.time(), "pages": {HOME: ""},
              "folders": [], "messages": [], "fresh": True}
+        if self.host != HERE_HOST:
+            t["host"] = self.host_name  # (its pages' files with that host's: page_paths)
         self.notebooks.insert(0, t)
         self.save_now()
         return t
@@ -508,8 +634,15 @@ class Store:
             not t.get("folders") and not t.get("messages")
 
     def delete(self, notebook):
-        self.notebooks = [t for t in self.notebooks if t["id"] != notebook["id"]]
-        self.save_now()
+        """A notebook gone, from whichever host's it is (that one, not one of the same id: the host shown may have
+        changed since it was asked for)."""
+        for host, books in [(HERE_HOST, self.local), *self.remote.items()]:
+            if any(t is notebook for t in books):
+                books[:] = [t for t in books if t is not notebook]
+                self.save_now()
+                if host != self.host:
+                    self.push(host)
+                return
 
     def mirror_pages(self):
         """Every page of notes as a plain file too, read-only, in a folder that's Record's own: pages/<notebook>/<page>.md.
@@ -518,9 +651,13 @@ class Store:
         but what's been written here. What's kept is records.json: a file that can't be written here stops neither that nor
         the other files."""
         root = os.path.join(data_dir(), "pages")
-        self.page_files = {key: os.path.join(root, rel) for key, rel in page_paths(self.notebooks).items()}
-        books = {t.get("id"): t["pages"] for t in self.notebooks}
-        wanted = {path: books[book][name] for (book, name), path in self.page_files.items()}
+        shown = [("", self.local)] + ([(self.host, self.notebooks)] if self.host != HERE_HOST else [])
+        self.page_files, wanted = {}, {}  # (by host too: another's notebook of the same id, as a copied records.json has)
+        for host, books in shown:  # (another host's in hosts/<its name>/: page_paths)
+            pages = {t.get("id"): t["pages"] for t in books}
+            for (book, name), rel in page_paths(books).items():
+                self.page_files[host, book, name] = path = os.path.join(root, rel)
+                wanted[path] = pages[book][name]
         failed = None
         gone = self.mirrored.keys() - wanted.keys()
         for path in gone:
@@ -554,7 +691,7 @@ class Store:
     def page_file(self, notebook, name):
         """A page's file, as the page is now (None if it couldn't be written)."""
         self.save_now()
-        path = self.page_files.get((notebook.get("id"), name))
+        path = self.page_files.get(("" if not notebook.get("host") else self.host, notebook.get("id"), name))
         return path if path and self.mirrored.get(path) == notebook["pages"].get(name) else None
 
     def flush(self):
@@ -578,7 +715,7 @@ class Store:
         self.backup()
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"records": self.notebooks, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
+            json.dump({"records": self.local, "host": self.picked, "host_name": self.picked_name, "notes": "markdown", "full_width": self.full_width, "zoom": self.zoom,
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
                        "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
@@ -589,6 +726,7 @@ class Store:
         os.replace(tmp, self.path)
         self.unzipped = True
         self.mirror_pages()
+        self.push()
         for fn in self.on_saved:
             fn(False)
         return False
@@ -902,6 +1040,11 @@ notebooks) change anything. The conversation stays as they open another notebook
 your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and \
 its folders.
 
+The notebooks are on hosts, the user's machines: local is this one. A place is host / notebook / page, and you're \
+told where the user is (Open: host / notebook / page) as it changes. Only the picked host's notebooks are listed, and \
+your tools work on those: a tool's host, if you give it, is that one. The user picks the host; to take them to \
+another, show button:host (items: its name) for them to press.
+
 You never write a page's text yourself. To change it (fill a passage in, rewrite one, add to it), call propose_edit \
 with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
 rejects it. When they've selected a passage on a page and ask you to fill it in or change it, the text it replaces is \
@@ -976,7 +1119,8 @@ RECORD_TOOLS = [
      "description": "Add a page to a notebook, with its text (Markdown). A sub-page's name is its parent's "
      "and its own: Work:Plans. notebook: the one it goes in (left out: the one open).",
      "inputSchema": {"type": "object", "required": ["page"], "properties": {
-         "page": {"type": "string"}, "text": {"type": "string"}, "notebook": {"type": "string"}}}},
+         "page": {"type": "string"}, "text": {"type": "string"}, "notebook": {"type": "string"},
+         "host": {"type": "string", "description": "the host the notebook's on (left out: the one picked)"}}}},
     {"name": "delete_page",
      "description": "Delete a page of the notebook open (not Home); its sub-pages stay.",
      "inputSchema": {"type": "object", "required": ["page"], "properties": {"page": {"type": "string"}}}},
@@ -986,11 +1130,13 @@ RECORD_TOOLS = [
      "they go to (either left out: the one open).",
      "inputSchema": {"type": "object", "required": ["pages", "under"], "properties": {
          "pages": {"type": "array", "items": {"type": "string"}}, "under": {"type": "string"},
-         "from_notebook": {"type": "string"}, "to_notebook": {"type": "string"}}}},
+         "from_notebook": {"type": "string"}, "to_notebook": {"type": "string"},
+         "host": {"type": "string", "description": "the host the notebook's on (left out: the one picked)"}}}},
     {"name": "add_notebook",
      "description": "Make a notebook, empty but for Home, at once (not opened): add_page notebook and move_pages "
      "to_notebook fill it.",
-     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"},
+                                                                           "host": {"type": "string", "description": "the host the notebook's on (left out: the one picked)"}}}},
     {"name": "edit_page",
      "description": "Change a page's text at once, as part of the change you're making to the pages this turn "
      "(fixing what refers to pages you moved, say): undone with the rest of it, as one. old_text is the text it "
@@ -1038,7 +1184,7 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
     files = page_paths(store.notebooks)
     root = pages_root()
     pages = sorted(notebook["pages"], key=lambda p: (p != HOME, p.lower()))
-    parts = [f'<notebook name="{attr(full_name(notebook))}">']
+    parts = [f'<notebook host="{attr(store.host_name)}" name="{attr(full_name(notebook))}">']
     left = limit
     for name in pages:
         text = notebook["pages"][name].strip()
@@ -1061,7 +1207,8 @@ def none_open_said(store):
     books = [f'<notebook name="{attr(full_name(t))}">' +
              ", ".join(sorted(t["pages"], key=lambda p: (p != HOME, p.lower()))[:40]) + "</notebook>"
              for t in store.notebooks[:30]]
-    return "\n".join(["<no-notebook-open/>", *books]) if books else "<no-notebook-open/> (and there are no notebooks yet)"
+    none = f'<no-notebook-open host="{attr(store.host_name)}"/>'
+    return "\n".join([none, *books]) if books else f"{none} (and there are no notebooks on it yet)"
 
 
 def referenced(text, space):
@@ -1280,6 +1427,9 @@ button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reje
 /* (one to send, its bar as bright as the accent: RecordChat.quote_box) */
 button.quote-drop { min-width: 24px; min-height: 24px; padding: 0; border-radius: 0; }
 .diary-title { font-size: 1.75em; font-weight: 800; }
+dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
+dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
+   name in the column) */
 .diary { font-size: 1.05em; background: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
@@ -5494,6 +5644,7 @@ class RecordChat(meta.MetaChat):
             lambda v: win.change_action_state("backupall", GLib.Variant.new_boolean(v)),
             lambda: widgets.settings_switch(backup, backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                             "win.backupall"), bool)
+
         return out
 
     def told(self):
@@ -5741,6 +5892,9 @@ class RecordChat(meta.MetaChat):
                              "open now.)")
             parts.append(notebook_said(notebook, store, space) if notebook is not None else none_open_said(store))
         agent.seen = notebook
+        if (place := self.win.place()) != getattr(agent, "seen_place", None):  # (host / notebook / page, as it changes)
+            parts.append(f"(Open: {place})")
+            agent.seen_place = place
         books = {t.get("id"): t for t in store.notebooks}
         for m in [*self.messages(), *(notebook["messages"] if notebook is not None else ())]:
             for p in m.get("proposals") or ():
@@ -5919,6 +6073,10 @@ class RecordChat(meta.MetaChat):
     # ---- the index: Record's part
     def index_lines(self):
         nb, store, lines = self.notebook, self.win.store, []
+        lines.append(f"open: {self.win.place()} · hosts: " + ", ".join(n for _k, n in self.win.note_hosts()) +
+                     " (button:host opens one)")
+        if store.host in store.loading:
+            lines.append(f"{store.host_name}'s notebooks: being listed")
         if nb is not None:
             pages = sorted(nb["pages"], key=lambda p: (p != HOME, p.lower()))
             folders = attached_folders(nb)
@@ -6100,9 +6258,19 @@ class RecordChat(meta.MetaChat):
 
     def buttons(self):
         return {"delete_notebook": f"Delete the {book().lower()} open and its pages (asks first; "
-                                   "can't be undone)"}
+                                   "can't be undone)",
+                "host": f"Open a host (items: its name): its {book(plural=True).lower()} listed"}
 
     def button(self, action, items):
+        if action == "host" and items:
+            hosts = self.win.note_hosts()
+            key = next((k for k, n in hosts if n.lower() == str(items[0]).strip().lower()), None)
+            if key is None:
+                raise ValueError(f"No host {items[0]!r}: they're {', '.join(n for _k, n in hosts)}.")
+            btn = Gtk.Button(label=f"Open {dict(hosts)[key]}")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda *_: self.win.pick_host(key))
+            return btn
         if action != "delete_notebook" or self.notebook is None:
             raise ValueError(f"There's no button {action}: app_index buttons lists them.")
         btn = Gtk.Button(label=f"Delete {full_name(self.notebook)}…")
@@ -6201,6 +6369,7 @@ class RecordChat(meta.MetaChat):
         return page
 
     def add_page(self, turn, args):
+        self._on_host(args)
         nb, name = self._notebook_named(args.get("notebook"), True, "notebook", turn), page_name(args.get("page"))
         if not name:
             raise ValueError("A page's name is needed.")
@@ -6228,6 +6397,17 @@ class RecordChat(meta.MetaChat):
         self.pages_changed({})
         return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
 
+    def _on_host(self, args):
+        """A tool's call naming a host: it's the one picked (its notebooks are what the tools work on), or why not."""
+        store, name = self.win.store, str(args.get("host") or "").strip()
+        names = [n for _k, n in self.win.note_hosts()]
+        if name and name.lower() != store.host_name.lower():
+            raise ValueError(f"Your tools work on the host picked, {store.host_name}: show button:host {name} for the "
+                             "user to open it, and call again once they have." if name.lower() in map(str.lower, names)
+                             else f"There's no host {name!r}: they're {', '.join(names)}.")
+        if store.host in store.loading:
+            raise ValueError(f"{store.host_name}'s notebooks are still being listed: call again in a moment.")
+
     def _notebook_named(self, name, open_one, said="from_notebook, to_notebook", turn=None):
         """The notebook a tool's call names (its name, any case); not named, the one open, if open_one (and it's the
         one turn was asked with)."""
@@ -6244,6 +6424,7 @@ class RecordChat(meta.MetaChat):
         return nb
 
     def move_pages(self, turn, args):
+        self._on_host(args)
         under = page_name(args.get("under"))
         src = self._notebook_named(args.get("from_notebook"), True, turn=turn)
         nb = self._notebook_named(args.get("to_notebook"), True, turn=turn)
@@ -6301,6 +6482,7 @@ class RecordChat(meta.MetaChat):
     def add_notebook(self, turn, args):
         """add_notebook: a notebook made at once, as a page is (add_page), marked in the notebooks' list, part of the
         turn's change and undone with it; not opened."""
+        self._on_host(args)
         store, name = self.win.store, base_name(str(args.get("name") or ""))
         if not name:
             raise ValueError(f"A {book().lower()}'s name is needed.")
@@ -6633,6 +6815,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         books = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
+        # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
+        self.host_banner = Adw.Banner(use_markup=True)
+        books.append(self.host_banner)
         books.append(self.pages)
         self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,
                                                lambda: self.fold_books(not self.store.books_folded),
@@ -6640,6 +6825,21 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.books_head.set_margin_start(12)
         self.books_head.set_margin_end(8)
         self.books_head.set_margin_top(10)
+        # (beside it, before its +: the host whose notebooks are listed, by its name (this machine's local), as Baude's
+        # New session has its hosts; kept in records.json, shown once that host's there: pick_host, on_network)
+        self.host_dd = widgets.ellipsize_dropdown(widgets.ChoiceDropDown(
+            [(HERE_HOST, THIS_MACHINE)], f"The host whose {book(plural=True).lower()} are listed", self.pick_host), 12)
+        self.host_dd.add_css_class("flat")
+        self.host_dd.add_css_class("notes-host")
+        self.host_dd.set_valign(Gtk.Align.CENTER)
+        if (popup := next((w for w in widgets.walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
+            popup.connect("show", lambda *_: (self.start_network(), network().look()))  # (opened: the hosts looked
+            # for, one started a moment ago offered)
+        self.books_head.insert_child_after(self.host_dd, self.books_head.arrow.get_next_sibling())
+        self.books_head.name.set_ellipsize(Pango.EllipsizeMode.NONE)  # (Notebooks whole: the host's name gives way)
+        self.sends, self.sent = {}, {}  # (by host: changes sent it, not answered yet; sent it at all, this run)
+        self.list_again, self.asked = set(), set()  # (hosts to list once what's sent is answered; being listed)
+        self.host_up, self.net_on = {}, False  # (by host: there, as last seen; the hosts looked for: start_network)
         books.append(self.books_head)
         self.notebook_list = Gtk.ListBox()
         self.notebook_list.add_css_class("navigation-sidebar")
@@ -6835,6 +7035,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.apply_full_width(self.store.full_width)
         self.connect("close-request", lambda *_: self.store.save_now() and False)
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
+        self.store.sender = self.send_notes
+        self.host_dd.set_choices(self.note_hosts())
+        self.host_dd.select(self.store.picked)
+        if self.store.picked != HERE_HOST:  # (another host picked when it last closed: its notebooks, there or not)
+            self.start_network()
+            self.show_host(self.store.picked)
         widgets.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
         widgets.warm_shaders(self)  # (after its first frame)
@@ -7180,7 +7386,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         """Every BACKUP_EVERY, all the notebooks in the one zip in place of the last (backup_zip), if they've changed. With the
         glossary and the chats (Settings) they may have whether or not the notebooks have. With nothing written anywhere it's
         left as it is: that's more likely notes that couldn't be read (Store) than notes that are gone."""
-        written = any(text.strip() for notebook in self.store.notebooks for text in notebook["pages"].values())
+        written = any(text.strip() for notebook in self.store.local for text in notebook["pages"].values())
         if written and not self.zipping and (self.store.unzipped or self.store.backup_all):
             self.zipping, self.store.unzipped = True, False
 
@@ -7189,7 +7395,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 if error:
                     self.store.unzipped = True  # (the next time)
                     print(f"Record: the backup: {error}", file=sys.stderr)
-            self.export(self.store.notebooks, backup_zip(), self.store.backup_all, done)
+            self.export(self.store.local, backup_zip(), self.store.backup_all, done)
         return True
 
     @staticmethod
@@ -7202,6 +7408,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     @staticmethod
     def _activated(win, _pspec):
+        if win.is_active() and win.store.host != HERE_HOST:  # (come back to: another host's notebooks listed again)
+            win.list_notes(win.store.host)
         if not win.is_active():
             win.store.flush()  # (gone to another window: what's typed is on the disk)
 
@@ -7337,6 +7545,237 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.chat.show(notebook)
         self._tab_shown()
         self.chat.composer.grab_focus()
+
+    # ---- hosts: another machine's notebooks, through its host process (baudelib.notes), as Baude has its chats
+    def note_hosts(self):
+        """[(key, name)]: the hosts whose notebooks can be listed, as Baude's New session lists them: this machine
+        (local), then every other known, by its name (one that's gone or deactivated too: picked, it says so,
+        show_host_state); and the one picked, by the name it had, while it isn't known."""
+        out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
+        for r in sorted(network().remotes() if _NETWORK else (), key=lambda r: remote_name(r).lower()):
+            if (key := host_key(r)) not in seen:
+                seen.add(key)
+                out.append((key, remote_name(r)))
+        if self.store.picked not in seen:
+            out.append((self.store.picked, self.store.picked_name or self.store.picked))
+        return out
+
+    def place(self):
+        """Where you are, as Meta's told it: host / notebook / page (the page in the tab shown, if it's one)."""
+        if self.current is None:
+            return f"{self.store.host_name} / no {book().lower()} open"
+        shown = self.tabs.current()
+        page = shown.page if isinstance(shown, DiaryEditor) and shown.notebook is self.current else None
+        return " / ".join([self.store.host_name, full_name(self.current), *([page] if page else [])])
+
+    def host_remote(self, key):
+        """A host's Remote, by its key, there or not (None for this machine, or one not known)."""
+        if key == HERE_HOST or not _NETWORK:
+            return None
+        return next((r for r in network().remotes() if host_key(r) == key), None)
+
+    @staticmethod
+    def reachable(r):
+        return r is not None and r.state == "alive" and not r.deactivated
+
+    def start_network(self):
+        """The hosts looked for (baudelib.client.Network): once, as the dropdown's first opened, or at the start with
+        another host picked. (Not before: a Record that's only this machine's reaches no other.)"""
+        if not self.net_on:
+            self.net_on = True
+            network().listen(self.on_network)
+            self.on_network()
+
+    def on_network(self):
+        """The hosts changed: the dropdown's as they are, on the host picked; the one shown, back, listed again (what
+        wasn't sent it, sent first: list_notes); what's in its way said (show_host_state)."""
+        store = self.store
+        for r in network().remotes():  # (the one picked, known by another key now: by that one)
+            if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:
+                self.rekey_host(store.picked, host_key(r))
+        hosts = self.note_hosts()
+        self.host_dd.set_choices(hosts)
+        self.host_dd.select(store.picked)
+        (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
+        # no other host to pick)
+        if store.host != HERE_HOST:
+            r = self.host_remote(store.host)
+            if r is not None and remote_name(r) != store.host_name:
+                store.host_name = store.picked_name = remote_name(r)
+            up = self.reachable(r)
+            if up and not self.host_up.get(store.host):
+                self.list_notes(store.host)
+            self.host_up[store.host] = up
+        self.show_host_state()
+
+    def rekey_host(self, old, new):
+        store = self.store
+        for d in (store.remote, store.remote_base, store.unsent, self.sends, self.sent, self.host_up):
+            if old in d:
+                d[new] = d.pop(old)
+        for s in (store.loading, self.asked, self.list_again):
+            if old in s:
+                s.discard(old)
+                s.add(new)
+        if store.host == old:
+            store.host = new
+        if store.picked == old:
+            store.picked = new
+            store.save()
+
+    def host_state(self):
+        """What's in the way of the host shown, as Baude's banner says it over a host's chats, or None: it's there (or
+        it's this machine)."""
+        store = self.store
+        if store.host == HERE_HOST:
+            return None
+        r, name = self.host_remote(store.host), store.host_name
+        if r is None:
+            return f"Looking for {name} on the network…"
+        if self.reachable(r):
+            return None
+        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
+            if r.state == "dead" else f"Looking for {name} on the network…"
+
+    def show_host_state(self):
+        """The host shown isn't there (or is deactivated): said in the banner over the left bar, its notebooks as
+        they were last listed; what's changed in them is sent once it's back."""
+        said = self.host_state()
+        if said is not None:
+            self.host_banner.set_title(GLib.markup_escape_text(said))
+        self.host_banner.set_revealed(said is not None)
+
+    def pick_host(self, key):
+        """A host picked in the dropdown (or with Meta's button:host): its notebooks listed; kept, across restarts
+        and while it's gone."""
+        self.store.picked, self.store.picked_name = key, dict(self.note_hosts()).get(key, THIS_MACHINE)
+        self.store.save()
+        if key != HERE_HOST:
+            self.start_network()
+        self.show_host(key)
+
+    def show_host(self, key):
+        """The notebooks listed, a host's: the open one closed (its changes sent first), the first of the new host's
+        opened once they're listed (list_notes)."""
+        store = self.store
+        if key == store.host:
+            return
+        store.flush()  # (what's typed: saved, or sent to the host it's on)
+        self.notebook_list.unselect_all()
+        if self.current is not None:
+            self._show(None)
+        store.host, store.host_name = key, dict(self.note_hosts()).get(key, store.picked_name)
+        if key != HERE_HOST and key not in store.remote_base:
+            store.loading.add(key)  # (nothing sent to it till what it has is listed)
+        store.mirror_pages()
+        self.fill_sidebar()
+        if key != HERE_HOST:
+            self.host_up[key] = self.reachable(self.host_remote(key))
+            self.list_notes(key)
+        self.open_first()
+        self.host_dd.select(key)
+        self.show_host_state()
+
+    def open_first(self):
+        first = self.notebook_list.get_row_at_index(0)
+        if first is not None:
+            self.notebook_list.select_row(first)
+        else:
+            self._show(None)
+
+    def list_notes(self, key):
+        """A host's notebooks asked for (op notes), and taken in as it lists them (Store.take). Not while what's
+        been changed here isn't on it: what wasn't sent, sent again first (Store.failed), and any list asked for
+        before a change was sent, asked for again once the changes are answered: none's undone by an older list."""
+        r = self.host_remote(key)
+        if not self.reachable(r) or key in self.asked:
+            return
+        self.asked.add(key)
+        at = self.sent.get(key, 0)
+
+        def got(reply):
+            self.asked.discard(key)
+            store = self.store
+            if key == store.host:
+                store.flush()  # (what's typed since: sent first, and listed again after)
+                store.push(key)  # (what wasn't sent it before: sent now)
+            if self.sends.get(key) or self.sent.get(key, 0) != at or store.unsent.get(key) is not None:
+                self.list_again.add(key)
+                if not self.sends.get(key) and key == store.host:  # (nothing on its way: asked again now)
+                    self.list_again.discard(key)
+                    GLib.timeout_add(500, lambda: self.list_notes(key) and False)
+                return
+            if reply.get("op") != "notes" or reply.get("error"):
+                store.loading.discard(key)
+                old = (r.info.get("version") or 1) < 6
+                self.toast(f"{remote_name(r)}'s {book(plural=True).lower()} weren't listed: " +
+                           ("its daemon is older than this Record" if old else str(reply.get("error") or "no answer")))
+                return
+            books = [b for b in reply.get("notebooks") or () if isinstance(b, dict) and isinstance(b.get("id"), str)
+                     and isinstance(b.get("pages"), dict)]
+            first = key in store.loading
+            store.take(key, remote_name(r), [notes.shared(b) for b in books])
+            if key == store.host:
+                self.notes_changed(first)
+        r.request({"op": "notes"}, got)
+
+    def send_notes(self, key, changes):
+        """Changes to a host's notebooks, sent it (Store.push). Those it doesn't take (it's gone, or says no): kept to
+        send again (Store.failed), with the next change or once it's back."""
+        r, store = self.host_remote(key), self.store
+        self.sent[key] = seq = self.sent.get(key, 0) + 1
+        if not self.reachable(r):
+            store.failed(key, changes)
+            store.unsent[key] = seq
+            return
+        self.sends[key] = self.sends.get(key, 0) + 1
+
+        def done(reply):
+            self.sends[key] -= 1
+            if reply.get("op") != "notes" or reply.get("error"):
+                if store.unsent.get(key) is None:
+                    self.toast(f"{remote_name(r)} didn't save the change: {reply.get('error') or 'no answer'}")
+                store.failed(key, changes)
+                store.unsent[key] = self.sent[key]
+                self.list_again.discard(key)  # (listed again as it comes back, or the window does: not at once)
+            elif store.unsent.get(key) is not None and seq > store.unsent[key]:
+                del store.unsent[key]  # (sent after what failed was marked: it had it)
+            if not self.sends[key] and key in self.list_again:
+                self.list_again.discard(key)
+                self.list_notes(key)
+        r.request({"op": "notes", "action": "write", "changes": changes}, done)
+
+    def notes_here(self, changes):
+        """Changes another machine's Record made to this one's notebooks (record.listen): made, and shown."""
+        if not notes.changes_ok(changes):
+            return False
+        self.store.apply_here(changes)
+        if self.store.host == HERE_HOST:
+            self.notes_changed()
+        return True
+
+    def notes_changed(self, fresh=False):
+        """The notebooks listed changed under the window (another host's listed, or changed from elsewhere): rows added
+        and gone, the open one's pages listed and shown again, its gone pages' tabs closed (fresh: the first listing,
+        the first notebook opened)."""
+        if fresh:
+            self.fill_sidebar()
+            self.open_first()
+            return
+        self.books_changed()
+        if self.current is not None and not any(t is self.current for t in self.store.notebooks):
+            self.notebook_list.unselect_all()
+            self._show(None)
+            return
+        if self.current is None:
+            return
+        for child in list(self.tabs.children()):
+            if isinstance(child, DiaryEditor) and child.notebook is self.current:
+                if child.page != HOME and child.page not in self.current["pages"]:
+                    self.tabs.close(("note", child.page))
+                else:
+                    child.reload()
+        self.pages.fill()
 
     # actions
     def free_name(self, cwd=None):
@@ -8219,10 +8658,6 @@ def uninstall():
     return remove(launchers(APP_ID, "Record"))
 
 
-def socket_path():
-    return os.path.join(data_dir(), "record.sock")
-
-
 def restart_path():
     """What a Record restarting (☰ → Restart Record) leaves for the one it starts: Window.state, as JSON."""
     return os.path.join(data_dir(), "restart.json")
@@ -8244,7 +8679,9 @@ def hand_over(request, path=None):
 
 def listen(on_request):
     """Be the Record that's running: a later start's request goes to on_request(dict), on the main loop. (Two would
-    each save records.json over the other's.)"""
+    each save records.json over the other's.) So does a change to this machine's notebooks from another's Record
+    ({"notes": changes}, from the host process here: notes.write): answered "notes" once on_request has made it (it
+    says True), so it's in records.json when the host process next lists them; "no" if it couldn't be, in time."""
     import socket
     path = socket_path()
     if os.path.exists(path):
@@ -8259,6 +8696,15 @@ def listen(on_request):
             with conn:
                 try:
                     request = json.loads(conn.makefile().readline() or "{}")
+                    if not isinstance(request, dict):
+                        continue
+                    if "notes" in request:
+                        made, ready = [], threading.Event()
+                        if notes.changes_ok(request["notes"]):
+                            GLib.idle_add(lambda r=request: (made.append(on_request(r)), ready.set()) and False)
+                        ready.wait(4)  # (within notes.write's wait: told no, it's sent again later)
+                        conn.sendall(b"notes\n" if made and made[0] else b"no\n")
+                        continue
                     conn.sendall(b"ok\n")
                 except (OSError, ValueError):
                     continue
@@ -8329,6 +8775,10 @@ class App(Adw.Application):
                 print("record: no Dock icon:", e, file=sys.stderr)
         else:
             themed_icon()
+        try:  # (first: a change from another machine's Record waits for the window, not written under it: notes.write)
+            self.server = listen(self.request)
+        except OSError as e:
+            print("record: another start won't find this one:", e, file=sys.stderr)
         self.win = Window(self)
         widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         state = None
@@ -8349,11 +8799,18 @@ class App(Adw.Application):
                                           blocked=lambda waiting: self.win is not None and self.win.update_waiting(waiting))
         if self.chat:
             self.win.open_chat(self.chat)
-        try:
-            self.server = listen(lambda r: (self.win.open_chat(r["chat"]) if r.get("chat")
-                                                                  else self.win.present()))
-        except OSError as e:
-            print("record: another start won't find this one:", e, file=sys.stderr)
+
+    def request(self, r):
+        """A later start's request (listen), or another machine's change to the notebooks here: True if it's made."""
+        if self.win is None:
+            return False
+        if "notes" in r:
+            return self.win.notes_here(r["notes"])
+        if r.get("chat"):
+            self.win.open_chat(r["chat"])
+        else:
+            self.win.present()
+        return True
 
 
 def main():

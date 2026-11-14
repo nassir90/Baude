@@ -14185,15 +14185,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return getattr(self, "model_names", {}).get(value) or self.model_dd.label()
 
     def on_model_changed(self, value):
-        self.move_after_turn = None  # (a model picked mid-turn: that one, not a provider's picked before it)
+        dropped = getattr(self, "move_after_turn", None) is not None
+        self.move_after_turn = None  # (a model picked mid-turn: that one, not one picked before it)
         was = self.model
-        if value == was:  # (the one it's on)
+        if value == was:  # (the one it's on: one waiting for the turn's end dropped)
+            if dropped:
+                self.sync_providers()
             return
         self.outgrown = False  # (another model's window: as its usage says)
         if self.remote is not None and model_program(value) != model_program(was):
             label = self.model_said(value)
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
+            return
+        if getattr(self, "busy", False) and self.proc is not None and \
+                (model_program(value) != model_program(was) or model_program(value) == "pi" or
+                 modelslib.runs_on(value) != modelslib.runs_on(was)):
+            # (it'd restart pi or claude, here or in the host process, which would stop the reply: once the turn's
+            # over, as a provider picked)
+            self.move_after_turn = (self.proc, value)
+            self.sync_providers()
             return
         self.model = value
         self.sync_providers()
@@ -14428,7 +14439,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.models_info.setdefault(m["value"], m)  # (as it's run: its effort levels, its name)
                 if m.get("digest") and self.models_info[m["value"]].get("digest") != m["digest"]:  # (pulled again)
                     self.models_info[m["value"]] = {**self.models_info[m["value"]], "digest": m["digest"]}
-        shown = shown or self.model or getattr(self, "model_shown", None)
+        pending = getattr(self, "move_after_turn", None)  # (picked mid-turn: where the chat goes once it's over)
+        shown = (pending[1] if pending and pending[0] is self.proc else None) or shown or self.model or \
+            getattr(self, "model_shown", None)
 
         def pid_of(m):
             return m.get("provider") or providerslib.provider_of(m["value"])
@@ -14460,8 +14473,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.model_dd.select(shown)
 
         here = THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(self.remote)
-        pending = getattr(self, "move_after_turn", None)  # (a provider picked mid-turn: where the chat's going)
-        pending = pending[1] if pending and pending[0] is self.proc else None
         copies = next((ms for _lead, ms in kinds if any(m["value"] == shown for m in ms)), []) if pid else []
         hosts, picked, self.alike_keys = {}, None, {}
         for m in copies:
@@ -14476,7 +14487,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 continue
             hosts.setdefault(k.split("|", 1)[0], (host, []))[1].append((k, label))
             self.alike_keys[k] = m["value"]
-            if m["value"] == shown and picked is None or m["value"] == pending:
+            if m["value"] == shown:
                 picked = k
         one = len(self.alike_keys) == 1
         self.provider_dd.set_choices(list(hosts.values()))
@@ -17178,7 +17189,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its model now)
+        if move is not None and move[0] is self.proc:  # (a model or provider picked while it ran: that model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)

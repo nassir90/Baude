@@ -41,8 +41,8 @@ chats into a group, archive or rename them, list only some hosts or groups, or, 
 and propose edits to them. Every change it makes shows under its reply with undo, and is marked in the left bar (green
 added, red removed, blue moved) until you keep or undo it. Asked about a setting, it changes it and puts the setting's
 own row in the chat for you to adjust. It runs on Haiku unless Settings → Meta says another model: any model your
-claude lists, or one of this machine's inference providers' that can call tools (Settings → Meta → Provider picks
-whose are listed), each given Meta's tools. It sets models up too: it says what runs them here, checks Ollama's
+claude lists, or any in the mesh that can call tools (Settings → Meta → Provider says where it runs, and picks
+another host's copy), each given Meta's tools. It sets models up too: it says what runs them here, checks Ollama's
 models and removes those that don't load (asking you first), adds an MLX model you've downloaded or an
 OpenAI-compatible server, and builds `apple-claude` (asking first). It never installs or downloads anything.
 When a conversation is more than the model's context window holds (another model picked, or the conversation grown),
@@ -63,12 +63,14 @@ listed in `settings.json`:
 ```
 
 All but Apple's run in [pi](https://pi.dev), which speaks their API, through `pi-claude` (pi installed in
-`~/.local/share/baude/pi`). The picker left of the model picker chooses the provider, by host: this machine's, and
-those of the other members of the mesh (studio / Ollama, say); the model picker lists Claude's models, then the
-provider's. Picking a provider changes the list; picking a model changes the chat. Claude isn't a provider: `claude`
-runs Claude's models on the machine it's on. Another member's Ollama or OpenAI-compatible server runs here through
-the mesh's proxy, so Meta can use it too; its Apple or MLX model starts a new conversation there. With one provider
-the picker is greyed a little; with none it's gone. An Ollama model gets the context window Ollama loads it with (4k
+`~/.local/share/baude/pi`). The model picker lists Claude's models, then every model of the chat's host and of the
+other members of the mesh, each once however many hosts have it. A model picked runs on the first provider that has it:
+the chat's host's, else the mesh's. The picker left of it says where the chat's model runs (local / MLX, studio /
+Ollama), listing each provider that has it, by host: picking another moves the chat's model there. With one it's
+greyed; on Claude's models it's gone, as Claude isn't a provider: `claude` runs Claude's models on the machine it's
+on. The chat stays on its host either way: another member's Ollama or OpenAI-compatible server runs for it through
+the mesh's proxy, so Meta can use it too, and its Apple or MLX model runs there as an agent whose tools are the
+chat's host's. An Ollama model gets the context window Ollama loads it with (4k
 unless its context length is raised), which is too small for pi's instructions and tools: the chat says so.
 
 ## Running it

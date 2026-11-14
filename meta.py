@@ -131,8 +131,9 @@ def listed_models(offered=None):
     gone and no other has it. Where two of a name aren't the same, each is told apart (providers.told_apart)."""
     offered = models() if offered is None else offered
     known = providerslib.entries()
-    lead = {m["value"]: first["value"] for first, ms in alike(offered, known) for m in ms}
-    out = [m for m in offered if m[3] is None or lead.get(m[0]) == m[0]]
+    by_value = {m[0]: m for m in offered}
+    out = [m for m in offered if m[3] is None] + \
+        [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
     others = [described(m, known) for m in out if m[3] is not None]
     return [(m[0], providerslib.told_apart(described(m, known), others), *m[2:]) if m[3] is not None else m
             for m in out]
@@ -660,7 +661,7 @@ META_SETTINGS = {"meta_model", "meta_effort", "meta_code_mode"}
 
 
 def settings_changed(keys, _before):
-    """Meta's model, provider, effort or Code mode changed in another app here (widgets.watch_settings): every row up
+    """Meta's model, effort or Code mode changed in another app here (widgets.watch_settings): every row up
     shows it, and each conversation's next message is the new model's."""
     if keys & META_SETTINGS:
         sync_rows()
@@ -776,11 +777,11 @@ def code_mode_row(chat):
 
 
 def settings_group(chat):
-    """Settings → Meta, in Baude's and Record's Settings: Provider, Intelligence, Effort and Code mode. They follow
+    """Settings → Meta, in Baude's and Record's Settings: Intelligence, Provider, Effort and Code mode. They follow
     this machine's providers as they're found (Ollama started, a model pulled)."""
     group = Adw.PreferencesGroup(title=NAME)
-    group.add(provider_row(chat))
     group.add(model_row(chat))
+    group.add(provider_row(chat))  # (where the model above runs)
     group.add(effort_row(chat))
     group.add(code_mode_row(chat))
     return group

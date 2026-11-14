@@ -14381,6 +14381,8 @@ def test_ref_palette(app):
         assert sc.get_action().activate(Gtk.ShortcutActionFlags(0), win, None)
         wait_for(lambda: isinstance(win.get_visible_dialog(), baude.RefPalette), "the palette")
         pal = win.get_visible_dialog()
+        pal.space.chat_items = lambda: []  # (the glossary's and the catalogue's names: the chats it lists too, aside)
+        pal.fill()
         wait_for(lambda: win.get_focus() is not None and win.get_focus().is_ancestor(pal.entry), "its entry focused")
 
         def shown():
@@ -14425,6 +14427,7 @@ def test_ref_palette(app):
         win.open_db_name = lambda table, *a, **kw: calls.append(("db", table))
         try:
             pal = baude.RefPalette(win)
+            pal.space.chat_items = lambda: []
             pal.present(win)
             wait_for(lambda: win.get_visible_dialog() is pal and pal.waiting is not None, "waiting for the catalogue")
             assert pal.dots.get_visible(), "the dots: more names on their way"

@@ -4344,7 +4344,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.picks.show(len(self.pop_shown), at, note, rect, coming=space is not None and space.busy)
 
     def _catalogued(self):
-        self.waiting = None
+        space = self.win.space()  # (a folder's in, another's on its way: waited for in turn, the list up or not)
+        self.waiting = space.refresh(self._catalogued) if space is not None and space.busy else None
         self.github_changed()
 
     def github_changed(self):

@@ -8034,8 +8034,9 @@ class RefPalette(Adw.Dialog):
     in any order; the best match first), in a table as the Kubernetes view's: Name (with the logo its links have),
     Kind, Where. Enter, or a click, opens it (on_open(item): Baude opens a looked-up name as its link does, Record
     where it is, in its viewers); Up and Down (Page Up, Page Down) pick; Esc closes. The catalogue is made afresh if
-    it's old, and the table follows. space: a lookup.SearchSpace (Baude's of its chat's Signal, Record's of its
-    notebook's folders)."""
+    it's old, and the table follows, a part at a time as it comes, dots at the bottom left till it's all in. space: a
+    lookup.SearchSpace (Baude's what @ lists: every host's chats and the chat's folder's names from its host; Record's
+    its notebook's folders, the chats and the notebooks)."""
     LIMIT = 400  # rows shown at most (a glossary has thousands)
 
     def __init__(self, win, space, on_open):
@@ -8152,6 +8153,9 @@ class RefPalette(Adw.Dialog):
         q = self.entry.get_text().strip().lower()
         self.items = self.space.items()
         shown, matched = self.space.search(q, self.LIMIT)
+        if self.waiting is None and self.space.busy:  # (made afresh since, while it's up: a search can start it)
+            self.waiting = self.space.refresh(self.catalogue_in)
+            self.dots.set_working(self.waiting is not None)
         self.store.splice(0, self.store.get_n_items(), [RefPaletteRow(it, q.split()) for it in shown])
         if self.store.get_n_items():
             self.selection.set_selected(0)

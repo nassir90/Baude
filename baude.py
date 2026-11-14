@@ -9493,6 +9493,7 @@ class BaudeMeta(meta.MetaChat):
         if info.get("remote") is not None:
             win.open_remote_soon(info)
         else:
+            win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
             win.switch_to(lambda: win.resume_session(info))
 
     def chats_rows(self, refs):
@@ -11151,22 +11152,30 @@ class RefPalette(widgets.RefPalette):
 
 def palette_open(win, item):
     """A ⌘K row opened: a name of this machine's as its link is (its open, ref_palette_items); a chat, as the sidebar
-    opens it; another host's pull request or issue on GitHub, its file read from it and shown in a tab, and anything
-    else of it said, as it can't be opened here."""
+    opens it (the open one: its tab shown); another host's pull request or issue on GitHub, its file (or a manifest's
+    object, at its manifest) read from it and shown in a tab, and anything else of it said, as Baude's views of
+    branches, clusters and databases look at this machine."""
     if (opened := item.get("open")) is not None:
         return opened(win)
     if item.get("kind") == "chat":
         info = next((i for i in all_chats(win.sidebar) if i["id"] == item.get("id")), None)
-        if info is None or info["id"] == win.session_id:
+        if info is None:
             return None
+        if info["id"] == win.session_id:
+            return win.tabs.show("chat")
         if info.get("remote") is not None:
             return win.open_remote_soon(info)
+        win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
         return win.switch_to(lambda: win.resume_session(info))
-    if (listed := (item.get("entry") or {}).get("github")) is not None:
+    entry = item.get("entry") or {}
+    if (listed := entry.get("github")) is not None:
         return fixview.open_github(win, listed)
     r, host = win.remote, item.get("host")
     on = remote_name(r) if r is not None and host == host_key(r) else "another host"
-    if item.get("kind") == "file" and item.get("host_path") and on != "another host":
+    first = (entry.get("sources") or [["", ""]])[0]
+    manifest = item.get("kind") == "k8s" and entry.get("hint") != "context" and \
+        not str(first[0]).endswith(" running") and first[1]  # (an object written in a file there, not one running)
+    if (item.get("kind") == "file" or manifest) and item.get("host_path") and on != "another host":
         return win.show_remote_file(r, item["host_path"], item.get("host_line"))
     return win.ref_toast(f"{item['surface']}: {(item.get('what') or 'a name').lower()} on {on}")
 

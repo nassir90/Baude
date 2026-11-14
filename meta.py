@@ -1706,7 +1706,8 @@ class RefCompleter:
                         widgets.PickList.over(self.view, word[0], self.anchor), coming=space.busy)
 
     def _catalogued(self):
-        self.waiting = None
+        space = self.space()  # (some of it in, more on its way: waited for in turn, the list up or not)
+        self.waiting = space.refresh(self._catalogued) if space is not None and space.busy else None
         if self.picks.visible():
             self.refresh()
         self.mark()

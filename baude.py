@@ -5834,7 +5834,8 @@ def said_nothing(base, text, is_error):
 
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
-    when the CLI runs it as a background task (its result only says it started)."""
+    when the CLI runs it as a background task (its result only says it started); running -> interrupted when its turn
+    ends without its result (stopped with Esc)."""
 
     def __init__(self, name, tool_id):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -5870,15 +5871,21 @@ class ToolCard(Gtk.Box):
         self.input_stale, self.pending_output = True, []
         self.input_toggle.on_expand.append(self.build_input)
         self.output_toggle.on_expand.append(self.build_output)
-        self.set_input({})
+        self.set_input({}, whole=False)
 
     # ---- state
     def set_state(self, state):
-        self.state = state
+        was, self.state = self.state, state
         self.show_status()
-        if state == "error":
+        if state in ("error", "interrupted"):  # (one stopped part way: red, as a failed one)
             self.add_css_class("error")
+        elif was == "interrupted":  # (its result in a later part of the chat after all)
+            self.remove_css_class("error")
+        if state == "error":
             self.output_toggle.set_label("Error")
+        if state == "interrupted" and not self.input_whole:  # (stopped before its input came in: nothing to open)
+            self.input_toggle.set_visible(False)
+            self.toggles.set_visible(self.output_toggle.get_visible())
         self.refresh_header()
         for fn in self.listeners:
             fn(self)
@@ -5942,7 +5949,7 @@ class ToolCard(Gtk.Box):
         shown = html.escape(s)
         if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
-        markup = f"{src}{shown}{tail}"
+        markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)
@@ -5954,8 +5961,10 @@ class ToolCard(Gtk.Box):
             return  # (a subagent's: View opens it in the side panel, in place of an Output to fold open; an Error stays)
         self.output_toggle.set_visible(True)
 
-    def set_input(self, inp):
+    def set_input(self, inp, whole=True):
+        """What it was given; whole: all of it (not yet, as a card's first drawn, before its input streams in)."""
         self.input = inp if isinstance(inp, dict) else {}
+        self.input_whole = whole
         self.refresh_header()
         # a plain Read's only input is the path, which the header already shows
         redundant = self.name == "Read" and not (self.input.get("offset") or self.input.get("limit") or
@@ -6135,7 +6144,9 @@ class ToolGroup(Gtk.Grid):
     def refresh(self):
         cards = self.cards()
         failed = sum(c.state == "error" for c in cards)
-        self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else ""))
+        cut = sum(c.state == "interrupted" for c in cards)
+        self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else "")
+                              + (f", {cut} interrupted" if cut else ""))
         states = {c.state for c in cards if c.asking is None}  # (one waiting to be allowed isn't running)
         state = "running" if states & {"running", "background"} else "error" if "error" in states else \
             "interrupted" if "interrupted" in states and len(states) == 1 else "done"
@@ -13792,6 +13803,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 card.set_input(c.get("input", {}))
                 if c["id"] in self.orphan_results:  # its result was drawn before it (older history)
                     self.render_tool_results([self.orphan_results.pop(c["id"])])
+            elif str(c.get("type")).endswith("_tool_result") and c.get("tool_use_id") in self.tool_cards:
+                # (a server tool's result, a web search's: in the reply itself; an error's a dict of type …_error)
+                failed = isinstance(c.get("content"), dict) and str(c["content"].get("type")).endswith("_error")
+                self.tool_cards[c["tool_use_id"]].set_state("error" if failed else "done")
             elif c.get("type") == "text" and c.get("text", "").strip():
                 self.queue_refs(c["text"], written_at)  # first: new names are drawn pending, not redrawn
                 if not streamed:
@@ -15962,6 +15977,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
         self.blocks.clear()
+        self.cut_short()
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
@@ -15980,6 +15996,28 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
                            f" · in {tok} / out {u.get('output_tokens', 0)} tok")
+
+    def cut_short(self):
+        """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning
+        for ever. A background subagent's calls go on after the turn: left running."""
+        for tid, card in list(self.tool_cards.items()):
+            if card.state != "running":
+                continue
+            parent = self.tool_parent.get(tid)
+            while parent is not None and not self.goes_on(parent):
+                parent = self.tool_parent.get(parent)
+            if parent is None:
+                card.answered()  # (asked whether to allow it: nothing to answer now)
+                card.set_state("interrupted")
+
+    def goes_on(self, tool_id):
+        """Whether a subagent's call goes on after its turn: run in the background (its card says so, or, its card
+        not running in the turn, a running task's is it), or not drawn here, so not known to have stopped."""
+        card = self.tool_cards.get(tool_id)
+        if card is None or card.state == "background":
+            return True
+        return card.state != "running" and any(
+            t.get("tool_use_id") == tool_id and t.get("status") == "running" for t in self.tasks.values())
 
     def h_control_response(self, msg):
         r = msg.get("response", {})

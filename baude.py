@@ -13515,6 +13515,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             for m in ms:
                 self.provider_index.setdefault(m["value"], k)
                 self.models_info.setdefault(m["value"], m)  # (as it's run: its effort levels, its name)
+                if m.get("digest") and self.models_info[m["value"]].get("digest") != m["digest"]:  # (pulled again)
+                    self.models_info[m["value"]] = {**self.models_info[m["value"]], "digest": m["digest"]}
         every = found
         found = [f for f in found if providerslib.has_runtime(f[0].split("|", 1)[1])]  # (another host's Apple model:
         # listed with Claude's, its provider none to pick)
@@ -13569,7 +13571,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         mine = (self.models_info.get(shown) or {"value": shown}) if shown and not apple and pid is not None and \
             self.provider_index.get(shown, "|").split("|", 1)[0] not in ("", (key or "|").split("|", 1)[0]) else None
         same = next((i for i, m in enumerate(chosen) if mine and m["value"] != shown and
-                     providerslib.kind(m) == providerslib.kind(mine)), None)
+                     providerslib.same(m, mine)), None)
         if same is not None:  # (the chat's own model, the same one as this provider's on another host, there still:
             # listed once, as the chat's)
             chosen[same] = mine
@@ -13607,7 +13609,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if (self.provider_key_of(self.model) or "|").split("|", 1)[0] == key.split("|", 1)[0]:
             mine = None  # (the same host's: picking its other provider only lists that one's)
         there = next((m for m in getattr(self, "provider_models", {}).get(key, []) if mine and
-                      m["value"] != self.model and providerslib.kind(m) == providerslib.kind(mine)), None)
+                      m["value"] != self.model and providerslib.same(m, mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
             self.move_to(there["value"])
             return

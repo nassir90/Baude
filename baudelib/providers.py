@@ -112,20 +112,30 @@ def entries():
 
 def kind(m):
     """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
-    server; else its name; Apple's, with no runtime, by its name), its window, its version and Ollama's digest of it,
-    where they're said."""
+    server; else its name; Apple's, with no runtime, by its name), its window and its version, where they're said. Two
+    of a kind are the same one unless their digests differ (same)."""
     served = (None if not has_runtime(m.get("provider") or provider_of(m["value"])) else
               m.get("resolvedModel") or m.get("id")) or m.get("displayName") or m["value"]
-    return served, m.get("window"), m.get("version"), m.get("digest")
+    return served, m.get("window"), m.get("version")
+
+
+def same(a, b):
+    """Whether two models are the same one: of a kind, and with the same digest of it (Ollama's) where both say one (a
+    host on an older version doesn't)."""
+    return kind(a) == kind(b) and not (a.get("digest") and b.get("digest") and a["digest"] != b["digest"])
 
 
 def alike(models, first=()):
-    """Models as one of each kind (each host's Apple model, say): [(the one listed, every one of its kind)], in
-    models' order. The one listed is the first of first (values) that's of its kind, else its kind's first."""
-    kinds = {}
+    """Models as one of each (each host's Apple model, say): [(the one listed, every one that's the same)], in models'
+    order. The one listed is the first of first (values) that's the same, else the first."""
+    groups = []
     for m in models:
-        kinds.setdefault(kind(m), []).append(m)
-    return [(next((m for v in first for m in ms if m["value"] == v), ms[0]), ms) for ms in kinds.values()]
+        ms = next((ms for ms in groups if all(same(m, x) for x in ms)), None)
+        if ms is None:
+            groups.append([m])
+        else:
+            ms.append(m)
+    return [(next((m for v in first for m in ms if m["value"] == v), ms[0]), ms) for ms in groups]
 
 
 def told_apart(m, listed):
@@ -544,7 +554,8 @@ def _look():
 
 def _shape(providers):
     """What a picker shows of providers (not a loaded model's window, which comes and goes with Ollama's keep-alive)."""
-    return [(p["id"], p["error"], [(m["value"], m.get("tools")) for m in p["models"]]) for p in providers or []]
+    return [(p["id"], p["error"], [(m["value"], m.get("tools"), m.get("digest")) for m in p["models"]])
+            for p in providers or []]
 
 
 def found(wait=False, max_age=MAX_AGE):

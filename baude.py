@@ -8916,8 +8916,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                          visible=False)  # (nothing over its box till something's asked)
         self.inside.append(self.scroll)
-        comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
-                       margin_top=10, margin_bottom=10)
+        comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
+                                   margin_top=10, margin_bottom=10)
         self.writing = widgets.Composer()
         self.composer = self.writing.input
         keys = Gtk.EventControllerKey()
@@ -9030,8 +9030,14 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def _stopped(self):
         self._busy(False)
-        self.status.set_state("interrupted")
-        self.status.set_visible(True)
+        self._mark("interrupted")
+
+    def _mark(self, state):
+        """Its line's status: a spinner, a failed or stopped one's mark, or (None) nothing; its page's header's too."""
+        if state is not None:
+            self.status.set_state(state)
+        self.status.set_visible(state is not None)
+        self.win.panel.side_question_status(self)
 
     def start(self, question):
         """Its claude, and the first question to it: False if it couldn't be had (said)."""
@@ -9067,9 +9073,7 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def _busy(self, busy):
         self.busy = busy
-        if busy:
-            self.status.set_state("running")
-        self.status.set_visible(busy)
+        self._mark("running" if busy else None)
         self.dots.set_working(busy)
         self.writing.set_busy(busy)
 
@@ -9116,8 +9120,7 @@ class SideQuestion(Gtk.ListBoxRow):
             if stopped:
                 self._stopped()
             elif msg.get("is_error"):
-                self.status.set_state("error")
-                self.status.set_visible(True)
+                self._mark("error")
                 if self.answer is not None and not self.answer.text:
                     self.answer.append(f"*{msg.get('result') or 'The side question failed.'}*")
             self.refresh_context()
@@ -9127,8 +9130,7 @@ class SideQuestion(Gtk.ListBoxRow):
         if self.proc is not None:
             if self.busy:  # (ended mid-answer)
                 self._busy(False)
-                self.status.set_state("interrupted")
-                self.status.set_visible(True)
+                self._mark("interrupted")
             self.writing.set_sensitive(False)
         return False
 
@@ -9997,8 +9999,9 @@ class SidePanel(Gtk.Box):
         self.artifact_list.append(self.artifact_empty)
         self.artifact_rows = {}
         # /btw side questions, newest first: rows titled with their questions, each opening under its line or
-        # filling the page (list -> detail, as subagents')
-        self.btw_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
+        # filling the page, out of its row as a subagent's does (list -> detail: ExpandStack)
+        self.btw_expand = widgets.ExpandStack(vexpand=True)
+        self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
         self.btw_list.set_placeholder(self._empty("No side questions"))
@@ -10011,23 +10014,33 @@ class SidePanel(Gtk.Box):
         btw_top.append(self.btw_new)
         btw_page.append(btw_top)
         self.btw_scroll = self._scrolled(self.btw_list)
+        # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
+        self.btw_list.set_margin_start(0)
+        self.btw_list.set_margin_end(widgets.INSIDE_GAP)
         btw_page.append(self.btw_scroll)
         self.btw_stack.add_named(btw_page, "list")
         btw_detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        top = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
-        self.btw_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All side questions")
-        self.btw_back.add_css_class("flat")
-        self.btw_back.connect("clicked", lambda *_: self.close_side_question())
+        # its row, as its header: each part where the row has it across (the list's edge, 1px, counted in), so a row
+        # opening into this only goes up; back at the end, where the row's square is, the row's ⌄ going out
+        top = Gtk.Box(spacing=12, margin_start=13, margin_end=7 + widgets.INSIDE_GAP, margin_top=8, margin_bottom=8)
+        self.btw_status = StatusSlot()
+        self.btw_status.set_visible(False)
         self.btw_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)  # (not bold: its row's)
-        top.append(self.btw_back)
+        self.btw_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All side questions",
+                                   valign=Gtk.Align.CENTER)
+        self.btw_back.add_css_class("flat")
+        self.btw_back.add_css_class("side-question-full")  # (the size of the button it's in place of)
+        self.btw_back.connect("clicked", lambda *_: self.close_side_question())
+        top.append(self.btw_status)
         top.append(self.btw_title)
+        top.append(self.btw_back)
         btw_detail.append(top)
         # (the shown one's thread set into the panel as a subagent's is: detail_holder)
         self.btw_holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True, margin_top=6)
         btw_detail.append(self.btw_holder)
         self.btw_stack.add_named(btw_detail, "detail")
         self.btw_shown = None
-        page = self.stack.add_titled(self.btw_stack, "btw", "Side questions")
+        page = self.stack.add_titled(self.btw_expand, "btw", "Side questions")
         page.set_icon_name("dialog-question-symbolic")
         page = self.stack.add_titled(self._scrolled(self.artifact_list), "artifacts", "Artifacts")
         page.set_icon_name(globe_icon())
@@ -10085,28 +10098,55 @@ class SidePanel(Gtk.Box):
         return [w for w in walk(self.btw_list) if isinstance(w, SideQuestion)]
 
     def open_side_question(self, sq):
-        """sq's thread filling the page, back (close_side_question) to the list."""
+        """sq's thread filling the page, opening out of its row (its thread under it, if it's open there, the square
+        it opens from), back (close_side_question) into it."""
+        self.btw_expand.finish()  # (one opening or closing: at its end, before the page's changed under it)
         if self.btw_shown is not None:
             self.btw_shown.put_inside_row()
         self.btw_shown = sq
-        self.btw_title.set_text(sq.title.get_label())
-        self.btw_holder.append(sq.take_inside())
-        self.btw_stack.set_visible_child_name("detail")
+        self.side_question_titled(sq)
+        self.side_question_status(sq)
+        if self.btw_stack.get_visible_child_name() == "list" and self.stack.get_visible_child_name() == "btw":
+            self.btw_expand.open("detail", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
+                                 across=self.btw_list, body=sq.inside if sq.expanded() else None)
+        else:
+            self.btw_stack.set_visible_child_name("detail")
+        self.btw_holder.append(sq.take_inside())  # (after: the row's picture taken with it in it)
         self.show_page("btw")
 
-    def close_side_question(self):
+    def btw_parts(self, sq):
+        """How a side question's row turns into its page's header (ExpandStack): its title and status into the
+        header's, its square into back (where it is), its ⌄ going out."""
+        return {"pairs": [(sq.title, self.btw_title), (sq.status, self.btw_status),
+                          (sq.full.get_child(), self.btw_back.get_child())],
+                "leave": [sq.toggle], "rides": [(sq.comp, sq.comp)]}  # (its box, and its meter on the page)
+
+    def close_side_question(self, animate=True):
+        """Back to the list, the side question shown closing into its row (into its thread under it, if it was open
+        there)."""
+        self.btw_expand.finish()
         sq, self.btw_shown = self.btw_shown, None
-        self.btw_stack.set_visible_child_name("list")
+        if sq is not None and animate and sq.get_parent() is self.btw_list:
+            self.btw_expand.close("list", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
+                                  across=self.btw_list, body=sq.inside if sq.expanded() else None)
+        else:
+            self.btw_stack.set_visible_child_name("list")
         if sq is not None:
-            sq.put_inside_row()
+            sq.put_inside_row()  # (after: the page's picture taken with it in it)
 
     def side_question_titled(self, sq):
         if sq is self.btw_shown:
             self.btw_title.set_text(sq.title.get_label())
 
+    def side_question_status(self, sq):
+        """The header's status as the shown one's row has it."""
+        if sq is self.btw_shown:
+            self.btw_status.set_state(sq.status.state)
+            self.btw_status.set_visible(sq.status.get_visible())
+
     def drop_side_question(self, sq):
         if sq is self.btw_shown:
-            self.close_side_question()
+            self.close_side_question(animate=False)
         if sq.get_parent() is self.btw_list:
             self.btw_list.remove(sq)
 

@@ -1353,6 +1353,16 @@ def _(app):
     return win
 
 
+@scene("55r2-network-host-unknown", "A host picked that isn't known now (forgotten, or a mesh member not listed yet): "
+                                    "still picked, by the name it had")
+def _(app):
+    network_fixture()
+    baude.save_settings(new_session_host="mesh:0123abcd", new_session_host_name="old-mini", sidebar_groups=None)
+    win = app.window(opts(cwd=NET["folders"][0]))
+    T.pump(1)
+    return win
+
+
 @scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Host Command… and Deactivate")
 def _(app):
     win = network_window(app, None, host=None)
@@ -1368,11 +1378,11 @@ def _(app):
                                        "grayed; its right-click has Activate")
 def _(app):
     win = network_window(app, None)
+    win.connect("unrealize", lambda *_: baude.network().deactivate(NET["lab"][1], False))  # (as it was, for the next)
     win.sidebar.deactivate_host(baude.host_key(NET["lab"][1]), True)
     T.wait_for(lambda: win.sidebar.host_banner.get_revealed(), "the banner")
     T.pump(0.3)
     host_right_click(win)
-    win.connect("unrealize", lambda *_: baude.network().deactivate(NET["lab"][1], False))  # (as it was, for the next)
     return win
 
 
@@ -2199,7 +2209,7 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, new_session_host=None, sidebar_groups=None,
+                        signal_reader=False, sidebar_network=None, new_session_host=None, new_session_host_name=None, sidebar_groups=None,
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)

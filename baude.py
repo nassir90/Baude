@@ -7805,7 +7805,8 @@ class SessionSidebar(Gtk.Box):
         if (popup := next((w for w in walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
             popup.connect("show", lambda *_: network().look())  # (opened: a server started a moment ago, offered)
         right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-        right.connect("pressed", lambda _g, _n, x, y: self.host_menu(x, y))
+        right.connect("pressed", lambda _g, _n, x, y: not (popup and popup.get_visible())  # (not in its list, open)
+                      and self.host_menu(x, y))
         self.host_dd.add_controller(right)
         new_row = Gtk.Box(spacing=2)
         new_row.append(self.new_btn)
@@ -8710,16 +8711,25 @@ class SessionSidebar(Gtk.Box):
 
     def new_hosts(self):
         """[(key, name)]: New session's hosts: this machine (local), then every other known, by its name, verbatim (one
-        that's gone or deactivated too: picked, it says so, show_host_state)."""
-        return [(key, name) for key, name, _note in self.known_hosts()]
+        that's gone or deactivated too: picked, it says so, show_host_state); and the one picked, by the name it had,
+        while it isn't known (forgotten, or a mesh member not listed yet)."""
+        out = [(key, name) for key, name, _note in self.known_hosts()]
+        if (kept := self.kept_host()) is not None and kept not in dict(out):
+            out.append((kept, load_settings().get("new_session_host_name") or kept))
+        return out
 
-    def shown_host(self, hosts=None):
-        """The host New session's on, and whose chats are listed: settings.json's new_session_host (by the key it has
-        now, if it's had another), kept across restarts and while it's gone; this machine while it isn't known (hosts:
-        new_hosts, read already)."""
+    def kept_host(self):
+        """settings.json's new_session_host (None: this machine), by the key it has now if it's had another (kept so,
+        for the next run, which won't know the old one)."""
         kept = load_settings().get("new_session_host")
-        kept = next((host_key(r) for r in network().remotes() if kept in getattr(r, "was", ())), kept)
-        return kept if kept in dict(hosts or self.new_hosts()) else HERE_HOST
+        if (now := next((host_key(r) for r in network().remotes() if kept in getattr(r, "was", ())), kept)) != kept:
+            save_settings(new_session_host=now)
+        return now if isinstance(now, str) and now != HERE_HOST else None
+
+    def shown_host(self):
+        """The host New session's on, and whose chats are listed: the one picked (kept_host), across restarts and while
+        it's gone or not known; else this machine."""
+        return self.kept_host() or HERE_HOST
 
     def shown_remote(self):
         """The host picked's Remote (None: this machine)."""
@@ -8727,9 +8737,12 @@ class SessionSidebar(Gtk.Box):
         return None if key == HERE_HOST else next((r for r in network().remotes() if host_key(r) == key), None)
 
     def host_state(self, r):
-        """What's in the way of a host (a Remote), as a chat on it says it in its banner (banner_text), or None: it's
-        there."""
-        if r is None or r.state == "alive" and not r.deactivated:
+        """What's in the way of the host picked (a Remote; None: this machine), as a chat on it says it in its banner
+        (banner_text), or None: it's there."""
+        if r is None:
+            key = self.shown_host()
+            return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if r.state == "alive" and not r.deactivated:
             return None
         name = remote_name(r)
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
@@ -8740,12 +8753,13 @@ class SessionSidebar(Gtk.Box):
         seen."""
         said = self.host_state(self.shown_remote())
         if said is not None:
-            self.host_banner.set_title(said)
+            self.host_banner.set_title(GLib.markup_escape_text(said))
         self.host_banner.set_revealed(said is not None)
 
     def pick_host(self, key):
-        """A host picked in New session's dropdown: new sessions made on it, and its chats listed."""
-        save_settings(new_session_host=key)
+        """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
+        for while it isn't known: new_hosts)."""
+        save_settings(new_session_host=key, new_session_host_name=dict(self.new_hosts()).get(key))
         self.show_host_state()
         self.fill()
 
@@ -8753,7 +8767,7 @@ class SessionSidebar(Gtk.Box):
         """New session's host, as the network has them now, on the one picked (shown_host)."""
         hosts = self.new_hosts()
         self.host_dd.set_choices(hosts)
-        self.host_dd.select(self.shown_host(hosts))
+        self.host_dd.select(self.shown_host())
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
@@ -8768,7 +8782,8 @@ class SessionSidebar(Gtk.Box):
         one here isn't listed (⋮: only groups), one through this machine's host process (ask_remote_start: in the group
         picked, if one is), so it's listed too."""
         key = self.host_dd.value() or HERE_HOST
-        if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:
+        if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
+            # not known)
             toast(self, said)
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)

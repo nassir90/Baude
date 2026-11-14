@@ -13312,8 +13312,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # it's made (New Session's host), or by Meta. The picker's on the provider of the chat's model, as it's opened or
     # picked. It's gone while the chat's on Claude's. Apple's model has no runtime to pick, so it's listed with
     # Claude's, once for every host that has the same one (providers.alike); while the chat's on it, the picker lists
-    # those hosts (local / Apple, studio / Apple), greyed with one. A model's name is the same whatever the picker's on:
-    # its provider and host are the picker's to say
+    # those hosts (local / Apple, studio / Apple), greyed with one. Any other model is the same way: one that's on two
+    # hosts is listed once, and picking the other's provider moves the chat's model there. A model's name is the same
+    # whatever the picker's on: its provider and host are the picker's to say
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
@@ -13437,7 +13438,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.provider_dd.set_tooltip_text(("Where the chat's model runs" if apple else
                                            "Inference provider: where the models after Claude's run") +
                                           (" (the only one there is)" if one else ""))
-        chosen = next((ms for k, _h, _l, ms in found if k == key), [])
+        self.provider_models = {k: ms for k, _h, _l, ms in found}
+        chosen = list(self.provider_models.get(key, []))
+        mine = (self.models_info.get(shown) or {"value": shown}) if shown and not apple and pid is not None else None
+        same = next((i for i, m in enumerate(chosen) if mine and m["value"] != shown and
+                     providerslib.kind(m) == providerslib.kind(mine)), None)
+        if same is not None:  # (the chat's own model, the same one as this provider's: listed once, as the chat's)
+            chosen[same] = mine
         lead = {m["value"]: first for first, ms in kinds for m in ms}
         listed = []
         for m in infos:
@@ -13449,23 +13456,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         listed += chosen
         if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
             listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
-        firsts = [first for first, _ms in kinds]
-        names = [(m["value"], providerslib.told_apart(m, firsts) if m in firsts else m.get("displayName") or m["value"])
-                 for m in listed]
+        others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
+        names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
+                  m.get("displayName") or m["value"]) for m in listed]
         self.model_names = dict(names)
         self.model_dd.set_choices(names or MODELS)
         if shown:
             self.model_dd.select(shown)
 
     def on_provider_changed(self, key):
-        """A provider picked: the model picker lists its models after Claude's (the chat goes on with its own till one's
-        picked); kept for the chats after (settings.json's provider). On Apple's model, another host's: the chat's model
-        that host's."""
+        """A provider picked: the model picker lists its models after Claude's; kept for the chats after
+        (settings.json's provider). The chat goes on with its own model till one's picked, unless the provider has the
+        same one (alike: its own on another host): the chat's model is then that host's. On Apple's model, another
+        host's Apple model."""
         if key in getattr(self, "alike_keys", {}):
             self.on_model_changed(self.alike_keys[key])
             return
         self.provider_key = key
         save_settings(provider=key)
+        mine = self.models_info.get(self.model) if self.model else None
+        there = next((m for m in getattr(self, "provider_models", {}).get(key, []) if mine and
+                      m["value"] != self.model and providerslib.kind(m) == providerslib.kind(mine)), None)
+        if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
+            self.on_model_changed(there["value"])
+            return
         self.sync_providers()
 
     def providers_found(self):

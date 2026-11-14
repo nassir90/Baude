@@ -148,32 +148,51 @@ def provider(offered=None):
 
 def listed_models(offered=None):
     """What Intelligence lists: Claude's models and Apple's (one of each kind: alike), then the provider's (provider);
-    and Meta's own, if it's another provider's (it goes on with it till another's picked)."""
+    and Meta's own, if it's another provider's (it goes on with it till another's picked), in the place of the
+    provider's that's the same one. Where two of a name aren't the same, each is told apart (providers.told_apart)."""
     offered = models() if offered is None else offered
     pid = provider(offered)
-    kinds = alike(offered)
+    known = providerslib.entries()
+    kinds = alike(offered, known)
     lead = {m["value"]: first for first, ms in kinds for m in ms}
-    firsts = [first for first, _ms in kinds]
     out = []
     for m in offered:
         if m[0] in lead:  # (Apple's, each host's: one of each kind)
             if lead[m[0]]["value"] == m[0]:
-                out.append((m[0], providerslib.told_apart(lead[m[0]], firsts), *m[2:]))
+                out.append(m)
         elif not providerslib.has_runtime(m[3]) or m[3] == pid:
             out.append(m)
     entry = model_entry(model(), offered)
-    return out + [entry] if entry and all(m[0] != entry[0] for m in out) else out
+    if entry and all(m[0] != entry[0] for m in out):
+        mine = providerslib.kind(described(entry, known))
+        same = next((i for i, m in enumerate(out)
+                     if m[3] is not None and providerslib.kind(described(m, known)) == mine), None) \
+            if entry[3] is not None else None
+        if same is not None:  # (Meta's own, the same one as the provider's: listed once, as Meta's)
+            out[same] = entry
+        else:
+            out.append(entry)
+    others = [described(m, known) for m in out if m[3] is not None]
+    return [(m[0], providerslib.told_apart(described(m, known), others), *m[2:]) if m[3] is not None else m
+            for m in out]
 
 
-def alike(offered=None):
+def described(m, known=None):
+    """An entry of models() as providers has a model: {value, displayName, provider}, and what it's served as, its
+    window and its version where they're said (known: providers.entries())."""
+    known = providerslib.entries() if known is None else known
+    return {"value": m[0], "displayName": m[1], "provider": m[3]} | \
+        {k: v for k, v in (known.get(m[0]) or {}).items() if k in ("resolvedModel", "id", "window", "version")}
+
+
+def alike(offered=None, known=None):
     """The models of offered (models()) with no runtime (Apple's, each host's), one of each kind (providers.alike):
-    [(the one listed, every one of its kind)], as {value, displayName, window, version, provider}. The one listed is
-    Meta's own model where it's of its kind, else this machine's."""
+    [(the one listed, every one of its kind)], as described has them. The one listed is Meta's own model where it's of
+    its kind, else this machine's."""
     bare = [m for m in (models() if offered is None else offered)
             if m[3] is not None and not providerslib.has_runtime(m[3])]
-    return providerslib.alike([{"value": m[0], "displayName": m[1], "provider": m[3]} |
-                               {k: v for k, v in providerslib.entry(m[0]).items() if k in ("window", "version")}
-                               for m in bare], [model(), modelslib.APPLE_MODEL["value"]])
+    known = providerslib.entries() if known is None else known
+    return providerslib.alike([described(m, known) for m in bare], [model(), modelslib.APPLE_MODEL["value"]])
 
 
 def listed(found, seed=False):
@@ -701,9 +720,18 @@ def model_picked(chat, value):
 
 
 def provider_picked(chat, pid):
-    """Provider set to pid: Intelligence lists its models after Claude's (Meta goes on with its own till one's
-    picked)."""
+    """Provider set to pid: Intelligence lists its models after Claude's. Meta goes on with its own till one's picked,
+    unless pid has the same one (alike: its own on another host): Meta's model is then that host's."""
     widgets.save_settings(meta_provider=pid)
+    offered = models()
+    entry = model_entry(model(), offered)
+    if entry and providerslib.has_runtime(entry[3]) and entry[3] != pid:
+        known = providerslib.entries()
+        mine = providerslib.kind(described(entry, known))
+        there = next((m for m in offered if m[3] == pid and providerslib.kind(described(m, known)) == mine), None)
+        if there is not None:
+            model_picked(chat, there[0])
+            return
     sync_rows()
 
 

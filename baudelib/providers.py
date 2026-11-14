@@ -95,20 +95,35 @@ def model_name(value):
     return value
 
 
+def entries():
+    """Every model this machine knows, by value: found's, then other hosts' in the mesh (mesh_endpoints', as they're
+    run here through its proxy, and mesh_agents')."""
+    out = {}
+    for p in found():
+        for m in p["models"]:
+            out.setdefault(m["value"], m)
+    for e in mesh_endpoints():
+        for m in e["models"]:
+            out.setdefault(f"openai/{e['id']}/{m['id']}", m | {"value": f"openai/{e['id']}/{m['id']}"})
+    for m in mesh_agents():
+        out.setdefault(m["value"], m)
+    return out
+
+
 def entry(value):
-    """A model's entry as this machine knows it (found's, else another host's: mesh_agents'), or {}."""
-    return next((m for p in found() for m in p["models"] if m["value"] == value), None) or \
-        next((m for m in mesh_agents() if m["value"] == value), None) or {}
+    """A model's entry as this machine knows it (entries'), or {}."""
+    return entries().get(value) or {}
 
 
 def kind(m):
-    """What makes a model with no runtime (Apple's) the same one on every host that has it: its name, its window and
-    its version, where they're said."""
-    return m.get("displayName") or m["value"], m.get("window"), m.get("version")
+    """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
+    server; else its name), its window and its version, where they're said."""
+    served = m.get("resolvedModel") or m.get("id") or m.get("displayName") or m["value"]
+    return served, m.get("window"), m.get("version")
 
 
 def alike(models, first=()):
-    """Models with no runtime (Apple's, each host's) as one of each kind: [(the one listed, every one of its kind)], in
+    """Models as one of each kind (each host's Apple model, say): [(the one listed, every one of its kind)], in
     models' order. The one listed is the first of first (values) that's of its kind, else its kind's first."""
     kinds = {}
     for m in models:
@@ -117,8 +132,8 @@ def alike(models, first=()):
 
 
 def told_apart(m, listed):
-    """A model's name, with its window and version after it where another of listed (alike's models listed) has its
-    name: Apple Foundation Model (32k, v3). Just its name where none does."""
+    """A model's name, with its window and version after it where another of listed (one of each kind) has its name:
+    Apple Foundation Model (32k, v3), qwen3:8b (16k). Just its name where none does."""
     name = m.get("displayName") or m["value"]
     if sum((x.get("displayName") or x["value"]) == name for x in listed) < 2:
         return name
@@ -156,7 +171,7 @@ def elsewhere(p, member):
     host runs them, without moving: through the mesh's proxy here, as an endpoint's (mesh.endpoint_id), where it
     serves an API; else run there, as an agent whose tools are here (agent/<member>/<its value>: agentproxy)."""
     from baudelib import mesh
-    keep = ("tools", "window", "version", "input", "thinking")
+    keep = ("id", "tools", "window", "version", "input", "thinking")
     if p.get("http"):
         pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
         return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,

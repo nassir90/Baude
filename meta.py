@@ -711,22 +711,24 @@ def model_picked(chat, value):
 
 def model_row(chat):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then every
-    other in the mesh (listed_models; where it runs: provider_row). Its sync() lists them as they are now (sync_rows)."""
-    row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
-    state = {"values": [], "syncing": False}
+    other in the mesh (listed_models; where it runs: provider_row), in a search box's list with each family's icon
+    (widgets.ModelPicker). Its sync() lists them as they are now (sync_rows)."""
+    row = Adw.ActionRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
+    picker = widgets.ModelPicker([], f"The model {NAME} thinks with", lambda v: model_picked(chat, v))
+    picker.set_valign(Gtk.Align.CENTER)
+    picker.add_css_class("flat")
+    row.add_suffix(picker)
+    row.set_activatable_widget(picker)
 
     def sync():
         offered = listed_models()
-        entry = model_entry(model(), offered)
-        state["values"], state["syncing"] = [m[0] for m in offered], True
-        row.set_model(Gtk.StringList.new([m[1] for m in offered]))
-        row.set_selected(offered.index(entry) if entry else 0)
-        state["syncing"] = False
-
-    def picked(r, _p):
-        if not state["syncing"] and r.get_selected() < len(state["values"]):
-            model_picked(chat, state["values"][r.get_selected()])
-    row.connect("notify::selected", picked)
+        entry = model_entry(model(), offered) or (offered[0] if offered else None)
+        picker.quiet = True
+        try:
+            picker.set_choices([(m[0], m[1]) for m in offered])
+            picker.select(entry[0] if entry else None)
+        finally:
+            picker.quiet = False
     row.sync = sync
     sync()
     MODEL_ROWS.add(row)

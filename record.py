@@ -428,7 +428,7 @@ class Store:
                 self.full_width = bool(saved.get("full_width"))
                 saved_notes = saved.get("notes")  # ("markdown": the notes are; else Zim's markup, from before)
                 self.zoom = float(saved.get("zoom") or 1.0)
-                self.zoom_default = float(saved.get("zoom_default") or 1.0)
+                self.zoom_default = float(saved.get("zoom_default") or 1.0)  # (from before it was Baude's too)
                 self.books_width = saved.get("books_width")
                 self.backup_all = bool(saved.get("backup_all"))
                 self.reading = saved.get("reading")
@@ -444,6 +444,11 @@ class Store:
                     widgets.save_settings(meta_model=chosen)
         except (OSError, ValueError, AttributeError):
             pass
+        shared = widgets.load_settings().get("zoom_default")  # (the Global Scale, Baude's too: Record's own, kept there)
+        if shared:
+            self.zoom_default = round(min(widgets.ZOOM_MAX, max(widgets.ZOOM_MIN, float(shared))), 2)
+        elif self.zoom_default != 1.0:
+            widgets.save_settings(zoom_default=self.zoom_default)
         zim = bool(self.notebooks) and saved_notes != "markdown"  # (notes from before Markdown: Zim's markup, made so once)
         if zim:
             self.backup(force=True)  # (the file as it was, kept first)
@@ -6496,11 +6501,11 @@ class Settings(Adw.PreferencesDialog):
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")  # (the text's and the icons' are Baude's too)
         sizes.add(widgets.settings_size("Text Scale", None, widgets.scale_setting("text_scale"),
-                                        lambda s: win.set_scale("text_scale", s)))
+                                        lambda s: win.set_scale("text_scale", s), key="text_scale"))
         sizes.add(widgets.settings_size("Icon Scale", None, widgets.scale_setting("icon_scale"),
-                                        lambda s: win.set_scale("icon_scale", s)))
+                                        lambda s: win.set_scale("icon_scale", s), key="icon_scale"))
         sizes.add(widgets.settings_size("Global Scale", None, win.store.zoom_default,  # (the zoom ⌘0 goes back to)
-                                        win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX))
+                                        win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"))
         page.add(sizes)
 
         def go(row, action):  # (this goes first: a capture is of the window, not of this over it)
@@ -6974,10 +6979,29 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 child._highlight()
 
     def set_zoom_default(self, zoom):
-        """Settings → Zoom: what Ctrl/⌘ 0 goes back to; and the zoom now."""
+        """Settings → Global Scale (Baude's too, settings.json's): what Ctrl/⌘ 0 goes back to; and the zoom now."""
         self.store.zoom_default = zoom
+        widgets.save_settings(zoom_default=zoom)
         self.store.save()  # (the zoom may be at it already)
         self.set_zoom(zoom)
+
+    def settings_changed(self, keys, _before):
+        """Shared settings changed in another app here (widgets.watch_settings): the text's and the icons' sizes; the
+        Global Scale, the zoom with it if it was at the one before (one zoomed apart stays as it is). (The accent's
+        taken already; Meta's are meta.settings_changed's.)"""
+        if keys & {"text_scale", "icon_scale"}:
+            self.text_scaled = self.text_scaled or "text_scale" in keys
+            if self.scale_wait is not None:
+                GLib.source_remove(self.scale_wait)
+            self.scale_wait = GLib.timeout_add(150, self._scales_changed)
+        if "zoom_default" in keys:
+            zoom = round(min(widgets.ZOOM_MAX, max(widgets.ZOOM_MIN,
+                                                   float(widgets.load_settings().get("zoom_default") or 1.0))), 2)
+            following = self.store.zoom == self.store.zoom_default
+            self.store.zoom_default = zoom
+            self.store.save()
+            if following:
+                self.set_zoom(zoom)
 
     def apply_zoom(self):
         """The zoom on the conversation and on the tab shown, each keeping its place. A tab not shown has its turn as
@@ -8237,6 +8261,10 @@ class App(Adw.Application):
         UNEXPLAINED.stop()
         Adw.Application.do_shutdown(self)
 
+    def settings_changed(self, keys, before):
+        if self.win is not None:
+            self.win.settings_changed(keys, before)
+
     def do_activate(self):
         widgets.load_css()  # (Baude's: its compact lists, its viewers; its classes aren't Record's)
         widgets.apply_scales(Gdk.Display.get_default())  # (Settings → Size: the text's and the icons', Baude's)
@@ -8265,6 +8293,7 @@ class App(Adw.Application):
         update.show(self.win, state if isinstance(state, dict) else None)
         if isinstance(state, dict):
             update.restarted(self.win, state, noun())
+        widgets.watch_settings(self.settings_changed)  # (changed in Baude, or another Record here)
         if self.updater is None:
             self.updater = update.Updater("record", lambda: self.win is None or self.win.idle(),
                                           lambda updated: self.win.restart(updated),

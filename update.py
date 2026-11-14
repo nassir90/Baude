@@ -151,8 +151,9 @@ def settings_row():
                         subtitle=f"From {up} every {CHECK_S}s, restarting once idle" if up else
                         "Not a git checkout following a branch: nothing to update from",
                         active=enabled() and up is not None, sensitive=up is not None)
-    row.connect("notify::active", lambda r, _p: r.get_sensitive() and widgets.save_settings(auto_update=r.get_active()))
-    return row
+    row.connect("notify::active", lambda r, _p: r.get_sensitive() and not r.syncing
+                and widgets.save_settings(auto_update=r.get_active()))
+    return widgets.follow_setting(row, "auto_update", lambda v: row.set_active(v is True and up is not None))
 
 
 def made_when(stamp):

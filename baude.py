@@ -7797,7 +7797,7 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner()
+        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
         self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
@@ -10148,10 +10148,11 @@ class SidePanel(Gtk.Box):
         self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
-        self.btw_list.set_placeholder(self._empty("No side questions"))
+        # (none asked: no placeholder, and the list hidden: empty, its outline would draw a line under the box)
+        self.btw_list.set_visible(False)
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        # (over them, a pill of its own: the box a new one's asked in, as tall as the pill a page with none shows; Enter
-        # and its send button off while it's empty)
+        # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
+        # empty)
         self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
@@ -10241,9 +10242,10 @@ class SidePanel(Gtk.Box):
         if self.btw_shown is not None:  # (back to the list, where it is)
             self.close_side_question()
         self.btw_list.prepend(sq)
+        self.btw_list.set_visible(True)
         sq.set_expanded(True)
 
-    ASK_HEIGHT = 63  # (px: the box's least, so its pill's as tall as the one a page with none shows: _empty's)
+    ASK_HEIGHT = 63  # (px: the box's least)
 
     def _ask_key(self, _c, keyval, _code, state):
         """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
@@ -10330,6 +10332,7 @@ class SidePanel(Gtk.Box):
             self.close_side_question(animate=False)
         if sq.get_parent() is self.btw_list:
             self.btw_list.remove(sq)
+            self.btw_list.set_visible(self.btw_list.get_row_at_index(0) is not None)
 
     def update_artifact(self, info):
         old = self.artifact_rows.pop(info["url"], None)
@@ -11848,8 +11851,9 @@ class SettingsDialog(Adw.PreferencesDialog):
 
 class UserTurn(Gtk.Box):
     """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
-    anywhere in the row, a revert button shows just outside the bubble, level with its last line (the chat's
-    revert_to: this message and everything after it taken back, and what it said put back in the box)."""
+    anywhere in the row, a revert button fades in just outside the bubble, level with its last line, and fades out as
+    it leaves (the chat's revert_to: this message and everything after it taken back, and what it said put back in
+    the box)."""
 
     def __init__(self, win, bubble, text, uuid):
         super().__init__(spacing=6, hexpand=True)
@@ -11870,6 +11874,8 @@ class UserTurn(Gtk.Box):
         self.add_controller(hover)
 
     BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
 
     def show_revert(self, on):
         on = on and self.uuid is not None and self.win.can_revert()
@@ -11877,8 +11883,14 @@ class UserTurn(Gtk.Box):
             metrics = self.bubble.get_pango_context().get_metrics(None, None)
             line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
             self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
-        self.revert.set_opacity(1 if on else 0)
         self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
 
 
 class Repaint(Gtk.Widget):
@@ -13394,7 +13406,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
                     self.drop_running = self.drop_session = None  # not tried again)
                 if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
-                    self.note(f"couldn't reach {remote_name(r)}: {e}")
+                    self.note(f"couldn't reach {'daemon' if r.mine else remote_name(r)}: {e}")
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -17028,12 +17040,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
         if kind == "gone":
             name = remote_name(self.remote)
-            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
-                f"Looking for {name} on the network…"
+            text = ("Can't connect to daemon" if self.remote.mine else f"Can't connect to {name} at the moment") \
+                if self.remote.state == "dead" else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
         elif kind == "drop":
-            text = f"Connection to {remote_name(self.remote)} dropped"
+            text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
             m = self.retrying or {}
             what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"

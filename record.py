@@ -1267,7 +1267,7 @@ CSS = """
 .reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
 .reader-assistant { padding: 4px 2px; }
 .reader-assistant label.prose { font-size: 1.02em; }
-button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 4px; color: white; box-shadow: none; }
+button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 0; color: white; box-shadow: none; }
 button.edit-accept { background: #2ec27e; }
 button.edit-accept:hover { background: #26a269; }
 button.edit-reject { background: #e01b24; }
@@ -2524,12 +2524,44 @@ class PageHistory:
         return True
 
 
+class _Overhang(Gtk.LayoutManager):
+    """EditControls' layout: its buttons side by side, as tall as the green beside them (the text's ascent and
+    descent), though the row asks the line for the ascent only. A widget in a line stands on its baseline (GTK has
+    no say for its own), so asking for more would push the line up; the descent's hung below, in the line's own."""
+
+    def __init__(self, spacing):
+        super().__init__()
+        self.spacing, self.up, self.down = spacing, 0, 0
+
+    def do_get_request_mode(self, _widget):
+        return Gtk.SizeRequestMode.CONSTANT_SIZE
+
+    def do_measure(self, widget, orientation, _for_size):
+        if orientation == Gtk.Orientation.VERTICAL:
+            return self.up, self.up, -1, -1
+        kids = widget.buttons
+        w = sum(k.measure(orientation, -1)[1] for k in kids) + self.spacing * max(0, len(kids) - 1)
+        return w, w, -1, -1
+
+    def do_allocate(self, widget, _width, _height, _baseline):
+        x = 0
+        for k in widget.buttons:
+            w = k.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+            box = Gdk.Rectangle()
+            box.x, box.y, box.width, box.height = x, 0, w, self.up + self.down
+            k.size_allocate(box, -1)
+            x += w + self.spacing
+
+
 class EditControls(Gtk.Box):
     """A proposed edit's Accept and Reject, on its page where its green ends (DiaryEditor._put_greens: at its anchor):
-    a tick on green and a cross on red, as tall as the text's letters (size), in its line. Neither takes the focus."""
+    a tick on green and a cross on red, square-cornered, as tall as the green, its top and bottom (size), in its line.
+    Neither takes the focus."""
 
-    def __init__(self, editor, p, px):
-        super().__init__(spacing=3, margin_start=4, margin_end=2)
+    def __init__(self, editor, p, size):
+        super().__init__(margin_start=4, margin_end=2)
+        self.layout = _Overhang(3)
+        self.set_layout_manager(self.layout)
         self.buttons = []
         for icon, tip, css, accept in (("object-select-symbolic", "Accept (Tab)", "edit-accept", True),
                                        ("window-close-symbolic", "Reject (Esc)", "edit-reject", False)):
@@ -2543,15 +2575,20 @@ class EditControls(Gtk.Box):
             self.append(btn)
             self.buttons.append(btn)
         self.px = None
-        self.size(px)
+        self.size(size)
 
-    def size(self, px):
-        """Each button px tall (and a little wider), its mark most of that."""
-        if px != self.px:
-            self.px = px
+    def size(self, size):
+        """size: the text's (ascent, descent) in px. Each button that tall in all, its top the green's and its bottom
+        the green's (the descent below the baseline: _Overhang), a little wider than the ascent, its mark most of
+        that."""
+        if size != self.px:
+            self.px = size
+            up, down = size
+            self.layout.up, self.layout.down = up, down
             for btn in self.buttons:
-                btn.set_size_request(round(px * 1.45), px)
-                btn.get_child().set_pixel_size(max(8, round(px * 0.85)))
+                btn.set_size_request(round(up * 1.45), up + down)
+                btn.get_child().set_pixel_size(max(8, round(up * 0.85)))
+            self.layout.layout_changed()
 
 
 class DiaryEditor(Gtk.Box, FindInText):
@@ -3303,10 +3340,20 @@ class DiaryEditor(Gtk.Box, FindInText):
                 e[k] = None
             e["anchor"] = e["controls"] = None
 
-    def _control_px(self):
-        """How tall an edit's Accept and Reject are: the text's letters' height, its font's ascent (a widget in a line
-        stands on its baseline, so that keeps the line as it is)."""
-        return max(10, round(self.view.get_pango_context().get_metrics(None, None).get_ascent() / Pango.SCALE))
+    def _control_px(self, anchor=None):
+        """How tall an edit's Accept and Reject are: (up, down), the text's font's ascent and, under its baseline, its
+        descent, as its green is (a widget in a line stands on its baseline: EditControls asks the line for the ascent
+        only, so that keeps the line as it is). On a line of their own (anchor: one that takes a paragraph out, say),
+        no green to match and no text's descent under them: the ascent only, clear of the line below."""
+        m = self.view.get_pango_context().get_metrics(None, None)
+        up = max(10, round(m.get_ascent() / Pango.SCALE))
+        if anchor is not None:
+            at = self.buf.get_iter_at_child_anchor(anchor)
+            after = at.copy()
+            after.forward_char()
+            if at.starts_line() and after.ends_line():
+                return up, 0
+        return up, max(0, round((m.get_ascent() + m.get_descent()) / Pango.SCALE) - up)
 
     def _mark_proposals(self):
         """Each change's passage struck through on red (any other's green in it left be), what it puts in green, and
@@ -3327,7 +3374,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
             tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
-            e["controls"].size(self._control_px())
+            e["controls"].size(self._control_px(e["anchor"]))
 
     def _proposal_at(self, offset):
         """The change shown a place in the buffer is in (Tab and Esc's): the one whose green it's inside, else the

@@ -17055,9 +17055,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def banner_text(self, kind):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
         if kind == "gone":
-            name = remote_name(self.remote)
-            text = ("Can't connect to daemon" if self.remote.mine else f"Can't connect to {name} at the moment") \
-                if self.remote.state == "dead" else f"Looking for {name} on the network…"
+            name = "daemon" if self.remote.mine else remote_name(self.remote)  # (this machine's: over its socket,
+            # not the network)
+            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
+                "Looking for daemon…" if self.remote.mine else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
         elif kind == "drop":

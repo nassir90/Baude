@@ -8870,21 +8870,23 @@ class SideQuestion(Gtk.Box):
         --resume <session> --fork-session --no-session-persistence --permission-mode plan
     so it sees the whole conversation so far but writes nothing (not to the session, not a new
     one), and can't edit anything. Tools that need permission are refused. Follow-ups go to the
-    same process; closing the thread ends it. Any number can run at once."""
+    same process; closing the thread ends it. Any number can run at once. One made from the pane's + has no question
+    yet: its box takes the first, and its claude starts then."""
 
     PREFACE = ("(This is a side question, asked while you work on the conversation above. Answer it "
                "briefly from what you already know; don't continue the task or use tools.)\n\n")
 
-    def __init__(self, win, question):
+    def __init__(self, win, question=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("side-question")
-        self.win, self.busy, self.answer = win, False, None
+        self.win, self.busy, self.answer, self.proc = win, False, None, None
         head = Gtk.Box(spacing=8)
-        self.dot = StatusDot("working")
+        self.dot = StatusDot("working" if question else "inactive")
         head.append(self.dot)
-        title = Gtk.Label(label=question, xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
-        title.add_css_class("heading")
-        head.append(title)
+        self.title = Gtk.Label(label=question or "New side question", xalign=0, hexpand=True, wrap=True,
+                               wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.title.add_css_class("heading")
+        head.append(self.title)
         close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close this side question",
                            valign=Gtk.Align.START)
         close.add_css_class("flat")
@@ -8893,9 +8895,18 @@ class SideQuestion(Gtk.Box):
         self.append(head)
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.append(self.body)
-        self.follow = Gtk.Entry(placeholder_text="Ask a follow-up…", sensitive=False)
+        self.follow = Gtk.Entry(placeholder_text="Ask a follow-up…" if question else "Ask a side question…",
+                                sensitive=not question)
         self.follow.connect("activate", lambda e: self.ask(e.get_text()) or e.set_text(""))
         self.append(self.follow)
+        if question:
+            self.start(question)
+
+    def start(self, question):
+        """Its claude, and the first question to it."""
+        win = self.win
+        self.title.set_label(question)
+        self.follow.set_placeholder_text("Ask a follow-up…")
         if not win.runs_here():  # (a chat of Baude's, or a host's: its side question's the host process's too)
             self.proc, self.forked = win.side_question_proc(self.on_msg, self.on_exit)
         else:
@@ -8908,6 +8919,9 @@ class SideQuestion(Gtk.Box):
 
     def ask(self, text, first=False):
         text = (text or "").strip()
+        if text and not first and self.proc is None and self.answer is None:  # (from +: its first question)
+            self.start(text)
+            return
         if not text or self.busy or self.proc is None:
             return
         if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
@@ -9802,7 +9816,16 @@ class SidePanel(Gtk.Box):
         self.btw_empty = self._empty("Ask a side question with /btw <question>\n(it doesn't interrupt or join the chat)")
         self.btw_empty.set_justify(Gtk.Justification.CENTER)
         self.btw_list.append(self.btw_empty)
-        page = self.stack.add_titled(self._scrolled(self.btw_list), "btw", "Side questions")
+        btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        btw_top = Gtk.Box(margin_start=10, margin_end=10, margin_top=6)  # (+: a new one, its question typed in it)
+        self.btw_new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New side question",
+                                  halign=Gtk.Align.END, hexpand=True)
+        self.btw_new.add_css_class("flat")
+        self.btw_new.connect("clicked", lambda *_: self.new_side_question())
+        btw_top.append(self.btw_new)
+        btw_page.append(btw_top)
+        btw_page.append(self._scrolled(self.btw_list))
+        page = self.stack.add_titled(btw_page, "btw", "Side questions")
         page.set_icon_name("dialog-question-symbolic")
         page = self.stack.add_titled(self._scrolled(self.artifact_list), "artifacts", "Artifacts")
         page.set_icon_name(globe_icon())
@@ -9845,6 +9868,13 @@ class SidePanel(Gtk.Box):
     def add_side_question(self, sq):
         self.btw_list.prepend(sq)
         self.side_questions_changed()
+
+    def new_side_question(self):
+        """A side question with no question yet, at the top, its box focused for the first."""
+        sq = SideQuestion(self.win)
+        self.add_side_question(sq)
+        sq.follow.grab_focus()
+        return sq
 
     def side_questions(self):
         return [w for w in walk(self.btw_list) if isinstance(w, SideQuestion)]

@@ -1640,6 +1640,25 @@ def _(app):
     return win
 
 
+@scene("75b-side-question-new", "Side questions' +: a new one asked in its own box, and another waiting for its "
+                                "question", size=(1200 + SIDEBAR, H))
+def _(app):
+    proj = os.path.join(T.TMP, "btw-new-proj")
+    os.makedirs(proj, exist_ok=True)
+    win = app.window(opts(cwd=proj))
+    T.write_session(proj, win.session_id, title="Main chat")
+    win.show_panel(True, "btw")
+    plus = getattr(win.panel, "btw_new", None)
+    if plus is not None:  # (before the +: the page as it was)
+        plus.emit("clicked")
+        first = win.panel.side_questions()[0]
+        first.follow.set_text("what does make do here?")
+        first.follow.emit("activate")
+        T.wait_for(lambda: first.answer is not None and not first.busy, "answer")
+        plus.emit("clicked")
+    return win
+
+
 @scene("76-tail-background-tasks", "Viewing a session running elsewhere: its background command and subagent "
                                    "(with its own transcript) rebuilt from the files, in the side panel",
        size=(1200 + SIDEBAR, H))

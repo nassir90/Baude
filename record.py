@@ -8232,6 +8232,7 @@ class App(Adw.Application):
         self.do_startup_look()
         widgets.ensure_icons()
         pointers.start()
+        widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
         import signal  # (told to stop, as logging out or `kill` does: what's typed is saved, then it stops)
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
             try:

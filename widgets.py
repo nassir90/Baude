@@ -6151,6 +6151,140 @@ class HostPicker(Gtk.MenuButton):
         return self.shown.get_label()
 
 
+def press_opens_dropdowns():
+    """As an app starts, once: every dropdown (a Gtk.DropDown, an Adw.ComboRow, a HostPicker) opens its list as the
+    mouse button goes down on it, not as it comes up (BaudeInternal#74). Held down and let go over a choice: that one's
+    picked, and the list closes. Let go outside the list: it closes. Let go on the dropdown itself, a plain click: the
+    list stays open, to pick from with a click. Each taken as it's realized (the hook on GtkWidget's realize), so none
+    is missed."""
+    if getattr(press_opens_dropdowns, "started", False):
+        return
+    press_opens_dropdowns.started = True
+    GObject.add_emission_hook(Gtk.Widget, "realize", _dropdown_realized)
+
+
+def _dropdown_realized(widget):
+    if isinstance(widget, (Gtk.DropDown, Adw.ComboRow, HostPicker)) and not getattr(widget, "press_opens", None):
+        # (before the dropdown's own button: that one opens it on the release)
+        widget.press_opens = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        widget.press_opens.connect("pressed", _dropdown_pressed)
+        widget.press_opens.connect("released", _dropdown_released)
+        widget.add_controller(widget.press_opens)
+    return True  # (a hook stays only while it says so)
+
+
+def _dropdown_released(gesture, _n, x, y):
+    """The release came back to the dropdown, not to its list (where the pointer isn't the popover's while held)."""
+    widget = gesture.get_widget()
+    ok, p = widget.compute_point(widget.get_native(), Graphene.Point().init(x, y))
+    if ok:
+        _dropdown_let_go(widget, p.x, p.y)
+
+
+def _dropdown_list(widget):
+    """The popover widget's choices are in."""
+    if isinstance(widget, Gtk.MenuButton):
+        return widget.get_popover()
+    return next((w for w in walk(widget) if isinstance(w, Gtk.Popover)), None)
+
+
+def _dropdown_pressed(gesture, n_press, _x, _y):
+    widget = gesture.get_widget()
+    pop = _dropdown_list(widget)
+    if n_press != 1 or pop is None or pop.get_visible():
+        return
+    gesture.set_state(Gtk.EventSequenceState.CLAIMED)  # (its own click, on the release, isn't to toggle it again)
+    # (opened as it opens itself; a Gtk.DropDown's activate() is Space's, which waits a quarter second to)
+    if isinstance(widget, Gtk.MenuButton):
+        widget.popup()
+    elif isinstance(button := widget.get_first_child(), Gtk.ToggleButton) and isinstance(widget, Gtk.DropDown):
+        button.set_active(True)
+    else:
+        widget.activate()
+    if not pop.get_visible():
+        return
+    _dropdown_held(pop, widget)
+    if not getattr(pop, "let_go", None):
+        # (the release, the press having been the dropdown's: the popover's, as it has the pointer now; or the dropdown's)
+        pop.let_go = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        pop.let_go.connect("unpaired-release", lambda g, x, y, _b, _s: _dropdown_let_go(
+            getattr(g.get_widget(), "held_from", None), *_popover_to_native(g.get_widget(), x, y)))
+        pop.let_go.connect("pressed", lambda g, *_: _dropdown_held(g.get_widget(), None))
+        pop.add_controller(pop.let_go)
+        # (what it's over while held, lit as under the pointer: GTK lights nothing, the press being another window's)
+        pop.held_over = Gtk.EventControllerMotion(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        pop.held_over.connect("motion", lambda c, x, y: getattr(c.get_widget(), "held_from", None) and _dropdown_light(
+            c.get_widget(), _dropdown_choice(c.get_widget(), x, y)))
+        pop.add_controller(pop.held_over)
+        pop.connect("closed", lambda p: _dropdown_held(p, None))
+
+
+def _dropdown_held(pop, widget):
+    """pop's list held open by a press on widget (None: no longer)."""
+    pop.held_from = widget
+    if widget is None:
+        _dropdown_light(pop, None)
+
+
+def _dropdown_light(pop, choice):
+    """choice (a row or a menu's item of pop) lit as under the pointer; the one before, not."""
+    lit = getattr(pop, "lit", None)
+    if lit is choice:
+        return
+    if lit is not None:
+        lit.unset_state_flags(Gtk.StateFlags.PRELIGHT)
+    if choice is not None:
+        choice.set_state_flags(Gtk.StateFlags.PRELIGHT, False)
+    pop.lit = choice
+
+
+def _dropdown_choice(pop, x, y):
+    """The choice at (x, y) of pop: a row of a Gtk.DropDown's or an Adw.ComboRow's list, an item of a HostPicker's menu;
+    pop itself if it's in pop but on none; None if it's not in pop."""
+    under = pop.pick(x, y, Gtk.PickFlags.DEFAULT)
+    if under is None:
+        return None
+    while under is not pop and under is not None:
+        if under.__gtype__.name in ("GtkListItemWidget", "GtkModelButton"):
+            return under
+        under = under.get_parent()
+    return pop
+
+
+def _popover_to_native(pop, x, y):
+    """(x, y) of pop, as a point of the window (or popover) it's over: that one's coordinates."""
+    surface, native = pop.get_surface(), pop.get_parent().get_native()
+    px, py = pop.get_surface_transform()
+    nx, ny = native.get_surface_transform()
+    return surface.get_position_x() + px + x - nx, surface.get_position_y() + py + y - ny
+
+
+def _dropdown_let_go(widget, x, y):
+    """The mouse button let go at (x, y) of widget's native, after a press on widget opened its list."""
+    pop = _dropdown_list(widget) if widget is not None else None
+    if pop is None or getattr(pop, "held_from", None) is not widget or not pop.get_visible():
+        return
+    _dropdown_held(pop, None)
+    native = widget.get_native()
+    ok, bounds = widget.compute_bounds(native)
+    if ok and bounds.contains_point(Graphene.Point().init(x, y)):
+        return  # (a plain click: the list stays open)
+    nx, ny = native.get_surface_transform()
+    px, py = pop.get_surface_transform()
+    surface = pop.get_surface()
+    choice = _dropdown_choice(pop, x + nx - surface.get_position_x() - px, y + ny - surface.get_position_y() - py)
+    if choice is None:
+        pop.popdown()
+    elif choice.__gtype__.name == "GtkModelButton":
+        choice.activate()
+    elif choice is not pop:  # (a row: as a click on it, by its position)
+        view = choice.get_ancestor(Gtk.ListView)
+        if view is not None and choice.activate_action("listitem.select", GLib.Variant("(bb)", (False, False))):
+            chosen = view.get_model().get_selection()
+            if not chosen.is_empty():
+                choice.activate_action("list.activate-item", GLib.Variant.new_uint32(chosen.get_minimum()))
+
+
 def empty_label(text):
     """A list's placeholder: a dim line of text."""
     lbl = Gtk.Label(label=text, margin_top=24, margin_bottom=24)

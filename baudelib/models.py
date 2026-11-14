@@ -93,8 +93,28 @@ def local_models():
 SERVED = ("ollama/", "openai/")  # (the values of models Ollama or an OpenAI-compatible server serves: baudelib.providers)
 
 
+AGENT = "agent/"  # (a model of another host's, run there as an agent of its: baudelib.agentproxy)
+
+
+def proxied(value):
+    """(the member of the mesh, its value there) of a model run on another host as an agent (agent/<member>/<value>),
+    None for any other."""
+    if not isinstance(value, str) or not value.startswith(AGENT):
+        return None
+    member, _, inner = value[len(AGENT):].partition("/")
+    return (member, inner) if member and inner else None
+
+
+def runs_on(value):
+    """The member of the mesh a model's program runs on, as an agent of its (proxied); None for this machine."""
+    return (proxied(value) or (None,))[0]
+
+
 def model_program(value):
-    """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude"."""
+    """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude". A
+    model run on another host as an agent: what runs it there."""
+    if (agent := proxied(value)) is not None:  # (only a model with no API is run so: Apple's, else MLX's)
+        return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
     if value == APPLE_MODEL["value"]:
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
@@ -142,7 +162,8 @@ def window_of(value):
     from baudelib import providers
     return next((m.get("window") for p in providers.found() for m in p["models"] if m["value"] == value), None) or \
         next((m.get("window") for e in providers.mesh_endpoints() for m in e["models"]
-              if f"openai/{e['id']}/{m['id']}" == value), None)
+              if f"openai/{e['id']}/{m['id']}" == value), None) or \
+        next((m.get("window") for m in providers.mesh_agents() if m["value"] == value), None)
 
 
 def launch(model, mode, effort, session_id=None, resumed=False):
@@ -150,6 +171,8 @@ def launch(model, mode, effort, session_id=None, resumed=False):
     (resumed) or hasn't had yet: {program, exe, missing (what runs it isn't here), mode, effort, resume, extra}, for
     ClaudeProc."""
     p = program(model)
+    if proxied(model) is not None:  # (run on its host, as an agent of its: its program's there, not here)
+        p = {**p, "exe": None}
     exe = globals()[p["exe"]]() if p["exe"] else None
     resume, extra = None, ()
     if session_id and (resumed and p["resumes"] or p["first"] == "--resume"):

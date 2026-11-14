@@ -20,6 +20,8 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
     python3 baude_headless.py deactivate DEST|ID   # a member not reached, nor let reach here, till it's activated
     python3 baude_headless.py activate   DEST|ID
     python3 baude_headless.py mesh                # the mesh's members, and the links this host makes
+    python3 baude_headless.py tools --cwd DIR [--only Read,...]   # an agent's tools, as an MCP server on stdio
+    python3 baude_headless.py mcp-relay --socket PATH RUN NAME TOKEN   # an agent's MCP server, from its caller
 A command that takes --host takes --member ID instead: a member of the mesh, reached through this machine's host.
 
 A session's prompt, folder, model and the rest come over the wire, in start: baude_oneshot.py starts one from the
@@ -248,6 +250,14 @@ def main():
     link.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
     sub.add_parser("unlink", help="a link this machine's host process makes let go of").add_argument("dest")
     sub.add_parser("mesh", help="the mesh's members, and the links this machine's host process makes")
+    tools = sub.add_parser("tools", help="the tools of an agent run on another host (Read, Write, Edit, Bash, Grep, "
+                                         "Glob), here, as an MCP server on stdin and stdout")
+    tools.add_argument("--cwd", required=True, help="the folder they work in")
+    tools.add_argument("--only", help="those of them it has, by name, with commas (default: all)")
+    relay = sub.add_parser("mcp-relay", help=argparse.SUPPRESS)  # (an agent run here's MCP server: its caller's)
+    relay.add_argument("--socket", required=True)
+    for name in ("run", "name", "token"):
+        relay.add_argument(name)
     for name, help_ in (("deactivate", "a member (where a link goes, or its id) not reached from here, nor let reach "
                                        "here, till it's activated again"),
                         ("activate", "a member deactivated here taken up again")):
@@ -265,6 +275,12 @@ def main():
         return connect(args)
     if args.command == "socket":
         return print(wire.socket_path())
+    if args.command == "tools":
+        from baudelib import hosttools
+        return hosttools.serve(args.cwd, args.only.split(",") if args.only else None)
+    if args.command == "mcp-relay":
+        from baudelib import agentproxy
+        return agentproxy.relay(args.socket, args.run, args.name, args.token)
     if args.command == "quit":
         try:
             ch, _info = wire.connect_local(timeout=3)

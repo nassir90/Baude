@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import claude, mesh, models, providers, selfupdate, transcripts, wire
+from baudelib import agentproxy, claude, mesh, models, providers, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -367,6 +367,7 @@ class Server:
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
         self.socket_path = socket_path or wire.socket_path()
+        self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
         if len(self.socket_path.encode()) > 100:
             raise OSError(f"{self.socket_path}: too long a path for a socket")
         self.listener, self.accepted, self.binding = None, 0.0, threading.Lock()
@@ -445,6 +446,8 @@ class Server:
         """Can this machine run a model: Claude's (claude's own say); one Ollama or an endpoint serves, with pi here
         (its server's say comes with the first message: pi-claude's); or one of runnable_models (its program and, for
         MLX's, the model itself here)?"""
+        if (agent := models.proxied(model)) is not None:  # (another member's, run there: while it's in the mesh)
+            return any(m.get("id") == agent[0] for m in self.mesh.view()["members"])
         if models.model_program(model) == "claude":
             return not models.launch(model, None, None)["missing"]
         if isinstance(model, str) and model.startswith(models.SERVED):
@@ -504,9 +507,9 @@ class Server:
             program = models.program(s.meta.get("model"))["name"]
             names = {s.meta.get("cli_id") or s.id, s.id}
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None]
-        pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, by its id)
-        if program == "pi" and os.path.isdir(pi):
-            paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(n.startswith(i) for i in names)]
+        pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
+        if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)
+            paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(i in n for i in names)]
         went = []
         for p in paths:
             if p and os.path.exists(p):
@@ -648,6 +651,8 @@ class Server:
         except OSError:
             pass
         self.mesh.stop()
+        for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
+            run.end()
         with self.lock:
             for c in list(self.conns):
                 c.close()
@@ -695,6 +700,10 @@ class Server:
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
+            if getattr(conn, "agent_run", None) is not None:  # (its caller gone: the agent with it)
+                conn.agent_run.end()
+            if getattr(conn, "agent_relay", None) is not None:
+                conn.agent_relay[0].relay_gone(conn.agent_relay[1])
             with self.lock:
                 self.conns.discard(conn)
                 for s in list(self.sessions.values()):
@@ -746,6 +755,23 @@ class Server:
                                                           else None, msg.get("id")))
         if op == "infer":
             return self.mesh.infer(conn, msg)
+        if op == "agent":  # (a model of this machine's, run here as an agent for a chat elsewhere: agentproxy)
+            if getattr(conn, "agent_run", None) is not None:
+                return reply("error", error="this connection runs an agent already")
+            run = agentproxy.Run(self, conn, msg)
+            with self.lock:
+                self.agent_runs[run.id] = run
+            conn.agent_run = run
+            return reply("agent_started", run=run.id)
+        if op in ("in", "close", "kill", "mcp", "mcp_close") and getattr(conn, "agent_run", None) is not None:
+            return conn.agent_run.take(msg)
+        if op == "mcp_relay":  # (one of an agent's MCP servers: a relay, carried to its caller)
+            run = self.agent_runs.get(msg.get("run"))
+            if run is None or run.relay(conn, msg) is None:
+                return reply("error", error="no such agent here")
+            return reply("relaying")
+        if op == "mcp_line" and getattr(conn, "agent_relay", None) is not None:
+            return conn.agent_relay[0].relay_line(conn.agent_relay[1], msg.get("line"))
         if op in ("deactivate", "activate"):  # (a member, by its id or where a link from here goes: mesh.deactivate)
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
@@ -973,11 +999,13 @@ class Server:
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
         made = []  # (the claude its exit is about: claude_exited)
-        s.proc = claude.ClaudeProc(
+        kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
+        s.proc = kind(
             lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
             s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,
             env={**s.env, **(self.env or {})} or None,  # (a head's, as it gave it; the host's own extras over it)
-            exe=run["exe"] if run["program"] != "claude" else self.exe)
+            exe=run["exe"] if run["program"] != "claude" else self.exe,
+            **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.used = time.time()
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
@@ -1033,10 +1061,11 @@ class Server:
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid,
                 "error": "another kind of model can't carry this conversation on: start a session with it"}}})
-        if sub == "set_model" and models.model_program(request.get("model")) == "pi" and s.proc is not None \
-                and request.get("model") != s.meta.get("model"):
-            s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model: the next message starts it on
-            s.proc.kill()                               # this one, pi's session going on: nothing's gone)
+        if sub == "set_model" and s.proc is not None and request.get("model") != s.meta.get("model") and \
+                (models.model_program(request.get("model")) == "pi" or
+                 models.runs_on(request.get("model")) != models.runs_on(s.meta.get("model"))):
+            s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model, and one on another host runs
+            s.proc.kill()  # there: the next message starts it on this one, pi's session going on: nothing's gone)
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
             undo = (key, s.meta.get(key), request.get(field) or s.meta.get(key))  # (put back if claude says no)

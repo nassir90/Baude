@@ -1645,8 +1645,10 @@ class Exhausted:
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 
-    def set(self, on):
+    def set(self, on, text="Context Exhausted"):
+        """On or off; on, what's said (This model is unavailable, Meta's: its model's gone from the mesh)."""
         self.on = on
+        self.label.set_text(text)
         self.label.set_visible(on)
         if on and self.box.input.is_focus():
             self.chat.grab_focus()
@@ -6073,6 +6075,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
 .mono { font-family: monospace; font-size: 0.9em; }
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
+.statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: 0.85em; opacity: 0.6; }
 .composer-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }

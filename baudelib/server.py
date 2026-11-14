@@ -1095,14 +1095,20 @@ class Server:
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         self.save(s)
-        if s.proc is None or getattr(s.proc, "stopping", False):  # (stopped: answered from what's kept, for when it
-            self.changed()                                          # runs; only a message starts it)
+        if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
+            self.changed()  # (stopped: answered from what's kept, for when it runs; only a message starts it, and a
+            # revert, which its claude makes)
             if sub == "get_settings":
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             return answer({})
+        try:
+            proc = self.ensure_proc(s)
+        except OSError as e:  # (its claude couldn't be started: a revert's said so, not left waiting)
+            return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
+                "subtype": "error", "request_id": rid, "error": str(e)}}})
         on = f"srv_{next(self.rids)}"
         s.routes[on] = (conn, rid, undo)
-        self.ensure_proc(s).send({**msg, "request_id": on})
+        proc.send({**msg, "request_id": on})
         self.changed()
 
     def from_claude(self, s, proc, msg):

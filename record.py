@@ -71,7 +71,8 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
-from baudelib.transcripts import task_notification  # noqa: E402  (a background task's ending, as said)
+from baudelib.transcripts import rewind_mark, task_notification  # noqa: E402  (a background task's ending, as said;
+# a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
@@ -766,16 +767,27 @@ def _is_noise(text):
                                   "This session is being continued from a previous conversation"))
 
 
-def parse_records(lines, items):
+def parse_records(lines, items, seen=None):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it."""
+    "failed", "summary"}, as Baude's chat says it. A revert (rewind_mark) takes back the items after the record it
+    keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
+    seen, last = ({} if seen is None else seen), None
     for line in lines:
+        if last:  # (the record before: how many items there were once it was read)
+            seen[last], last = len(items), None
+        if (mark := rewind_mark(line)) is not None:
+            if (n := 0 if mark[0] is None else seen.get(mark[0])) is not None:
+                del items[n:]
+            continue
         try:
             d = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(d, dict):
+            continue
+        last = d.get("uuid")
         kind = d.get("type")
         if kind not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
             continue
@@ -797,6 +809,8 @@ def parse_records(lines, items):
                 items[-1]["grew"] = True
             else:
                 items.append({"role": "assistant", "text": text, "id": mid})
+    if last:
+        seen[last] = len(items)
     return items
 
 
@@ -5143,7 +5157,7 @@ class Reader(Gtk.Box):
             self.mark_nouns_soon()
             return
         self.path = chat["path"] if chat else None
-        self.items = []
+        self.items, self.seen = [], {}
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         self.rows, self.picks, self.picking = [], [], None
@@ -5239,7 +5253,7 @@ class Reader(Gtk.Box):
 
     def _rewritten(self):
         """The chat's file got shorter (rewritten): read again from its start (livefeed.Tail)."""
-        self.items = []
+        self.items, self.seen = [], {}
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         self.rows = []
@@ -5248,14 +5262,20 @@ class Reader(Gtk.Box):
         """What's been added to the chat (livefeed.Tail, the moment it's written): its prose drawn, a reply written in
         several records the one it's part of, grown."""
         n = len(self.items)
-        parse_records(lines, self.items)
-        grew = n and self.items[n - 1].pop("grew", False)
+        parse_records(lines, self.items, self.seen)
+        keep = n  # (a revert took back what's after the record it keeps: those rows go)
+        if n and (len(self.items) < n or self.rows[n - 1].item is not self.items[n - 1]):
+            keep = next(i for i, row in enumerate(self.rows) if i >= len(self.items) or row.item is not self.items[i])
+            for row in self.rows[keep:]:
+                self.box.remove(row)
+            del self.rows[keep:]
+        grew = keep and self.items[keep - 1].pop("grew", False)
         if grew:
-            self.rows[n - 1].prose.set_text(self.items[n - 1]["text"])
-        for it in self.items[n:]:
+            self.rows[keep - 1].prose.set_text(self.items[keep - 1]["text"])
+        for it in self.items[keep:]:
             it.pop("grew", None)
             self._add(it)
-        if grew or len(self.items) > n:
+        if grew or len(self.items) != n or keep < n:
             self.mark_nouns_soon()
 
     def _add(self, it):

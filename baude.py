@@ -11805,6 +11805,41 @@ class SettingsDialog(Adw.PreferencesDialog):
     size_row = staticmethod(settings_size)
 
 
+class UserTurn(Gtk.Box):
+    """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
+    anywhere in the row, a revert button shows just outside the bubble, level with its last line (the chat's
+    revert_to: this message and everything after it taken back, and what it said put back in the box)."""
+
+    def __init__(self, win, bubble, text, uuid):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
+                                 tooltip_text="Revert: take back this message and everything after it, and put it "
+                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
+        self.revert.add_css_class("circular")
+        self.revert.add_css_class("revert-turn")
+        self.revert.connect("clicked", lambda *_: win.revert_to(self))
+        self.append(self.revert)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_revert(True))
+        hover.connect("leave", lambda *_: self.show_revert(False))
+        self.add_controller(hover)
+
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+
+    def show_revert(self, on):
+        on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
+        self.revert.set_opacity(1 if on else 0)
+        self.revert.set_can_target(on)
+
+
 class Repaint(Gtk.Widget):
     """Over the whole window, drawing nothing but for a frame when asked (flash): a change across all of it, which makes
     all of that frame's picture new. GTK 4.24's macOS backend shows a window as tiles, each given the new picture only
@@ -13766,9 +13801,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
-        self.add(self.user_bubble(text, atts))
+        said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
+        self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
-        self.proc.user(self.user_content(text, atts))
+        self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
 
     def chat_begun(self):
@@ -13814,6 +13850,78 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if text:
             bubble.append(MarkdownView(text))
         return bubble
+
+    def can_revert(self):
+        """Whether a message of yours can be reverted here: claude's chats can (it cuts its conversation itself:
+        rewind_conversation); pi's and Apple's models' can't, nor a chat that's only read here (live_elsewhere)."""
+        return model_program(self.model) == "claude" and not self.live_elsewhere()
+
+    def revert_to(self, turn):
+        """A message of yours reverted (UserTurn's button): claude takes it and everything after it back (a turn at it
+        stopped, what it started since stopped too), the chat drops them, and what it said is put back in the box. A chat
+        only viewed is resumed first, as sending in it does (send_text)."""
+        if not self.can_revert() or turn.uuid is None:
+            return
+        if self.resume_pending:
+            self.begin_resume()
+        if self.proc is None and self.remote is None and not self.runs_here():
+            took = self.take_up()
+            if took is False:  # (This Mac's host process isn't there yet: started, and reverted once it is)
+                self.note(f"Starting {THIS_MACHINE}'s host process…")
+                self.local_server(lambda _r: turn.is_ancestor(self.transcript) and self.revert_to(turn))
+                return
+            if took is None:
+                return
+        if self.proc is None:
+            self.start_proc()
+        if self.proc is None:
+            self.note("Couldn't revert: claude isn't running")
+            return
+        self.request({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid, "interrupt_if_running": True},
+                     lambda r: self.reverted(turn, r), lambda error: self.note(f"Couldn't revert: {error}"))
+
+    def reverted(self, turn, response):
+        """claude's answer to revert_to: rewound, the message and all after it gone from the chat and the message in the
+        box; else why not, said."""
+        response = response or {}
+        if not response.get("rewound"):
+            why = next((v for k, v in response.items() if k != "rewound" and isinstance(v, str)), None)
+            self.note(f"Couldn't revert: {why or 'claude said no'}")
+            return
+        if not turn.is_ancestor(self.transcript):  # (gone already: another chat opened meanwhile)
+            return
+        self.drop_from(turn)
+        self.blocks, self.streamed_ids = {}, set()  # (a turn it stopped: what was half drawn is gone)
+        buf = self.input.get_buffer()
+        buf.set_text(turn.text or response.get("prefillText") or "")
+        buf.place_cursor(buf.get_end_iter())
+        self.input.grab_focus()
+        self.stick_bottom = True
+
+    def drop_from(self, widget):
+        """widget and everything drawn after it, out of the chat (an earlier chunk it's in: the rest of that, and the
+        chunks after it, not drawn later either)."""
+        w = widget
+        while w is not None and w is not self.transcript:
+            parent, after = w.get_parent(), w.get_next_sibling()
+            while after is not None:
+                nxt = after.get_next_sibling()
+                parent.remove(after)
+                discard(after)
+                after = nxt
+            w = parent
+        widget.get_parent().remove(widget)
+        discard(widget)
+        if self.chunk_slots:
+            gone = [slot for slot in self.chunk_slots if slot.get_parent() is None]
+            self.chunk_slots = [slot for slot in self.chunk_slots if slot.get_parent() is not None]
+            for slot in gone:  # (the chunks after it not drawn yet: their items counted as drawn, never to be)
+                self.history.take(*slot.span)
+            if gone:
+                self.update_earlier_btn()
+        kept = [job for job in self.fill_jobs if job.slot.get_parent() is not None]
+        self.fill_jobs.clear()
+        self.fill_jobs.extend(kept)
 
     def interrupt(self):
         if self.proc:
@@ -16125,7 +16233,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                self.add(self.user_bubble(text, atts))
+                self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:

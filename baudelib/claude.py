@@ -171,10 +171,11 @@ class ClaudeProc:
         except (BrokenPipeError, OSError, ValueError):
             pass  # close() still closes the file when its final flush fails
 
-    def user(self, content):
-        """content: a string, or a list of content blocks (text / image / document)."""
+    def user(self, content, uuid=None):
+        """content: a string, or a list of content blocks (text / image / document). uuid: the message's, as claude
+        keeps it (what a revert names: rewind_conversation's target), else claude's own."""
         self.send({"type": "user", "message": {"role": "user", "content": content},
-                   "parent_tool_use_id": None, "session_id": ""})
+                   "parent_tool_use_id": None, "session_id": ""} | ({"uuid": uuid} if uuid else {}))
 
     def control(self, request):
         rid = f"baude_{next(self.req_ids)}"

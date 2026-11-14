@@ -6872,6 +6872,8 @@ tabgrid > tabgridchild:focus:focus-visible .card, .navigation-sidebar > row:focu
 entry:focus-within, spinbutton:focus-within, spinbutton.vertical > text:focus-within,
 row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none; }
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
+.revert-turn { min-width: 24px; min-height: 24px; padding: 0; color: alpha(@view_fg_color, 0.6); }  /* (beside a
+   message of yours, on hover: small, and the grey of the chat's notes, .sysnote's) */
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }

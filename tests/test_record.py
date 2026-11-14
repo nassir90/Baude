@@ -2546,7 +2546,7 @@ def test_ask_says_what_project_names_are(app):
            "src/relay_jobs.py\n[/project names]" in p, p
     assert p.count("\nUser: ") + p.count("\nMeta: ") + p.startswith("User: ") == 3, "three messages"
     assert "--- page: Home ---" in p and "- **function**: a recipe" in p
-    last = by_id(win, "a")["messages"][-1]
+    last = win.store.meta["messages"][-1]
     assert last["role"] == "meta" and last["unknown"] == ["stream protocol", "idempotency"], last
     shot(win, "record-3-answered")
 

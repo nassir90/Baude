@@ -9768,7 +9768,9 @@ class SidePanel(Gtk.Box):
         self.agent_list.set_margin_end(widgets.INSIDE_GAP)
         self.agent_stack.add_named(self.agent_scroll, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        top = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
+        # (each part where its row has it across: the status, the title, the › and back on the same x, so a row opening
+        # into this only goes up)
+        top = Gtk.Box(spacing=6, margin_start=15, margin_end=12, margin_top=6, margin_bottom=6)
         back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All subagents", valign=Gtk.Align.CENTER)
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.close_agent())
@@ -9777,7 +9779,7 @@ class SidePanel(Gtk.Box):
         # the end, where the row's › is; so as it opens the row goes up to be this, each part where it is in both
         self.detail_status = StatusSlot()
         titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
-                         margin_start=4)
+                         margin_start=6)
         self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.detail_title.add_css_class("heading")
         self.detail_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)

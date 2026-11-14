@@ -7408,10 +7408,9 @@ UNDER_GTK_THEME_CSS = """
 .baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
 """
 # Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
-# theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), so what's drawn in an unnamed
-# colour isn't drawn: the Kubernetes and database views' bar and sidebar let the window show through, and the chat,
-# Meta's, an agent's and Record's pages took the window's colour, not the theme's white. Below everything, each of
-# libadwaita's names as the theme's colour it stands for: a theme that names it itself is above, and its own.
+# theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
+# no stylesheet names isn't drawn. Below everything, each of libadwaita's names as the theme's colour it stands for: a
+# theme that names it itself is above, and its own.
 BELOW_GTK_THEME_CSS = """
 @define-color window_bg_color @theme_bg_color;
 @define-color window_fg_color @theme_fg_color;
@@ -7430,6 +7429,10 @@ BELOW_GTK_THEME_CSS = """
    shows through it. The fill the window's, the edge in the theme's border colour; a theme that draws them, its own) */
 floating-sheet > sheet, bottom-sheet > sheet { background-color: @window_bg_color;
   box-shadow: 0 0 0 1px @borders, 0 0 14px 2px rgb(0 0 6 / 3%), 0 0 5px 2px rgb(0 0 6 / 10%); }
+/* (a toast: libadwaita's, which a theme drawing no toasts leaves see-through, its text on whatever's under it) */
+toast { background-color: #505053; color: white; margin: 12px 12px 24px; border-radius: 150px; border-spacing: 6px;
+  padding: 6px 6px 6px 12px; box-shadow: 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 6px 2px rgb(0 0 6 / 3%); }
+toast > widget { margin: 0 6px; }
 """
 # What below the theme depends on whether it's light or dark (theme_dark): the dimming under a dialog, the status
 # colours (a theme without its own), as libadwaita has them light and dark.
@@ -7483,6 +7486,9 @@ def theme_css(*app_css):
             Adw.ColorScheme.FORCE_DARK if dark else Adw.ColorScheme.FORCE_LIGHT)
         below.load_from_string(below_gtk_theme_css(dark))
         display.baude_below_theme = below
+        # (the system's accent changed: what's drawn here follows it, and so does the CSS)
+        Adw.StyleManager.get_default().connect("notify::accent-color",
+                                               lambda *_: below.load_from_string(below_gtk_theme_css(dark)))
         display.baude_rounded_sheets = (CSS, *app_css)
         _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
 

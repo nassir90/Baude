@@ -7406,9 +7406,6 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
 .baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
-/* (the title bar flush with the window's top: a theme that pads the window to show its frame (Windows 95's bevel)
-   has it at the sides and bottom, not as a sliver of another colour above the title bar; see _probe_title_bar) */
-window.csd, window.solid-csd { padding-top: 0; }
 """
 # Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
 # theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
@@ -7530,49 +7527,59 @@ def _probe_corners(window):
     return _corners["tries"] < 40
 
 
-# ---- a GTK theme's title bar. A theme can draw its title bar as an image a pixel wide and as tall as the bar, tiled
-# across it (XP's). GTK clips such an image to the bar less its top padding, so a sliver of the bar's plain colour shows
-# above it. Seen in what's drawn (the first header bar shown, its image cut off at the top), as the corners are: the
-# image is then stretched across the bar instead, the same picture with nothing cut off. No theme is named.
+# ---- a GTK theme's title bar, flush with the window's top. Two ways a theme leaves a sliver of another colour above
+# it, both seen in what's drawn as the first window shows (as the corners are), no theme named:
+# - it pads the window to show a frame (Windows 95's bevel): the window's top padding goes, and as much transparent
+#   margin above it keeps the edge the window's resized by (GTK takes a window's margin as resize area). The frame
+#   stays at the sides and bottom. Only for a window drawn with transparency (.csd): one without (.solid-csd, X11
+#   with no compositor) would show the margin black, and keeps its frame.
+# - its title bar is an image a pixel or two wide and as tall as the bar, tiled across it (XP's): GTK clips that to the
+#   bar less its top padding, and the bar's plain colour shows above it. The image is stretched across the bar instead,
+#   the same picture with nothing cut off.
 _title_bar = {"tries": 0}
 
 
 def _probe_title_bar(window):
-    """Once the window's laid out: its first header bar's image, if GTK cuts its top off, made to fill the bar
-    (retried a while: none laid out yet). False: done."""
+    """Once the window's laid out and drawn: the window's top padding, and its first header bar's image if GTK cuts
+    its top off (retried a while: none drawn yet). False: done."""
     _title_bar["tries"] += 1
     bar = next((w for w in walk(window) if w.get_css_name() == "headerbar" and w.get_mapped() and w.get_height()),
                None)
-    if bar is None:
+    cut = title_bar_cut(bar) if bar is not None else None
+    if cut is None:
         return _title_bar["tries"] < 40
-    if title_bar_cut(bar):
-        css = Gtk.CssProvider()
-        css.load_from_string("headerbar { background-size: 100% 100%; }")
-        Gtk.StyleContext.add_provider_for_display(window.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        window.get_display().baude_title_bar_css = css
+    ok, bounds = window.compute_bounds(window)
+    pad = round(-bounds.get_y()) if ok else 0  # (the window's border box above its content: its top border and padding)
+    css = ""
+    if pad > 0 and window.has_css_class("csd"):
+        css += f"window.csd {{ padding-top: 0; margin-top: {pad}px; }}\n"
+    if cut:
+        css += "headerbar { background-size: 100% 100%; }\n"
+    if css:
+        provider = Gtk.CssProvider()
+        provider.load_from_string(css)
+        Gtk.StyleContext.add_provider_for_display(window.get_display(), provider,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        window.get_display().baude_title_bar_css = provider
     return False
 
 
 def title_bar_cut(bar):
-    """Whether bar's background is a strip at most 2px wide, tiled, whose top is clipped off: a clip that starts below
-    where the strip does."""
+    """Whether bar's own background is a strip at most 2px wide and as tall as the bar, tiled, whose top is clipped
+    off (a clip starting below where the strip does). None: it isn't drawn yet."""
     snap = Gtk.Snapshot()
     Gtk.WidgetPaintable.new(bar).snapshot(snap, bar.get_width(), bar.get_height())
-
-    def nodes(node):
-        yield node
-        if isinstance(node, Gsk.ContainerNode):
-            for i in range(node.get_n_children()):
-                yield from nodes(node.get_child(i))
-        elif isinstance(node, (Gsk.TransformNode, Gsk.ClipNode, Gsk.RoundedClipNode, Gsk.RepeatNode,
-                               Gsk.OpacityNode)):
-            yield from nodes(node.get_child())
-
-    root = snap.to_node()
-    for clip in nodes(root) if root is not None else ():
+    node = snap.to_node()
+    while isinstance(node, Gsk.TransformNode):  # (the bar's own drawing; what's in it, its children, is further in)
+        node = node.get_child()
+    if node is None:
+        return None
+    own = [node.get_child(i) for i in range(node.get_n_children())] if isinstance(node, Gsk.ContainerNode) else [node]
+    for clip in own:
         if isinstance(clip, (Gsk.ClipNode, Gsk.RoundedClipNode)) and isinstance(clip.get_child(), Gsk.RepeatNode):
             tile = clip.get_child().get_child().get_bounds()
-            if tile.size.width <= 2 and tile.origin.y < clip.get_bounds().origin.y - 0.5:
+            if (tile.size.width <= 2 and tile.size.height >= bar.get_height() - 1
+                    and tile.origin.y < clip.get_bounds().origin.y - 0.5):
                 return True
     return False
 

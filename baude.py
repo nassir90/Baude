@@ -9770,15 +9770,22 @@ class SidePanel(Gtk.Box):
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.close_agent())
         self.agent_back = back
-        self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
+        # its row, as its header: its status, its title, and under that what it's done (the row's line), so as it opens
+        # the row goes up to be this, each part where it is in both
+        self.detail_status = StatusSlot()
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
+                         margin_start=4)
+        self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.detail_title.add_css_class("heading")
-        top.append(back)
-        top.append(self.detail_title)
-        detail.append(top)
-        self.detail_info = Gtk.Label(xalign=0, wrap=True, margin_start=14, margin_end=14)
+        self.detail_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.detail_info.add_css_class("dim-label")
         self.detail_info.add_css_class("caption")
-        detail.append(self.detail_info)
+        titles.append(self.detail_title)
+        titles.append(self.detail_info)
+        top.append(back)
+        top.append(self.detail_status)
+        top.append(titles)
+        detail.append(top)
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
@@ -9939,7 +9946,8 @@ class SidePanel(Gtk.Box):
         if row is None:
             row = Adw.ActionRow(activatable=True)
             row.tool_use_id = tid
-            row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+            row.chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
+            row.add_suffix(row.chevron)
             # an agent started by another agent sits under it, indented like a file in a folder
             parent = self.agent_rows.get(getattr(self.win, "tool_parent", {}).get(tid))
             row.depth = parent.depth + 1 if parent is not None else 0
@@ -9965,7 +9973,8 @@ class SidePanel(Gtk.Box):
         row.status.set_state({"running": "running", "completed": "done",
                               "interrupted": "interrupted"}.get(task.get("status"), "error"))
         if self.agent_stack.get_visible_child_name() == "detail" and self.current == tid:
-            self.detail_info.set_text(self.describe(task))
+            self.set_detail_info(task)
+            self.detail_status.set_state(row.status.state)
 
     current = None
 
@@ -9977,16 +9986,24 @@ class SidePanel(Gtk.Box):
         self.current = tool_use_id
         task = next((t for t in self.win.tasks.values() if t.get("tool_use_id") == tool_use_id), {})
         self.detail_title.set_text(task.get("description") or "Subagent")
-        self.detail_info.set_text(self.describe(task))
+        self.set_detail_info(task)
+        row = self.agent_rows.get(tool_use_id)
+        if row is not None:
+            self.detail_status.set_state(row.status.state)
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
-        row = self.agent_rows.get(tool_use_id)
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
-            self.agent_expand.open("detail", row, self.row_title(row), *self.detail_parts(), within=self.agent_scroll)
+            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll)
         else:
             self.agent_stack.set_visible_child_name("detail")
         self.show_page("agents")
+
+    def set_detail_info(self, task):
+        """What the subagent shown has done, as its row has it (the status beside it); nothing, no line."""
+        text = self.describe(task, marked=True)
+        self.detail_info.set_text(text)
+        self.detail_info.set_visible(bool(text))
 
     def view_agent(self, tool_use_id):
         """A subagent's View: its page, opened from its row only if the list's already being looked at (shown just
@@ -9995,18 +10012,23 @@ class SidePanel(Gtk.Box):
         self.win.show_panel(True, "agents")
         self.open_agent(tool_use_id, from_row=seen)
 
-    def detail_parts(self):
-        """A subagent's page's parts, as ExpandStack opens it: its title, its square, and the rest of it."""
-        return self.detail_title, self.detail_holder, (self.agent_back, self.detail_info)
-
-    @staticmethod
-    def row_title(row):
-        return next((w for w in walk(row) if isinstance(w, Gtk.Label) and w.has_css_class("title")), None)
+    def expand_parts(self, row):
+        """How a subagent's row turns into its page's header (ExpandStack): its title, its line and its status each
+        into the header's, the back button coming in, the row's › going."""
+        labels = {cls: next((w for w in walk(row) if isinstance(w, Gtk.Label) and w.has_css_class(cls)), None)
+                  for cls in ("title", "subtitle")}
+        pairs = [(labels["title"], self.detail_title), (labels["subtitle"], self.detail_info),
+                 (row.status, self.detail_status)]
+        return {"pairs": [(a, b) for a, b in pairs if a is not None], "enter": [self.agent_back],
+                "leave": [row.chevron]}
 
     def close_agent(self):
         """Back to the list, the subagent shown closing into its row."""
         row = self.agent_rows.get(self.current)
-        self.agent_expand.close("list", row, row and self.row_title(row), *self.detail_parts(), within=self.agent_scroll)
+        if row is None:
+            self.agent_stack.set_visible_child_name("list")
+            return
+        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll)
 
     # ---- background processes
     def update_process(self, task):

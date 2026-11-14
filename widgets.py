@@ -4703,9 +4703,24 @@ def _graphene(r):
     return Graphene.Rect().init(*r)
 
 
+def _opacity(widget):
+    """widget's opacity as it's drawn, its CSS's (a dim label's) too: what its parent's drawing of it is under."""
+    parent = widget.get_parent()
+    if parent is None:
+        return 1.0
+    snap = Gtk.Snapshot()
+    parent.snapshot_child(widget, snap)
+    node = snap.to_node()
+    while node is not None:
+        if isinstance(node, Gsk.OpacityNode):
+            return node.get_opacity()
+        node = node.get_child() if hasattr(node, "get_child") else None
+    return 1.0
+
+
 def _text(label, to):
-    """Where label's text is drawn (in to's coordinates) and how: its font, colour and width, for ExpandStack to draw
-    it there itself, or anywhere between; None if it isn't laid out."""
+    """Where label's text is drawn (in to's coordinates) and how: its font, colour, width and wrapping, for ExpandStack
+    to draw it there itself, or anywhere between; None if it isn't laid out."""
     r = _rect(label, to) if label is not None else None
     if r is None:
         return None
@@ -4713,17 +4728,28 @@ def _text(label, to):
     ok, b = label.compute_bounds(label)
     tw, th = label.get_layout().get_pixel_size()
     return {"x": r[0] + ox - (b.get_x() if ok else 0), "y": r[1] + oy - (b.get_y() if ok else 0), "w": r[2],
-            "tw": tw, "th": th, "font": label.get_pango_context().get_font_description().copy(),
-            "color": label.get_color(), "text": label.get_text()}
+            "h": r[3], "tw": tw, "th": th, "font": label.get_pango_context().get_font_description().copy(),
+            "color": label.get_color(), "alpha": _opacity(label), "text": label.get_text(), "wrap": label.get_wrap(),
+            "layout": label.get_layout().copy(), "baseline": label.get_layout().get_baseline() / Pango.SCALE}
+
+
+def _place(widget, to):
+    """Where widget is, for ExpandStack: a label's text (_text), anything else's rectangle."""
+    if isinstance(widget, Gtk.Label):
+        return _text(widget, to)
+    r = _rect(widget, to) if widget is not None else None
+    return None if r is None else {"x": r[0], "y": r[1], "w": r[2], "h": r[3]}
 
 
 class ExpandStack(Gtk.Widget):
     """A Gtk.Stack (stack: its pages added and shown as any stack's) whose page of one thing opens out of that thing's
-    row in a list (open), and back into it (close). Everything moves, nothing fades in or out: the row's rectangle grows
-    into the page's square (its darker inside), pushing the rows above it up and the rows below down; the row's title
-    goes up to be the page's header, drawn as one line of text all the way, its size, weight and colour turning into
-    the header's; the page comes with it as one piece, what's in the square shown as the square gets to it. Between the
-    two pages nothing else is drawn of them, only those parts."""
+    row in a list (open), and closes back into it (close). Everything moves; nothing fades in or out but the row's
+    background. The row goes up to be the page's header, as wide as the page's square (its darker inside) all the way,
+    and the square opens under it: the rows above are pushed up off the page, those below down off it. The row's parts
+    each become the header's (pairs): a label's text drawn as one line all the way, its place, size, weight and colour
+    turning into the other's; anything else drawn as the header's, going from one place to the other. What only the
+    page has slides in from the left (enter), what only the row has out to the right (leave); what's in the square
+    comes with the header, shown as the square gets to it. Between the two pages nothing else is drawn of them."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -4747,79 +4773,112 @@ class ExpandStack(Gtk.Widget):
         if m is None:
             return
         if m["live"]:  # (opening: the page's parts where they are as it's laid out)
+            m["page"] = _rect(m["page_widget"], self) or m["page"]
             for part in m["parts"].values():
                 part["rect"] = _rect(part["widget"], self) or part["rect"]
-            m["to_text"] = _text(m["parts"]["title"]["widget"], self) or m["to_text"]
+            for pair in m["pairs"]:
+                pair["b"] = _place(pair["to"], self) or pair["b"]
         else:  # (closing: the row where it is, the list shown again)
-            m["from"], m["from_text"] = self._origin(m["origin"], m["origin_title"], m["within"])
-        r = self.square_rect()
-        self.square.allocate(max(1, round(r[2])), max(1, round(r[3])), -1,
-                             Gsk.Transform().translate(Graphene.Point().init(r[0], r[1])))
+            m["row"] = self._seen(m["origin"], m["within"])
+            for pair in m["pairs"]:
+                pair["a"] = _place(pair["from"], self)
+            for part in m["leave"]:
+                part["rect"] = _rect(part["widget"], self)
+        g = self.geometry()
+        if g is not None:
+            r = g["square"]
+            self.square.allocate(max(1, round(r[2])), max(1, round(r[3])), -1,
+                                 Gsk.Transform().translate(Graphene.Point().init(r[0], r[1])))
 
-    def _origin(self, origin, origin_title, within):
-        """origin's rectangle as it's seen (within: the scrolled window it's in, the part of it showing), and its
-        title's text (_text); None if it isn't seen."""
+    def _seen(self, origin, within):
+        """origin's rectangle as it's seen (within: the scrolled window it's in, the part of it showing), on whole
+        pixels (the list's parts, cut there, meet without a seam); None if it isn't seen."""
         r = _rect(origin, self) if origin.get_mapped() else None
         if r is None:
-            return None, None
+            return None
         if within is not None and (w := _rect(within, self)) is not None:
             x0, y0 = max(r[0], w[0]), max(r[1], w[1])
             x1, y1 = min(r[0] + r[2], w[0] + w[2]), min(r[1] + r[3], w[1] + w[3])
             if x1 - x0 < 1 or y1 - y0 < 1:
-                return None, None
+                return None
             r = (x0, y0, x1 - x0, y1 - y0)
-        x0, y0 = round(r[0]), round(r[1])  # (on whole pixels: the list's parts, cut there, meet without a seam)
-        return (x0, y0, round(r[0] + r[2]) - x0, round(r[1] + r[3]) - y0), _text(origin_title, self)
+        x0, y0 = round(r[0]), round(r[1])
+        return x0, y0, round(r[0] + r[2]) - x0, round(r[1] + r[3]) - y0
 
-    def square_rect(self):
+    def geometry(self):
+        """Where things are at the move's p: the header (the row, gone up), the square under it, and how far the
+        page's moved (dx, dy: its first label's text, from the row's to its own)."""
         m = self.move
-        a, b = m["from"], m["parts"]["square"]["rect"]
-        if a is None or b is None:
-            return b or (0, 0, 1, 1)
-        return tuple(_lerp(a[i], b[i], m["p"]) for i in range(4))
+        row, end, page, p = m["row"], m["parts"]["square"]["rect"], m["page"], m["p"]
+        if row is None or end is None or page is None:
+            return None
+        head_end = (end[0], page[1], end[2], end[1] - page[1])
+        head = tuple(_lerp(row[i], head_end[i], p) for i in range(4))
+        bottom = _lerp(row[1] + row[3], end[1] + end[3], p)
+        square = (head[0], head[1] + head[3], head[2], max(0.0, bottom - head[1] - head[3]))
+        dx = dy = 0.0
+        lead = next((q for q in m["pairs"] if q["a"] and q["b"] and "text" in q["a"]), None)
+        if lead is not None:
+            dx, dy = (lead["a"]["x"] - lead["b"]["x"]) * (1 - p), (lead["a"]["y"] - lead["b"]["y"]) * (1 - p)
+        return {"head": head, "square": square, "end": end, "dx": dx, "dy": dy, "lead": lead}
 
     @staticmethod
-    def _parts(title, square, rest):
-        parts = {"title": title, "square": square, **{f"rest{i}": w for i, w in enumerate(rest)}}
+    def _parts(square):
+        parts = {"square": square}
         if isinstance(square, Gtk.ScrolledWindow) and square.get_child() is not None:
             parts["inside"] = square.get_child()  # (what's in it, scrolled as it is: without its edge)
         return parts
 
-    def open(self, name, origin, origin_title, title, square, rest=(), within=None):
-        """Show page name, opened out of origin, a row of the page shown now: square (the page's, a widget in it) grows
-        from origin's rectangle (within: the scrolled window the row's in, the part of it showing) to its own; the
-        text of origin_title (a label) becomes title's (a label); rest (the rest of the page) comes with it. Just shown
-        when there'd be nothing to see move: the row not on screen, or EXPAND_MS 0."""
+    def open(self, name, origin, square, pairs=(), enter=(), leave=(), within=None):
+        """Show page name, opened out of origin, a row of the page shown now (within: the scrolled window it's in):
+        the row goes up to be the page's header and square (the page's darker inside) opens under it. pairs: (the
+        row's widget, the page's), each turning into the other; enter: the page's, coming in from the left; leave: the
+        row's, going out to the right. Just shown when there'd be nothing to see move: the row not on screen, the list
+        not drawn since it was shown, or EXPAND_MS 0."""
         self.finish()
         shown = self.stack.get_visible_child()
-        start = self._origin(origin, origin_title, within) if EXPAND_MS and self.get_mapped() and shown else (None, None)
-        if start[0] is None:
+        row = self._seen(origin, within) if EXPAND_MS and self.get_mapped() and shown else None
+        lst = Gtk.WidgetPaintable.new(shown).get_current_image() if row is not None else None
+        if row is None or lst.get_intrinsic_width() <= 0:  # (just shown, not drawn since: where it is isn't known)
             self.stack.set_visible_child_name(name)
             return
-        lst, lst_rect = Gtk.WidgetPaintable.new(shown).get_current_image(), _rect(shown, self)
-        if lst.get_intrinsic_width() <= 0:  # (the list just shown, not drawn since: where its rows are isn't known)
-            self.stack.set_visible_child_name(name)
-            return
+        start = [{"from": a, "to": b, "a": _place(a, self), "b": None,
+                  "paint_from": Gtk.WidgetPaintable.new(a).get_current_image()} for a, b in pairs]
+        gone = [{"widget": w, "rect": _rect(w, self), "paint": Gtk.WidgetPaintable.new(w).get_current_image()}
+                for w in leave]
+        lst_rect = _rect(shown, self)
         self.stack.set_visible_child_name(name)
-        self.move = {"live": True, "p": 0.0, "from": start[0], "from_text": start[1], "to_text": None,
-                     "list": (lst, lst_rect),
+        page = self.stack.get_visible_child()
+        for pair in start:
+            pair["paint"] = Gtk.WidgetPaintable.new(pair["to"])
+        self.move = {"live": True, "p": 0.0, "row": row, "list": (lst, lst_rect), "page_widget": page, "page": None,
+                     "pairs": start, "leave": gone,
+                     "enter": [{"widget": w, "paint": Gtk.WidgetPaintable.new(w), "rect": None} for w in enter],
                      "parts": {k: {"widget": w, "paint": Gtk.WidgetPaintable.new(w), "rect": None}
-                               for k, w in self._parts(title, square, rest).items()}}
+                               for k, w in self._parts(square).items()}}
+        for part in self.move["enter"]:
+            self.move["parts"][f"enter{id(part)}"] = part  # (laid out with the rest)
         self._run(square, 0.0, 1.0)
 
-    def close(self, name, origin, origin_title, title, square, rest=(), within=None):
+    def close(self, name, origin, square, pairs=(), enter=(), leave=(), within=None):
         """Show page name (the list origin's a row of) again, the page shown now closing back into origin: open's
         parts, as open was given them, the other way."""
         self.finish()
         if not (EXPAND_MS and self.get_mapped()) or origin is None or origin.get_parent() is None:
             self.stack.set_visible_child_name(name)
             return
-        frozen = {k: {"widget": w, "paint": Gtk.WidgetPaintable.new(w).get_current_image(), "rect": _rect(w, self)}
-                  for k, w in self._parts(title, square, rest).items()}
-        to_text = _text(title, self)
+        frozen = lambda w: Gtk.WidgetPaintable.new(w).get_current_image()
+        page = self.stack.get_visible_child()
+        move = {"live": False, "p": 1.0, "row": None, "list": None, "page": _rect(page, self) if page else None,
+                "origin": origin, "within": within,
+                "pairs": [{"from": a, "to": b, "a": None, "b": _place(b, self), "paint": frozen(b),
+                           "paint_from": Gtk.WidgetPaintable.new(a)} for a, b in pairs],
+                "leave": [{"widget": w, "rect": None, "paint": Gtk.WidgetPaintable.new(w)} for w in leave],
+                "enter": [{"widget": w, "paint": frozen(w), "rect": _rect(w, self)} for w in enter],
+                "parts": {k: {"widget": w, "paint": frozen(w), "rect": _rect(w, self)}
+                          for k, w in self._parts(square).items()}}
         self.stack.set_visible_child_name(name)
-        self.move = {"live": False, "p": 1.0, "from": None, "from_text": None, "to_text": to_text, "list": None,
-                     "parts": frozen, "origin": origin, "origin_title": origin_title, "within": within}
+        self.move = move
         self._run(square, 1.0, 0.0)
 
     def _run(self, square, a, b):
@@ -4856,14 +4915,14 @@ class ExpandStack(Gtk.Widget):
 
     def do_snapshot(self, snap):
         m = self.move
-        if m is None or (not m["live"] and m["from"] is None):  # (closing into a row not seen: just the list)
+        g = self.geometry() if m is not None else None
+        if g is None:  # (closing into a row not seen, or not laid out yet: just the page shown)
             self.snapshot_child(self.stack, snap)
             return
-        p = min(1.0, max(0.0, m["p"]))
+        p, row, head, sq, end = min(1.0, max(0.0, m["p"])), m["row"], g["head"], g["square"], g["end"]
+        dx, dy = g["dx"], g["dy"]
         if m["live"]:  # (the page drawn, unseen: a widget's paintable is what it last drew, nothing till it has)
             self.snapshot_child(self.stack, Gtk.Snapshot())
-        parts, row, sq = m["parts"], m["from"], self.square_rect()
-        a, b = m["from_text"], m["to_text"]
         if m["list"] is not None:  # (opening: the list as it was)
             draw_list = lambda: self._paint(snap, *m["list"])
         else:
@@ -4871,79 +4930,81 @@ class ExpandStack(Gtk.Widget):
             self.snapshot_child(self.stack, inner)
             node = inner.to_node()
             draw_list = lambda: node is not None and snap.append_node(node)
-        big = 1e5
-        # the page, as one piece, from where the row's title is to where its own is
-        dx = dy = 0
-        if a is not None and b is not None:
-            dx, dy = (a["x"] - b["x"]) * (1 - p), (a["y"] - b["y"]) * (1 - p)
-        # the list, parted at the row: the rows above pushed up by the page's top (where it is), those below down by
-        # its square's bottom, and both all the way off by the end
-        end = parts["square"]["rect"]
-        below = sq[1] + sq[3] + ((self.get_height() - end[1] - end[3]) * p if end else 0)
-        lift = (b["y"] - a["y"]) * p if a is not None and b is not None else 0  # (the page's header, as it goes up)
-        for clip, shift in (((-big, -big, 2 * big, big + row[1]), min(0.0, sq[1] - row[1], lift, -row[1] * p)),
-                            ((-big, row[1] + row[3], 2 * big, big), max(0.0, below - row[1] - row[3]))):
+
+        def piece(clip, x=0.0, y=0.0, sx=1.0, sy=1.0):
+            """The list's clip (where it is in the list), drawn moved by x, y (and scaled by sx, sy from its corner)."""
             snap.save()
-            snap.translate(Graphene.Point().init(0, shift))
+            snap.translate(Graphene.Point().init(x + clip[0], y + clip[1]))
+            snap.scale(sx, sy)
+            snap.translate(Graphene.Point().init(-clip[0], -clip[1]))
             snap.push_clip(_graphene(clip))
             draw_list()
             snap.pop()
             snap.restore()
-        # the row itself, under the square as it darkens; its title's drawn moving (below), where it was the row's
-        # background (a column of it just before the title, spread over it)
-        for clip in self._around((-big, row[1], 2 * big, row[3]), a):  # (its band: the list's edges beside it too)
-            snap.push_clip(_graphene(clip))
-            draw_list()
-            snap.pop()
-        if a is not None:
-            x0, x1 = math.floor(a["x"]) - 1, min(row[0] + row[2], math.ceil(a["x"] + a["tw"]) + 1)
-            y0, y1 = max(row[1], math.floor(a["y"]) - 1), min(row[1] + row[3], math.ceil(a["y"] + a["th"]) + 1)
-            col = x0 - 2
-            if x1 > x0 and y1 > y0 and col >= row[0]:
-                snap.push_clip(_graphene((x0, y0, x1 - x0, y1 - y0)))
-                snap.save()
-                snap.translate(Graphene.Point().init(x0, 0))
-                snap.scale(x1 - x0, 1)
-                snap.translate(Graphene.Point().init(-col, 0))
-                snap.push_clip(_graphene((col, y0, 1, y1 - y0)))
-                draw_list()
-                snap.pop()
-                snap.restore()
-                snap.pop()
-        snap.push_opacity(min(1.0, p / 0.25))
-        self.snapshot_child(self.square, snap)
-        snap.pop()
-        inside = parts.get("inside") or parts["square"]
-        if (r := inside["rect"]) is not None:  # what's in the square, as far as the square's got
-            snap.push_clip(_graphene((sq[0] + 1, sq[1] + 1, max(0, sq[2] - 2), max(0, sq[3] - 2))))
-            self._paint(snap, inside["paint"], (r[0] + dx, r[1] + dy, r[2], r[3]))
-            snap.pop()
-        for key, part in parts.items():
-            if key.startswith("rest") and (r := part["rect"]) is not None:
-                snap.push_opacity(p * p)
-                self._paint(snap, part["paint"], (r[0] + dx, r[1] + dy, r[2], r[3]))
-                snap.pop()
-        if a is not None and b is not None:
-            self._morph(snap, a, b, p)
-        elif (r := parts["title"]["rect"]) is not None:
-            self._paint(snap, parts["title"]["paint"], r)
 
-    @staticmethod
-    def _around(row, a):
-        """The row less its title's text (a: _text's): the strips of it above, below and either side of that."""
-        if a is None:
-            return [row]
-        x0, y0, x1, y1 = row[0], row[1], row[0] + row[2], row[1] + row[3]
-        tx0, ty0 = max(x0, min(x1, math.floor(a["x"]) - 1)), max(y0, min(y1, math.floor(a["y"]) - 1))
-        tx1 = max(tx0, min(x1, math.ceil(a["x"] + a["tw"]) + 1))
-        ty1 = max(ty0, min(y1, math.ceil(a["y"] + a["th"]) + 1))
-        strips = [(x0, y0, x1 - x0, ty0 - y0), (x0, ty1, x1 - x0, y1 - ty1),
-                  (x0, ty0, tx0 - x0, ty1 - ty0), (tx1, ty0, x1 - tx1, ty1 - ty0)]
-        return [r for r in strips if r[2] > 0 and r[3] > 0]
+        big = 1e5
+        # the list less the row: what's above it (its edges beside the row too) pushed up off the page with the
+        # header, what's below pushed down off it by the square
+        up = head[1] - row[1]  # (on the header's top: off the page as that gets to the page's)
+        piece((-big, -big, 2 * big, big + row[1]), y=up)
+        piece((-big, row[1], big + row[0], row[3]), y=up - row[3] * p)  # (the row's own edges beside it)
+        piece((row[0] + row[2], row[1], big, row[3]), y=up - row[3] * p)
+        down = sq[1] + sq[3] - row[1] - row[3] + (self.get_height() - end[1] - end[3]) * p
+        piece((-big, row[1] + row[3], 2 * big, big), y=max(0.0, down))
+        # the header: the row's background, as wide as the square, fading to the page's (a column of the row's own
+        # just before its first text, spread over it)
+        snap.push_clip(_graphene(head))
+        lead = g["lead"]
+        col = round(lead["a"]["x"]) - 2 if lead else None
+        if col is not None and row[0] <= col < row[0] + row[2] and row[3] > 4 and p < 1:
+            fade = p > 0  # (none at its start: not even an opacity of 1, which rounds)
+            if fade:
+                snap.push_opacity(1 - p)
+            # (its edges, the list's lines, top and bottom; between them its colour, each a column of it, repeated)
+            for y0, h, at in ((row[1], 2, head[1]), (row[1] + 2, row[3] - 4, head[1] + 2),
+                              (row[1] + row[3] - 2, 2, head[1] + head[3] - 2)):
+                fill = (head[0], at, head[2], h if h == 2 else max(0.0, head[3] - 4))
+                if fill[3] <= 0:
+                    continue
+                snap.push_repeat(_graphene(fill), _graphene((head[0], at, 1, h)))
+                piece((col, y0, 1, h), x=head[0] - col, y=at - y0)
+                snap.pop()
+            if fade:
+                snap.pop()
+        # what only the row has, going out to the right; what only the page has, coming in from the left
+        for part in m["leave"]:  # (its own drawing: the row's background, see-through, isn't drawn on twice)
+            if (r := part["rect"]) is not None:
+                self._paint(snap, part["paint"], (r[0] + (head[0] + head[2] - r[0]) * p, r[1] + head[1] - row[1],
+                                                  r[2], r[3]))
+        for part in m["enter"]:
+            if (r := part["rect"]) is not None:
+                self._paint(snap, part["paint"], (r[0] - (r[0] - end[0] + r[2]) * (1 - p), r[1] + dy, r[2], r[3]))
+        # the row's parts turning into the header's
+        for pair in m["pairs"]:
+            a, b = pair["a"], pair["b"]
+            if a is None or b is None:
+                if b is not None:
+                    self._paint(snap, pair["paint"], (b["x"] + dx, b["y"] + dy, b["w"], b["h"]))
+            elif "text" in a and "text" in b:
+                self._morph(snap, a, b, p)
+            else:  # (the row's drawing of it the first half of the way, the header's the second: the same, but for
+                # a spinner's turn; and one just shown hasn't drawn yet)
+                self._paint(snap, pair["paint"] if p >= 0.5 else pair["paint_from"],
+                            (_lerp(a["x"] + (a["w"] - b["w"]) / 2, b["x"], p),
+                             _lerp(a["y"] + (a["h"] - b["h"]) / 2, b["y"], p), b["w"], b["h"]))
+        snap.pop()
+        # the square, opening under the header, and what's in it, coming with the header, as far as it's got
+        if sq[3] >= 0.5:  # (not yet, at the row: it's allocated a pixel at least, but there's none of it to draw)
+            self.snapshot_child(self.square, snap)
+        inside = m["parts"].get("inside") or m["parts"]["square"]
+        if (r := inside["rect"]) is not None and sq[3] > 2:  # (across, on the square's own edge: never cut off by it)
+            snap.push_clip(_graphene((sq[0] + 1, sq[1] + 1, max(0.0, sq[2] - 2), sq[3] - 2)))
+            self._paint(snap, inside["paint"], (r[0] + sq[0] - end[0], r[1] + dy, r[2], r[3]))
+            snap.pop()
 
     def _morph(self, snap, a, b, p):
-        """One line of text, a's (the row's title) turning into b's (the header's) at p: its place, size, weight and
-        colour between theirs."""
+        """One label's text, a's (the row's) turning into b's (the header's) at p: its place, size, weight, colour
+        and width between theirs, wrapped as b's is."""
         font = b["font"].copy()
         fa, fb = a["font"], b["font"]
         size = _lerp(fa.get_size(), fb.get_size(), p)
@@ -4952,17 +5013,23 @@ class ExpandStack(Gtk.Widget):
         else:
             font.set_size(round(size))
         font.set_variations(f"wght={_lerp(int(fa.get_weight()), int(fb.get_weight()), p):.1f}")
-        layout = self.create_pango_layout(b["text"])
+        layout = b["layout"].copy()  # (as the label lays it out: its attributes, its spacing)
         layout.set_font_description(font)
         layout.set_width(round(_lerp(a["w"], b["w"], p) * Pango.SCALE))
-        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        if b["wrap"]:
+            layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+        else:
+            layout.set_ellipsize(Pango.EllipsizeMode.END)
         ca, cb = a["color"], b["color"]
         color = Gdk.RGBA()
         color.red, color.green = _lerp(ca.red, cb.red, p), _lerp(ca.green, cb.green, p)
         color.blue, color.alpha = _lerp(ca.blue, cb.blue, p), _lerp(ca.alpha, cb.alpha, p)
-        snap.save()
-        snap.translate(Graphene.Point().init(_lerp(a["x"], b["x"], p), _lerp(a["y"], b["y"], p)))
+        snap.save()  # (its baseline between theirs: their lines' spacing needn't be the same)
+        y = _lerp(a["y"] + a["baseline"], b["y"] + b["baseline"], p) - layout.get_baseline() / Pango.SCALE
+        snap.translate(Graphene.Point().init(_lerp(a["x"], b["x"], p), y))
+        snap.push_opacity(_lerp(a["alpha"], b["alpha"], p))  # (as each is drawn: a dim one under its opacity)
         snap.append_layout(layout, color)
+        snap.pop()
         snap.restore()
 
     @staticmethod

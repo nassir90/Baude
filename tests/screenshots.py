@@ -1339,6 +1339,63 @@ def _(app):
     return win
 
 
+def host_right_click(win):
+    """New session's host right-clicked: its menu."""
+    ok, rect = win.sidebar.host_dd.compute_bounds(win.sidebar.host_dd)
+    win.sidebar.host_menu(rect.get_width() / 2, rect.get_height() / 2)
+
+
+@scene("55r-network-host-gone", "build-box, gone, picked beside New session: said over its chats, as they were last "
+                                "seen")
+def _(app):
+    win = network_window(app, None, host="box")
+    T.wait_for(lambda: sidebar_row(win, "Run the nightly benchmarks") is not None, "build-box's chats")
+    return win
+
+
+@scene("55r2-network-host-unknown", "A host picked that isn't known now (forgotten, or a mesh member not listed yet): "
+                                    "still picked, by the name it had")
+def _(app):
+    network_fixture()
+    baude.save_settings(new_session_host="mesh:0123abcd", new_session_host_name="old-mini", sidebar_groups=None)
+    win = app.window(opts(cwd=NET["folders"][0]))
+    T.pump(1)
+    return win
+
+
+@scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Host Command… and Deactivate")
+def _(app):
+    win = network_window(app, None, host=None)
+    r = studio(win)
+    win.sidebar.pick_host(baude.host_key(r))
+    win.sidebar.fill_new_hosts()
+    T.pump(0.2)
+    host_right_click(win)
+    return win
+
+
+@scene("55t-network-host-deactivated", "lab-mac deactivated (its right-click → Deactivate): said over its chats, "
+                                       "grayed; its right-click has Activate")
+def _(app):
+    win = network_window(app, None)
+    win.connect("unrealize", lambda *_: baude.network().deactivate(NET["lab"][1], False))  # (as it was, for the next)
+    win.sidebar.deactivate_host(baude.host_key(NET["lab"][1]), True)
+    T.wait_for(lambda: win.sidebar.host_banner.get_revealed(), "the banner")
+    T.pump(0.3)
+    host_right_click(win)
+    return win
+
+
+@scene("55u-network-meta-host-button", "Meta's button:host for lab-mac, pressed, with this machine picked: lab-mac's "
+                                       "chats listed, and New session on it")
+def _(app):
+    win = network_window(app, None, host=None)
+    btn = win.panel.meta.button("host", ["lab-mac"])
+    btn.emit("clicked")
+    T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "lab-mac's chats")
+    return win
+
+
 @scene("55g-network-session-menu", "Right-click a network session: Rename…, Archive and Move to Trash…, done on its "
                                    "host; one at a turn: Stop; one whose host is gone: Delete (it comes back when it's "
                                    "used again)")
@@ -2152,7 +2209,8 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, new_session_host=None, sidebar_groups=None,
+                        signal_reader=False, sidebar_network=None, new_session_host=None, new_session_host_name=None,
+                        sidebar_groups=None,
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)

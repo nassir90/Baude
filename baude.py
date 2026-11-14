@@ -7795,7 +7795,7 @@ class SessionSidebar(Gtk.Box):
         self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
                                        lambda: win.pick_folder())
         # (beside it: the host a new session's made on, by its name, verbatim (this machine's local), and whose chats
-        # are listed; kept in settings.json's new_session_host, which Meta sets too: fill_new_hosts, shown_host)
+        # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click: host_menu)
         self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)], "The host a new session is made "
                                                          "on, and whose chats are listed",
                                                          self.pick_host), 12)
@@ -7804,6 +7804,10 @@ class SessionSidebar(Gtk.Box):
         self.host_dd.set_valign(Gtk.Align.CENTER)
         if (popup := next((w for w in walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
             popup.connect("show", lambda *_: network().look())  # (opened: a server started a moment ago, offered)
+        right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        right.connect("pressed", lambda _g, _n, x, y: not (popup and popup.get_visible())  # (not in its list, open)
+                      and self.host_menu(x, y))
+        self.host_dd.add_controller(right)
         new_row = Gtk.Box(spacing=2)
         new_row.append(self.new_btn)
         new_row.append(self.host_dd)
@@ -7844,6 +7848,9 @@ class SessionSidebar(Gtk.Box):
         find_row.append(self.view_btn)
         top.append(find_row)
         self.append(top)
+        # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
+        self.host_banner = Adw.Banner()
+        self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self.on_activate)
@@ -7871,6 +7878,12 @@ class SessionSidebar(Gtk.Box):
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
         actions.add_action(add_server)
+        command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
+        command.connect("activate", lambda _a, v: self.win.ask_host_command(v.get_string()))
+        actions.add_action(command)
+        off = Gio.SimpleAction.new("deactivate_host", GLib.VariantType.new("(sb)"))
+        off.connect("activate", lambda _a, v: self.deactivate_host(*v.unpack()))
+        actions.add_action(off)
         # (groups: a chat right-clicked → Move to Group, its group ticked (the action's state: (its id, its group));
         # New Group… (a chat's id, to be moved to it; "": none); a group right-clicked in ⋮ → Rename Group…, Delete)
         move = Gio.SimpleAction.new_stateful("move_group", GLib.VariantType.new("(ss)"), GLib.Variant("(ss)", ("", "")))
@@ -8009,9 +8022,32 @@ class SessionSidebar(Gtk.Box):
         if (old := load_settings().get("sidebar_network")) is not None:  # (⋮ → Group's one group, from before)
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
         self.fill_new_hosts()
+        self.show_host_state()
         self.group_list.fill(self.known_groups(), self.group_filter())
         self.actions.lookup_action("show_all").set_enabled(self.group_filter() is not None)  # (after the fill: it can
         # change what's picked)
+
+    def host_menu(self, x, y):
+        """Right-click New session's host (another machine's): Host Command…, for one reached over ssh; Deactivate, or
+        Activate for one that's deactivated."""
+        if (r := self.shown_remote()) is None:
+            return
+        menu = Gio.Menu()
+        if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
+            item = Gio.MenuItem.new("Host Command…", None)
+            item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
+            menu.append_item(item)
+        item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
+        item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
+        menu.append_item(item)
+        self.host_menu_shown = self.menu_at(menu, self.host_dd, x, y)
+
+    def deactivate_host(self, key, off):
+        """New session's host right-clicked → Deactivate (off), or Activate: Network.deactivate, its chats grayed and
+        the banner saying so while it is."""
+        if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
+            network().deactivate(r, off)
+            toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
 
     def group_menu(self, row, x, y):
         """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
@@ -8674,31 +8710,64 @@ class SessionSidebar(Gtk.Box):
         self.refresh()
 
     def new_hosts(self):
-        """[(key, name)]: the hosts a new session can be made on: this machine (local), then each other that's there,
-        by its name, verbatim."""
-        out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
-        for r in sorted(network().alive(), key=lambda r: remote_name(r).lower()):
-            if (key := host_key(r)) not in seen and not r.deactivated:
-                seen.add(key)
-                out.append((key, remote_name(r)))
+        """[(key, name)]: New session's hosts: this machine (local), then every other known, by its name, verbatim (one
+        that's gone or deactivated too: picked, it says so, show_host_state); and the one picked, by the name it had,
+        while it isn't known (forgotten, or a mesh member not listed yet)."""
+        out = [(key, name) for key, name, _note in self.known_hosts()]
+        if (kept := self.kept_host()) is not None and kept not in dict(out):
+            out.append((kept, load_settings().get("new_session_host_name") or kept))
         return out
 
-    def shown_host(self, hosts=None):
-        """The host New session's on, and whose chats are listed: settings.json's new_session_host, this machine while
-        that one isn't there (hosts: new_hosts, read already)."""
+    def kept_host(self):
+        """settings.json's new_session_host (None: this machine), by the key it has now if it's had another (kept so,
+        for the next run, which won't know the old one)."""
         kept = load_settings().get("new_session_host")
-        return kept if kept in dict(hosts or self.new_hosts()) else HERE_HOST
+        if (now := next((host_key(r) for r in network().remotes() if kept in getattr(r, "was", ())), kept)) != kept:
+            save_settings(new_session_host=now)
+        return now if isinstance(now, str) and now != HERE_HOST else None
+
+    def shown_host(self):
+        """The host New session's on, and whose chats are listed: the one picked (kept_host), across restarts and while
+        it's gone or not known; else this machine."""
+        return self.kept_host() or HERE_HOST
+
+    def shown_remote(self):
+        """The host picked's Remote (None: this machine)."""
+        key = self.shown_host()
+        return None if key == HERE_HOST else next((r for r in network().remotes() if host_key(r) == key), None)
+
+    def host_state(self, r):
+        """What's in the way of the host picked (a Remote; None: this machine), as a chat on it says it in its banner
+        (banner_text), or None: it's there."""
+        if r is None:
+            key = self.shown_host()
+            return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if r.state == "alive" and not r.deactivated:
+            return None
+        name = remote_name(r)
+        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
+            if r.state == "dead" else f"Looking for {name} on the network…"
+
+    def show_host_state(self):
+        """The host picked isn't there (or is deactivated): said in the banner over its chats, as they were last
+        seen."""
+        said = self.host_state(self.shown_remote())
+        if said is not None:
+            self.host_banner.set_title(GLib.markup_escape_text(said))
+        self.host_banner.set_revealed(said is not None)
 
     def pick_host(self, key):
-        """A host picked in New session's dropdown: new sessions made on it, and its chats listed."""
-        save_settings(new_session_host=key)
+        """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
+        for while it isn't known: new_hosts)."""
+        save_settings(new_session_host=key, new_session_host_name=dict(self.new_hosts()).get(key))
+        self.show_host_state()
         self.fill()
 
     def fill_new_hosts(self):
         """New session's host, as the network has them now, on the one picked (shown_host)."""
         hosts = self.new_hosts()
         self.host_dd.set_choices(hosts)
-        self.host_dd.select(self.shown_host(hosts))
+        self.host_dd.select(self.shown_host())
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
@@ -8713,7 +8782,10 @@ class SessionSidebar(Gtk.Box):
         one here isn't listed (⋮: only groups), one through this machine's host process (ask_remote_start: in the group
         picked, if one is), so it's listed too."""
         key = self.host_dd.value() or HERE_HOST
-        if key != HERE_HOST and (r := next((r for r in network().alive() if host_key(r) == key), None)) is not None:
+        if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
+            # not known)
+            toast(self, said)
+        elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
         elif self.mine_listed():
             self.win.switch_to(self.win.new_session)
@@ -9119,8 +9191,9 @@ class SideQuestion(Gtk.ListBoxRow):
 
 BAUDE_PROMPT = """Chats: each has an id (its first 8 characters will do) and a title, and is in a folder, on a host and \
 in a group. Hosts are the machines chats run on; groups are the user's own division of the chats into whole lists. \
-The left bar lists one host's chats, New session's (the setting new_session_host); ⋮ there picks which groups are \
-listed: show_groups (none given: all of them). move_chats puts chats \
+The left bar lists one host's chats, the one picked beside New session, which is the user's to pick: to show them \
+another's, show button:host (items: its name). ⋮ there picks which groups are listed: show_groups (none given: all \
+of them). move_chats puts chats \
 in a group (made if it's new; "" for none, whatever host they're on); make_group, rename_group and delete_group change \
 the groups. highlight_chats highlights chats in the list without changing them: use it to show which you mean before a \
 change the user should check. archive_chats and unarchive_chats; delete_chats moves chats of this machine's own (not \
@@ -9413,34 +9486,6 @@ class BaudeMeta(meta.MetaChat):
         out["group_by"] = meta.Setting("group_by", "Group by", now, group_by, row, by,
                                        note="the left bar's chats, under their folders or their days")
 
-        def hosts():  # ([(key, name)]: New session's, as the left bar has them)
-            sidebar = getattr(win, "sidebar", None)
-            return sidebar.new_hosts() if sidebar is not None else [(HERE_HOST, THIS_MACHINE)]
-
-        def host_now():
-            kept = load_settings().get("new_session_host")
-            return dict(hosts()).get(kept, THIS_MACHINE)
-
-        def host_set(name):
-            key = next((k for k, n in hosts() if n == name), HERE_HOST)
-            save_settings(new_session_host=key)
-            if (sidebar := getattr(win, "sidebar", None)) is not None:
-                sidebar.fill_new_hosts()
-                sidebar.fill()  # (its chats listed)
-
-        def host_row():
-            names = [n for _k, n in hosts()]
-            r = Adw.ComboRow(title="New session's host", subtitle="Where a new session lives: its files and its tools",
-                             model=Gtk.StringList.new(names), selected=names.index(host_now()))
-            r.connect("notify::selected", lambda r, _p: r.get_selected() < len(names) and
-                      host_set(names[r.get_selected()]))
-            return r
-        out["new_session_host"] = meta.Setting(
-            "new_session_host", "New session's host", host_now, host_set, host_row,
-            lambda: [n for _k, n in hosts()],
-            note="the host a new session's made on, and whose chats the left bar lists, by its name (local: this "
-                 "machine), as New session's dropdown has it: where a new session lives, its files and its tools. Its "
-                 "model may run on any host; a chat stays where it's made. For one with a folder and a prompt, spawn_agent")
         return out
 
     def marks_changed(self):
@@ -9529,9 +9574,19 @@ class BaudeMeta(meta.MetaChat):
 
     def buttons(self):
         return {"trash": "Move to Trash… a chat (items: its id), to the system's trash or its host's; asks first, "
-                         "and can't be undone here"}
+                         "and can't be undone here",
+                "host": "Open a host (items: its name): the left bar lists its chats, and New session's on it"}
 
     def button(self, action, items):
+        if action == "host" and items:
+            sidebar = self.win.sidebar
+            key = next((k for k, n in sidebar.new_hosts() if n.lower() == str(items[0]).strip().lower()), None)
+            if key is None:
+                raise ValueError(f"No host {items[0]!r}: they're {', '.join(n for _k, n in sidebar.new_hosts())}.")
+            btn = Gtk.Button(label=f"Open {dict(sidebar.new_hosts())[key]}")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda *_: (sidebar.pick_host(key), sidebar.fill_new_hosts()))
+            return btn
         if action != "trash" or not items:
             raise ValueError(f"There's no button {action}{'' if items else ' without items'}: app_index buttons.")
         info = self._chat(items[0])["info"]
@@ -16586,15 +16641,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                   lambda reply: self.remote_started(r, reply))
 
     def remote_started(self, r, reply):
-        """A server started a session asked for here: its host and group listed, and it opened."""
+        """A server started a session asked for here: its group listed, and it opened (another host's isn't listed till
+        that host's picked beside New session: Meta's button:host)."""
         if reply.get("op") != "started":
             self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
             return
         r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
         sb, info = self.sidebar, remote_info({**reply["session"], "server": r})
-        if host_key(r) != sb.shown_host() and host_key(r) in dict(sb.new_hosts()):  # (listed: its host picked beside
-            save_settings(new_session_host=host_key(r))                            # New session)
-            sb.fill_new_hosts()
         groups, group = sb.group_filter(), chat_group(info)  # (and its group, if ⋮ leaves it out)
         sb.filtered(sidebar_groups=sorted(groups | {group}) if groups is not None else None)
         self.open_remote_soon(info)

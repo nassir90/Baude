@@ -159,7 +159,9 @@ Moving to them, from `baude_server.py`:
 - On another machine, put `baude_headless.py` on `PATH` where `baude_server.py` was, for ssh to find.
 
 The sidebar lists one host's sessions: the host picked beside New session, where a new session is made (`local`: this
-machine's own chats, Claude Code's and Claude Desktop's, and its host process's). ⋮ beside its search → Groups picks
+machine's own chats, Claude Code's and Claude Desktop's, and its host process's), kept across restarts. A host that's
+gone or deactivated stays picked, its chats as they were last seen, and says so over them. Right-click the host for
+Host Command… (one reached over ssh) and Deactivate or Activate. ⋮ beside its search → Groups picks
 which groups are listed: a click lists only that one, and Shift or Ctrl (⌘) and a click adds or takes away one, as the
 Git page's branch list does. A group is the label a session was started with.
 

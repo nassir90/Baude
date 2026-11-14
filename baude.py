@@ -7797,7 +7797,7 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner()
+        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
         self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
@@ -13406,7 +13406,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
                     self.drop_running = self.drop_session = None  # not tried again)
                 if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
-                    self.note(f"couldn't reach {remote_name(r)}: {e}")
+                    self.note(f"couldn't reach {'daemon' if r.mine else remote_name(r)}: {e}")
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -17040,12 +17040,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
         if kind == "gone":
             name = remote_name(self.remote)
-            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
-                f"Looking for {name} on the network…"
+            text = ("Can't connect to daemon" if self.remote.mine else f"Can't connect to {name} at the moment") \
+                if self.remote.state == "dead" else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
         elif kind == "drop":
-            text = f"Connection to {remote_name(self.remote)} dropped"
+            text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
             m = self.retrying or {}
             what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"

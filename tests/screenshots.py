@@ -1652,8 +1652,12 @@ def _(app):
     if plus is not None:  # (before the +: the page as it was)
         plus.emit("clicked")
         first = win.panel.side_questions()[0]
-        first.follow.set_text("what does make do here?")
-        first.follow.emit("activate")
+        if hasattr(first, "composer"):
+            first.composer.get_buffer().set_text("what does make do here?")
+            first.submit()
+        else:
+            first.follow.set_text("what does make do here?")
+            first.follow.emit("activate")
         T.wait_for(lambda: first.answer is not None and not first.busy, "answer")
         plus.emit("clicked")
     return win

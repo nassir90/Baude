@@ -4678,9 +4678,9 @@ def test_restart_keeps_state(app):
         update.quiet = lambda w: True
         try:
             assert win.idle(), "nothing's stopping it"
-            sq.follow.set_text("And then")
+            sq.composer.get_buffer().set_text("And then")
             assert not win.idle(), "a follow-up's written"
-            sq.follow.set_text("")
+            sq.composer.get_buffer().set_text("")
             assert win.idle()
         finally:
             update.quiet = was

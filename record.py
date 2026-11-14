@@ -8217,6 +8217,7 @@ class App(Adw.Application):
         else:
             themed_icon()
         self.win = Window(self)
+        widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         state = None
         try:  # (restarted, ☰ → Restart Record or a new version: what the one before showed)
             with open(restart_path()) as f:

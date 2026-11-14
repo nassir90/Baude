@@ -9766,12 +9766,12 @@ class SidePanel(Gtk.Box):
         self.agent_stack.add_named(self.agent_scroll, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
-        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All subagents")
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All subagents", valign=Gtk.Align.CENTER)
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.close_agent())
         self.agent_back = back
-        # its row, as its header: its status, its title, and under that what it's done (the row's line), so as it opens
-        # the row goes up to be this, each part where it is in both
+        # its row, as its header: its status, its title, and under that what it's done (the row's line), and back at
+        # the end, where the row's › is; so as it opens the row goes up to be this, each part where it is in both
         self.detail_status = StatusSlot()
         titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
                          margin_start=4)
@@ -9782,9 +9782,9 @@ class SidePanel(Gtk.Box):
         self.detail_info.add_css_class("caption")
         titles.append(self.detail_title)
         titles.append(self.detail_info)
-        top.append(back)
         top.append(self.detail_status)
         top.append(titles)
+        top.append(back)
         detail.append(top)
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
@@ -9982,6 +9982,7 @@ class SidePanel(Gtk.Box):
         box = self.agent_boxes.get(tool_use_id)
         if box is None:
             return
+        self.agent_expand.finish()  # (one opening or closing: at its end, before its page is changed under it)
         self.win.subagent_opened(tool_use_id)
         self.current = tool_use_id
         task = next((t for t in self.win.tasks.values() if t.get("tool_use_id") == tool_use_id), {})
@@ -10014,13 +10015,12 @@ class SidePanel(Gtk.Box):
 
     def expand_parts(self, row):
         """How a subagent's row turns into its page's header (ExpandStack): its title, its line and its status each
-        into the header's, the back button coming in, the row's › going."""
+        into the header's, and its › into back (flipped: ‹)."""
         labels = {cls: next((w for w in walk(row) if isinstance(w, Gtk.Label) and w.has_css_class(cls)), None)
                   for cls in ("title", "subtitle")}
         pairs = [(labels["title"], self.detail_title), (labels["subtitle"], self.detail_info),
-                 (row.status, self.detail_status)]
-        return {"pairs": [(a, b) for a, b in pairs if a is not None], "enter": [self.agent_back],
-                "leave": [row.chevron]}
+                 (row.status, self.detail_status), (row.chevron, self.agent_back.get_child(), True)]
+        return {"pairs": [pair for pair in pairs if pair[0] is not None]}
 
     def close_agent(self):
         """Back to the list, the subagent shown closing into its row."""

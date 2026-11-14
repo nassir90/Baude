@@ -4704,18 +4704,38 @@ def _graphene(r):
 
 
 def _opacity(widget):
-    """widget's opacity as it's drawn, its CSS's (a dim label's) too: what its parent's drawing of it is under."""
+    """widget's opacity as it's drawn, its CSS's (a dim label's) too: what its parent's drawing of it is under. None
+    if it can't be drawn now (waiting to be laid out)."""
     parent = widget.get_parent()
     if parent is None:
-        return 1.0
+        return None
     snap = Gtk.Snapshot()
     parent.snapshot_child(widget, snap)
     node = snap.to_node()
+    if node is None:
+        return None
     while node is not None:
         if isinstance(node, Gsk.OpacityNode):
             return node.get_opacity()
         node = node.get_child() if hasattr(node, "get_child") else None
     return 1.0
+
+
+def _frozen(widget):
+    """A picture of widget as it is now, drawn now (not what it last drew: a redraw asked for, a spinner's, say, has
+    thrown that away till the next frame), at its own size; what it last drew if it can't be drawn now."""
+    parent = widget.get_parent()
+    ok, r = widget.compute_bounds(parent) if parent is not None else (False, None)
+    if ok:
+        snap = Gtk.Snapshot()
+        snap.translate(Graphene.Point().init(-r.get_x(), -r.get_y()))
+        parent.snapshot_child(widget, snap)
+        node = snap.to_node()
+        if node is not None:
+            picture = Gtk.Snapshot()
+            picture.append_node(node)
+            return picture.to_paintable(Graphene.Size().init(r.get_width(), r.get_height()))
+    return Gtk.WidgetPaintable.new(widget).get_current_image()
 
 
 def _text(label, to):
@@ -4778,8 +4798,11 @@ class ExpandStack(Gtk.Widget):
                 part["rect"] = _rect(part["widget"], self) or part["rect"]
             for pair in m["pairs"]:
                 pair["b"] = _place(pair["to"], self) or pair["b"]
-        else:  # (closing: the row where it is, the list shown again)
+        else:  # (closing: the row where it is, the list shown again; not seen, nothing to move: over)
             m["row"] = self._seen(m["origin"], m["within"])
+            if m["row"] is None and not m.get("ending"):
+                m["ending"] = True
+                GLib.idle_add(lambda anim=self.anim: (anim is self.anim and self.finish(), False)[1])
             for pair in m["pairs"]:
                 pair["a"] = _place(pair["from"], self)
             for part in m["leave"]:
@@ -4832,19 +4855,20 @@ class ExpandStack(Gtk.Widget):
     def open(self, name, origin, square, pairs=(), enter=(), leave=(), within=None):
         """Show page name, opened out of origin, a row of the page shown now (within: the scrolled window it's in):
         the row goes up to be the page's header and square (the page's darker inside) opens under it. pairs: (the
-        row's widget, the page's), each turning into the other; enter: the page's, coming in from the left; leave: the
+        row's widget, the page's[, True]), each turning into the other (with True, one drawing of it all the way,
+        flipped across its middle: an arrow into its mirror); enter: the page's, coming in from the left; leave: the
         row's, going out to the right. Just shown when there'd be nothing to see move: the row not on screen, the list
         not drawn since it was shown, or EXPAND_MS 0."""
         self.finish()
         shown = self.stack.get_visible_child()
         row = self._seen(origin, within) if EXPAND_MS and self.get_mapped() and shown else None
-        lst = Gtk.WidgetPaintable.new(shown).get_current_image() if row is not None else None
+        lst = _frozen(shown) if row is not None else None
         if row is None or lst.get_intrinsic_width() <= 0:  # (just shown, not drawn since: where it is isn't known)
             self.stack.set_visible_child_name(name)
             return
-        start = [{"from": a, "to": b, "a": _place(a, self), "b": None,
-                  "paint_from": Gtk.WidgetPaintable.new(a).get_current_image()} for a, b in pairs]
-        gone = [{"widget": w, "rect": _rect(w, self), "paint": Gtk.WidgetPaintable.new(w).get_current_image()}
+        start = [{"from": a, "to": b, "flip": bool(flip and flip[0]), "a": _place(a, self), "b": None,
+                  "paint_from": _frozen(a)} for a, b, *flip in pairs]
+        gone = [{"widget": w, "rect": _rect(w, self), "paint": _frozen(w)}
                 for w in leave]
         lst_rect = _rect(shown, self)
         self.stack.set_visible_child_name(name)
@@ -4867,12 +4891,12 @@ class ExpandStack(Gtk.Widget):
         if not (EXPAND_MS and self.get_mapped()) or origin is None or origin.get_parent() is None:
             self.stack.set_visible_child_name(name)
             return
-        frozen = lambda w: Gtk.WidgetPaintable.new(w).get_current_image()
+        frozen = _frozen
         page = self.stack.get_visible_child()
         move = {"live": False, "p": 1.0, "row": None, "list": None, "page": _rect(page, self) if page else None,
                 "origin": origin, "within": within,
-                "pairs": [{"from": a, "to": b, "a": None, "b": _place(b, self), "paint": frozen(b),
-                           "paint_from": Gtk.WidgetPaintable.new(a)} for a, b in pairs],
+                "pairs": [{"from": a, "to": b, "flip": bool(flip and flip[0]), "a": None, "b": _place(b, self),
+                           "paint": frozen(b), "paint_from": Gtk.WidgetPaintable.new(a)} for a, b, *flip in pairs],
                 "leave": [{"widget": w, "rect": None, "paint": Gtk.WidgetPaintable.new(w)} for w in leave],
                 "enter": [{"widget": w, "paint": frozen(w), "rect": _rect(w, self)} for w in enter],
                 "parts": {k: {"widget": w, "paint": frozen(w), "rect": _rect(w, self)}
@@ -4987,6 +5011,17 @@ class ExpandStack(Gtk.Widget):
                     self._paint(snap, pair["paint"], (b["x"] + dx, b["y"] + dy, b["w"], b["h"]))
             elif "text" in a and "text" in b:
                 self._morph(snap, a, b, p)
+            elif pair["flip"]:  # (one drawing all the way, flipped across its middle as it goes: a › into a ‹, its
+                # point going across. Opening, the row's as it was; closing, the page's: each drawn, neither just shown)
+                img, size, sx = ((pair["paint_from"], a, 1 - 2 * p) if m["live"] else (pair["paint"], b, 2 * p - 1))
+                cx = _lerp(a["x"] + a["w"] / 2, b["x"] + b["w"] / 2, p)
+                cy = _lerp(a["y"] + a["h"] / 2, b["y"] + b["h"] / 2, p)
+                if abs(sx) > 1e-3:
+                    snap.save()
+                    snap.translate(Graphene.Point().init(cx, cy))
+                    snap.scale(sx, 1)
+                    self._paint(snap, img, (-size["w"] / 2, -size["h"] / 2, size["w"], size["h"]))
+                    snap.restore()
             else:  # (the row's drawing of it the first half of the way, the header's the second: the same, but for
                 # a spinner's turn; and one just shown hasn't drawn yet)
                 self._paint(snap, pair["paint"] if p >= 0.5 else pair["paint_from"],
@@ -5027,7 +5062,9 @@ class ExpandStack(Gtk.Widget):
         snap.save()  # (its baseline between theirs: their lines' spacing needn't be the same)
         y = _lerp(a["y"] + a["baseline"], b["y"] + b["baseline"], p) - layout.get_baseline() / Pango.SCALE
         snap.translate(Graphene.Point().init(_lerp(a["x"], b["x"], p), y))
-        snap.push_opacity(_lerp(a["alpha"], b["alpha"], p))  # (as each is drawn: a dim one under its opacity)
+        oa, ob = a["alpha"], b["alpha"]  # (as each is drawn: a dim one under its opacity; one not known, the other's)
+        oa, ob = (oa if oa is not None else ob or 1.0), (ob if ob is not None else oa or 1.0)
+        snap.push_opacity(_lerp(oa, ob, p))
         snap.append_layout(layout, color)
         snap.pop()
         snap.restore()

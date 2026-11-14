@@ -15908,14 +15908,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def check_host_version(self):
         """This Mac's host process older than Baude (an update since it started: its protocol, wire.VERSION, behind):
-        said, once a host process, with Restart It (restart_host)."""
+        said, once a host process, with Restart Daemon (restart_host)."""
         r = local_host()
         if r is None or (r.info.get("version") or 1) >= baudelib.wire.VERSION or \
                 _HOST_SAID.get("old") == r.info.get("pid"):
             return
         _HOST_SAID["old"] = r.info.get("pid")
-        t = Adw.Toast(title=f"{THIS_MACHINE}'s host process is older than this Baude", button_label="Restart It",
-                      timeout=0)
+        t = Adw.Toast(title="Daemon is older than client", button_label="Restart Daemon", timeout=0)
         t.connect("button-clicked", lambda *_: self.restart_host())
         self.toasts.add_toast(t)
 
@@ -15931,7 +15930,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
         def later(n):
             if not waited:
-                toast(self.sidebar, f"Restarting {THIS_MACHINE}'s host process once {n} session"
+                toast(self.sidebar, f"Restarting the daemon once {n} session"
                                     f"{'s finish' if n > 1 else ' finishes'} running a command")
             GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
 
@@ -15943,7 +15942,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             def gone():  # (the old one gone: a new one, started as any is: local_server)
                 if r.state == "alive" and time.monotonic() < end:
                     return True
-                self.local_server(lambda _r: toast(self.sidebar, f"{THIS_MACHINE}'s host process restarted"))
+                self.local_server(lambda _r: toast(self.sidebar, "Daemon restarted"))
                 return False
             GLib.timeout_add(250, gone)
         if busy:

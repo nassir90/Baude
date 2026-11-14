@@ -1207,7 +1207,7 @@ def popup_choices(dropdown):
 
 
 @scene("56-host-older", "This Mac's host process, which runs Baude's chats, older than Baude after an update: said, with "
-                       "Restart It (once nothing's at a turn there: its sessions resume as they're next written to)")
+                       "Restart Daemon (once nothing's at a turn there: its sessions resume as they're next written to)")
 def _(app):
     win = app.window()
     r = baude.local_host()

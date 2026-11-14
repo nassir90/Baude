@@ -147,13 +147,33 @@ def provider(offered=None):
 
 
 def listed_models(offered=None):
-    """What Intelligence lists: Claude's models and Apple's, then the provider's (provider); and Meta's own, if it's
-    another provider's (it goes on with it till another's picked)."""
+    """What Intelligence lists: Claude's models and Apple's (one of each kind: alike), then the provider's (provider);
+    and Meta's own, if it's another provider's (it goes on with it till another's picked)."""
     offered = models() if offered is None else offered
     pid = provider(offered)
-    out = [m for m in offered if not providerslib.has_runtime(m[3]) or m[3] == pid]
+    kinds = alike(offered)
+    lead = {m["value"]: first for first, ms in kinds for m in ms}
+    firsts = [first for first, _ms in kinds]
+    out = []
+    for m in offered:
+        if m[0] in lead:  # (Apple's, each host's: one of each kind)
+            if lead[m[0]]["value"] == m[0]:
+                out.append((m[0], providerslib.told_apart(lead[m[0]], firsts), *m[2:]))
+        elif not providerslib.has_runtime(m[3]) or m[3] == pid:
+            out.append(m)
     entry = model_entry(model(), offered)
-    return out + [entry] if entry and entry not in out else out
+    return out + [entry] if entry and all(m[0] != entry[0] for m in out) else out
+
+
+def alike(offered=None):
+    """The models of offered (models()) with no runtime (Apple's, each host's), one of each kind (providers.alike):
+    [(the one listed, every one of its kind)], as {value, displayName, window, version, provider}. The one listed is
+    Meta's own model where it's of its kind, else this machine's."""
+    bare = [m for m in (models() if offered is None else offered)
+            if m[3] is not None and not providerslib.has_runtime(m[3])]
+    return providerslib.alike([{"value": m[0], "displayName": m[1], "provider": m[3]} |
+                               {k: v for k, v in providerslib.entry(m[0]).items() if k in ("window", "version")}
+                               for m in bare], [model(), modelslib.APPLE_MODEL["value"]])
 
 
 def listed(found, seed=False):
@@ -714,10 +734,12 @@ def model_row(chat):
 def provider_row(chat):
     """Settings → Meta → Provider: the inference provider whose models Intelligence lists after Claude's (MLX, Ollama,
     an OpenAI-compatible server), by host: this machine's (local), then other hosts' in the mesh. Gone when there's
-    none, or Meta's on Claude's (claude runs where it is: no provider of its); on Apple's own and off on Apple's (no
-    runtime: the only one there is for it); dimmed when there's only one."""
+    none, or Meta's on Claude's (claude runs where it is: no provider of its); on Apple's, the hosts that have it
+    (alike: picking one moves Meta's model there), greyed and off with one; dimmed when there's only one."""
     row = Adw.ActionRow(title="Provider", subtitle="Where the models after Claude's run")
-    picker = widgets.HostPicker("Inference provider", lambda pid: provider_picked(chat, pid))
+    same = {}  # (on Apple's model: each host's that has it, by its provider)
+    picker = widgets.HostPicker("Inference provider", lambda pid: model_picked(chat, same[pid]) if pid in same else
+                                provider_picked(chat, pid))
     picker.set_valign(Gtk.Align.CENTER)
     picker.add_css_class("flat")
     row.add_suffix(picker)
@@ -736,14 +758,21 @@ def provider_row(chat):
         if runtime:
             picker.set_choices([(host, choices) for host, choices in hosts.items() if choices])
             picker.select(provider(offered))
-        elif pid is not None:  # (Apple's: its own provider, the only one there is for it)
-            host, name = providerslib.where(pid)
-            picker.set_choices([(host or HERE_NAME, [(pid, name)])])
+        same.clear()
+        if not runtime and pid is not None:  # (Apple's: the hosts that have it, this machine's first)
+            ms = next((ms for _m, ms in alike(offered) if any(m["value"] == entry[0] for m in ms)), None) \
+                if entry else None
+            there = {HERE_NAME: []}
+            for m in sorted(ms or [{"value": model(), "provider": pid}],
+                            key=lambda m: m["value"] != modelslib.APPLE_MODEL["value"]):
+                host, name = providerslib.where(m["provider"])
+                there.setdefault(host or HERE_NAME, []).append((m["provider"], name))
+                same[m["provider"]] = m["value"]
+            picker.set_choices([(host, choices) for host, choices in there.items() if choices])
             picker.select(pid)
-        row.set_sensitive(runtime)
+        row.set_sensitive(runtime or len(same) > 1)  # (Apple's on one host: greyed, off)
         row.set_visible((bool(found) or not runtime) and pid is not None)  # (Claude's: none)
-        (row.add_css_class if len(found) == 1 and runtime else row.remove_css_class)("one-provider")  # (Apple's:
-        # greyed, off, rather than dimmed too)
+        (row.add_css_class if len(found) == 1 and runtime else row.remove_css_class)("one-provider")
     row.sync = sync
     sync()
     MODEL_ROWS.add(row)

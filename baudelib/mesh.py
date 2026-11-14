@@ -147,6 +147,8 @@ def _model(m):
             out[k] = m[k]
     if isinstance(m.get("window"), int) and not isinstance(m.get("window"), bool):
         out["window"] = m["window"]
+    if isinstance(m.get("version"), str):
+        out["version"] = m["version"][:32]
     if isinstance(m.get("input"), list):
         out["input"] = [x[:32] for x in m["input"][:8] if isinstance(x, str)]
     return out
@@ -732,8 +734,8 @@ class Mesh:
                            for x in p["models"]]}
                for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
         agents = [{"provider": p["id"], "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
-                   "models": [{k: x[k] for k in ("value", "displayName", "window", "tools", "input", "thinking")
-                               if k in x} for x in p["models"]]}
+                   "models": [{k: x[k] for k in ("value", "displayName", "window", "version", "tools", "input",
+                                                 "thinking") if k in x} for x in p["models"]]}
                   for m in view["members"] for p in m["providers"] if not p.get("http")]
         with self.lock:
             if (eps, agents) == self.told:

@@ -1121,14 +1121,17 @@ def network_fixture():
     return NET
 
 
-def network_window(app, group="Lab", sid=None):
-    """A window listing a group on the network, every host's (⋮ → Groups; None: every group), in Planning, sid: the
-    session waited for."""
+def network_window(app, group="Lab", sid=None, host="lab"):
+    """A window listing a group on the network (⋮ → Groups; None: every group), on a host (New session's: lab, lab-mac;
+    None: this machine), in Planning, sid: the session waited for."""
     network_fixture()
-    baude.save_settings(sidebar_hosts=None, sidebar_groups=[group] if group else None)
+    baude.save_settings(new_session_host=baude.host_key(NET[host][1]) if host else None,
+                        sidebar_groups=[group] if group else None)
     win = app.window(opts(cwd=NET["folders"][0]))
-    if sid is None:
+    if sid is None and host == "lab":
         T.wait_for(lambda: sidebar_row(win, "Write the release notes for 2.4") is not None, "the network's sessions")
+    elif sid is None:
+        T.pump(0.5)
     else:
         T.wait_for(lambda: session_row(win, sid) is not None, "the session")
     return win
@@ -1218,17 +1221,15 @@ def _(app):
     return win
 
 
-@scene("55-network-group-menu", "⋮ beside the search: Group by, then which hosts and groups are listed: This Mac "
-                                "(its own chats and its server's) and each host a server's on; each group their "
-                                "sessions are in. Here every host's, in Lab")
+@scene("55-network-group-menu", "⋮ beside the search: Group by, Add Host…, then which groups are listed: each "
+                                "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):
     win = network_window(app)
     win.sidebar.view_btn.popup()
     return win
 
 
-@scene("55b-network-group", "A group on the network: its sessions from every server that has some, by folder; those "
-                            "of a server that's gone (build-box) kept, marked dead")
+@scene("55b-network-group", "A group on lab-mac, New session's host: its sessions there, by folder")
 def _(app):
     return network_window(app)
 
@@ -1259,22 +1260,12 @@ def _(app):
     return win
 
 
-@scene("55e-network-dead-session", "A session of a server that's gone: as it was last seen, nothing to write in")
+@scene("55f-network-new-session", "New session, while a new chat here isn't listed (only Planning): a prompt, a "
+                                  "folder and a group, through this machine's host process, with the top bar's model, "
+                                  "effort and mode")
 def _(app):
-    win = network_window(app)
-    row = sidebar_row(win, "Run the nightly benchmarks")
-    win.sidebar.on_activate(win.sidebar.list, row)
-    T.wait_for(lambda: win.remote is not None and win.session_id == NET["ids"]["Run the nightly benchmarks"],
-               "opened")
-    T.pump(0.3)
-    return win
-
-
-@scene("55f-network-new-session", "New session, while only another host is listed: a prompt, a folder and a group, "
-                                  "on a server that's there, with the top bar's model, effort and mode")
-def _(app):
-    win = network_window(app)
-    win.sidebar.filtered(sidebar_hosts=[NET["lab"][1].key])
+    win = network_window(app, None, host=None)
+    win.sidebar.filtered(sidebar_groups=["Planning"])  # (a new chat here, in no group, not listed)
     win.sidebar.new_chat()
     T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
     f = win.remote_fields
@@ -1287,7 +1278,7 @@ def _(app):
                              "its own, which this machine doesn't have")
 def _(app):
     models_server()
-    win = network_window(app)
+    win = network_window(app, host=None)  # (gpu-mac is on this machine: its sessions are local's)
     T.wait_for(lambda: sidebar_row(win, "Sketch the release checklist") is not None, "gpu-mac's session")
     win.sidebar.on_activate(win.sidebar.list, sidebar_row(win, "Sketch the release checklist"))
     T.wait_for(lambda: win.remote is not None and win.proc is not None and "apple" in win.model_dd.values, "its models")
@@ -1306,67 +1297,38 @@ def _(app):
     return win
 
 
-@scene("55l-network-hosts", "⋮ → Hosts, one picked (a click; Shift or Ctrl (⌘) and a click adds or takes away one): "
-                            "lab-mac's sessions, in every group; Show All puts everything back")
+@scene("55l-network-hosts", "New session's host, lab-mac, picked: lab-mac's sessions listed, in every group; ⋮ "
+                            "has Add Host… and the groups")
 def _(app):
     win = network_window(app, None)
-    win.sidebar.filtered(sidebar_hosts=[NET["lab"][1].key])
     win.sidebar.view_btn.popup()
     return win
 
 
-@scene("55m-network-all", "Every host and group, as at first: This Mac's own chats, with the network's sessions")
+@scene("55l2-network-host-picker", "New session's hosts: the one picked is the one whose chats are listed")
+def _(app):
+    win = network_window(app, None)
+    popup_choices(win.sidebar.host_dd)
+    return win
+
+
+@scene("55m-network-all", "Every group, on this machine (New session's host, as at first): its own chats, with its "
+                           "host process's sessions")
 def _(app):
     network_fixture()
     for n, title in enumerate(("Tidy the changelog", "Fix the login redirect")):  # (this machine's own, in site)
         T.write_session(NET["folders"][1], f"5555555{n}-0000-4000-8000-000000000055", title=title)
-    win = network_window(app, None)
+    win = network_window(app, None, host=None)
     T.wait_for(lambda: sidebar_row(win, "Tidy the changelog") is not None, "this machine's chats")
     return win
 
 
-@scene("55n-network-new-session-here", "Right-click a host in ⋮ → Hosts: New Session Here")
-def _(app):
-    win = network_window(app, None)
-    win.sidebar.view_btn.popup()
-    T.pump(0.2)
-    row = next(r for r in win.sidebar.host_list.rows() if r.key == NET["lab"][1].key)
-    ok, rect = row.compute_bounds(win.sidebar.host_list)
-    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
-    return win
-
-
-@scene("55o-network-new-session-here-dialog", "New Session Here on lab-mac: its folder, a group and a prompt, with the "
-                                              "top bar's model, effort and mode")
-def _(app):
-    win = network_window(app, None)
-    win.new_session_here(NET["lab"][1].key)
-    T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
-    f = win.remote_fields
-    f["folder"].set_text(NET["folders"][0])
-    f["prompt"].get_buffer().set_text("Profile the parser on the large fixtures and write up where the time goes.")
-    return win
-
-
 def studio(win):
-    """A host added by hand, over ssh (never reached: the tests' ssh is false): studio, its row in ⋮ → Hosts."""
+    """A host added by hand, over ssh (never reached: the tests' ssh is false): studio."""
     r = baude.network().add({"via": "ssh", "dest": "lab@studio.lan"}, by_hand=True)
     T.wait_for(lambda: r.state == "dead", "studio tried")
     win.sidebar.fill_filters()
     return r
-
-
-@scene("55p-network-host-menu", "Right-click a host reached over ssh: New Session Here (not while it's gone), and "
-                                "Host Command…, for its host process there if it isn't on its PATH")
-def _(app):
-    win = network_window(app, None)
-    r = studio(win)
-    win.sidebar.view_btn.popup()
-    T.pump(0.2)
-    row = next(x for x in win.sidebar.host_list.rows() if x.key == r.key)
-    ok, rect = row.compute_bounds(win.sidebar.host_list)
-    win.sidebar.host_menu(row, 40, rect.get_y() + rect.get_height() / 2)
-    return win
 
 
 @scene("55q-network-host-command", "Host Command…: the command ssh runs on the host, with connect after it")
@@ -2190,7 +2152,7 @@ def capture_macos(win):
 
 def reset_state():
     baude.save_settings(zoom=1.0, full_width=False, sidebar=True, collapsed_folders=["archived"], archived=[],
-                        signal_reader=False, sidebar_network=None, sidebar_hosts=None, sidebar_groups=None,
+                        signal_reader=False, sidebar_network=None, new_session_host=None, sidebar_groups=None,
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)

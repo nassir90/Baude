@@ -8233,6 +8233,7 @@ class App(Adw.Application):
         widgets.ensure_icons()
         pointers.start()
         widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
+        widgets.theme_css(CSS)  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
         import signal  # (told to stop, as logging out or `kill` does: what's typed is saved, then it stops)
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
             try:

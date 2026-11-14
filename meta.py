@@ -2905,6 +2905,9 @@ class MetaChat(Gtk.Box):
         text = self.writing.text().strip()
         if not self.ask and not available():
             self.model_changed()  # (gone since it was picked: said so)
+        if self.exhausted.on and not self.ask and text.lower() in self.CLEAR:  # (a way out of it, typed in its box)
+            buf.set_text("")
+            return self._clear()
         if self.ask or self.exhausted.on or not self.ready() or not (text or self.can_ask_empty()):
             return
         if text.lower() in self.CLEAR:

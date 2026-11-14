@@ -709,11 +709,18 @@ class _Remote:
         return self.proc.code if self.proc.code is not None else -1 if self.proc.killed else None
 
 
+class Refused(OSError):
+    """A host that answered, but wouldn't attach a session (gone from it, being deleted…): RemoteProc's."""
+
+
 class RemoteProc(claude.ClaudeProc):
     """A session on a host (where: wire.reach's), talked to as ClaudeProc talks to a local claude: what's sent goes to its claude (started
     on the server if it isn't running), what it says comes to on_msg. live: everything it says, as it says it; else
     only what it asks (a permission) and the answers to what's asked of it (initialize: its models and commands).
-    kill() lets go of it: the session goes on, on its server. OSError if it can't be reached."""
+    kill() lets go of it: the session goes on, on its server. OSError if it can't be reached. on_exit's code: its
+    claude's exit code, as its host said it; "stopped", its host told to stop it (Stop); "deleted", the session
+    deleted there; "lost", the connection gone with none of those said (its host process went, or the link fell
+    silent)."""
 
     def __init__(self, on_msg, on_exit, where, session_id, live=True, env=None, always_allow=None):
         self.on_msg, self.on_exit = on_msg, on_exit
@@ -728,7 +735,7 @@ class RemoteProc(claude.ClaudeProc):
         reply = self.ch.reply()
         if not reply or reply.get("op") != "attached":
             self.ch.close()
-            raise OSError((reply or {}).get("error") or "the server didn't answer")
+            raise (Refused if reply else OSError)((reply or {}).get("error") or "the server didn't answer")
         self.ch.sock.settimeout(wire.SILENT_S)  # (the server pings: silence this long, and it's gone)
         self.ch.keep_alive()
         self.listing = reply.get("session") or {}
@@ -741,8 +748,8 @@ class RemoteProc(claude.ClaudeProc):
             op = msg.get("op")
             if op == "claude" and msg.get("session") == self.session:
                 self.dispatch(lambda m=msg["msg"]: self.on_msg(self, m))
-            elif op == "exited" and msg.get("session") == self.session:
-                self.code = msg.get("code")
+            elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
+                self.code = "stopped" if msg.get("stopped") else msg.get("code")
                 break
             elif op == "deleted" and msg.get("session") == self.session:  # (gone from its host, for good)
                 self.code = "deleted"
@@ -751,8 +758,8 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda e=msg.get("error"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": f"the server: {e}"}))
         self.ch.close()
-        if not self.killed:
-            code = -1 if self.code is None else self.code
+        if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
+            code = "lost" if self.code is None else self.code
             self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):

@@ -1738,11 +1738,13 @@ class ContextUsage(Gtk.Box):
 
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
-    over its box, in plain grey, and the box off, till a model with a bigger window's picked or the conversation's
-    cleared. box: the Composer, already in its column; chat: what has the focus instead while it's off."""
+    over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
+    with a bigger window's picked or the conversation's cleared. The text box stays as it is, to write in. It's the
+    chat's own state, which only you change: what's in its way from outside it is said in a banner. box: the Composer,
+    already in its column; chat: (kept for its callers)."""
 
     def __init__(self, chat, box):
-        self.chat, self.box, self.on = chat, box, False
+        self.box, self.on = box, False
         self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
@@ -1752,10 +1754,7 @@ class Exhausted:
         self.on = on
         self.label.set_text(text)
         self.label.set_visible(on)
-        if on and self.box.input.is_focus():
-            self.chat.grab_focus()
-        self.box.input.set_cursor_visible(not on)
-        self.box.set_sensitive(not on)
+        self.box.gate("exhausted", on)
 
 
 class FindBar(Gtk.SearchBar):
@@ -3220,10 +3219,19 @@ class Composer(Gtk.Overlay):
         self.add_css_class("card")
         self.add_css_class("composer-box")
         self.set_overflow(Gtk.Overflow.HIDDEN)
+        self.gates, self.busy = set(), False  # (what keeps what's written from being sent now: gate)
         self.set_busy(False)
+
+    def gate(self, name, on):
+        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),
+        on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
+        (self.gates.add if on else self.gates.discard)(name)
+        self.send.set_sensitive(self.busy or not self.gates)
 
     def set_busy(self, busy):
         """The send button: grey, to send; red, to stop, while the reply's coming."""
+        self.busy = busy
+        self.send.set_sensitive(busy or not self.gates)
         if busy:
             self.send.set_icon_name("media-playback-stop-symbolic")
             self.send.set_tooltip_text("Stop (Esc)")
@@ -6794,7 +6802,7 @@ CSS = """
 @define-color baude_inside @view_bg_color;
 @define-color baude_rule alpha(@borders, 0.9);
 @define-color baude_raised alpha(@view_fg_color, 0.06);
-.baude-frame, .baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
+.baude-frame { background-color: @baude_frame; box-shadow: none; }
 /* (square; its edge a border, inside it: a ring outside it was clipped where it meets the bar above) */
 .baude-inside { background-color: @baude_inside; border: 1px solid @baude_rule; }
 /* the main area's tabs (MainTabs) on a window's bar (Record's), as tall as it, on the frame */
@@ -7287,6 +7295,117 @@ def load_css():
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         display.baude_css = css
+
+
+# ---- GTK themes. Baude's look is drawn over libadwaita's stylesheet. Started with GTK_THEME set, libadwaita doesn't
+# load it and the theme draws everything, below the app's CSS: there the parts of Baude's look that only make sense over
+# libadwaita stand aside (the header bar the frame's colour, the title in the text's own weight), so a theme's own title
+# bar and title show, and a GTK 3-era theme's outline stays the focus ring it was there (GTK 3 drew `outline` only round
+# what had the keyboard's focus; GTK 4 draws it round every widget that has one, so `* { outline-style: dotted }` boxed
+# everything). A theme put in ~/.config/gtk-4.0/gtk.css instead is above the app's CSS: these don't reach it.
+OVER_ADWAITA_CSS = """
+.baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
+headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: inherit; }
+"""
+UNDER_GTK_THEME_CSS = """
+*:not(:focus-visible) { outline-style: none; }
+"""
+
+
+def theme_css(*app_css):
+    """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
+    (libadwaita's, or a GTK_THEME's). app_css: the app's own stylesheets besides CSS (Record's), whose corners go
+    square with Baude's under a square theme (square_corners)."""
+    display = Gdk.Display.get_default()
+    if display is None or getattr(display, "baude_theme_css", None):
+        return
+    css = Gtk.CssProvider()
+    themed = bool(os.environ.get("GTK_THEME"))
+    css.load_from_string(UNDER_GTK_THEME_CSS if themed else OVER_ADWAITA_CSS)
+    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    display.baude_theme_css = css
+    if themed:
+        display.baude_rounded_sheets = (CSS, *app_css)
+        _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
+
+
+# ---- a GTK theme's corners. Baude's own (a bubble's, the input box's, a table's, a code block's: its stylesheets'
+# border-radius) are libadwaita's roundness. Under a GTK theme they follow the theme's: the first window shown, one of
+# its buttons is drawn as the theme draws it, its corner's radius read off what's drawn (how far along the diagonal from
+# the corner it's clear), and every border-radius in Baude's stylesheets is held to it: 0 under Windows 95, Redmond,
+# CDE, NeXT; a few pixels under XP or Clearlooks; as it was under a theme as round as libadwaita. No theme is named:
+# it's what the theme draws.
+_corners = {"hook": None, "tries": 0, "done": False}
+
+
+def _first_window_mapped(window):
+    if _corners["done"]:
+        return False  # (the hook comes off)
+    if not isinstance(window, Gtk.Window):  # (the hook is on every widget's map)
+        return True
+    _corners["done"] = True
+    GLib.timeout_add(50, _probe_corners, window)
+    return False
+
+
+def _probe_corners(window):
+    """Once the window's laid out: its first solid button's corner radius, Baude's held to it (retried a while: none
+    laid out yet, or all flat). False: done."""
+    _corners["tries"] += 1
+    for w in walk(window):
+        if (w.get_css_name() == "button" and not w.has_css_class("flat") and w.get_mapped()
+                and w.get_width() >= 16 and w.get_height() >= 12):
+            radius = corner_radius(w)
+            if radius is not None:
+                fit_corners(window.get_display(), radius)
+                return False
+    return _corners["tries"] < 40
+
+
+def corner_radius(widget):
+    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
+    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
+    them). None: no solid top edge to tell by (a flat button)."""
+    w, h = widget.get_width(), widget.get_height()
+    snap = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(widget).snapshot(snap, w, h)
+    node = snap.to_node()
+    native = widget.get_native()
+    if node is None or native is None or native.get_renderer() is None:
+        return None
+    texture = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
+    down = Gdk.TextureDownloader.new(texture)
+    down.set_format(Gdk.MemoryFormat.R8G8B8A8)
+    data, stride = down.download_bytes()
+    data = data.get_data()
+    alpha = lambda x, y: data[y * stride + x * 4 + 3]  # noqa: E731
+    edge = alpha(texture.get_width() // 2, 0)
+    if edge < 128:
+        return None
+    clear = 0
+    while clear < min(texture.get_width(), texture.get_height()) // 2 and alpha(clear, clear) * 10 < edge * 9:
+        clear += 1
+    return round(clear / (1 - 0.5 ** 0.5))
+
+
+def fit_corners(display, radius):
+    """Every border-radius in Baude's stylesheets (and the app's: theme_css) held to radius, above them."""
+    def held(value):
+        return re.sub(r"(\d+(?:\.\d+)?)px", lambda m: f"{min(float(m.group(1)), radius):g}px", value)
+    rules = []
+    for sheet in getattr(display, "baude_rounded_sheets", (CSS,)):
+        sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", sheet, flags=re.S))  # (comments, @define-colors)
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+            for value in re.findall(r"border-radius:\s*([^;}]+)", body):
+                if held(value) != value:
+                    rules.append(f"{' '.join(sel.split())} {{ border-radius: {held(value).strip()}; }}")
+    display.baude_corner_radius = radius
+    if not rules:
+        return
+    css = Gtk.CssProvider()
+    css.load_from_string("\n".join(rules))
+    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+    display.baude_corners_css = css
 
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a

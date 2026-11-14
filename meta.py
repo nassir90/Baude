@@ -1014,8 +1014,8 @@ SETUP_TOOLS = [
      "undone (they'd be downloaded again).",
      "inputSchema": {"type": "object", "required": ["models"], "properties": {
          "models": {"type": "array", "items": {"type": "string"}}}}},
-    {"name": "add_mlx_model", "description": "Add a downloaded MLX model (local_models: its repo) to MLX's models. "
-     "thinking: it thinks (Qwen3's do); name: as it's listed.",
+    {"name": "add_mlx_model", "description": "Name a downloaded MLX model (local_models: its repo, or its folder's path) among MLX's models: "
+     "every one downloaded is listed already, as its folder's named. thinking: it thinks (Qwen3's do); name: as it's listed.",
      "inputSchema": {"type": "object", "required": ["repo"], "properties": {
          "repo": {"type": "string"}, "name": {"type": "string"}, "thinking": {"type": "boolean"}}}},
     {"name": "add_endpoint", "description": "Add an OpenAI-compatible server (LM Studio, llama.cpp, vLLM), once it "
@@ -1054,15 +1054,17 @@ def models_report():
     else:
         lines.append("Ollama: not installed (ollama.com/download: the user installs it)")
     mlx = found.get("mlx") or {}
-    known = modelslib.mlx_models()
     have = {m["value"] for m in mlx.get("models") or []}
-    lines.append("MLX (pi-claude): " + ("pi isn't installed (in ~/.local/share/baude/pi); " if mlx.get("error") else "") +
+    lines.append("MLX (pi-claude): " + (f"can't run yet: {mlx['error']}; " if mlx.get("error") else "") +
                  (", ".join(f"{m['displayName']} ({'downloaded' if m['value'] in have else 'not downloaded'})"
-                            for m in known) or "no models"))
+                            for m in modelslib.MLX_OWN + modelslib.mlx_added()) or "no models named"))
     extra = [m for m in providerslib.mlx_downloaded() if not m["added"]]
     if extra:
-        lines.append("  downloaded, not added (add_mlx_model): " + ", ".join(
-            f"{m['repo']} ({m['size'] / 1e9:.1f} GB{', sees images' if m['vision'] else ''})" for m in extra))
+        lines.append("  also downloaded, listed as found (add_mlx_model names one, or says it thinks): " + ", ".join(
+            f"{m['repo']} ({m['where']}, {m['size'] / 1e9:.1f} GB{', sees images' if m['vision'] else ''})"
+            for m in extra))
+    lines.append("  looked for in: the Hugging Face cache (" + modelslib.hf_hub() + ")" +
+                 "".join(f", {d}" for d in modelslib.mlx_dirs()) + " (settings.json's mlx_dirs adds folders)")
     if sys.platform == "darwin":
         st = providerslib.apple_status()
         state = "built" if st["built"] else {"building": "building now", "failed": "its build failed"}.get(
@@ -3653,8 +3655,10 @@ class MetaChat(Gtk.Box):
             return found[repo]
 
         def done(m):
-            taken = {x["value"] for x in modelslib.mlx_list()}
-            value = base = "mlx-" + re.sub(r"[^a-z0-9.]+", "-", repo.split("/")[-1].lower()).strip("-")
+            listed = modelslib.mlx_list()  # (listed as found already: its value kept, for the chats on it)
+            was = next((x["value"] for x in listed if x["repo"] == repo and x.get("found")), None)
+            taken = {x["value"] for x in listed if x["value"] != was}
+            value = base = was or "mlx-" + re.sub(r"[^a-z0-9.]+", "-", repo.split("/")[-1].lower()).strip("-")
             n = 2
             while value in taken:
                 value, n = f"{base}-{n}", n + 1

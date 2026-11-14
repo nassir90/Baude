@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(HERE))  # (baudelib, beside pi-claude/: where
 from baudelib import providers  # noqa: E402
 HOME = os.path.expanduser("~/.local/share/baude/pi")
 PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "pi")
-MODELS = {m["value"]: m for m in providers.modelslib.mlx_list()}  # (models.json's, and those settings.json adds)
+MODELS = {m["value"]: m for m in providers.modelslib.mlx_list()}  # (models.json's, settings.json's, those found)
 CONTEXT = 32768  # (the window pi is told: these models take more, but not in 16 GB beside everything else)
 MAX_OUT = 4096
 MAX_OUT_THINKING = 16384  # (thinking and answer share it: pi's high budget, less 1024 for the answer)
@@ -65,7 +65,10 @@ def flag(name):
     return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
 
 
-model = providers.resolve(flag("--model") or "") or MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
+asked = flag("--model") or ""
+model = providers.resolve(asked) or MODELS.get(asked) or \
+    ({"value": asked, "repo": asked, "displayName": asked, "input": ["text"], "gone": True}  # (found once, not now)
+     if asked.startswith("mlx-") else next(iter(MODELS.values())))
 kind = model.get("kind") or "mlx"  # (mlx; or ollama, openai: a served model, its server its own)
 window = model.get("window") or CONTEXT  # (its context window: a served model's, Ollama's once it's loaded)
 session_id = flag("--resume") or str(uuid.uuid4())
@@ -256,7 +259,7 @@ class Gate:
 
 
 def mlx_vlm_server():
-    return which("mlx_vlm.server", os.path.expanduser("~/.local/bin/mlx_vlm.server"))
+    return providers.modelslib.mlx_server()
 
 
 def serve():
@@ -347,6 +350,8 @@ def serve():
 
 def use_server():
     """Count this chat in, start the server if it isn't running, and wait until it answers."""
+    if model.get("gone"):
+        raise RuntimeError(f"{model['value']} isn't downloaded here now (its folder's gone, or not mounted)")
     if not mlx_vlm_server():
         raise RuntimeError("mlx_vlm.server isn't installed (uv tool install mlx-vlm)")
     with run_lock():

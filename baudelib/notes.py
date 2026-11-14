@@ -2,6 +2,8 @@
 records.json, and changed through the Record running here, if one is (it keeps them, and saves over the file), else in
 the file itself. No GTK: the host process reads this, and so does record.py."""
 import copy
+import difflib
+import hashlib
 import json
 import os
 import socket
@@ -31,6 +33,11 @@ def records_path():
     return os.path.join(data_dir(), "records.json")
 
 
+def _records_file():
+    """records.json's path, its folder not made (the host process looks at it on every machine: stamp)."""
+    return os.path.join(os.environ.get("RECORD_DATA") or own_data_dir("Record"), "records.json")
+
+
 def socket_path():
     """The Record running here's socket (record.listen)."""
     return os.path.join(data_dir(), "record.sock")
@@ -52,16 +59,120 @@ def _read():
     return saved if isinstance(saved, dict) else {}
 
 
-def listing():
-    """{notebooks: [shared(…)]} (error: why not). records.json as it is: a Record running here writes its changes
-    there within a moment (record.Store.SAVE_MS)."""
+def digest(book):
+    """A notebook as shared (shared's), in a few characters: the same while it is."""
+    return hashlib.sha1(json.dumps(book, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def file_key():
+    """records.json as written last (when, how big): another once it's written again; "" with none."""
+    try:
+        st = os.stat(_records_file())
+    except OSError:
+        return ""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def stamp():
+    """The notebooks here as they are, in a word: another once one's changed (a save of Record's that changed only
+    what it shows, its zoom, say, isn't one). The host process's info says it, so a Record elsewhere showing them
+    lists them again: live."""
+    try:
+        with open(_records_file(), encoding="utf-8") as f:
+            books = [shared(t) for t in (json.load(f) or {}).get("records") or [] if isinstance(t, dict) and t.get("id")]
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return digest({"books": books})
+
+
+def listing(have=None):
+    """{notebooks: [shared(…)], ids: every one's id, in order} (error: why not); have ({id: digest}: those the asker
+    has), only those it hasn't as they are. records.json as it is: a Record running here writes its changes there
+    within a moment (record.Store.SAVE_MS)."""
     try:
         books = [shared(t) for t in _read().get("records") or [] if isinstance(t, dict) and t.get("id")]
     except (OSError, ValueError) as e:
         return {"notebooks": [], "error": f"records.json: {e}"}
-    if len(json.dumps(books)) > LIMIT:
+    have = have if isinstance(have, dict) else {}
+    sent = [b for b in books if have.get(b["id"]) != digest(b)]
+    if len(json.dumps(sent)) > LIMIT:
         return {"notebooks": [], "error": "its notebooks are too big to send"}
-    return {"notebooks": books}
+    return {"notebooks": sent, "ids": [b["id"] for b in books]}
+
+
+def merge3(base, mine, theirs):
+    """A page changed two ways from base: both changes kept where they don't touch (by line, then within the lines
+    both changed, by character). Where both changed the same text, nothing either wrote is lost: the one that has the
+    other in it (one side wrote on), else both, mine first."""
+    if mine == theirs or theirs == base:
+        return mine
+    if mine == base:
+        return theirs
+    return _merge(base, mine, theirs, True)
+
+
+def _hunks(a, b, side):
+    sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return [(i1, i2, b[j1:j2], side) for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != "equal"]
+
+
+def _both(mine, theirs, lines):
+    """One stretch both sides changed, both kept: the one that has the other at its start or end, else mine then
+    theirs (by line: each on lines of its own); by character, None: not merged so."""
+    if theirs.startswith(mine) or theirs.endswith(mine):
+        return theirs
+    if mine.startswith(theirs) or mine.endswith(theirs):
+        return mine
+    if not lines:
+        return None
+    return mine + ("" if not mine or mine.endswith("\n") else "\n") + theirs
+
+
+def _merge(base, mine, theirs, lines):
+    """merge3 by line (lines), or by character: None where, by character, both changed the same text."""
+    split = (lambda t: t.splitlines(keepends=True)) if lines else list
+    b, m, t = split(base), split(mine), split(theirs)
+    hunks = sorted(_hunks(b, m, 0) + _hunks(b, t, 1), key=lambda h: (h[0], h[1]))
+    clusters = []
+    for h in hunks:  # (those whose stretches of base meet, or are put in at one place: together)
+        c = clusters[-1] if clusters else None
+        if c is not None and (h[0] < c["end"] or h[0] == c["end"] and (h[0] == h[1] or c["start"] == c["end"])):
+            c["hunks"].append(h)
+            c["end"] = max(c["end"], h[1])
+        else:
+            clusters.append({"start": h[0], "end": h[1], "hunks": [h]})
+
+    def side(c, which):
+        out, at = [], c["start"]
+        for s, e, rep, w in c["hunks"]:
+            if w == which:
+                out += b[at:s] + list(rep)
+                at = e
+        return "".join(out + b[at:c["end"]])
+    out, at = [], 0
+    for c in clusters:
+        out.append("".join(b[at:c["start"]]))
+        sides = {h[3] for h in c["hunks"]}
+        if sides == {0}:
+            out.append(side(c, 0))
+        elif sides == {1}:
+            out.append(side(c, 1))
+        else:
+            mine_c, theirs_c = side(c, 0), side(c, 1)
+            if mine_c == theirs_c:
+                out.append(mine_c)
+            elif not lines:
+                if (kept := _both(mine_c, theirs_c, False)) is None:
+                    return None
+                out.append(kept)
+            elif c["start"] == c["end"]:  # (both put lines in at one place)
+                out.append(_both(mine_c, theirs_c, True))
+            else:
+                by_char = _merge("".join(b[c["start"]:c["end"]]), mine_c, theirs_c, False)
+                out.append(by_char if by_char is not None else _both(mine_c, theirs_c, True))
+        at = c["end"]
+    out.append("".join(b[at:]))
+    return "".join(out)
 
 
 def changes_ok(changes):
@@ -71,12 +182,16 @@ def changes_ok(changes):
         and (c.get("name") is None or isinstance(c["name"], str))
         and isinstance(c.get("pages") or {}, dict)
         and all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in (c.get("pages") or {}).items())
+        and isinstance(c.get("was") or {}, dict)
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in (c.get("was") or {}).items())
         for c in changes)
 
 
 def apply(notebooks, changes):
     """changes made to notebooks (a list, changed in place): a new one put first; one dropped taken out; one's name
-    and pages set (a page None: deleted). The ids changed."""
+    and pages set (a page None: deleted). A page's was (what the sender had it as): one changed here too since,
+    both changes kept (merge3); one deleted there and changed here, kept. A page the sender had none of (said by its
+    was, without this page) and one here has: both kept. The ids changed."""
     by_id = {t.get("id"): t for t in notebooks}
     done = []
     for c in changes:
@@ -97,9 +212,14 @@ def apply(notebooks, changes):
         if c.get("name") is not None:
             t["name"] = c["name"]
         pages = t.setdefault("pages", {})
+        was, said = c.get("was") or {}, "was" in c  # (said: a sender that says what it had; an older one doesn't)
         for name, text in (c.get("pages") or {}).items():
+            here = pages.get(name)
             if text is None:
-                pages.pop(name, None)
+                if not (said and name in was and here is not None and here != was[name]):  # (changed here: kept)
+                    pages.pop(name, None)
+            elif said and here is not None and here != was.get(name, here if name in was else ""):
+                pages[name] = merge3(was.get(name, ""), here, text)  # (what's here kept where it was changed)
             else:
                 pages[name] = text
         done.append(c["id"])

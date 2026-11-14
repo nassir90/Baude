@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, mesh, models, providers, selfupdate, transcripts, wire
+from baudelib import agentproxy, claude, mesh, models, notes, providers, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -749,6 +749,15 @@ class Server:
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
+        if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; on a thread
+            def notes_op():  # of its own: a change waits on the Record running here)
+                try:
+                    reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
+                                      else notes.listing()))
+                except Exception as e:  # noqa: BLE001 (said to the Record that asked)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=notes_op, daemon=True, name="notes").start()
+            return None
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():
                 try:

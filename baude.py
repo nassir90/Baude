@@ -130,6 +130,7 @@ from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
+from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
@@ -6841,59 +6842,6 @@ class ChatRefCompleter(meta.RefCompleter):
             self.forget()
             return found
         return super().handle_key(keyval, state)
-
-
-class ChoiceDropDown(Gtk.DropDown):
-    """A DropDown over (value, label) pairs. on_pick(value) fires for user picks only,
-    not for select()/set_choices() calls that mirror what the CLI reports."""
-
-    def __init__(self, choices, tooltip, on_pick):
-        super().__init__(tooltip_text=tooltip, css_classes=["choice"])
-        # (its list centred under it: GTK's lines up their left sides, and a longer one runs on to the right)
-        if (popup := next((w for w in walk(self) if isinstance(w, Gtk.Popover)), None)) is not None:
-            popup.set_halign(Gtk.Align.CENTER)
-        self.strings = Gtk.StringList()
-        self.set_model(self.strings)
-        self.on_pick, self.values, self.quiet = on_pick, [], False
-        self.set_choices(choices)
-        self.connect("notify::selected", self._changed)
-
-    def _changed(self, *_):
-        if not self.quiet and self.value() is not None:
-            self.on_pick(self.value())
-
-    def _quietly(self, fn):
-        self.quiet = True
-        try:
-            fn()
-        finally:
-            self.quiet = False
-
-    def set_choices(self, choices):
-        """Replace the entries, keeping the current value selected if it is still there."""
-        keep = self.value()
-        def swap():
-            self.values = [v for v, _ in choices]
-            self.strings.splice(0, self.strings.get_n_items(), [lbl for _, lbl in choices])
-            self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
-        self._quietly(swap)
-
-    def select(self, value):
-        """Show `value` as selected (appending it if unknown) without firing on_pick."""
-        def pick():
-            if value not in self.values:
-                self.values.append(value)
-                self.strings.append(value)
-            self.set_selected(self.values.index(value))
-        self._quietly(pick)
-
-    def value(self):
-        i = self.get_selected()
-        return self.values[i] if i < len(self.values) else None
-
-    def label(self):
-        i = self.get_selected()
-        return self.strings.get_string(i) if i < len(self.values) else ""
 
 
 # --------------------------------------------------------------- sessions --

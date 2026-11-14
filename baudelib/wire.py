@@ -434,7 +434,7 @@ def through(ch, host, timeout=5.0):
     if not reply or reply.get("op") != "relayed":
         ch.close()
         error = (reply or {}).get("error") or "the host process here didn't answer"
-        raise OSError("the host process here is older, with no mesh: restart it" if error.startswith("no session")
+        raise OSError("Daemon is older than client, with no mesh: restart it" if error.startswith("no session")
                       else error)
     return _hello(ch, max(timeout, 10.0), host)
 

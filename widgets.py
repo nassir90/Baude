@@ -2515,31 +2515,44 @@ KUBE_ICONS = {
 
 
 def ensure_icons():
-    """Write baude's icons where the icon theme looks for them (once per run)."""
+    """Write baude's icons where the icon theme looks for them, and put Adwaita's behind the desktop's theme
+    (once per run)."""
     display = Gdk.Display.get_default()
     if display is None or getattr(ensure_icons, "done", False):
         return
     base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     folder = os.path.join(base, "baude", "icons")
-    os.makedirs(folder, exist_ok=True)
-    for name, body in {**BAUDE_ICONS, **BAUDE_SHAPES, **KUBE_ICONS}.items():
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-               f'<g fill="#2e3436">{body}</g></svg>')
-        path = os.path.join(folder, f"{name}.svg")
-        try:
-            with open(path) as f:
-                same = f.read() == svg
-        except OSError:
-            same = False
-        if not same:
-            with open(path, "w") as f:
-                f.write(svg)
-    Gtk.IconTheme.get_for_display(display).add_search_path(folder)
+    theme = Gtk.IconTheme.get_for_display(display)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for name, body in {**BAUDE_ICONS, **BAUDE_SHAPES, **KUBE_ICONS}.items():
+            svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+                   f'<g fill="#2e3436">{body}</g></svg>')
+            path = os.path.join(folder, f"{name}.svg")
+            try:
+                with open(path) as f:
+                    same = f.read() == svg
+            except OSError:
+                same = False
+            if not same:
+                with open(path, "w") as f:
+                    f.write(svg)
+    except OSError as e:  # (a cache that can't be written: the app starts all the same, Adwaita's icons still found)
+        print("baude: couldn't write its icons:", e, file=sys.stderr)
+    theme.add_search_path(folder)
+    # GTK 4 looks only in the desktop's icon theme and hicolor, not Adwaita, so under another theme (Breeze,
+    # Papirus…) an Adwaita name that theme lacks draws nothing. Adwaita's own folders, searched after every theme,
+    # fill those in; a name the desktop's theme has is still drawn from it.
+    for root in theme.get_search_path():
+        for sub in sorted(glob.glob(os.path.join(root, "Adwaita", "symbolic", "*"))):
+            if os.path.isdir(sub):
+                theme.add_search_path(sub)
     ensure_icons.done = True
 
 
 def globe_icon():
     """A globe where the icon theme has one (Yaru does); Adwaita only has the browser compass."""
+    ensure_icons()
     display = Gdk.Display.get_default()
     if display is not None and Gtk.IconTheme.get_for_display(display).has_icon("globe-symbolic"):
         return "globe-symbolic"
@@ -5381,6 +5394,7 @@ class MarkdownView(Gtk.Box):
 
 def themed_icon(name, fallback):
     """name if the current icon theme has it, else fallback (themes differ: Yaru vs Adwaita)."""
+    ensure_icons()
     display = Gdk.Display.get_default()
     if name and display is not None and Gtk.IconTheme.get_for_display(display).has_icon(name):
         return name

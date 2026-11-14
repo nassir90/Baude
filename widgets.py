@@ -6625,12 +6625,12 @@ def load_css():
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a
 # side) and its arrow's room; picom (or compton, or xcompmgr -c) puts a shadow of its own round the whole window, a
-# larger rectangle round the box. There they're drawn without GTK's shadow (its outline ring drawn inside instead) and
-# with no arrow, so the window is the box and picom's shadow is the popover's. Their corners stay round: picom's shadow
-# is square unless its corner-radius rounds the window too.
+# larger rectangle round the box. There they're drawn without GTK's shadow (an outline ring inside the box) and with no
+# arrow, so the window is the box and picom's shadow is the popover's. Their corners are libadwaita's (15px round);
+# picom's shadow is square unless its corner-radius rounds the window too.
 SHADOWING_COMPOSITORS = ("picom", "compton", "xcompmgr")
 FLAT_POPOVER_CSS = """
-popover:not(.touch-selection):not(.magnifier) > contents { box-shadow: inset 0 0 0 1px alpha(black, 0.05); }
+popover:not(.touch-selection):not(.magnifier) > contents { box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15); }
 """
 _flat = {"display": None, "provider": None, "on": False, "hook": None, "arrowless": weakref.WeakSet()}
 

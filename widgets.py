@@ -6309,7 +6309,7 @@ CSS = """
 @define-color baude_inside @view_bg_color;
 @define-color baude_rule alpha(@borders, 0.9);
 @define-color baude_raised alpha(@view_fg_color, 0.06);
-.baude-frame, .baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
+.baude-frame { background-color: @baude_frame; box-shadow: none; }
 /* (square; its edge a border, inside it: a ring outside it was clipped where it meets the bar above) */
 .baude-inside { background-color: @baude_inside; border: 1px solid @baude_rule; }
 /* the main area's tabs (MainTabs) on a window's bar (Record's), as tall as it, on the frame */
@@ -6800,6 +6800,33 @@ def load_css():
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         display.baude_css = css
+
+
+# ---- GTK themes. Baude's look is drawn over libadwaita's stylesheet. Started with GTK_THEME set, libadwaita doesn't
+# load it and the theme draws everything, below the app's CSS: there the parts of Baude's look that only make sense over
+# libadwaita stand aside (the header bar the frame's colour, the title in the text's own weight), so a theme's own title
+# bar and title show, and a GTK 3-era theme's outline stays the focus ring it was there (GTK 3 drew `outline` only round
+# what had the keyboard's focus; GTK 4 draws it round every widget that has one, so `* { outline-style: dotted }` boxed
+# everything). A theme put in ~/.config/gtk-4.0/gtk.css instead is above the app's CSS: these don't reach it.
+OVER_ADWAITA_CSS = """
+.baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
+headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: inherit; }
+"""
+UNDER_GTK_THEME_CSS = """
+*:not(:focus-visible) { outline-style: none; }
+"""
+
+
+def theme_css():
+    """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
+    (libadwaita's, or a GTK_THEME's)."""
+    display = Gdk.Display.get_default()
+    if display is None or getattr(display, "baude_theme_css", None):
+        return
+    css = Gtk.CssProvider()
+    css.load_from_string(UNDER_GTK_THEME_CSS if os.environ.get("GTK_THEME") else OVER_ADWAITA_CSS)
+    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    display.baude_theme_css = css
 
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a

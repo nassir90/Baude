@@ -1474,7 +1474,7 @@ def test_reader_picks(app):
     drag(first, "each job", Gdk.ModifierType.META_MASK)
     assert [p["text"] for p in r.picks] == ["golden files", "orders-api", "each job"], r.picks
     assert win.chat.quote == "[1] golden files\n\n[2] orders-api\n\n[3] each job", win.chat.quote
-    assert win.chat.quote_label.get_text() == "1 “golden files”  2 “orders-api”  3 “each job”"
+    assert win.chat.quote_label.get_text() == win.chat.quote_said({"quote": win.chat.quote}), "as it'll be sent"
     assert not first.get_selection_bounds()[0], "all three drawn alike, by the reader"
     shot(win, "record-1-picks")
     copied = []

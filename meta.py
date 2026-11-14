@@ -2070,9 +2070,10 @@ class MetaChat(Gtk.Box):
         return False
 
     def quote_said(self, m):
-        """A user's message's quote, as its bubble shows it (above what they wrote), or None."""
+        """A user's message's quote, as its bubble shows it (above what they wrote, its bar saying it's a quote), or
+        None."""
         q = m.get("quote")
-        return "“" + (" ".join(q.split())[:400] + ("…" if len(q) > 400 else "")) + "”" if q else None
+        return " ".join(q.split())[:400] + ("…" if len(q) > 400 else "") if q else None
 
     def prose(self, text):
         """A reply's text, as Baude's chat shows one: Markdown, in no bubble (Record's links its folders' names)."""

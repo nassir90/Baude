@@ -6874,7 +6874,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                                          reveal_child=not self.store.books_folded)
         books.append(self.books_reveal)
         side.set_content(books)
-        # (at the foot, under a rule from the notebooks: Update Available, while a new version waits: update_waiting)
+        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting)
         self.update_bar = widgets.UpdateBar(self.update_now)
         side.add_bottom_bar(self.update_bar)
         self.left_sizes()
@@ -7168,7 +7168,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         return not self.restart_blockers()
 
     def restart_blockers(self):
-        """What a restart waits for, said (the Update Available bar's tooltip), [] for none: a question being answered,
+        """What a restart waits for, said (the Update bar's tooltip), [] for none: a question being answered,
         a dialog or capture open, and you at it (the window you're in, something typed, clicked or scrolled in it in the
         last minute)."""
         why = ["a question being answered"] if self.chat.ask is not None else []

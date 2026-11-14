@@ -7804,7 +7804,7 @@ class SessionSidebar(Gtk.Box):
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
-        # (at the foot, under a rule from the chats: Update Available, while a new version waits: show_update_bars)
+        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars)
         self.update_bar = widgets.UpdateBar(lambda: win.get_application().update_now(win))
         self.append(self.update_bar)
         keys = Gtk.EventControllerKey()
@@ -12371,7 +12371,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return not self.restart_blockers()
 
     def restart_blockers(self):
-        """What a restart of Baude waits for in this window, said (the Update Available bar's tooltip), [] for none: a
+        """What a restart of Baude waits for in this window, said (the Update bar's tooltip), [] for none: a
         command of Baude's own claude's running (a Desktop chat's; a host's chats go on through a restart, commands and
         all), a side question's follow-up being written (that doesn't come back; what's typed elsewhere does:
         restart_state), a dialog or a capture open, and you at it (the window you're in, something typed, clicked or
@@ -17359,7 +17359,7 @@ class BaudeApp(Adw.Application):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
         return all(w.idle() for w in self.windows())
 
-    # ---- Update Available: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
+    # ---- Update: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
     # or This Mac's host process's (on its commands: info's update)
     def update_waiting(self, waiting):
         self.update_held = waiting
@@ -17386,26 +17386,26 @@ class BaudeApp(Adw.Application):
                 bar.say(why)
 
     def update_now(self, win):
-        """The bar clicked: restarted now, what's running stopped (said first, and asked)."""
+        """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
+        asked."""
         why = [w for w in (self.update_reasons() or []) if not w.startswith("you, using")]
-        dlg = Adw.AlertDialog(heading="Restart now?", default_response="cancel", close_response="cancel",
-                              body="The new version is picked up now. "
-                                   + ("These are stopped, and their chats can be continued after:\n"
-                                      + "\n".join(f"• {w}" for w in why) if why else "Nothing's running."))
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("go", "Restart Now")
-        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE if why else Adw.ResponseAppearance.SUGGESTED)
 
-        def answered(_d, r):
-            if r != "go":
-                return
+        def go():
             host = local_host()
             if host is not None and host.info.get("update"):
                 host.request({"op": "quit"})  # (it comes back as a chat wants it: local_server)
             if self.updater is not None and self.updater.ready:
                 u = self.updater
                 self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})
-        dlg.connect("response", answered)
+        if not why:
+            return go()
+        dlg = Adw.AlertDialog(heading="Restart now?", default_response="cancel", close_response="cancel",
+                              body="The new version is picked up now. These are stopped, and their chats can be "
+                                   "continued after:\n" + "\n".join(f"• {w}" for w in why))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("go", "Restart Now")
+        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda _d, r: r == "go" and go())
         dlg.present(win)
 
     def restart(self, updated=None):

@@ -1619,14 +1619,14 @@ def set_markup_safe(label, markup):
 
 
 class UpdateBar(Gtk.Box):
-    """At the foot of a sidebar, under a rule from what's listed above it: Update Available, while a new version's
-    waiting to be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now, asked)."""
+    """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's
+    waiting to be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now; asked only if that stops something)."""
 
     def __init__(self, on_click):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
-        self.button = Gtk.Button(label="Update Available", halign=Gtk.Align.START, margin_start=6, margin_end=6,
+        self.button = Gtk.Button(label="Update", halign=Gtk.Align.START, margin_start=6, margin_end=6,
                                  margin_top=4, margin_bottom=4)
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: on_click())

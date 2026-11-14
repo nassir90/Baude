@@ -7425,22 +7425,90 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
+.baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
 """
+# Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
+# theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
+# no stylesheet names isn't drawn. Below everything, each of libadwaita's names as the theme's colour it stands for: a
+# theme that names it itself is above, and its own.
+BELOW_GTK_THEME_CSS = """
+@define-color window_bg_color @theme_bg_color;
+@define-color window_fg_color @theme_fg_color;
+@define-color view_bg_color @theme_base_color;
+@define-color view_fg_color @theme_text_color;
+@define-color sidebar_bg_color @window_bg_color;
+@define-color sidebar_fg_color @window_fg_color;
+@define-color card_bg_color @view_bg_color;
+@define-color card_fg_color @view_fg_color;
+@define-color popover_bg_color @window_bg_color;
+@define-color popover_fg_color @window_fg_color;
+@define-color borders alpha(@window_fg_color, 0.15);
+:root { --border-color: color-mix(in srgb, currentColor 15%, transparent); --card-shade-color: rgb(0 0 6 / 7%); }
+/* (a dialog's sheet over the window: its fill, its edge, its shadow and the dimming under it are libadwaita's, and
+   most themes don't draw them (some fill only a window); without them the sheet runs into the window, or the window
+   shows through it. The fill the window's, the edge in the theme's border colour; a theme that draws them, its own) */
+floating-sheet > sheet, bottom-sheet > sheet { background-color: @window_bg_color;
+  box-shadow: 0 0 0 1px @borders, 0 0 14px 2px rgb(0 0 6 / 3%), 0 0 5px 2px rgb(0 0 6 / 10%); }
+/* (a toast: libadwaita's, which a theme drawing no toasts leaves see-through, its text on whatever's under it) */
+toast { background-color: #505053; color: white; margin: 12px 12px 24px; border-radius: 150px; border-spacing: 6px;
+  padding: 6px 6px 6px 12px; box-shadow: 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 6px 2px rgb(0 0 6 / 3%); }
+toast > widget { margin: 0 6px; }
+"""
+# What below the theme depends on whether it's light or dark (theme_dark): the dimming under a dialog, the status
+# colours (a theme without its own), as libadwaita has them light and dark.
+BELOW_GTK_THEME_SHADE = {False: ("rgb(0 0 6 / 14%)", "#1b8553", "#9c6e03", "#c01c28"),
+                         True: ("rgb(0 0 6 / 50%)", "#78e9ab", "#ffc252", "#ff938c")}
+
+
+def gtk_themed():
+    """Whether a GTK theme draws the apps: GTK_THEME set (even empty, as libadwaita has it: it loads none of its
+    stylesheet then)."""
+    return "GTK_THEME" in os.environ
+
+
+def below_gtk_theme_css(dark):
+    """BELOW_GTK_THEME_CSS, light or dark, and Baude's accent: what accent_rgba and accent_text_rgba have, so what the
+    CSS draws in it and what's drawn here are the one colour (a theme's own accent, if it names one, above)."""
+    dim, success, warning, error = BELOW_GTK_THEME_SHADE[dark]
+    return (BELOW_GTK_THEME_CSS + f"floating-sheet > dimming, bottom-sheet > dimming {{ background-color: {dim}; }}\n"
+            f"@define-color success_color {success};\n@define-color warning_color {warning};\n"
+            f"@define-color error_color {error};\n@define-color accent_bg_color {accent_rgba().to_string()};\n"
+            f"@define-color accent_color {accent_text_rgba().to_string()};\n")
+
+
+def theme_dark():
+    """Whether the GTK theme is dark: its views' colour (as it's resolved, the theme's or below it) dark."""
+    probe = Gtk.Label(css_classes=["baude-theme-probe"])
+    c = probe.get_color()
+    return c.alpha > 0 and 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue < 0.5
 
 
 def theme_css(*app_css):
     """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
     (libadwaita's, or a GTK_THEME's). app_css: the app's own stylesheets besides CSS (Record's), whose corners go
-    square with Baude's under a square theme (square_corners)."""
+    square with Baude's under a square theme (square_corners). Under a theme, light or dark is the theme's: what
+    Baude draws in its own colours (code's, the accent's shade, a diagram's) is then drawn for the theme's background,
+    not for the system's light or dark."""
     display = Gdk.Display.get_default()
     if display is None or getattr(display, "baude_theme_css", None):
         return
     css = Gtk.CssProvider()
-    themed = bool(os.environ.get("GTK_THEME"))
+    themed = gtk_themed()
     css.load_from_string(UNDER_GTK_THEME_CSS if themed else OVER_ADWAITA_CSS)
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     display.baude_theme_css = css
     if themed:
+        below = Gtk.CssProvider()
+        below.load_from_string(BELOW_GTK_THEME_CSS)
+        Gtk.StyleContext.add_provider_for_display(display, below, Gtk.STYLE_PROVIDER_PRIORITY_FALLBACK)
+        dark = theme_dark()
+        Adw.StyleManager.get_default().set_color_scheme(
+            Adw.ColorScheme.FORCE_DARK if dark else Adw.ColorScheme.FORCE_LIGHT)
+        below.load_from_string(below_gtk_theme_css(dark))
+        display.baude_below_theme = below
+        # (the system's accent changed: what's drawn here follows it, and so does the CSS)
+        Adw.StyleManager.get_default().connect("notify::accent-color",
+                                               lambda *_: below.load_from_string(below_gtk_theme_css(dark)))
         display.baude_rounded_sheets = (CSS, *app_css)
         _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
 
@@ -7731,6 +7799,9 @@ def apply_accent(display):
     name = name if name in ACCENTS else None
     rgba = Adw.AccentColor.to_rgba(ACCENTS[name]).to_string() if name else None
     css = f"@define-color accent_bg_color {rgba};\n:root {{ --accent-bg-color: {rgba}; }}" if name else ""
+    if name and gtk_themed():  # (no libadwaita to make @accent_color of it: what accent_text_rgba has)
+        text = Adw.AccentColor.to_standalone_rgba(ACCENTS[name], Adw.StyleManager.get_default().get_dark())
+        css += f"\n@define-color accent_color {text.to_string()};"
     if _accent["provider"] is None:
         _accent["provider"] = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(display, _accent["provider"], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
@@ -7962,6 +8033,8 @@ def macos_appearance():
     rt.class_addMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p]
 
     def changed(_self, _sel, _path, _app, _change, _context):
+        if gtk_themed():  # (light or dark is the theme's: theme_css)
+            return
         name = objc_send(objc_send(app, b"effectiveAppearance"), b"name")
         dark = b"Dark" in (objc_send(name, b"UTF8String", ret=ctypes.c_char_p) or b"") if name else False
         Adw.StyleManager.get_default().set_color_scheme(

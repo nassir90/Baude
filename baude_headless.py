@@ -16,7 +16,7 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
     python3 baude_headless.py unarchive SESSION [...]
     python3 baude_headless.py delete    SESSION [...]   # stopped, gone, its transcript moved to the trash
     python3 baude_headless.py link   DEST [--host-command CMD]   # this host linked to DEST's, both ways: the mesh
-    python3 baude_headless.py unlink DEST                       # that link let go of
+    python3 baude_headless.py unlink DEST|ID                    # that link let go of (or one straight to a member)
     python3 baude_headless.py deactivate DEST|ID   # a member not reached, nor let reach here, till it's activated
     python3 baude_headless.py activate   DEST|ID
     python3 baude_headless.py mesh                # the mesh's members, and the links this host makes
@@ -299,13 +299,17 @@ def main():
         for m in ask(args, {"op": "subscribe"})["server"].get("models") or []:
             print(f"{m['value']:24}  {m['displayName']}")
         return
-    if args.command in ("link", "unlink"):
+    if args.command == "unlink":  # (a link made from here, or straight to a member found: by where, or its id)
+        args.host, args.host_command = None, None
+        said = ask(args, {"op": "unlink", **({"id": args.dest} if wire.is_id(args.dest) else
+                                             {"where": {"via": "ssh", "dest": args.dest}})})
+        return print(f"no longer linked to {args.dest}" if said.get("any") else f"no link to {args.dest} here")
+    if args.command == "link":
         where = {"via": "ssh", "dest": args.dest, **({"command": args.host_command}
                                                       if getattr(args, "host_command", None) else {})}
         args.host, args.host_command = None, None
         ask(args, {"op": args.command, "where": where})
-        return print(f"linking to {args.dest}: `{os.path.basename(sys.argv[0])} mesh` says how it goes"
-                     if args.command == "link" else f"no longer linked to {args.dest}")
+        return print(f"linking to {args.dest}: `{os.path.basename(sys.argv[0])} mesh` says how it goes")
     if args.command in ("deactivate", "activate"):
         args.host, args.host_command = None, None
         said = ask(args, {"op": args.command, **({"id": args.target} if wire.is_id(args.target) else {}),
@@ -321,11 +325,11 @@ def main():
             print(f"link to {wire.said_where(x['where'])}: {'deactivated' if x.get('active') is False else x['state']}"
                   + (f" ({x['error']})" if x.get("error") else ""))
         for x in mesh.get("found") or []:
-            print(f"link straight to {x['name']} (learned of through the mesh): {x['state']}"
+            print(f"{x['id']}  link straight to {x['name']} (found through the mesh): {x['state']}"
                   + (f" ({x['error']})" if x.get("error") else ""))
         for i in mesh.get("inactive") or []:
             print(f"{i}  deactivated")
-        if not mesh.get("members") and not mesh.get("links") and not mesh.get("inactive"):
+        if not mesh.get("members") and not mesh.get("links") and not mesh.get("inactive") and not mesh.get("found"):
             print("in no mesh: link to another host with `link DEST`")
         return
     if args.command in ("stop", "archive", "unarchive"):

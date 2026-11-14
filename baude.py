@@ -13413,7 +13413,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if apple:  # (the hosts that have the chat's model, Apple's: its own first)
             ms = next((ms for _m, ms in kinds if any(m["value"] == shown for m in ms)), [{"value": shown}])
             for m in sorted(ms, key=lambda m: m["value"] != "apple"):
-                k = self.provider_index.get(m["value"]) or f"{self.chat_host()}|{pid_of(m)}"
+                if m["value"] not in self.provider_index and m["value"] not in ("apple", shown):
+                    continue  # (its host gone from the mesh: none to move to)
+                agent = modelslib.proxied(m["value"])
+                k = self.provider_index.get(m["value"]) or \
+                    (f"{agent[0]}|{agent[1]}" if agent else f"{self.chat_host()}|{pid_of(m)}")
                 there, pname = providerslib.where(pid_of(m))
                 there = next((h for k2, h, _l, _ms in every if k2 == k), None) or there or \
                     (THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(self.remote))

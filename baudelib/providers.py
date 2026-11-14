@@ -564,7 +564,7 @@ def local_providers():
     """This machine's providers that run models now, as another host is told of them (the mesh: plain JSON, no
     secrets): [{"id", "kind" (apple, mlx, ollama, openai), "name", "base_url" (its OpenAI-compatible API; None for one a
     program runs: Apple's, MLX's), "models": [{"value", "displayName", "id" (its name to its server), "tools",
-    "window", "input", "thinking"}]}]."""
+    "window", "input", "thinking", "version" (where it's said)}]}]."""
     out = []
     for p in usable(found(wait=True)):
         kind = "openai" if p["id"].startswith("openai/") else p["id"]
@@ -572,7 +572,8 @@ def local_providers():
         out.append({"id": p["id"], "kind": kind, "name": p["name"], "base_url": base, "models": [
             {"value": m["value"], "displayName": m["displayName"], "id": m.get("resolvedModel") or m["value"],
              "tools": m.get("tools", True), "window": m.get("window"), "input": m.get("input") or ["text"],
-             "thinking": bool(m.get("thinking") or m.get("supportsEffort"))} for m in p["models"]]})
+             "thinking": bool(m.get("thinking") or m.get("supportsEffort"))} |
+            ({"version": m["version"]} if isinstance(m.get("version"), str) else {}) for m in p["models"]]})
     return out
 
 

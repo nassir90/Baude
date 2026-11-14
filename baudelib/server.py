@@ -34,6 +34,8 @@ EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
+CATALOGUE_WAIT_S = 30  # (a folder's catalogue being made: waited for this long before what there is is sent)
+CATALOGUE_LIMIT = 20000  # (files sent of a folder's, at most: its other names all are)
 RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
@@ -367,6 +369,7 @@ class Server:
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
         self.socket_path = socket_path or wire.socket_path()
+        self.catalogue_lock, self.catalogue_asked = threading.Lock(), {}  # (catalogue's: when each folder was first asked for)
         self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
         if len(self.socket_path.encode()) > 100:
             raise OSError(f"{self.socket_path}: too long a path for a socket")
@@ -746,6 +749,14 @@ class Server:
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
+        if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
+            def catalogue():
+                try:
+                    reply("catalogue", **self.catalogue(msg.get("cwd"), bool(msg.get("wait"))))
+                except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
+            return None
         if op == "link":  # (a head's: a link made from here)
             where = msg.get("where")
             self.mesh.link(where)
@@ -1509,10 +1520,7 @@ class Server:
         path = os.path.expanduser(path or "")
         if not os.path.isabs(path):
             return {"path": path, "error": "not an absolute path"}
-        real = os.path.realpath(path)
-        with self.lock:
-            folders = {os.path.realpath(s.meta["cwd"]) for s in self.sessions.values() if s.meta.get("cwd")}
-        if not any(real == f or real.startswith(f.rstrip(os.sep) + os.sep) for f in folders):
+        if not self.in_sessions(os.path.realpath(path)):
             return {"path": path, "error": "not in one of its sessions' folders"}
         try:
             with open(path, "rb") as f:
@@ -1522,3 +1530,55 @@ class Server:
             return {"path": path, "error": e.strerror or str(e)}
         return {"path": path, "size": size, "truncated": len(data) > FILE_LIMIT,
                 "data": base64.b64encode(data[:FILE_LIMIT]).decode("ascii")}
+
+    def in_sessions(self, path):
+        """Is path (real) one of its sessions' folders, or in one?"""
+        with self.lock:
+            folders = {os.path.realpath(s.meta["cwd"]) for s in self.sessions.values() if s.meta.get("cwd")}
+        return any(path == f or path.startswith(f.rstrip(os.sep) + os.sep) for f in folders)
+
+    def catalogue(self, cwd, wait=False):
+        """What @ lists for a session's folder, as Baude lists its own chat's (lookup.items: its files, branches,
+        Kubernetes objects, what's running on this machine, its pull requests and issues), made here. What there is is
+        sent at once; with nothing made yet, or wait, it's waited for while it's made (and GitHub's first read of it),
+        up to CATALOGUE_WAIT_S. busy: there's more to come. At most CATALOGUE_LIMIT files, and every other name."""
+        if not isinstance(cwd, str) or not os.path.isabs(os.path.expanduser(cwd)):
+            return {"cwd": cwd, "items": [], "error": "not an absolute path"}
+        real = os.path.realpath(os.path.expanduser(cwd))
+        if not self.in_sessions(real) or not os.path.isdir(real):
+            return {"cwd": cwd, "items": [], "error": "not one of its sessions' folders"}
+        root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        import lookup
+        with self.catalogue_lock:  # (two heads asking at once: one Folder, made once)
+            folder = lookup.Folder.for_folder(real)
+            folder.catalogue_soon()
+            first = self.catalogue_asked.setdefault(folder.root, time.monotonic())
+        lookup.GITHUB.look(tops=[folder.root])
+
+        def busy():
+            github = lookup.gh_path() is not None and lookup.GITHUB.listed(folder.root) is lookup.GITHUB.NOTHING and \
+                time.monotonic() - first < CATALOGUE_WAIT_S  # (its first read: a folder that's on GitHub's, soon)
+            return folder.catalogue_busy or github
+        if wait or not folder.catalogue:
+            until = time.monotonic() + CATALOGUE_WAIT_S
+            while busy() and time.monotonic() < until:
+                time.sleep(0.1)
+        items, files = [], 0
+        for it in lookup.items(folder):
+            if it["kind"] == "file":
+                files += 1
+                if files > CATALOGUE_LIMIT:
+                    continue
+            entry = it.get("entry")
+            if entry is not None:  # (what a list shows of it: its first source, and GitHub's)
+                entry = {k: entry[k] for k in ("kind", "hint", "github") if k in entry} | \
+                    {"sources": list(entry.get("sources") or ())[:1]}
+            item = {**it, "entry": entry}
+            try:
+                wire.encode(item)
+            except (TypeError, ValueError):  # (a file name that isn't UTF-8, say: that one left out)
+                continue
+            items.append(item)
+        return {"cwd": cwd, "items": items, "busy": busy()}

@@ -9048,20 +9048,90 @@ def meta_trash():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "trash")
 
 
+def all_chats(sidebar):
+    """Every chat Baude knows: this machine's own (the sidebar's), and the hosts' sessions."""
+    net = [remote_info(s) for s in network().sessions() if not s.get("draft")]  # (a new chat not written in yet)
+    theirs = {i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i}
+    return net + [i for i in (sidebar.sessions if sidebar is not None else []) if i["id"] not in theirs]
+
+
+class HostFolder:
+    """A folder on another host, as SearchSpace reads a Signal: its names (lookup.items) made there and fetched
+    (catalogue, wire.py), afresh once they're CATALOGUE_TTL old; catalogue_busy while they're on their way. One per host
+    and folder (on)."""
+
+    _instances = {}
+
+    @classmethod
+    def on(cls, remote, folder):
+        if (remote.key, folder) not in cls._instances:
+            cls._instances[(remote.key, folder)] = cls(remote, folder)
+        found = cls._instances[(remote.key, folder)]
+        found.remote = remote  # (rekeyed, reached again: the one there is now)
+        return found
+
+    def __init__(self, remote, folder):
+        self.remote, self.root = remote, folder
+        self.refs, self.catalogue, self.catalogue_at, self.catalogue_busy = {}, (), 0.0, False
+
+    def catalogue_soon(self):
+        if not self.catalogue_busy and time.time() - self.catalogue_at > CATALOGUE_TTL:
+            self.catalogue_busy = True
+            self.remote.request({"op": "catalogue", "cwd": self.root}, self._got)
+
+    # (what a list reads of an item, should a host send less: lookup.items')
+    DEFAULTS = {"canonical": "", "faint": False, "icon": "code", "what": "Name", "summary": "", "kind": "symbol"}
+
+    def _got(self, reply):
+        ok = reply.get("op") == "catalogue" and not reply.get("error") and isinstance(reply.get("items"), list)
+        if ok:
+            here = host_key(self.remote)  # (that host's: its paths are paths there)
+            self.catalogue = tuple(
+                {**self.DEFAULTS, **{k: v for k, v in it.items() if isinstance(v, type(self.DEFAULTS.get(k, v)))},
+                 "path": None, "line": None, "host": here}
+                for it in reply["items"] if isinstance(it, dict) and isinstance(it.get("surface"), str))
+        if ok and reply.get("busy"):  # (not all made yet: what there is listed, the rest waited for there)
+            return self.remote.request({"op": "catalogue", "cwd": self.root, "wait": True}, self._got)
+        # (the host not reached: asked again soon; anything else, an older host's error too, once it's old)
+        gone = reply.get("op") == "error" and reply.get("error") in GONE
+        self.catalogue_at = time.time() - (CATALOGUE_TTL - 5 if gone else 0)
+        self.catalogue_busy = False
+
+
+GONE = ("the server isn't there", "the server's gone", "the server didn't answer")  # (baudelib.client's)
+
+
+class HostSpace(lookup.SearchSpace):
+    """SearchSpace over a HostFolder: the items as they came."""
+
+    def make_items(self):
+        return list(self.source.catalogue)
+
+
 class MetaNames(lookup.SearchSpace):
-    """What @ lists in Meta's box: Baude's chats by their titles (the sidebar's), then the names the open chat's
-    folder has (the glossary's search: SearchSpace, of catalogue_signal)."""
+    """What @ lists in Meta's box and a chat's: every host's chats by their titles (all_chats), then the names the open
+    chat's folder has (the glossary's search: SearchSpace, of catalogue_signal; a chat on another host's, made there:
+    HostSpace). Those of the open chat's host come first, other hosts' chats after them."""
 
     def __init__(self, win):
         super().__init__(None, GLib.timeout_add)
-        self.win, self._chats, self._space = win, (None, []), None
+        self.win, self._chats, self._space = win, (None, None, []), None
+
+    def host(self):
+        return self.win.chat_host()
 
     def folder_space(self):
-        signal = self.win.catalogue_signal()
-        if signal is None:
+        win = self.win
+        if win.chat_host() != HERE_HOST:
+            folder = win.remote_folder()
+            source = HostFolder.on(win.remote, folder) if folder else None
+            make = HostSpace
+        else:
+            source, make = win.catalogue_signal(), SearchSpace
+        if source is None:
             return None
-        if self._space is None or self._space.source is not signal:
-            self._space = SearchSpace(signal)
+        if self._space is None or self._space.source is not source:
+            self._space = make(source)
         return self._space
 
     @property
@@ -9075,20 +9145,37 @@ class MetaNames(lookup.SearchSpace):
     def refresh(self, on_ready=None):
         return space.refresh(on_ready) if (space := self.folder_space()) is not None else None
 
+    def search(self, q, limit=None):
+        if isinstance(space := self.folder_space(), HostSpace):  # (the list up: another host's names asked for)
+            space.source.catalogue_soon()
+        return super().search(q, limit)
+
+    def later(self, item):
+        return item.get("host", self.host()) != self.host()
+
     def chat_items(self):
-        sessions = self.win.sidebar.sessions if getattr(self.win, "sidebar", None) is not None else []
-        if self._chats[0] is not sessions:
+        sidebar = getattr(self.win, "sidebar", None)
+        sessions = sidebar.sessions if sidebar is not None else None
+        net = tuple((x["id"], x["server"].key, x.get("title"), x.get("cwd"), x.get("said"), x.get("draft"))
+                    for x in network().sessions())
+        if self._chats[0] is not sessions or self._chats[1] != net:
             items = []
-            for info in sorted(sessions, key=last_used, reverse=True):
+            for info in sorted(all_chats(sidebar), key=last_used, reverse=True):
                 if not info.get("title"):
                     continue
-                at, where = last_used(info), pretty_path(info.get("folder") or info.get("cwd") or "") or "no folder"
+                r = info.get("remote")
+                host = host_key(r) if r is not None else HERE_HOST
+                folder = info.get("folder") or info.get("cwd") or ""
+                at = last_used(info)
+                where = (remote_path(folder, r) if r is not None else pretty_path(folder)) or "no folder"
+                if host != HERE_HOST:  # (another host's: by its name, as the status line says it)
+                    where = f"{remote_name(r)} · {where}"
                 items.append({"surface": info["title"], "canonical": "", "icon": "claude", "what": "Chat",
                               "kind": "chat", "at": at, "ago": (ago := time_ago(at)), "where": where,
                               "summary": f"{where} · {ago}", "path": info.get("path"), "id": info["id"], "line": None,
-                              "entry": None, "faint": False})
-            self._chats = (sessions, items)
-        return self._chats[1]
+                              "entry": None, "faint": False, "host": host})
+            self._chats = (sessions, net, items)
+        return self._chats[2]
 
     def items(self):
         space = self.folder_space()
@@ -9217,11 +9304,7 @@ class BaudeMeta(meta.MetaChat):
 
     # ---- chats
     def all_infos(self):
-        """Every chat Baude knows: this machine's own (the sidebar's), and the hosts' sessions."""
-        net = [remote_info(s) for s in network().sessions() if not s.get("draft")]  # (a new chat not written in yet)
-        theirs = {i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i}
-        sidebar = getattr(self.win, "sidebar", None)
-        return net + [i for i in (sidebar.sessions if sidebar is not None else []) if i["id"] not in theirs]
+        return all_chats(getattr(self.win, "sidebar", None))
 
     def find_chat(self, ref):
         ref = ref.strip().removeprefix("s:")

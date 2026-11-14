@@ -353,13 +353,13 @@ def transcript_text(path, limit=REF_LIMIT):
         text[-limit:]
 
 
-def earlier_said(messages, limit=EARLIER_LIMIT):
+def earlier_said(messages, limit=EARLIER_LIMIT, where=lambda m: ""):
     """What was said before this session (a new one: the app started again, another model), the newest as far back
-    as limit."""
+    as limit; where(m): what goes before a message's text (Record's: the notebook it was asked in)."""
     lines, size = [], 0
     for m in reversed([m for m in messages if not m.get("error")]):
         who = "User" if m.get("role") == "user" else NAME
-        body = m.get("text") or ""
+        body = where(m) + (m.get("text") or "")
         if m.get("quote"):
             body = f"[quoting] {m['quote'][:1500]} [/quoting]\n" + body
         for p in m.get("proposals") or ():
@@ -1883,12 +1883,16 @@ class MetaChat(Gtk.Box):
     def first_refs(self, items):
         return items
 
+    def said_where(self, m):
+        """What goes before a message's text in a new session's earlier conversation (earlier_said)."""
+        return ""
+
     def agent_setup(self):
         """{cwd, roots, exe, env_of} for its session."""
         return {"cwd": os.path.expanduser("~"), "roots": ()}
 
     def scope(self):
-        """What a session's for, besides its model and mode (Record's: the notebook and its folders)."""
+        """What a session's for, besides its model and mode (Record's: the folders it reads)."""
         return ()
 
     def app_prompt(self):
@@ -2818,7 +2822,7 @@ class MetaChat(Gtk.Box):
         self.save(now=True)
 
     def agent_made(self, agent):
-        """A session just started for the conversation (Record's: the notebook it's for, kept with it)."""
+        """A session just started for the conversation."""
 
     def can_ask_empty(self):
         return False
@@ -2841,7 +2845,7 @@ class MetaChat(Gtk.Box):
         parts = []
         if agent.fresh:
             parts.append(f"<app_index>\n{self.index_text()}\n</app_index>")
-            if earlier := earlier_said(self.messages()[:-1]):
+            if earlier := earlier_said(self.messages()[:-1], where=self.said_where):
                 parts.append(earlier)
         parts += self.since()
         parts += self.context(agent, msg)

@@ -4,7 +4,7 @@
 Each notebook is a glossary, kept as notes: wiki pages (Markdown, [[links]] between them, @name for a page, a notebook
 or anything Baude's ⌘K finds) of the things you already understand, in your own words. Meta, in the right bar, is
 the helper that operates Record (meta.py: Claude Code, run as `claude -p`, Haiku unless Settings → Meta says another),
-its conversation the notebook open's:
+one conversation for the window, whichever notebook's open:
   * it reads the notebook's pages and folders, and whatever's @-referenced in what you ask (a page, a notebook, a file,
     a chat: its text goes with your message), and remembers the conversation;
   * a passage selected on a page, or picked in a chat read, is quoted with what you ask: asked to fill it in or change
@@ -92,7 +92,7 @@ def noun(plural=False):
 
 
 def book(plural=False):
-    """What there's one of per subject (its notes, its conversation)."""
+    """What there's one of per subject (its notes)."""
     return "Notebook" + ("s" if plural else "")
 
 
@@ -5342,7 +5342,7 @@ class RecordChat(meta.MetaChat):
 
     def __init__(self, win):
         super().__init__(win)
-        self.notebook, self.quote, self.selection = None, "", None
+        self.notebook, self.quote, self.selection, self.drawn = None, "", None, False
         self.add_css_class("record-column")  # (the frame's: widgets.CSS)
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.apply_zoom)
         self._spans_seen = {}  # (a page's key: (its text before, now, where what was put in is): changed_spans)
@@ -5371,7 +5371,10 @@ class RecordChat(meta.MetaChat):
         if self.selection is not None and self.selection["notebook"] != (notebook or {}).get("id"):
             self.set_quote("")
         self.notebook = notebook
-        self.render()
+        if not self.drawn:
+            self.drawn = True
+            self.render()
+        self.show_pending_bar()
         self.marks_changed()  # (the notebooks' list, and the pages' and the pages open, as Meta's marks have them)
 
     # ---- what Meta.MetaChat asks of Record
@@ -5413,11 +5416,18 @@ class RecordChat(meta.MetaChat):
     def _on_open(self, fn):
         """A tool that works on the notebook open: with none open, why it can't."""
         def run(turn, args):
+            self._same_open(turn)
             if self.notebook is None:
                 raise ValueError(f"No {book().lower()} is open: add_page takes notebook, move_pages from_notebook "
                                  "and to_notebook, and add_notebook makes one.")
             return fn(turn, args)
         return run
+
+    def _same_open(self, turn):
+        """A tool that works on the notebook open, called in a turn asked with another open (or none): why not."""
+        if turn is not None and "notebook" in turn and turn["notebook"] is not self.notebook:
+            raise ValueError(f"The user opened another {book().lower()} (or closed it) since their message: nothing "
+                             "was done. Their next message says which is open.")
 
     def make_settings(self):
         win = self.win
@@ -5627,9 +5637,17 @@ class RecordChat(meta.MetaChat):
     def plain(self, text):
         return plain_refs(text)
 
+    def said_where(self, m):
+        """Where a user's message was asked, for a new session's earlier conversation: the notebook open then."""
+        if m.get("role") != "user" or "notebook" not in m:
+            return ""
+        nb = self._book(m["notebook"]) if m["notebook"] else None
+        return f"[in {full_name(nb)}] " if nb is not None else "[no notebook open] " if not m["notebook"] else ""
+
     def make_message(self, text):
         msg = super().make_message(text)
         notebook, space = self.notebook, self.space()
+        msg["notebook"] = notebook.get("id") if notebook is not None else None
         if msg.get("refs"):  # (each said as the catalogue says it)
             msg["refs"] = [{"surface": it["surface"], "what": what_it_is(it, space), "icon": it.get("icon")}
                            for it in self.referenced(text)]
@@ -5648,13 +5666,15 @@ class RecordChat(meta.MetaChat):
         return "What does this mean?"
 
     def before_ask(self):
+        if self.notebook is not None:
+            self.notebook.pop("fresh", None)  # (asked about: kept, Store.is_blank)
         self.win.store.flush()  # (the pages' files as they are: what it reads)
 
     def taken(self, msg):
         self.set_quote("")
 
     def turn_extra(self, msg):
-        return {"proposals": [], "selection": msg.get("selection")}
+        return {"proposals": [], "selection": msg.get("selection"), "notebook": self.notebook}
 
     def context(self, agent, msg):
         """The notebook open, with a new session's first message and once another's opened; what's become of the
@@ -5749,7 +5769,8 @@ class RecordChat(meta.MetaChat):
             outer.bubble = b
             return outer
         outer = super()._bubble(m)
-        if m["role"] != "user" and m.get("unknown") and self.notebook is not None:  # (chips add to its Home)
+        if m["role"] != "user" and m.get("unknown") and self.notebook is not None and \
+                m.get("notebook", self.notebook.get("id")) == self.notebook.get("id"):  # (chips add to its Home)
             outer.bubble.append(self._unknown_chips(m))
         return outer
 
@@ -5761,6 +5782,8 @@ class RecordChat(meta.MetaChat):
         return super().worked(turn) or bool(turn.get("proposals") or turn.get("revised") or turn.get("withdrew"))
 
     def finish(self, m, turn):
+        if turn.get("notebook") is not None:
+            m["notebook"] = turn["notebook"].get("id")
         m["text"], m["unknown"] = split_unknown(m["text"])
         if m["unknown"] and (texts := [it for it in m.get("items") or () if it["kind"] == "text"]):
             texts[-1]["text"] = split_unknown(texts[-1]["text"])[0]  # (its last part ended with the line)
@@ -6071,6 +6094,8 @@ class RecordChat(meta.MetaChat):
                 else:
                     books[b]["pages"][p] = text
         here = self.notebook is not None and data.get("in", self.notebook.get("id")) == self.notebook.get("id")
+        if not here and data.get("moved") and (nb := books.get(data.get("in"))) is not None:
+            self.follow_moves(nb, data["moved"])
         self.pages_changed(data.get("moved") or {} if here else {})
 
     def apply_notebook(self, data):
@@ -6096,9 +6121,8 @@ class RecordChat(meta.MetaChat):
         """The notebook open's pages changed under its tabs: those moved go with their pages (Window.note_renamed),
         and so do the edits waiting on them; those gone are closed; the rest shown again; the list again."""
         win, nb = self.win, self.notebook
-        for p in self.pending(nb) if nb is not None else ():
-            if p["page"] in moved:
-                p["page"] = moved[p["page"]]
+        if nb is not None:
+            self.follow_moves(nb, moved)
         win.store.save()
         if moved:
             win.note_renamed(moved)
@@ -6110,6 +6134,12 @@ class RecordChat(meta.MetaChat):
                     child.reload()
         win.pages.fill()
 
+    def follow_moves(self, notebook, moved):
+        """A notebook's pages moved ({old name: new}): the edits waiting on them go with them."""
+        for p in self.pending(notebook):
+            if p["page"] in moved:
+                p["page"] = moved[p["page"]]
+
     def _named_page(self, name, notebook=None):
         notebook = notebook or self.notebook
         page = page_named(notebook, str(name or ""), self.win.store)
@@ -6118,7 +6148,7 @@ class RecordChat(meta.MetaChat):
         return page
 
     def add_page(self, turn, args):
-        nb, name = self._notebook_named(args.get("notebook"), True, "notebook"), page_name(args.get("page"))
+        nb, name = self._notebook_named(args.get("notebook"), True, "notebook", turn), page_name(args.get("page"))
         if not name:
             raise ValueError("A page's name is needed.")
         if nb["pages"].get(name, "").strip():
@@ -6145,10 +6175,13 @@ class RecordChat(meta.MetaChat):
         self.pages_changed({})
         return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
 
-    def _notebook_named(self, name, open_one, said="from_notebook, to_notebook"):
-        """The notebook a tool's call names (its name, any case); not named, the one open, if open_one."""
+    def _notebook_named(self, name, open_one, said="from_notebook, to_notebook", turn=None):
+        """The notebook a tool's call names (its name, any case); not named, the one open, if open_one (and it's the
+        one turn was asked with)."""
         name = base_name(str(name or ""))
         if not name:
+            if open_one:
+                self._same_open(turn)
             if open_one and self.notebook is not None:
                 return self.notebook
             raise ValueError(f"No {book().lower()} is open: say which ({said}).")
@@ -6159,8 +6192,8 @@ class RecordChat(meta.MetaChat):
 
     def move_pages(self, turn, args):
         under = page_name(args.get("under"))
-        src = self._notebook_named(args.get("from_notebook"), True)
-        nb = self._notebook_named(args.get("to_notebook"), True)
+        src = self._notebook_named(args.get("from_notebook"), True, turn=turn)
+        nb = self._notebook_named(args.get("to_notebook"), True, turn=turn)
         names = [self._named_page(p, src) for p in args.get("pages") or ()]
         if not names:
             raise ValueError("Which pages? pages is empty.")
@@ -6194,6 +6227,8 @@ class RecordChat(meta.MetaChat):
                       page_key(nb, old)) for old, new in moved.items() if old in was]
             a = self._pages_act(turn, said + (f" in {full_name(nb)}" if nb is not self.notebook else ""), before,
                                 moved, marks, moved_in=nb)
+            if nb is not self.notebook:
+                self.follow_moves(nb, moved)
             self.pages_changed(moved if nb is self.notebook else {})
         else:
             before = {src["id"]: {old: src["pages"].get(old) for old in moved},

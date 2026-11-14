@@ -1115,8 +1115,9 @@ class Server:
                 return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "success", "request_id": rid,
                     "response": {"rewound": False, "error": "that message isn't in this chat's record"}}}})
-            s.rewinds[on], index = found
-            msg = {**msg, "request": {**request, "baude_prompt_index": index}}
+            s.rewinds[on], index, count, before = found
+            msg = {**msg, "request": {**request, "baude_prompt_index": index, "baude_prompt_count": count,
+                                      "baude_kept": before}}  # (Apple's, its session made again from them)
         s.routes[on] = (conn, rid, undo)
         proc.send({**msg, "request_id": on})
         self.changed()
@@ -1333,6 +1334,7 @@ class Server:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
             s.asks.clear()
+            s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()
             s.agents = None  # (what its subagents wrote as it went: looked at again)
             s.note_written()  # (exited: all it's written is there)

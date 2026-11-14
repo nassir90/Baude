@@ -332,7 +332,8 @@ def rewind_mark(line):
 def rewind_target(path, target):
     """For a revert of the message of yours with this uuid, in a transcript Baude's server keeps (pi's and Apple's
     chats: records in the order said, earlier reverts marked): (the uuid of the record it keeps last, None for none;
-    which of the messages of yours still in the conversation it is, from 0), or None if it isn't there."""
+    which of the messages of yours still in the conversation it is, from 0; how many there are; what's kept before
+    it, [{"role", "text"}]), or None if it isn't there."""
     kept = []
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -355,8 +356,19 @@ def rewind_target(path, target):
         return None
     for i, rec in enumerate(kept):
         if rec.get("uuid") == target and _is_prompt(rec):
-            return (kept[i - 1].get("uuid") if i else None), sum(1 for r in kept[:i] if _is_prompt(r))
+            before = [{"role": r["type"], "text": t} for r in kept[:i]
+                      if (r["type"] == "assistant" or _is_prompt(r)) and (t := _prose(r))]
+            return (kept[i - 1].get("uuid") if i else None), sum(1 for r in kept[:i] if _is_prompt(r)), \
+                sum(1 for r in kept if _is_prompt(r)), before
     return None
+
+
+def _prose(rec):
+    """A record's words: its text blocks, joined."""
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return content
+    return "\n".join(c.get("text") or "" for c in content or () if isinstance(c, dict) and c.get("type") == "text")
 
 
 def line_of_uuid(path, uuid, before):

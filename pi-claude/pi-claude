@@ -571,8 +571,6 @@ class Engine:
             self.turn["error"] = self.failed
             self.end_turn()
             return
-        if uuid:  # (kept on the message as pi saves it: what a revert names, revert.ts)
-            self.send({"type": "prompt", "message": f"/baude-uuid {uuid}"})
         cmd = {"type": "prompt", "message": text}
         if images:
             cmd["images"] = images
@@ -583,16 +581,21 @@ class Engine:
             if not r.get("success") and self.turn:
                 self.turn["error"] = r.get("error") or "pi didn't take the message"
                 self.end_turn()
-        self.send(cmd, accepted)
+        if uuid:  # (kept on the message as pi saves it, matched by its text: what a revert names, revert.ts; the
+            # message sent once pi's taken it)
+            self.send({"type": "prompt", "message": "/baude-uuid " + json.dumps({"uuid": uuid, "text": text})},
+                      lambda _r: self.send(cmd, accepted))
+        else:
+            self.send(cmd, accepted)
 
     REWIND = object()
 
-    def rewind(self, rid, uuid, index):
+    def rewind(self, rid, uuid, index, count=None):
         """rewind_conversation, as claude's: pi's session moved back to before the message of yours with this uuid (or
         the index-th of yours, for one saved before revert.ts), a turn at it stopped and what was to follow dropped.
         Answered once revert.ts says it's done: {"rewound": true}, else why not."""
         if not self.ready.is_set():  # (not started yet: pi's taken the session up first)
-            self.queue.append((Engine.REWIND, rid, uuid, index))
+            self.queue.append((Engine.REWIND, rid, uuid, index, count))
             self.start()
             return
         if self.failed or self.pi is None:
@@ -600,7 +603,8 @@ class Engine:
         self.deny_all("The user reverted this")
         self.rewinds[uuid] = rid
         self.send({"type": "clear_queue"})
-        self.send({"type": "prompt", "message": "/baude-rewind " + json.dumps({"uuid": uuid, "index": index})})
+        self.send({"type": "prompt", "message": "/baude-rewind " + json.dumps({"uuid": uuid, "index": index,
+                                                                         "count": count})})
 
     def rewound(self, said):
         rid = self.rewinds.pop(said.get("uuid"), None)
@@ -815,7 +819,8 @@ def handle(msg):
             emit({"type": "system", "subtype": "status", "status": None, "permissionMode": mode,
                   "session_id": session_id})
         elif sub == "rewind_conversation" and keep_session:
-            engine.rewind(rid, req.get("target_message_uuid"), req.get("baude_prompt_index"))
+            engine.rewind(rid, req.get("target_message_uuid"), req.get("baude_prompt_index"),
+                          req.get("baude_prompt_count"))
         elif sub == "interrupt":
             engine.deny_all("Interrupted by the user")
             if engine.ready.is_set() and not engine.failed:

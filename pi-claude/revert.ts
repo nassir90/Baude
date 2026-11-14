@@ -1,24 +1,36 @@
 // A pi extension: what lets Baude revert a message of yours in a pi chat, as claude's rewind_conversation does.
-// pi-claude says each message's uuid (Baude's) with /baude-uuid just before it sends the message; the uuid is kept on
-// the message as pi saves it (baudeUuid: a field the model's API never sees). /baude-rewind {"uuid", "index"} moves
+// pi-claude says each message's uuid (Baude's) and text with /baude-uuid, and sends the message once that's taken; the
+// uuid is kept on the user message of that text as pi saves it (baudeUuid: a field the model's API never sees; one
+// pi never took is passed over by the next that's saved). /baude-rewind {"uuid", "index"} moves
 // pi's session back to before that message (navigateTree: the session file is only appended to, the dropped turns
 // left on a branch nobody follows), so what the model sees from then on is what comes before it. A message saved
-// before this extension (no baudeUuid) is found by index instead: which of the branch's messages of yours it is.
+// before this extension (no baudeUuid) is found by index instead (which of the branch's messages of yours it is), only
+// while the branch has as many as Baude's record (count): else they don't line up, and it's refused.
 // It answers with a notice, {"baude": "rewound", "uuid", "ok", "why"}.
 export default function (pi: any) {
-	let waiting: string[] = [];
+	let waiting: { uuid: string; text: string }[] = [];
+	const text = (m: any) =>
+		typeof m.content === "string" ? m.content
+			: (m.content || []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n");
 
 	pi.registerCommand("baude-uuid", {
 		description: "Baude: the uuid of the message about to be sent",
 		handler: async (args: string) => {
-			if (args.trim()) waiting.push(args.trim());
+			try {
+				const said = JSON.parse(args);
+				if (said?.uuid) waiting.push({ uuid: said.uuid, text: said.text ?? "" });
+			} catch {}
 		},
 	});
 
 	pi.on("message_end", async (event: any) => {
 		const m = event.message;
-		if (m?.role !== "user" || m.baudeUuid || !waiting.length) return undefined;
-		return { message: { ...m, baudeUuid: waiting.shift() } };
+		if (m?.role !== "user" || m.baudeUuid) return undefined;
+		const at = waiting.findIndex((w) => w.text === text(m));
+		if (at < 0) return undefined;
+		const uuid = waiting[at].uuid;
+		waiting = waiting.slice(at + 1);
+		return { message: { ...m, baudeUuid: uuid } };
 	});
 
 	pi.registerCommand("baude-rewind", {
@@ -40,7 +52,7 @@ export default function (pi: any) {
 					.getBranch()
 					.filter((e: any) => e.type === "message" && e.message?.role === "user");
 				let target = mine.find((e: any) => ask.uuid && e.message.baudeUuid === ask.uuid);
-				if (!target && Number.isInteger(ask.index) && ask.index >= 0 && ask.index < mine.length
+				if (!target && Number.isInteger(ask.index) && ask.index >= 0 && ask.count === mine.length
 					&& !mine[ask.index].message.baudeUuid) target = mine[ask.index];
 				if (!target) return answer(false, "pi has no record of that message");
 				const r = await ctx.navigateTree(target.id, { summarize: false });

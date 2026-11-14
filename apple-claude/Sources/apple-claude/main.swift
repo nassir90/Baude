@@ -202,7 +202,8 @@ final class Agent: @unchecked Sendable {
             case "rewind_conversation":
                 let id = msg["request_id"] ?? ""
                 let target = request["target_message_uuid"] as? String
-                Task { await self.rewind(to: target, requestID: id) }
+                let kept = request["baude_kept"] as? [[String: Any]]
+                Task { await self.rewind(to: target, kept: kept, requestID: id) }
                 return
             default: break
             }
@@ -317,16 +318,16 @@ final class Agent: @unchecked Sendable {
     }
 
     /// A revert (rewind_conversation): a turn at it stopped, and the session made again from its transcript up to where
-    /// that message began. One from before this session (the program started again, or the context filled) leaves it
-    /// none of what it has: all of that came after it.
-    func rewind(to target: String?, requestID: Any) async {
+    /// that message began. One from before this session (the program started again, or the context filled) isn't in
+    /// it: the session's made from kept instead, what Baude's record has before it (the server's: baude_kept).
+    func rewind(to target: String?, kept: [[String: Any]]?, requestID: Any) async {
         let t = lock.withLock { () -> Task<Void, Never>? in generation += 1; return task }
         if t != nil {
             interrupt()
             await t?.value
         }
         let tools = await tools()
-        lock.withLock {
+        let made = lock.withLock { () -> Bool in
             let place = target.flatMap { places[$0] }
             if let session, let place, place.session == ObjectIdentifier(session) {
                 let kept = Array(session.transcript.prefix(place.at))
@@ -335,13 +336,27 @@ final class Agent: @unchecked Sendable {
                 let id = ObjectIdentifier(s)
                 places = places.filter { $0.value.session == ObjectIdentifier(session) && $0.value.at < place.at }
                     .mapValues { (id, $0.at) }
-            } else {
-                session = nil
+                return true
+            } else if let kept {
+                var entries = [Transcript.Entry.instructions(Transcript.Instructions(
+                    segments: [.text(Transcript.TextSegment(content: flag("--system-prompt") ?? Agent.instructions))],
+                    toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }))]
+                for item in kept {
+                    let text = item["text"] as? String ?? ""
+                    let segment = Transcript.Segment.text(Transcript.TextSegment(content: text))
+                    entries.append(item["role"] as? String == "assistant"
+                                   ? .response(Transcript.Response(assetIDs: [], segments: [segment]))
+                                   : .prompt(Transcript.Prompt(segments: [segment])))
+                }
+                session = LanguageModelSession(tools: tools, transcript: Transcript(entries: entries))
                 places = [:]
+                return true
             }
+            return false
         }
         emit(["type": "control_response", "response": ["subtype": "success", "request_id": requestID,
-                                                       "response": ["rewound": true]] as [String: Any]])
+              "response": (made ? ["rewound": true] : ["rewound": false, "error": "Apple's model has no record of that message"])
+                as [String: Any]] as [String: Any]])
     }
 
     func currentSession() async -> LanguageModelSession {

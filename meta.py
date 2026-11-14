@@ -687,17 +687,22 @@ def provider_picked(chat, pid):
     sync_rows()
 
 
-def model_row(chat):
+def model_row(chat, beside_provider=False):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then the
-    provider's (provider_row). Its sync() lists them as they are now (sync_rows)."""
+    provider's (provider_row). Its sync() lists them as they are now (sync_rows). beside_provider: under the Provider
+    row, which names the provider, so its models are listed without it (Qwen3 4B, not Qwen3 4B (MLX))."""
     row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
     state = {"values": [], "syncing": False}
 
     def sync():
-        offered = listed_models()
+        every = models()
+        offered = listed_models(every)
         entry = model_entry(model(), offered)
+        pid = provider(every) if beside_provider and providerslib.has_runtime(entry[3] if entry else None) else None
+        host, name = providerslib.where(pid) if pid else (None, None)
         state["values"], state["syncing"] = [m[0] for m in offered], True
-        row.set_model(Gtk.StringList.new([m[1] for m in offered]))
+        row.set_model(Gtk.StringList.new([providerslib.bare_name(m[1], name, host) if pid and m[3] == pid else m[1]
+                                          for m in offered]))
         row.set_selected(offered.index(entry) if entry else 0)
         state["syncing"] = False
 
@@ -786,7 +791,7 @@ def settings_group(chat):
     this machine's providers as they're found (Ollama started, a model pulled)."""
     group = Adw.PreferencesGroup(title=NAME)
     group.add(provider_row(chat))
-    group.add(model_row(chat))
+    group.add(model_row(chat, beside_provider=True))
     group.add(effort_row(chat))
     group.add(code_mode_row(chat))
     return group

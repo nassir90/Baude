@@ -9996,7 +9996,8 @@ class SidePanel(Gtk.Box):
             row.add_suffix(row.stop)
             card = self.win.tool_cards.get(task.get("tool_use_id"))
             cmd = card.input.get("command") if card is not None else None
-            body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)  # (its blocks fill the row: widgets.CSS)
+            body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                           margin_start=12, margin_end=12, margin_top=10, margin_bottom=12)
             if cmd:
                 body.append(CodeBlock(cmd, "bash"))
             row.output = CodeBlock("(no output yet)", "output")

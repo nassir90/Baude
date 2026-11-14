@@ -6222,16 +6222,11 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .side-panel .baude-inside .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
                                     mix(@baude_inside, @view_fg_color, 0.06) 14px); }
-.side-panel list.nested .codeblock .code-corner { border-radius: 0;
+.side-panel list.nested .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(@baude_raised, 0), @baude_raised 14px),
     linear-gradient(to right, transparent, color-mix(in srgb, var(--card-shade-color) 50%, transparent) 14px),
     linear-gradient(to right, alpha(@card_bg_color, 0), @card_bg_color 14px),
     linear-gradient(to right, alpha(@baude_frame, 0), @baude_frame 14px); }
-/* an open Processes row is its command's and output's blocks, edge to edge: square, but for the last row's
-   bottom corners, which are the list's (inside its 1px edge) */
-.side-panel list.nested .codeblock { border-radius: 0; }
-.side-panel list.boxed-list > row.expander:last-child list.nested .codeblock:last-child {
-  border-radius: 0 0 11px 11px; }
 /* a wrapped block's lines can't be scrolled out from under them: they show while the pointer's on it */
 .codeblock.wrapped .code-corner { opacity: 0; transition: opacity 150ms; }
 .codeblock.wrapped:hover .code-corner, .codeblock.wrapped .code-corner:focus-within { opacity: 1; }

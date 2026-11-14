@@ -12845,7 +12845,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.blocks, self.streamed_ids = {}, set()
         self.waiting_cards.clear()
         self.turn_finished = False
-        if p.mode in self.mode_dd.values:  # (the mode it's running in, not the read-only one a chat opens in)
+        if p.mode in self.mode_dd.values:  # (the mode it's running in, not the one a chat opens in)
             self.mode = p.mode
             self.mode_dd.select(p.mode)
         self.set_busy(True)

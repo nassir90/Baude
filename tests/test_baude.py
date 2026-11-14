@@ -414,12 +414,13 @@ def test_model_and_mode_pickers(app):
         labels = lambda dd: [dd.strings.get_string(i) for i in range(dd.strings.get_n_items())]
         assert labels(win.model_dd) == ["Opus 5.5", "Sonnet 5.5", "Haiku 4.5"], labels(win.model_dd)
         assert win.model_dd.label() == "Opus 5.5", "CLI default should show as the model it resolves to"
-        assert win.mode_dd.label() == "Plan", "a chat starts read-only"
+        assert win.mode_dd.label() == "Auto", "a chat starts in Auto"
         assert "Auto" in labels(win.mode_dd), labels(win.mode_dd)
         assert not any("default" in l.lower() for l in labels(win.model_dd) + labels(win.mode_dd))
         start = [l for l in fake_log() if l.startswith("START")][-1]
-        assert "--model" not in start and '"--permission-mode", "plan"' in start, start
+        assert "--model" not in start and '"--permission-mode", "auto"' in start, start
 
+        win.mode_dd.set_selected(win.mode_dd.values.index("acceptEdits"))
         win.mode_dd.set_selected(win.mode_dd.values.index("auto"))
         win.model_dd.set_selected(win.model_dd.values.index("sonnet"))
         wait_for(lambda: any('"set_permission_mode"' in l and '"auto"' in l for l in fake_log()), "mode sent")
@@ -444,14 +445,13 @@ def test_model_and_mode_pickers(app):
         start = [l for l in fake_log() if l.startswith("START")][-1]
         assert '"--permission-mode", "plan"' in start and '"--model", "sonnet"' in start, start
         wait_for(lambda: win.model_dd.label() == "Sonnet 5.5" and win.mode_dd.label() == "Plan", "re-sync")
-        # a chat opened next starts in Plan again, whatever this one was left in
-        win.mode_dd.set_selected(win.mode_dd.values.index("auto"))
-        assert win.mode == "auto"
+        # a chat opened next starts in Auto again, whatever this one was left in
+        assert win.mode == "plan"
         starts = sum(l.startswith("START") for l in fake_log())
         win.new_session()
-        assert win.mode == "plan" and win.mode_dd.label() == "Plan"
+        assert win.mode == "auto" and win.mode_dd.label() == "Auto"
         wait_for(lambda: sum(l.startswith("START") for l in fake_log()) > starts, "the new chat's process")
-        assert '"--permission-mode", "plan"' in [l for l in fake_log() if l.startswith("START")][-1]
+        assert '"--permission-mode", "auto"' in [l for l in fake_log() if l.startswith("START")][-1]
     finally:
         close(win)
 

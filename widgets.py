@@ -6531,15 +6531,15 @@ def load_css():
 
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a
-# side) and its arrow's room; picom (compton, xcompmgr) puts a shadow of its own round the whole window, a larger
-# rectangle round the box. There they're drawn as libadwaita draws them with no compositor (its .solid-csd look): no
+# side) and its arrow's room; picom (or compton, or xcompmgr -c) puts a shadow of its own round the whole window, a
+# larger rectangle round the box. There they're drawn as libadwaita draws them with no compositor (its .solid-csd look): no
 # shadow, square corners, an edge, no arrow, so the window is the box and picom's shadow is the popover's.
 SHADOWING_COMPOSITORS = ("picom", "compton", "xcompmgr")
 FLAT_POPOVER_CSS = """
-popover.background { background: @popover_bg_color; color: @popover_fg_color; border: 1px solid alpha(currentColor, 0.15); }
+popover.background:not(.touch-selection):not(.magnifier) { background: @popover_bg_color; color: @popover_fg_color; border: 1px solid alpha(currentColor, 0.15); }
 popover > contents, popover > arrow { box-shadow: none; border-radius: 0; background-clip: border-box; border: none; }
 """
-_flat = {"display": None, "provider": None, "on": False, "hook": None}
+_flat = {"display": None, "provider": None, "on": False, "hook": None, "arrowless": weakref.WeakSet()}
 
 
 def shadowing_compositor():
@@ -6567,8 +6567,9 @@ def flat_popovers(display):
     _flat["provider"].load_from_string(FLAT_POPOVER_CSS)
 
     def realized(widget, *_):
-        if _flat["on"] and isinstance(widget, Gtk.Popover):
+        if _flat["on"] and isinstance(widget, Gtk.Popover) and widget.get_has_arrow():
             widget.set_has_arrow(False)
+            _flat["arrowless"].add(widget)  # (its arrow back if picom goes)
         return True
 
     def update(*_):
@@ -6583,6 +6584,9 @@ def flat_popovers(display):
                 _flat["hook"] = GObject.add_emission_hook(Gtk.Widget, "realize", realized)
         else:
             Gtk.StyleContext.remove_provider_for_display(display, _flat["provider"])
+            for pop in list(_flat["arrowless"]):
+                pop.set_has_arrow(True)
+            _flat["arrowless"].clear()
 
     display.connect("notify::composited", update)
     update()

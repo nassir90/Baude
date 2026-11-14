@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(HERE))  # (baudelib, beside pi-claude/: where
 from baudelib import providers  # noqa: E402
 HOME = os.path.expanduser("~/.local/share/baude/pi")
 PI = os.environ.get("BAUDE_PI") or os.path.join(HOME, "node_modules", ".bin", "pi")
-MODELS = {m["value"]: m for m in providers.modelslib.mlx_list()}  # (models.json's, and those settings.json adds)
+MODELS = {m["value"]: m for m in providers.modelslib.mlx_list()}  # (models.json's, settings.json's, those found)
 CONTEXT = 32768  # (the window pi is told: these models take more, but not in 16 GB beside everything else)
 MAX_OUT = 4096
 MAX_OUT_THINKING = 16384  # (thinking and answer share it: pi's high budget, less 1024 for the answer)
@@ -256,7 +256,7 @@ class Gate:
 
 
 def mlx_vlm_server():
-    return which("mlx_vlm.server", os.path.expanduser("~/.local/bin/mlx_vlm.server"))
+    return providers.modelslib.mlx_server()
 
 
 def serve():

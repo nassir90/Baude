@@ -14,7 +14,6 @@ A model's value says its provider: "apple", an MLX one's own (mlx-qwen3-4b), "ol
 
 What's found is kept MAX_AGE seconds and looked for again on a thread of its own (found), so a window asking never
 waits on a server that doesn't answer; listen(fn) hears when it changes."""
-import glob
 import json
 import os
 import platform
@@ -464,8 +463,7 @@ def endpoint(ep, timeout=TIMEOUT):
 # ---- this machine's providers
 
 def pi_installed():
-    pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
-    return os.access(pi, os.X_OK)
+    return os.access(modelslib.pi_path(), os.X_OK)
 
 
 def look_here():
@@ -475,8 +473,9 @@ def look_here():
         out.append({"id": "apple", "name": "Apple", "models": [modelslib.APPLE_MODEL | {"provider": "apple",
                                                                                          "providerName": "Apple"}],
                     "error": None if modelslib.apple_exe() else "apple-claude isn't built"})
-    mlx = [m | {"provider": "mlx", "providerName": "MLX"} for m in modelslib.local_models()]
-    out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": None if pi_installed() else "pi isn't installed"})
+    missing = modelslib.mlx_missing()  # (its models listed even so, with what they need: they're not to pick till then)
+    mlx = [m | {"provider": "mlx", "providerName": "MLX"} for m in modelslib.downloaded_models()]
+    out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": "; ".join(missing) or None, "needs": missing})
     return out
 
 
@@ -675,61 +674,12 @@ def ollama_delete(name):
     fetch(ollama_url() + "/api/delete", {"model": name}, method="DELETE")
 
 
-def talks(snap):
-    """Whether a downloaded model is one to talk to: it has a chat template (a speech or embedding model hasn't)."""
-    if glob.glob(os.path.join(snap, "chat_template.*")):
-        return True
-    try:
-        with open(os.path.join(snap, "tokenizer_config.json")) as f:
-            return bool(json.load(f).get("chat_template"))
-    except (OSError, ValueError, AttributeError):
-        return False
-
-
 def mlx_downloaded():
-    """MLX models to talk to in the Hugging Face cache (modelslib.hf_hub), their weights there in full: [{"repo", "size"
-    (bytes), "vision", "added" (pi-claude knows it: mlx_list)}]. An MLX model's config says how it's quantized, or its
-    repo's name says MLX; one to talk to has a chat template (talks). Its snapshot is the one refs/main names, else the
-    newest."""
-    hub, out = modelslib.hf_hub(), []
-    known = {m["repo"] for m in modelslib.mlx_list()}
-    for d in sorted(os.listdir(hub)) if os.path.isdir(hub) else []:
-        if not d.startswith("models--") or "--" not in d[len("models--"):]:
-            continue
-        try:
-            found = one_downloaded(os.path.join(hub, d), d[len("models--"):].replace("--", "/", 1), known)
-        except (OSError, ValueError):  # (changing as it's looked at: left out this time)
-            continue
-        if found is not None:
-            out.append(found)
-    return out
-
-
-def one_downloaded(path, repo, known):
-    """mlx_downloaded's entry for one repo's folder in the cache, or None."""
-    try:
-        with open(os.path.join(path, "refs", "main")) as f:
-            snap = os.path.join(path, "snapshots", f.read().strip())
-    except OSError:
-        snaps = [p for p in glob.glob(os.path.join(path, "snapshots", "*")) if os.path.isdir(p)]
-        snap = max(snaps, key=os.path.getmtime) if snaps else None
-    if snap is None or not os.path.isdir(snap):
-        return None
-    with open(os.path.join(snap, "config.json")) as f:
-        config = json.load(f)
-    if not isinstance(config, dict) or not ("quantization" in config or "mlx" in repo.lower()) or not talks(snap):
-        return None
-    weights = [w for w in glob.glob(os.path.join(snap, "*.safetensors")) if os.path.exists(w)]
-    try:
-        with open(os.path.join(snap, "model.safetensors.index.json")) as f:
-            shards = set((json.load(f).get("weight_map") or {}).values())
-    except (OSError, ValueError, AttributeError):
-        shards = set()
-    have = {os.path.basename(w) for w in weights}
-    if not have or not shards <= have:  # (none, or some still downloading)
-        return None
-    return {"repo": repo, "size": sum(os.path.getsize(w) for w in weights), "vision": "vision_config" in config,
-            "added": repo in known}
+    """MLX models to talk to downloaded here (modelslib.downloaded: the Hugging Face cache, LM Studio's folders,
+    settings.json's mlx_dirs), their weights there in full: [{"repo", "name", "size" (bytes), "vision", "where",
+    "added" (models.json or settings.json names it: else it's listed as found, modelslib.mlx_found)}]."""
+    named = {m["repo"] for m in modelslib.MLX_OWN + modelslib.mlx_added()}
+    return [m | {"added": m["repo"] in named} for m in modelslib.downloaded()]
 
 
 APPLE_NEEDS = (26, 4)  # (the macOS apple-claude/Package.swift says it needs: FoundationModels' tools)

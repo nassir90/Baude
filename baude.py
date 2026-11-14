@@ -8953,6 +8953,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
         self.scroll.set_propagate_natural_height(True)
         self.scroll.set_vexpand(False)
+        self.scroll.set_visible(self.answer is not None)  # (nothing over its box till something's asked)
         self.inside.set_vexpand(False)
         self.inside.set_margin_start(widgets.INSIDE_GAP)
         box = self._box_scroll()
@@ -8960,6 +8961,7 @@ class SideQuestion(Gtk.ListBoxRow):
         # (no scrollbar: a shown one's least length would keep it two lines tall; still scrolled, past nine)
         box.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
         self._slim(True)
+        self.comp.set_margin_bottom(10)
         self.foot.set_visible(False)
         self.reveal.set_child(self.inside)
 
@@ -8969,12 +8971,14 @@ class SideQuestion(Gtk.ListBoxRow):
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroll.set_propagate_natural_height(False)
         self.scroll.set_vexpand(True)
+        self.scroll.set_visible(True)  # (asked or not: the page over its box, the box at its foot, as Meta's)
         self.inside.set_vexpand(True)
         self.inside.set_margin_start(0)  # (as a subagent's square: none on the main chat's side, its gap's the one)
         box = self._box_scroll()
         box.set_min_content_height(56)  # (Composer's own)
         box.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._slim(False)
+        self.comp.set_margin_bottom(0)  # (as Meta's: its box as far up from the page's foot as Meta's and the chat's)
         self.foot.set_visible(True)
         return self.inside
 

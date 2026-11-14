@@ -228,9 +228,10 @@ class RefIcon(Gtk.Widget):
 
 class PickList:
     """A list to pick from as you type, the focus left in the text: Record's @ and # in its notes, Baude's / in its
-    composer. A row's a logo (RefIcon), a name and a dimmed line about it; under them, how many there are. Rows are made
-    as they're shown (a folder has thousands): bind(i, icon, name, about) says what row i is. ↑ ↓ Page Up and Page Down
-    move in it (move); Enter or Tab, and a click, take what's picked (the caller's on_pick)."""
+    composer. A row's a logo (RefIcon), a name and a dimmed line about it; under them, how many there are, at the right,
+    and at the left, dots while more are on their way. Rows are made as they're shown (a folder has thousands): bind(i,
+    icon, name, about) says what row i is. ↑ ↓ Page Up and Page Down move in it (move); Enter or Tab, and a click, take
+    what's picked (the caller's on_pick)."""
 
     WIDTH, HEIGHT = 520, 360  # px: past that height it scrolls
     STEPS = {Gdk.KEY_Up: -1, Gdk.KEY_Down: 1, Gdk.KEY_Page_Up: -10, Gdk.KEY_Page_Down: 10}
@@ -251,9 +252,14 @@ class PickList:
         self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                          propagate_natural_height=True, max_content_height=self.HEIGHT,
                                          width_request=self.WIDTH)
-        self.note = Gtk.Label(xalign=0, css_classes=["dim-label", "caption"])
+        self.note = Gtk.Label(xalign=1, hexpand=True, css_classes=["dim-label", "caption"])
+        self.dots = WorkingDots()  # (more names on their way: they're listed as they come)
+        self.dots.add_css_class("dim-label")
+        foot = Gtk.Box(spacing=6, margin_start=4, margin_end=4)
+        foot.append(self.dots)
+        foot.append(self.note)
         box.append(self.scroll)
-        box.append(self.note)
+        box.append(foot)
         self.pop.set_child(box)
         self.pop.set_parent(parent)
         # (the pointer picks a row only once it's moved over the list: resting where the list came up as you typed, it
@@ -289,9 +295,9 @@ class PickList:
         self.bind(int(li.get_item().get_string()), icon, name, name.get_next_sibling())
         icon.queue_draw()
 
-    def show(self, n, at, note, pointing_to=None):
-        """n rows, row at picked (None: none), note under them; up, if it wasn't, pointing at pointing_to (a
-        Gdk.Rectangle in the parent's coordinates)."""
+    def show(self, n, at, note, pointing_to=None, coming=False):
+        """n rows, row at picked (None: none), note under them at the right (how many); coming: more on their way, the
+        dots at the left; up, if it wasn't, pointing at pointing_to (a Gdk.Rectangle in the parent's coordinates)."""
         self.model.splice(0, self.model.get_n_items(), [str(i) for i in range(n)])
         self.list.set_can_target(False)  # (other rows under the pointer: none of them picked till it moves again)
         self.rest = None
@@ -304,6 +310,7 @@ class PickList:
             self.list.scroll_to(at or 0, Gtk.ListScrollFlags.NONE, None)
         self.scroll.set_visible(bool(n))
         self.note.set_text(note)
+        self.dots.set_working(coming)
         if pointing_to is not None:
             self.pop.set_pointing_to(pointing_to)
         if not self.pop.get_visible():

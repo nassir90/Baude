@@ -2434,12 +2434,16 @@ class SearchSpace:
         return self._by
 
     def search(self, q, limit=None):
-        """The items matching what's typed, best first (a place's older version last), at most limit; and how many
-        matched."""
+        """The items matching what's typed, best first (a place's older version last, and those later says), at most
+        limit; and how many matched."""
         q = q.strip().lower()
         ranked = sorted(((rank, it) for it in self.items() if (rank := ref_palette_rank(it, q)) is not None),
-                        key=lambda x: (x[1]["faint"], x[0], x[1]["surface"].lower()))
+                        key=lambda x: (x[1]["faint"], self.later(x[1]), x[0], x[1]["surface"].lower()))
         return [it for _r, it in ranked[:limit]], len(ranked)
+
+    def later(self, item):
+        """Is an item listed after the rest, however well it matches (Baude's: another host's)?"""
+        return False
 
     def issues(self, q=""):
         """What # lists, and how many: the pull requests and issues there are, issues first, the open ones before the

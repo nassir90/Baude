@@ -88,6 +88,11 @@ A client's requests (a "req" it picks comes back on the reply):
     rename {session, title}                         -> renamed {session} (claude renames it, if it's running; else
                                                        the server does as claude would)
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
+    catalogue {cwd}                                 -> catalogue {cwd, items, busy, error?}: what @ lists for one of
+                                                       its sessions' folders, made there (lookup.items: its files,
+                                                       branches, Kubernetes objects, what's running on that machine,
+                                                       its pull requests and issues), waited for while it's made;
+                                                       busy: it wasn't made in time, there's more to come
     link {where}                                    -> linking {where}: a link made from this host process to
                                                        where (as reach has it, not "local" or "mesh"), kept and made
                                                        again whenever it drops, and used both ways: the mesh
@@ -161,8 +166,8 @@ import subprocess
 import threading
 import time
 
-VERSION = 4  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
-# 4: deactivate, activate)
+VERSION = 5  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+# 4: deactivate, activate; 5: catalogue)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word

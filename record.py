@@ -4067,13 +4067,13 @@ class DiaryEditor(Gtk.Box, FindInText):
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
                 self.waiting = space.refresh(self._catalogued)
-            note = (f"{matched} found" if matched else "Nothing found") + (" · cataloguing…" if space.busy else "")
+            note = f"{matched} found" if matched else "Nothing found"
         it = self.buf.get_iter_at_offset(self.token[0])
         loc = self.view.char_rect(it)
         x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, loc.x, loc.y)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = x, y, 1, loc.height
-        self.picks.show(len(self.pop_shown), at, note, rect)
+        self.picks.show(len(self.pop_shown), at, note, rect, coming=space is not None and space.busy)
 
     def _catalogued(self):
         self.waiting = None

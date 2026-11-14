@@ -1632,11 +1632,11 @@ class RefCompleter:
         self.moved = at is not None
         if self.waiting is None and space.busy:
             self.waiting = space.refresh(self._catalogued)
-        note = (f"{matched} found" if matched else "Nothing found") + (" · cataloguing…" if space.busy else "")
+        note = f"{matched} found" if matched else "Nothing found"
         wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
         self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
         self.picks.show(len(shown), (at or 0) if shown else None, note,
-                        widgets.PickList.over(self.view, word[0], self.anchor))
+                        widgets.PickList.over(self.view, word[0], self.anchor), coming=space.busy)
 
     def _catalogued(self):
         self.waiting = None

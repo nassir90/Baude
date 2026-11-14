@@ -4718,7 +4718,10 @@ def _opacity(widget):
     while node is not None:
         if isinstance(node, Gsk.OpacityNode):
             return node.get_opacity()
-        node = node.get_child() if hasattr(node, "get_child") else None
+        if isinstance(node, Gsk.ContainerNode):  # (a wrapped label's lines: under one opacity, or none)
+            node = node.get_child(0) if node.get_n_children() == 1 else None
+        else:
+            node = node.get_child() if hasattr(node, "get_child") else None
     return 1.0
 
 
@@ -4811,7 +4814,7 @@ class ExpandStack(Gtk.Widget):
             for pair in m["pairs"]:
                 pair["a"] = _place(pair["from"], self)
             for ride in m["rides"]:
-                ride["a"] = _rect(ride["from"], self) if ride["from"].get_mapped() else None
+                ride["a"] = _rect(ride["from"], self) if self._whole(ride["from"], m["within"]) else None
             for part in m["leave"]:
                 part["rect"] = _rect(part["widget"], self)
         g = self.geometry()
@@ -4897,7 +4900,7 @@ class ExpandStack(Gtk.Widget):
         lst_rect = _rect(shown, self)
         body = self._seen(body, within) if body is not None else None  # (where it is, before the list's gone)
         ridden = [{"from": a, "to": b, "a": _rect(a, self), "b": None, "paint_from": _frozen(a, RIDE_GROW)}
-                  for a, b in rides if a.get_mapped()]
+                  for a, b in rides if self._whole(a, within)]
         self.stack.set_visible_child_name(name)
         page = self.stack.get_visible_child()
         for pair in start:
@@ -5059,6 +5062,18 @@ class ExpandStack(Gtk.Widget):
                             (_lerp(a["x"] + (a["w"] - b["w"]) / 2, b["x"], p),
                              _lerp(a["y"] + (a["h"] - b["h"]) / 2, b["y"], p), b["w"], b["h"]))
         snap.pop()
+        # beside a body: the row's card (its edge with it), as wide as there's still room, as tall as the square
+        body = m.get("body")
+        if body is not None and p < 1 and sq[3] > 0:
+            mid = round(body[1] + body[3] / 2)  # (a line of the card beside the body, repeated down the square)
+            for x0, w0, x1, w1 in ((row[0], body[0] - row[0], head[0], sq[0] - head[0]),
+                                   (body[0] + body[2], row[0] + row[2] - body[0] - body[2], sq[0] + sq[2],
+                                    head[0] + head[2] - sq[0] - sq[2])):
+                if w0 <= 0 or w1 <= 0:
+                    continue
+                snap.push_repeat(_graphene((x1, sq[1], w1, sq[3])), _graphene((x1, sq[1], w1, 1)))
+                piece((x0, mid, w0, 1), x=x1 - x0, y=sq[1] - mid, sx=w1 / w0)
+                snap.pop()
         # the square, opening under the header, and what's in it, coming with the header, as far as it's got
         if sq[3] >= 0.5:  # (not yet, at the row: it's allocated a pixel at least, but there's none of it to draw)
             self.snapshot_child(self.square, snap)
@@ -5073,7 +5088,9 @@ class ExpandStack(Gtk.Widget):
             # that, what it last drew, not drawn twice a frame)
             paint = _frozen(inside["widget"]) if m["live"] and not m.get("drawn") else inside["paint"]
             m["drawn"] = True
-            self._paint(snap, paint, (r[0] + sq[0] - end[0], r[1] + dy, r[2], r[3]))
+            # (from a body, with the square's top, from the body's; else with the header, as its title moves)
+            down = (m["body"][1] - end[1]) * (1 - p) if m.get("body") is not None else dy
+            self._paint(snap, paint, (r[0] + sq[0] - end[0], r[1] + down, r[2], r[3]))
             snap.pop()
         if sq[3] > 2 and rides:  # (what goes with the square from the row's place to the page's: the row's, then the
             # page's, on the square, not out of it)
@@ -5082,9 +5099,15 @@ class ExpandStack(Gtk.Widget):
                 first = p < 0.5
                 img = (ride["paint_from"] if m["live"] else _frozen(ride["from"], RIDE_GROW)) if first else \
                     (_frozen(ride["to"], RIDE_GROW) if m["live"] else ride["paint"])
-                g = RIDE_GROW
-                self._paint(snap, img, (at[0] - g, at[1] - g, at[2] + 2 * g, at[3] + 2 * g))
+                grow = RIDE_GROW
+                self._paint(snap, img, (at[0] - grow, at[1] - grow, at[2] + 2 * grow, at[3] + 2 * grow))
             snap.pop()
+
+    def _whole(self, widget, within):
+        """Whether all of widget's seen (within: the scrolled window it's in): a ride goes from its place only then."""
+        r = _rect(widget, self) if widget.get_mapped() else None
+        seen = self._seen(widget, within) if r is not None else None
+        return seen is not None and seen[3] >= round(r[3]) - 1
 
     @staticmethod
     def _ride_at(ride, p):
@@ -5098,7 +5121,7 @@ class ExpandStack(Gtk.Widget):
 
     def _morph(self, snap, a, b, p):
         """One label's text, a's (the row's) turning into b's (the header's) at p: its place, size, weight, colour
-        and width between theirs, wrapped as b's is."""
+        and width between theirs, wrapped as the nearer one's is."""
         font = b["font"].copy()
         fa, fb = a["font"], b["font"]
         size = _lerp(fa.get_size(), fb.get_size(), p)
@@ -5107,10 +5130,11 @@ class ExpandStack(Gtk.Widget):
         else:
             font.set_size(round(size))
         font.set_variations(f"wght={_lerp(int(fa.get_weight()), int(fb.get_weight()), p):.1f}")
-        layout = b["layout"].copy()  # (as the label lays it out: its attributes, its spacing)
+        near = a if p < 0.5 else b  # (laid out as the nearer one is: a row's wrapped title isn't one line till the end)
+        layout = near["layout"].copy()  # (as the label lays it out: its attributes, its spacing)
         layout.set_font_description(font)
         layout.set_width(round(_lerp(a["w"], b["w"], p) * Pango.SCALE))
-        if b["wrap"]:
+        if near["wrap"]:
             layout.set_wrap(Pango.WrapMode.WORD_CHAR)
         else:
             layout.set_ellipsize(Pango.EllipsizeMode.END)

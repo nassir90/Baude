@@ -8944,6 +8944,10 @@ class SideQuestion(Gtk.ListBoxRow):
     def expanded(self):
         return self.reveal.get_reveal_child()
 
+    def opened(self):
+        """Its thread open under its line, all the way (not opening or closing there)."""
+        return self.reveal.get_reveal_child() and self.reveal.get_child_revealed()
+
     def set_expanded(self, on):
         self.reveal.set_reveal_child(on)
         self.toggle.set_icon_name("list-remove-symbolic" if on else "pan-down-symbolic")
@@ -10108,7 +10112,7 @@ class SidePanel(Gtk.Box):
         self.side_question_status(sq)
         if self.btw_stack.get_visible_child_name() == "list" and self.stack.get_visible_child_name() == "btw":
             self.btw_expand.open("detail", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
-                                 across=self.btw_list, body=sq.inside if sq.expanded() else None)
+                                 across=self.btw_list)
         else:
             self.btw_stack.set_visible_child_name("detail")
         self.btw_holder.append(sq.take_inside())  # (after: the row's picture taken with it in it)
@@ -10117,9 +10121,11 @@ class SidePanel(Gtk.Box):
     def btw_parts(self, sq):
         """How a side question's row turns into its page's header (ExpandStack): its title and status into the
         header's, its square into back (where it is), its ⌄ going out."""
+        body = sq.inside if sq.opened() else None  # (its thread under its line, if it's all the way open)
         return {"pairs": [(sq.title, self.btw_title), (sq.status, self.btw_status),
                           (sq.full.get_child(), self.btw_back.get_child())],
-                "leave": [sq.toggle], "rides": [(sq.comp, sq.comp)]}  # (its box, and its meter on the page)
+                "leave": [sq.toggle], "body": body,
+                "rides": [(sq.comp, sq.comp)] if body is not None else []}  # (its box, and its meter on the page)
 
     def close_side_question(self, animate=True):
         """Back to the list, the side question shown closing into its row (into its thread under it, if it was open
@@ -10128,7 +10134,7 @@ class SidePanel(Gtk.Box):
         sq, self.btw_shown = self.btw_shown, None
         if sq is not None and animate and sq.get_parent() is self.btw_list:
             self.btw_expand.close("list", sq, sq.inside, **self.btw_parts(sq), within=self.btw_scroll,
-                                  across=self.btw_list, body=sq.inside if sq.expanded() else None)
+                                  across=self.btw_list)
         else:
             self.btw_stack.set_visible_child_name("list")
         if sq is not None:

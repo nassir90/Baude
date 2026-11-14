@@ -320,6 +320,9 @@ def main():
         for x in mesh.get("links") or []:
             print(f"link to {wire.said_where(x['where'])}: {'deactivated' if x.get('active') is False else x['state']}"
                   + (f" ({x['error']})" if x.get("error") else ""))
+        for x in mesh.get("found") or []:
+            print(f"link straight to {x['name']} (learned of through the mesh): {x['state']}"
+                  + (f" ({x['error']})" if x.get("error") else ""))
         for i in mesh.get("inactive") or []:
             print(f"{i}  deactivated")
         if not mesh.get("members") and not mesh.get("links") and not mesh.get("inactive"):

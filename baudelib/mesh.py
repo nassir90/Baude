@@ -21,6 +21,13 @@ What goes over a link, after hello and join {host} -> joined {host} (wire.py's l
     data {t | r, msg}       a wire message in a tunnel: t, one this end opened; r, one the other end did
     ping
 
+A member learned of through another (reached, but not linked to here) is linked to straight, once (Found): with what
+this machine has already, ssh to the name that member's record gives for its machine (its host, then its name), this
+user's own keys and ssh config, its key already in known_hosts, and the member it's said to be there or nothing. Then
+the two stay linked when the member between them goes. Nothing's passed on for it: no address or key of another's, and
+no new op (a join, as any link's). Of two members that learn of each other, the one with the lower id waits
+DIAL_WAIT_S first, so the other's link, if it makes one, is the one there is.
+
 A head reaches a member through its own machine's host process: relay {to} on its socket (wire.reach's {"via": "mesh",
 "host": id}) -> relayed {to}, and from then on that connection is the tunnel, hello first as ever.
 
@@ -50,6 +57,7 @@ from baudelib import models, wire
 
 RETRY_S = (2, 10, 30, 120, 300)  # a link that's dropped, or couldn't be made, is tried again after these
 OFF_S = 30  # (one the other end's deactivated this host on: tried again this often)
+DIAL_WAIT_S = 5  # (a member learned of through another, by the lower id of the two: Found waits this long first)
 OPEN_S = 20  # a tunnel's far end has this long to say it's there
 TTL = 16  # hosts a tunnel's passed through at most
 PROVIDERS_S = 60  # this machine's providers looked at again this often, while it's linked
@@ -324,6 +332,7 @@ class Out:
         self.id, self.name = id, name  # (the member it's to, once it's said)
         self.state, self.error, self.link = "connecting", None, None
         self.stopped, self.wake, self.active = False, threading.Event(), active
+        self.expect, self.made = None, False  # (the member it must be, if it's said: Found's; linked once, at least)
 
     def start(self):
         threading.Thread(target=self._run, daemon=True, name=f"link-to-{wire.said_where(self.where)}").start()
@@ -385,6 +394,10 @@ class Out:
             self.state = "dropped"
             ch.close()
             return
+        if self.expect is not None and peer["id"] != self.expect:  # (another host there than the member it's to)
+            self.error, self.state = f"another host, {peer['name']}, is there", "dropped"
+            ch.close()
+            return
         if peer["id"] in self.mesh.inactive:  # (deactivated here by its id: not linked to, wherever it's reached)
             self.id, self.name, self.active = peer["id"], peer["name"], False
             ch.close()
@@ -399,7 +412,7 @@ class Out:
             ch.close()
             return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
-        self.link = Link(self.mesh, ch, theirs, made=True)
+        self.link, self.made = Link(self.mesh, ch, theirs, made=True), True
         if self.stopped or not self.active:  # (unlinked or deactivated as it was made: stop or pause saw no link to
             # close, or closed this one)
             self.link, self.state = None, "dropped"
@@ -413,6 +426,54 @@ class Out:
 
     def kept(self):
         return {"where": self.where, "id": self.id, "name": self.name, **({} if self.active else {"active": False})}
+
+
+class Found(Out):
+    """A link straight to a member this host learned of through another (Mesh.reroute), made from what this machine
+    has already: ssh to each name the member's record gives for its machine (wheres), with this user's own keys and
+    ssh config and the machine's key already in known_hosts (strict), to that member and no other (expect). Tried
+    once, after delay; made again, as an Out is, if it drops after it was made, while the member's still wanted
+    (Mesh.wants: known, not deactivated, not linked otherwise). Not kept in links.json."""
+
+    def __init__(self, mesh, member, wheres, delay=0):
+        super().__init__(mesh, wheres[0], id=member, name=mesh.name_of(member))
+        self.expect, self.wheres, self.delay = member, wheres, delay
+
+    def pause(self):  # (deactivated: let go of for good)
+        self.stop()
+
+    def _run(self):
+        tries = 0
+        if self.delay:
+            self.state = "waiting"
+            self.wake.wait(self.delay)
+        while not self.stopped and self.mesh.wants(self.expect, self):
+            self.state = "connecting"
+            for where in self.wheres:
+                try:
+                    ch, info = wire.reach(where, timeout=10)
+                except OSError as e:
+                    self.error, self.state = str(e), "dropped"
+                    continue
+                if self.stopped or not self.mesh.wants(self.expect, self):
+                    ch.close()
+                    break
+                self.where, since = where, time.monotonic()
+                self.take(ch, info)
+                if self.made:  # (it was linked, and dropped: that way first, next time)
+                    self.wheres = [where] + [w for w in self.wheres if w != where]
+                    tries = 0 if time.monotonic() - since > 60 else tries
+                    break
+            self.mesh.changed()
+            if not self.made:  # (never linked: not tried again)
+                if self.error:
+                    self.mesh.log(f"mesh: no link straight to {self.name}: {self.error}")
+                break
+            self.wake.wait(RETRY_S[min(tries, len(RETRY_S) - 1)])
+            self.wake.clear()
+            tries += 1
+        self.state = "stopped"
+        self.mesh.unfound(self)
 
 
 def same_place(a, b):
@@ -438,6 +499,7 @@ class Mesh:
         self.local = local_providers()
         self.proxy = None
         self.outs = []
+        self.found, self.tried = {}, set()  # (member id -> Found; those a link straight to was tried for, this run)
         self.stopped, self.linked = threading.Event(), threading.Event()  # (linked: set while there's a link)
         self.told = None  # (the endpoints what runs here was last told of: endpoints())
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
@@ -463,7 +525,7 @@ class Mesh:
         self.stopped.set()
         self.linked.set()
         with self.lock:
-            outs, links = list(self.outs), [x for ls in self.links.values() for x in ls]
+            outs, links = list(self.outs) + list(self.found.values()), [x for ls in self.links.values() for x in ls]
         for o in outs:
             o.stop()
         for x in links:
@@ -559,13 +621,14 @@ class Mesh:
         id = id if wire.is_id(id) else None
         with self.lock:
             outs = [o for o in self.outs if where is not None and same_place(o.where, where) or id and o.id == id]
+            found = [f for f in self.found.values() if f.id == id or f.id in {o.id for o in outs}]
             # (an id given is taken as one, unless it's only what a link's said to be where it goes: an alias)
             ids = {o.id for o in outs if o.id} | ({id} if id and (self.known(id) or not outs) else set())
             self.inactive |= ids
             links = [x for i in ids for x in self.links.get(i) or []]
             tunnels = [(x, key, end) for ls in self.links.values() for x in ls for key, end in x.tunnels.items()
                        if isinstance(end, Here) and (end.origin in ids or end.to in ids)]
-        for o in outs:
+        for o in outs + found:
             o.pause()
         for x in links:
             x.close()
@@ -707,6 +770,38 @@ class Mesh:
                 r.pop("lost", None)
             elif now - r.setdefault("lost", now) > FORGET_S:
                 del self.records[k]
+                self.tried.discard(k)  # (forgotten: tried again if it's learned of again)
+        if self.stopped.is_set():
+            return
+        for k, n in self.hops.items():  # (reached through another, and not tried yet: a link straight to it tried)
+            if n > 1 and k not in self.tried and self.wants(k) and (wheres := self.wheres(k)):
+                self.tried.add(k)
+                self.found[k] = Found(self, k, wheres, 0 if self.id > k else DIAL_WAIT_S).start()
+
+    def wheres(self, member):
+        """(lock held) Where a link straight to member could go, from what's here: ssh to the names its record gives
+        for its machine (its host, then its name), strict (its key in known_hosts already)."""
+        info = ((self.records.get(member) or {}).get("rec") or {}).get("info") or {}
+        names = []
+        for name in (info.get("host"), info.get("name")):
+            if wire.is_dest(name) and name not in names:
+                names.append(name)
+        return [{"via": "ssh", "dest": name, "strict": True} for name in names]
+
+    def wants(self, member, found=None):
+        """Is a link straight to member (by found, if it's given) still wanted: it's known, not deactivated, not this
+        host, and not linked to otherwise (a link of another's, or one made from here)?"""
+        with self.lock:
+            mine = found.link if found is not None else None
+            return member != self.id and member in self.records and member not in self.inactive and \
+                not any(x is not mine for x in self.links.get(member) or []) and \
+                not any(o.id == member for o in self.outs) and self.found.get(member, found) is found
+
+    def unfound(self, found):
+        with self.lock:
+            if self.found.get(found.expect) is found:
+                del self.found[found.expect]
+        self.changed()
 
     def next_link(self, to):
         with self.lock:
@@ -859,8 +954,10 @@ class Mesh:
     def view(self):
         """info's mesh: {members: [{id, name, group, host, version, providers, hops, through (the member it's reached
         through, by name; None for one linked to here)}], links: [{where, id, name, state ("linked", "connecting",
-        "dropped", "inactive"), error, active}] (those made from here), proxy: {url, key} (Proxy's: None till a member
-        has a provider it serves), inactive: [the ids of members deactivated here]}."""
+        "dropped", "inactive"), error, active}] (those made from here), found: [{id, name, state ("waiting",
+        "connecting", "linked", "dropped"), error}] (links straight to members learned of through others: Found),
+        proxy: {url, key} (Proxy's: None till a member has a provider it serves), inactive: [the ids of members
+        deactivated here]}."""
         with self.lock:
             members = []
             for k, n in sorted(self.hops.items(), key=lambda kv: (kv[1], self.name_of(kv[0]).lower())):
@@ -870,6 +967,7 @@ class Mesh:
             links = [{"where": o.where, "id": o.id, "name": o.name, "state": o.state, "error": o.error,
                       "active": o.active} for o in self.outs]
             inactive = sorted(self.inactive)
+            found = [{"id": f.expect, "name": f.name, "state": f.state, "error": f.error} for f in self.found.values()]
             if self.proxy is None and any(p.get("http") for m in members for p in m["providers"]):
                 try:
                     self.proxy = Proxy(self).start()
@@ -877,7 +975,7 @@ class Mesh:
                     self.log(f"mesh: no proxy for other members' models: {e}")
                     self.proxy = False
             proxy = {"url": self.proxy.url, "key": self.proxy.key} if self.proxy else None
-        return {"members": members, "links": links, "proxy": proxy, "inactive": inactive}
+        return {"members": members, "links": links, "proxy": proxy, "inactive": inactive, "found": found}
 
     def providers_here(self):
         """This machine's providers, for its info: as local_providers has them, with no key."""

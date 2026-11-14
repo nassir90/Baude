@@ -68,8 +68,9 @@ listed in `settings.json`:
 
 All but Apple's run in [pi](https://pi.dev), which speaks their API, through `pi-claude` (pi installed in
 `~/.local/share/baude/pi`). The model picker lists Claude's models, then every model of the chat's host and of the
-other members of the mesh, each once however many hosts have it, each with its family's icon and under its family's
-name (Claude, Qwen, Gemma…), with a search box on top: type to narrow, ↑ ↓ and Enter to pick. A model picked runs on the first provider that has it:
+other members of the mesh, each once however many hosts have it, each with its family's icon and under its
+family's name (Claude, Qwen, Gemma…), with a search box on top: type to narrow, ↑ ↓ and Enter to pick. A model
+picked runs on the first provider that has it:
 the chat's host's, else the mesh's. The picker left of it says where the chat's model runs (local / MLX, studio /
 Ollama), listing each provider that has it, by host: picking another moves the chat's model there. With one it's
 greyed; on Claude's models it's gone, as Claude isn't a provider: `claude` runs Claude's models on the machine it's

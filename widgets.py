@@ -6701,7 +6701,7 @@ MODEL_FAMILIES = [
     ("yi", "Yi", r"(^|[/:\-])yi[\-:]"),
     ("stepfun", "Step", r"stepfun|(^|[/:\-])step-"),
     ("baichuan", "Baichuan", r"baichuan"),
-    ("apple", "Apple", r"^apple$|apple/|foundation"),
+    ("apple", "Apple", r"^apple$|apple/|apple-foundation"),
 ]
 MODEL_ICONS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vendor", "model-icons")
 

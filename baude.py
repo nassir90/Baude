@@ -13102,8 +13102,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.restart_proc(resume=False)
             return
         if self.remote is None and value != was and \
-                (model_program(value) == "pi" or modelslib.runs_on(value) != modelslib.runs_on(was)):  # (pi-claude serves one model, and one on another host runs there: pi's session
-            # goes on, kept on the chat's host; a network session's server starts it again on the new one itself)
+                (model_program(value) == "pi" or modelslib.runs_on(value) != modelslib.runs_on(was)):
+            # (pi-claude serves one model, and one on another host runs there: pi's session goes on, kept on the chat's
+            # host; a network session's server starts it again on the new one itself)
             self.note(f"model → {self.model_dd.label()}")
             self.restart_proc(resume=True)
             return

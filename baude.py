@@ -11868,8 +11868,8 @@ class UserTurn(Gtk.Box):
         self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
                                  tooltip_text="Revert: take back this message and everything after it, and put it "
                                  "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
-                                 margin_bottom=6, opacity=0, can_target=False)  # (level with the bubble's last line:
-        self.revert.add_css_class("flat")  # its padding and half a line, less half the button)
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
         self.revert.add_css_class("circular")
         self.revert.add_css_class("revert-turn")
         self.revert.connect("clicked", lambda *_: win.revert_to(self))
@@ -11880,8 +11880,14 @@ class UserTurn(Gtk.Box):
         hover.connect("leave", lambda *_: self.show_revert(False))
         self.add_controller(hover)
 
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+
     def show_revert(self, on):
         on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
         self.revert.set_opacity(1 if on else 0)
         self.revert.set_can_target(on)
 

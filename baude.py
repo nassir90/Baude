@@ -16610,8 +16610,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             toast(self.sidebar, f"Looking for Baude on {to}")
             return f"looking for Baude on {to}"
         return meta.Form("Add a host", box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
-                                             ("command", "its host process's command there, if baude_headless.py "
-                                                         "isn't on its PATH (or empty)", command)],
+                                             ("command", "its host process's command there, run as `<command> "
+                                                         "connect`: empty if baude_headless.py is on its PATH, else "
+                                                         "its path (in a git checkout of Baude, <checkout>/"
+                                                         "baude_headless.py; not the baude launcher, which runs the "
+                                                         "app)", command)],
                          lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
                          submit, verb="Add", said=False)
 

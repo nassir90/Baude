@@ -1608,6 +1608,9 @@ class RefCompleter:
         if self.at is not None:
             self.view.get_buffer().delete_mark(self.at)
             self.at = None
+        if self.waiting is not None:  # (what it waited for may be another chat's: asked again as it's next shown)
+            GLib.source_remove(self.waiting)
+            self.waiting = None
         self.hide()
 
     def refresh(self):

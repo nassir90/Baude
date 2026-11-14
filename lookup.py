@@ -2396,8 +2396,9 @@ class SearchSpace:
         return self.source is not None and self.source.catalogue_busy
 
     def refresh(self, on_ready=None):
-        """Catalogue the names afresh if it's been a while; on_ready() once that's in. What waits for it (a GLib
-        source, to remove if on_ready isn't wanted any more), or None: nothing to wait for."""
+        """Catalogue the names afresh if it's been a while; on_ready() once that's in, or once some of it is (a source
+        whose catalogue comes in parts: Baude's HostFolder). What waits for it (a GLib source, to remove if on_ready
+        isn't wanted any more), or None: nothing to wait for."""
         if self.source is None:
             return None
         self.source.catalogue_soon()
@@ -2408,8 +2409,10 @@ class SearchSpace:
             from gi.repository import GLib
             schedule = GLib.timeout_add
 
+        made = getattr(self.source, "catalogue", None)
+
         def check():
-            if self.source.catalogue_busy:
+            if self.source.catalogue_busy and getattr(self.source, "catalogue", None) is made:
                 return True
             self._items = None
             if on_ready is not None:

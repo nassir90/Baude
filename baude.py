@@ -9079,15 +9079,26 @@ class HostFolder:
             self.catalogue_busy = True
             self.remote.request({"op": "catalogue", "cwd": self.root}, self._got)
 
+    # (what a list reads of an item, should a host send less: lookup.items')
+    DEFAULTS = {"canonical": "", "faint": False, "icon": "code", "what": "Name", "summary": "", "kind": "symbol"}
+
     def _got(self, reply):
         ok = reply.get("op") == "catalogue" and not reply.get("error") and isinstance(reply.get("items"), list)
         if ok:
             here = host_key(self.remote)  # (that host's: its paths are paths there)
-            self.catalogue = tuple({**it, "path": None, "line": None, "host": here} for it in reply["items"]
-                                   if isinstance(it, dict) and isinstance(it.get("surface"), str))
-        if ok and reply.get("busy"):  # (not all made yet: what there is shown, the rest asked for again)
-            return self.remote.request({"op": "catalogue", "cwd": self.root}, self._got)
-        self.catalogue_at, self.catalogue_busy = time.time(), False  # (an error, an older host: asked again once old)
+            self.catalogue = tuple(
+                {**self.DEFAULTS, **{k: v for k, v in it.items() if isinstance(v, type(self.DEFAULTS.get(k, v)))},
+                 "path": None, "line": None, "host": here}
+                for it in reply["items"] if isinstance(it, dict) and isinstance(it.get("surface"), str))
+        if ok and reply.get("busy"):  # (not all made yet: what there is listed, the rest waited for there)
+            return self.remote.request({"op": "catalogue", "cwd": self.root, "wait": True}, self._got)
+        # (the host not reached: asked again soon; anything else, an older host's error too, once it's old)
+        gone = reply.get("op") == "error" and reply.get("error") in GONE
+        self.catalogue_at = time.time() - (CATALOGUE_TTL - 5 if gone else 0)
+        self.catalogue_busy = False
+
+
+GONE = ("the server isn't there", "the server's gone", "the server didn't answer")  # (baudelib.client's)
 
 
 class HostSpace(lookup.SearchSpace):
@@ -9095,10 +9106,6 @@ class HostSpace(lookup.SearchSpace):
 
     def make_items(self):
         return list(self.source.catalogue)
-
-    def items(self):
-        self.source.catalogue_soon()
-        return super().items()
 
 
 class MetaNames(lookup.SearchSpace):
@@ -9138,13 +9145,18 @@ class MetaNames(lookup.SearchSpace):
     def refresh(self, on_ready=None):
         return space.refresh(on_ready) if (space := self.folder_space()) is not None else None
 
+    def search(self, q, limit=None):
+        if isinstance(space := self.folder_space(), HostSpace):  # (the list up: another host's names asked for)
+            space.source.catalogue_soon()
+        return super().search(q, limit)
+
     def later(self, item):
         return item.get("host", self.host()) != self.host()
 
     def chat_items(self):
         sidebar = getattr(self.win, "sidebar", None)
         sessions = sidebar.sessions if sidebar is not None else None
-        net = tuple((x["id"], x["server"].key, x.get("title"), x.get("cwd"), x.get("said"), x.get("updated"))
+        net = tuple((x["id"], x["server"].key, x.get("title"), x.get("cwd"), x.get("said"), x.get("draft"))
                     for x in network().sessions())
         if self._chats[0] is not sessions or self._chats[1] != net:
             items = []

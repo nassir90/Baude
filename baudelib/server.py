@@ -35,7 +35,7 @@ CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in ca
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
 CATALOGUE_WAIT_S = 30  # (a folder's catalogue being made: waited for this long before what there is is sent)
-CATALOGUE_LIMIT = 20000  # (names sent of a folder's, at most)
+CATALOGUE_LIMIT = 20000  # (files sent of a folder's, at most: its other names all are)
 RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
@@ -369,6 +369,7 @@ class Server:
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
         self.socket_path = socket_path or wire.socket_path()
+        self.catalogue_lock, self.catalogue_asked = threading.Lock(), {}  # (catalogue's: when each folder was first asked for)
         self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
         if len(self.socket_path.encode()) > 100:
             raise OSError(f"{self.socket_path}: too long a path for a socket")
@@ -751,8 +752,8 @@ class Server:
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():
                 try:
-                    reply("catalogue", **self.catalogue(msg.get("cwd")))
-                except Exception as e:  # noqa: BLE001 (git, kubectl, a name that isn't JSON: said, not the thread's end)
+                    reply("catalogue", **self.catalogue(msg.get("cwd"), bool(msg.get("wait"))))
+                except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
             return None
@@ -1536,10 +1537,11 @@ class Server:
             folders = {os.path.realpath(s.meta["cwd"]) for s in self.sessions.values() if s.meta.get("cwd")}
         return any(path == f or path.startswith(f.rstrip(os.sep) + os.sep) for f in folders)
 
-    def catalogue(self, cwd):
+    def catalogue(self, cwd, wait=False):
         """What @ lists for a session's folder, as Baude lists its own chat's (lookup.items: its files, branches,
-        Kubernetes objects, what's running on this machine, its pull requests and issues), made here: waited for while
-        it's made, up to CATALOGUE_WAIT_S (busy: there's more to come)."""
+        Kubernetes objects, what's running on this machine, its pull requests and issues), made here. What there is is
+        sent at once; with nothing made yet, or wait, it's waited for while it's made (and GitHub's first read of it),
+        up to CATALOGUE_WAIT_S. busy: there's more to come. At most CATALOGUE_LIMIT files, and every other name."""
         if not isinstance(cwd, str) or not os.path.isabs(os.path.expanduser(cwd)):
             return {"cwd": cwd, "items": [], "error": "not an absolute path"}
         real = os.path.realpath(os.path.expanduser(cwd))
@@ -1549,17 +1551,34 @@ class Server:
         if root not in sys.path:
             sys.path.insert(0, root)
         import lookup
-        folder = lookup.Folder.for_folder(real)
-        folder.catalogue_soon()
+        with self.catalogue_lock:  # (two heads asking at once: one Folder, made once)
+            folder = lookup.Folder.for_folder(real)
+            folder.catalogue_soon()
+            first = self.catalogue_asked.setdefault(folder.root, time.monotonic())
         lookup.GITHUB.look(tops=[folder.root])
-        until = time.monotonic() + CATALOGUE_WAIT_S
-        while folder.catalogue_busy and time.monotonic() < until:
-            time.sleep(0.1)
-        items = []
-        for it in lookup.items(folder)[:CATALOGUE_LIMIT]:
+
+        def busy():
+            github = lookup.gh_path() is not None and lookup.GITHUB.listed(folder.root) is lookup.GITHUB.NOTHING and \
+                time.monotonic() - first < CATALOGUE_WAIT_S  # (its first read: a folder that's on GitHub's, soon)
+            return folder.catalogue_busy or github
+        if wait or not folder.catalogue:
+            until = time.monotonic() + CATALOGUE_WAIT_S
+            while busy() and time.monotonic() < until:
+                time.sleep(0.1)
+        items, files = [], 0
+        for it in lookup.items(folder):
+            if it["kind"] == "file":
+                files += 1
+                if files > CATALOGUE_LIMIT:
+                    continue
             entry = it.get("entry")
             if entry is not None:  # (what a list shows of it: its first source, and GitHub's)
                 entry = {k: entry[k] for k in ("kind", "hint", "github") if k in entry} | \
                     {"sources": list(entry.get("sources") or ())[:1]}
-            items.append({**it, "entry": entry})
-        return {"cwd": cwd, "items": items, "busy": folder.catalogue_busy}
+            item = {**it, "entry": entry}
+            try:
+                wire.encode(item)
+            except (TypeError, ValueError):  # (a file name that isn't UTF-8, say: that one left out)
+                continue
+            items.append(item)
+        return {"cwd": cwd, "items": items, "busy": busy()}

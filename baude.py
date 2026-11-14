@@ -130,6 +130,7 @@ from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
+from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
@@ -6192,6 +6193,22 @@ def macos_dock_icon():
               types=(ctypes.c_void_p,))
 
 
+def logo_icon():
+    """Elsewhere, windows take the logo (ICON_SVG) from the icon theme by name (APP_ID): it's put in an icon folder of
+    Baude's own, as Record's is. The user's theme has it only once Baude's in the application menu, and without it a
+    title bar that shows the window's icon (KDE's, at the start of the header bar) had the theme's missing-image icon."""
+    root = os.path.join(_data_home(), "baude", "icons")
+    path = os.path.join(root, "hicolor", "scalable", "apps", f"{APP_ID}.svg")
+    try:
+        if not os.path.exists(path) or open(path).read() != ICON_SVG:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(ICON_SVG)
+    except OSError:
+        return
+    Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
+
+
 def launch_command(*args):
     """argv that starts baude: imported as a module, so Python uses its cached bytecode instead of
     compiling all of baude.py on every start (~150 ms; a script run directly is never cached)."""
@@ -6841,59 +6858,6 @@ class ChatRefCompleter(meta.RefCompleter):
             self.forget()
             return found
         return super().handle_key(keyval, state)
-
-
-class ChoiceDropDown(Gtk.DropDown):
-    """A DropDown over (value, label) pairs. on_pick(value) fires for user picks only,
-    not for select()/set_choices() calls that mirror what the CLI reports."""
-
-    def __init__(self, choices, tooltip, on_pick):
-        super().__init__(tooltip_text=tooltip, css_classes=["choice"])
-        # (its list centred under it: GTK's lines up their left sides, and a longer one runs on to the right)
-        if (popup := next((w for w in walk(self) if isinstance(w, Gtk.Popover)), None)) is not None:
-            popup.set_halign(Gtk.Align.CENTER)
-        self.strings = Gtk.StringList()
-        self.set_model(self.strings)
-        self.on_pick, self.values, self.quiet = on_pick, [], False
-        self.set_choices(choices)
-        self.connect("notify::selected", self._changed)
-
-    def _changed(self, *_):
-        if not self.quiet and self.value() is not None:
-            self.on_pick(self.value())
-
-    def _quietly(self, fn):
-        self.quiet = True
-        try:
-            fn()
-        finally:
-            self.quiet = False
-
-    def set_choices(self, choices):
-        """Replace the entries, keeping the current value selected if it is still there."""
-        keep = self.value()
-        def swap():
-            self.values = [v for v, _ in choices]
-            self.strings.splice(0, self.strings.get_n_items(), [lbl for _, lbl in choices])
-            self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
-        self._quietly(swap)
-
-    def select(self, value):
-        """Show `value` as selected (appending it if unknown) without firing on_pick."""
-        def pick():
-            if value not in self.values:
-                self.values.append(value)
-                self.strings.append(value)
-            self.set_selected(self.values.index(value))
-        self._quietly(pick)
-
-    def value(self):
-        i = self.get_selected()
-        return self.values[i] if i < len(self.values) else None
-
-    def label(self):
-        i = self.get_selected()
-        return self.strings.get_string(i) if i < len(self.values) else ""
 
 
 # --------------------------------------------------------------- sessions --
@@ -7585,13 +7549,13 @@ def is_desktop(session_id):
     return bool(session_id) and session_id in desktop_index()
 
 
-HERE_HOST = "here"  # (⋮ → Hosts: this machine's key; another's is its server's)
+HERE_HOST = "here"  # (New session's hosts: this machine's key; another's is its server's)
 THIS_MACHINE = "local"  # (this machine, as every host is written: by its name, which here is local)
 
 
 def host_key(r):
-    """The host a server's sessions are listed under (⋮ → Hosts): this machine, for a server on it, as its own chats
-    are; else the server's own."""
+    """The host a server's sessions are listed under (New session's hosts): this machine, for a server on it, as its
+    own chats are; else the server's own."""
     return HERE_HOST if baudelib.client.is_here(r.info) else r.key
 
 
@@ -7644,7 +7608,7 @@ class StatusDot(Gtk.Image):
 
 
 class FilterList(Gtk.ListBox):
-    """One of the sidebar's ⋮ filters (Hosts, Groups), a list in its menu: what's ticked is listed, and everything is
+    """The sidebar's ⋮ filter (Groups), a list in its menu: what's ticked is listed, and everything is
     till some are picked. Picked as the Git page's branches are: a click, that one only; Shift or Ctrl (⌘) and a click,
     one more or one fewer (none left: everything again). changed(the keys ticked, or None: all of them) as it's
     picked; menu(row, x, y), x and y in the list's own, on a right-click on a row."""
@@ -7794,14 +7758,20 @@ class SessionSidebar(Gtk.Box):
         self.new_btn.set_hexpand(True)
         self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
                                        lambda: win.pick_folder())
-        # (beside it: the host a new session's made on, by its name, verbatim (this machine's local); kept in
-        # settings.json's new_session_host, which Meta sets too: fill_new_hosts)
+        # (beside it: the host a new session's made on, by its name, verbatim (this machine's local), and whose chats
+        # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click: host_menu)
         self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)], "The host a new session is made "
-                                                         "on: where it lives, its files and its tools",
-                                                         lambda key: save_settings(new_session_host=key)), 12)
+                                                         "on, and whose chats are listed",
+                                                         self.pick_host), 12)
         self.host_dd.add_css_class("flat")
         self.host_dd.add_css_class("new-host")
         self.host_dd.set_valign(Gtk.Align.CENTER)
+        if (popup := next((w for w in walk(self.host_dd) if isinstance(w, Gtk.Popover)), None)) is not None:
+            popup.connect("show", lambda *_: network().look())  # (opened: a server started a moment ago, offered)
+        right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        right.connect("pressed", lambda _g, _n, x, y: not (popup and popup.get_visible())  # (not in its list, open)
+                      and self.host_menu(x, y))
+        self.host_dd.add_controller(right)
         new_row = Gtk.Box(spacing=2)
         new_row.append(self.new_btn)
         new_row.append(self.host_dd)
@@ -7815,13 +7785,12 @@ class SessionSidebar(Gtk.Box):
         by.append("Folder", "sb.group::folder")
         by.append("Date", "sb.group::date")
         view.append_section("Group by", by)
-        # (Hosts and Groups: which sessions are listed, each a list of its own in the menu (FilterList), filled by
-        # fill_filters; a right-click on a host: New Session Here; on a group: Rename Group…, Delete Group)
+        # (Groups: which sessions are listed, a list of its own in the menu (FilterList), filled by fill_filters; a
+        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter)
         hosts, groups = Gio.Menu(), Gio.Menu()
-        for menu, name in ((hosts, "hosts"), (groups, "groups")):
-            item = Gio.MenuItem.new(None, None)
-            item.set_attribute_value("custom", GLib.Variant.new_string(name))
-            menu.append_item(item)
+        item = Gio.MenuItem.new(None, None)
+        item.set_attribute_value("custom", GLib.Variant.new_string("groups"))
+        groups.append_item(item)
         hosts.append("Add Host…", "sb.add_server")  # (another machine, by where ssh goes: ask_add_host)
         item = Gio.MenuItem.new("New Group…", None)  # (no chat moved to it: ask_new_group)
         item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
@@ -7832,12 +7801,10 @@ class SessionSidebar(Gtk.Box):
         view.append_section("Hosts", hosts)
         view.append_section("Groups", groups)
         pop = Gtk.PopoverMenu.new_from_model(view)
-        self.host_list = FilterList(lambda keys: self.filtered(sidebar_hosts=keys), self.host_menu)
         self.group_list = FilterList(lambda keys: self.filtered(sidebar_groups=keys), self.group_menu)
-        pop.add_child(self.host_list, "hosts")
         pop.add_child(self.group_list, "groups")
         self.view_btn = Gtk.MenuButton(icon_name="view-more-symbolic", popover=pop, valign=Gtk.Align.CENTER,
-                                       tooltip_text="Group by, and which hosts and groups are listed")
+                                       tooltip_text="Group by, and which groups are listed")
         self.view_btn.add_css_class("flat")
         # (opened, or the window come forward: the network looked at again now, for a server started a moment ago)
         self.view_btn.connect("notify::active", lambda b, _p: b.get_active() and network().look())
@@ -7845,12 +7812,15 @@ class SessionSidebar(Gtk.Box):
         find_row.append(self.view_btn)
         top.append(find_row)
         self.append(top)
+        # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
+        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
+        self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
-        # (at the foot, under a rule from the chats: Update Available, while a new version waits: show_update_bars)
+        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars)
         self.update_bar = widgets.UpdateBar(lambda: win.get_application().update_now(win))
         self.append(self.update_bar)
         keys = Gtk.EventControllerKey()
@@ -7867,20 +7837,17 @@ class SessionSidebar(Gtk.Box):
         group.connect("change-state", self.on_group_changed)
         actions.add_action(group)
         every = Gio.SimpleAction.new("show_all", None)
-        every.connect("activate", lambda *_: self.filtered(sidebar_hosts=None, sidebar_groups=None))
+        every.connect("activate", lambda *_: self.filtered(sidebar_groups=None))
         actions.add_action(every)
-        here = Gio.SimpleAction.new("new_here", GLib.VariantType.new("s"))
-        here.connect("activate", lambda _a, v: (pop.popdown(), self.win.new_session_here(v.get_string())))
-        actions.add_action(here)
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
+        actions.add_action(add_server)
         command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
-        command.connect("activate", lambda _a, v: (pop.popdown(), self.win.ask_host_command(v.get_string())))
+        command.connect("activate", lambda _a, v: self.win.ask_host_command(v.get_string()))
         actions.add_action(command)
         off = Gio.SimpleAction.new("deactivate_host", GLib.VariantType.new("(sb)"))
         off.connect("activate", lambda _a, v: self.deactivate_host(*v.unpack()))
         actions.add_action(off)
-        actions.add_action(add_server)
         # (groups: a chat right-clicked → Move to Group, its group ticked (the action's state: (its id, its group));
         # New Group… (a chat's id, to be moved to it; "": none); a group right-clicked in ⋮ → Rename Group…, Delete)
         move = Gio.SimpleAction.new_stateful("move_group", GLib.VariantType.new("(ss)"), GLib.Variant("(ss)", ("", "")))
@@ -7957,11 +7924,11 @@ class SessionSidebar(Gtk.Box):
         """Grouped by day (⋮ → Group by → Date), not by folder."""
         return load_settings().get("sidebar_group") == "date"
 
-    # ---- ⋮ → Hosts and Groups: which sessions are listed. A host is a machine: this one (THIS_MACHINE: Claude Code's
-    # and Claude Desktop's chats, as ever, and those of a server on it), or another a server's on (baudelib.server),
-    # its sessions kept as last seen and marked dead while it's gone. A group is Baude's own, a list of chats of its
-    # own, whatever host they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group).
-    # Everything's listed till some are picked (FilterList)
+    # ---- Which sessions are listed: one host's, New session's (the dropdown beside it), and ⋮ → Groups. A host is a
+    # machine: this one (THIS_MACHINE: Claude Code's and Claude Desktop's chats, as ever, and those of a server on it),
+    # or another a server's on (baudelib.server). A group is Baude's own, a list of chats of its own, whatever host
+    # they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group). Every group's listed
+    # till some are picked (FilterList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
         one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
@@ -7982,19 +7949,19 @@ class SessionSidebar(Gtk.Box):
         names = set(made_groups(st)) | set(assigned.values()) | {chat_group(s, assigned) for s in network().sessions()}
         return [(g, g, "") for g in sorted(names - {""}, key=str.lower)] + [("", "No group", "")]
 
-    def picked(self, name, known, was=None):
-        """The hosts or groups picked (settings' sidebar_hosts, sidebar_groups) that are still there, or None: all of
-        them (none of those picked there, or every one there picked). was: {a key a host had: the one it has now}."""
+    def picked(self, name, known):
+        """The groups picked (settings' sidebar_groups) that are still there, or None: all of them (none of those picked
+        there, or every one there picked)."""
         shown = load_settings().get(name)
         if not isinstance(shown, list):
             return None
         keys = {key for key, *_ in known}
-        shown = {(was or {}).get(k, k) for k in shown} & keys
+        shown = set(shown) & keys
         return shown if shown and shown != keys else None
 
     def host_filter(self):
-        was = {old: host_key(r) for r in network().remotes() for old in getattr(r, "was", ())}
-        return self.picked("sidebar_hosts", self.known_hosts(), was)
+        """{the one host whose chats are listed}: New session's (shown_host)."""
+        return {self.shown_host()}
 
     def group_filter(self):
         return self.picked("sidebar_groups", self.known_groups())
@@ -8006,50 +7973,42 @@ class SessionSidebar(Gtk.Box):
             (groups is None or chat_group(s, assigned) in groups)
 
     def filtered(self, **picked):
-        """Hosts or groups picked (sidebar_hosts=[keys], sidebar_groups=[names]; None: all of them, as is every one
-        there): listed."""
-        known = {"sidebar_hosts": self.known_hosts, "sidebar_groups": self.known_groups}
+        """Groups picked (sidebar_groups=[names]; None: all of them, as is every one there): listed."""
+        known = {"sidebar_groups": self.known_groups}
         save_settings(**{name: None if keys is None or set(keys) >= {k for k, *_ in known[name]()} else keys
                          for name, keys in picked.items()})
         self.fill_filters()
         self.fill()
 
     def fill_filters(self):
-        """⋮ → Hosts and Groups, as the network has them now (what's picked that the network's lost: not shown, and
-        not left out either, till it's back)."""
+        """New session's hosts and ⋮ → Groups, as the network has them now (what's picked that the network's lost: not
+        shown, and not left out either, till it's back)."""
         if (old := load_settings().get("sidebar_network")) is not None:  # (⋮ → Group's one group, from before)
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
-        off = {host_key(r) for r in network().remotes() if r.deactivated}  # (grayed)
-        self.host_list.fill([(*h, h[0] in off) for h in self.known_hosts()], self.host_filter())
         self.fill_new_hosts()
+        self.show_host_state()
         self.group_list.fill(self.known_groups(), self.group_filter())
-        self.actions.lookup_action("show_all").set_enabled(  # (as it is after both: a fill can change what's picked)
-            self.host_filter() is not None or self.group_filter() is not None)
+        self.actions.lookup_action("show_all").set_enabled(self.group_filter() is not None)  # (after the fill: it can
+        # change what's picked)
 
-    def host_menu(self, row, x, y):
-        """Right-click a host (⋮ → Hosts): New Session Here (not on one that's gone); Host Command… for one reached
-        over ssh; Deactivate, or Activate for one that's deactivated (another machine's)."""
-        r = next((r for r in network().remotes() if host_key(r) == row.key), None)
+    def host_menu(self, x, y):
+        """Right-click New session's host (another machine's): Host Command…, for one reached over ssh; Deactivate, or
+        Activate for one that's deactivated."""
+        if (r := self.shown_remote()) is None:
+            return
         menu = Gio.Menu()
-        item = Gio.MenuItem.new("New Session Here", None)
-        if row.key == HERE_HOST or r is not None and r.state == "alive":
-            item.set_action_and_target_value("sb.new_here", GLib.Variant.new_string(row.key))
-        else:
-            item.set_action_and_target_value("sb.gone", None)  # (no such action: shown, but not to be picked)
-        menu.append_item(item)
-        if r is not None and r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
+        if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
             item = Gio.MenuItem.new("Host Command…", None)
-            item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(row.key))
+            item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
             menu.append_item(item)
-        if r is not None and row.key != HERE_HOST:
-            item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
-            item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (row.key, not r.deactivated)))
-            menu.append_item(item)
-        self.host_menu_shown = self.menu_at(menu, self.host_list, x, y)
+        item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
+        item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
+        menu.append_item(item)
+        self.host_menu_shown = self.menu_at(menu, self.host_dd, x, y)
 
     def deactivate_host(self, key, off):
-        """A host right-clicked → Deactivate (off), or Activate: Network.deactivate, its row and chats grayed while
-        it is."""
+        """New session's host right-clicked → Deactivate (off), or Activate: Network.deactivate, its chats grayed and
+        the banner saying so while it is."""
         if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
             network().deactivate(r, off)
             toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
@@ -8208,9 +8167,10 @@ class SessionSidebar(Gtk.Box):
         hosts, groups, assigned = self.host_filter(), self.group_filter(), chat_groups()
         ids = frozenset(i for s in network().sessions() for i in (s["id"], s.get("cli_id")) if i)
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
-        seen = sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"), s.get("said"),
-                       s.get("group"), bool(s.get("archived"))) for s in network().sessions()
-                      if self.shows(s, hosts, groups, assigned))
+        # (and the host listed: this machine's again while the one picked is gone)
+        seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
+                                       s.get("said"), s.get("group"), bool(s.get("archived")))
+                                      for s in network().sessions() if self.shows(s, hosts, groups, assigned)))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8714,37 +8674,82 @@ class SessionSidebar(Gtk.Box):
         self.refresh()
 
     def new_hosts(self):
-        """[(key, name)]: the hosts a new session can be made on: this machine (local), then each other that's there,
-        by its name, verbatim."""
-        out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
-        for r in sorted(network().alive(), key=lambda r: remote_name(r).lower()):
-            if (key := host_key(r)) not in seen and not r.deactivated:
-                seen.add(key)
-                out.append((key, remote_name(r)))
+        """[(key, name)]: New session's hosts: this machine (local), then every other known, by its name, verbatim (one
+        that's gone or deactivated too: picked, it says so, show_host_state); and the one picked, by the name it had,
+        while it isn't known (forgotten, or a mesh member not listed yet)."""
+        out = [(key, name) for key, name, _note in self.known_hosts()]
+        if (kept := self.kept_host()) is not None and kept not in dict(out):
+            out.append((kept, load_settings().get("new_session_host_name") or kept))
         return out
 
+    def kept_host(self):
+        """settings.json's new_session_host (None: this machine), by the key it has now if it's had another (kept so,
+        for the next run, which won't know the old one)."""
+        kept = load_settings().get("new_session_host")
+        if (now := next((host_key(r) for r in network().remotes() if kept in getattr(r, "was", ())), kept)) != kept:
+            save_settings(new_session_host=now)
+        return now if isinstance(now, str) and now != HERE_HOST else None
+
+    def shown_host(self):
+        """The host New session's on, and whose chats are listed: the one picked (kept_host), across restarts and while
+        it's gone or not known; else this machine."""
+        return self.kept_host() or HERE_HOST
+
+    def shown_remote(self):
+        """The host picked's Remote (None: this machine)."""
+        key = self.shown_host()
+        return None if key == HERE_HOST else next((r for r in network().remotes() if host_key(r) == key), None)
+
+    def host_state(self, r):
+        """What's in the way of the host picked (a Remote; None: this machine), as a chat on it says it in its banner
+        (banner_text), or None: it's there."""
+        if r is None:
+            key = self.shown_host()
+            return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if r.state == "alive" and not r.deactivated:
+            return None
+        name = remote_name(r)
+        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
+            if r.state == "dead" else f"Looking for {name} on the network…"
+
+    def show_host_state(self):
+        """The host picked isn't there (or is deactivated): said in the banner over its chats, as they were last
+        seen."""
+        said = self.host_state(self.shown_remote())
+        if said is not None:
+            self.host_banner.set_title(GLib.markup_escape_text(said))
+        self.host_banner.set_revealed(said is not None)
+
+    def pick_host(self, key):
+        """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
+        for while it isn't known: new_hosts)."""
+        save_settings(new_session_host=key, new_session_host_name=dict(self.new_hosts()).get(key))
+        self.show_host_state()
+        self.fill()
+
     def fill_new_hosts(self):
-        """New session's host, as the network has them now, on the one picked (settings.json's new_session_host; this
-        machine while that one isn't there)."""
+        """New session's host, as the network has them now, on the one picked (shown_host)."""
         hosts = self.new_hosts()
         self.host_dd.set_choices(hosts)
-        kept = load_settings().get("new_session_host")
-        self.host_dd.select(kept if kept in dict(hosts) else HERE_HOST)
+        self.host_dd.select(self.shown_host())
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
     def mine_listed(self):
-        """Is a new chat here listed (This Mac's host, and No group, picked in ⋮: it's in no group till it's put in
-        one)?"""
+        """Is a new chat here listed (this machine's host picked in New session's dropdown, and No group in ⋮: it's in
+        no group till it's put in one)?"""
         hosts, groups = self.host_filter(), self.group_filter()
         return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
 
     def new_chat(self):
         """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here; or, while a new
-        one here isn't listed (⋮: only other hosts, or only groups), one through a host that's listed
-        (ask_remote_start: in the group picked, if one is), so it's listed too."""
+        one here isn't listed (⋮: only groups), one through this machine's host process (ask_remote_start: in the group
+        picked, if one is), so it's listed too."""
         key = self.host_dd.value() or HERE_HOST
-        if key != HERE_HOST and (r := next((r for r in network().alive() if host_key(r) == key), None)) is not None:
+        if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
+            # not known)
+            toast(self, said)
+        elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
         elif self.mine_listed():
             self.win.switch_to(self.win.new_session)
@@ -8863,8 +8868,9 @@ class SideQuestion(Gtk.ListBoxRow):
         --resume <session> --fork-session --no-session-persistence --permission-mode plan
     so it sees the whole conversation so far but writes nothing (not to the session, not a new
     one), and can't edit anything. Tools that need permission are refused. Follow-ups go to the
-    same process; it ends with the window. Any number can run at once. One made from the pane's + has no question
-    yet: its box takes the first, and its claude starts then.
+    same process; it ends with the window. Any number can run at once. One asked in the box over the pane's list
+    (SidePanel.ask_typed) is made with no question and given it at once. One whose claude couldn't be had keeps its
+    question in its own box, to send again: its claude starts then.
     Its thread (inside: the darker inside, the box it's asked in under it, Meta's) opens under its line (toggle: ⌄, −
     to close it again), the box slimmer there, or fills the page (full: SidePanel.open_side_question, back out of it),
     the box as Meta's is, its dots and context meter under it."""
@@ -8886,7 +8892,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.status = StatusSlot("running")  # (a spinner while it answers; a mark only for one that failed)
         self.status.set_visible(False)
         head.append(self.status)
-        self.title = Gtk.Label(label=question or "New side question", xalign=0, hexpand=True, wrap=True,
+        self.title = Gtk.Label(label=question or "", xalign=0, hexpand=True, wrap=True,
                                wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.title.add_css_class("title")  # (as a subagent's row's)
         head.append(self.title)
@@ -8931,7 +8937,7 @@ class SideQuestion(Gtk.ListBoxRow):
         rows.append(self.reveal)
         self.put_inside_row()
         self.set_expanded(False)
-        if question and not self.start(question):  # (couldn't be had: kept in its box, as one from +'s, to send again)
+        if question and not self.start(question):  # (couldn't be had: kept in its box, to send again)
             self.composer.get_buffer().set_text(question)
 
     def expanded(self):
@@ -8964,6 +8970,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
         self.scroll.set_propagate_natural_height(True)
         self.scroll.set_vexpand(False)
+        self.scroll.set_visible(self.answer is not None)  # (nothing over its box till something's asked)
         self.inside.set_vexpand(False)
         self.inside.set_margin_start(widgets.INSIDE_GAP)
         box = self._box_scroll()
@@ -8971,6 +8978,7 @@ class SideQuestion(Gtk.ListBoxRow):
         # (no scrollbar: a shown one's least length would keep it two lines tall; still scrolled, past nine)
         box.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
         self._slim(True)
+        self.comp.set_margin_bottom(10)
         self.foot.set_visible(False)
         self.reveal.set_child(self.inside)
 
@@ -8980,12 +8988,14 @@ class SideQuestion(Gtk.ListBoxRow):
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroll.set_propagate_natural_height(False)
         self.scroll.set_vexpand(True)
+        self.scroll.set_visible(True)  # (asked or not: the page over its box, the box at its foot, as Meta's)
         self.inside.set_vexpand(True)
         self.inside.set_margin_start(0)  # (as a subagent's square: none on the main chat's side, its gap's the one)
         box = self._box_scroll()
         box.set_min_content_height(56)  # (Composer's own)
         box.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._slim(False)
+        self.comp.set_margin_bottom(0)  # (as Meta's: its box as far up from the page's foot as Meta's and the chat's)
         self.foot.set_visible(True)
         return self.inside
 
@@ -9045,8 +9055,12 @@ class SideQuestion(Gtk.ListBoxRow):
             info = find_session(win.session_id) if win.session_id else None
             fork = ["--fork-session"] if info else []  # nothing saved yet: a fresh, context-free side chat
             self.forked = bool(info)
-            self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
-                                   info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+            try:
+                self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
+                                       info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+            except OSError as e:  # (claude not there, or the chat's folder gone: said, as the chat's own would be)
+                win.note(f"the side question couldn't be asked: {e}")
+                self.proc = None
         if self.proc is None:
             return False
         self.title.set_label(question)
@@ -9056,7 +9070,7 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def ask(self, text, first=False):
         text = (text or "").strip()
-        if text and not first and self.proc is None and self.answer is None:  # (from +: its first question)
+        if text and not first and self.proc is None and self.answer is None:  # (its first question, sent again)
             return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
@@ -9150,7 +9164,9 @@ class SideQuestion(Gtk.ListBoxRow):
 
 BAUDE_PROMPT = """Chats: each has an id (its first 8 characters will do) and a title, and is in a folder, on a host and \
 in a group. Hosts are the machines chats run on; groups are the user's own division of the chats into whole lists. \
-⋮ in the left bar picks which are listed: show_hosts and show_groups (none given: all of them). move_chats puts chats \
+The left bar lists one host's chats, the one picked beside New session, which is the user's to pick: to show them \
+another's, show button:host (items: its name). ⋮ there picks which groups are listed: show_groups (none given: all \
+of them). move_chats puts chats \
 in a group (made if it's new; "" for none, whatever host they're on); make_group, rename_group and delete_group change \
 the groups. highlight_chats highlights chats in the list without changing them: use it to show which you mean before a \
 change the user should check. archive_chats and unarchive_chats; delete_chats moves chats of this machine's own (not \
@@ -9176,9 +9192,6 @@ BAUDE_TOOLS = [
      "given: all).",
      "inputSchema": {"type": "object", "required": ["groups"], "properties": {
          "groups": {"type": "array", "items": {"type": "string"}}}}},
-    {"name": "show_hosts", "description": "Which hosts the left bar lists, by name (none given: all).",
-     "inputSchema": {"type": "object", "required": ["hosts"], "properties": {
-         "hosts": {"type": "array", "items": {"type": "string"}}}}},
     {"name": "archive_chats", "description": "Archive chats: listed under Archived, out of the way.",
      "inputSchema": {"type": "object", "required": ["chats"], "properties": {
          "chats": {"type": "array", "items": {"type": "string"}}}}},
@@ -9423,7 +9436,7 @@ class BaudeMeta(meta.MetaChat):
     def app_handlers(self):
         return {"highlight_chats": self.highlight_chats, "move_chats": self.move_chats, "make_group": self.make_group,
                 "rename_group": self.rename_group, "delete_group": self.delete_group, "show_groups": self.show_groups,
-                "show_hosts": self.show_hosts, "archive_chats": lambda t, a: self.archive_chats(t, a, True),
+                "archive_chats": lambda t, a: self.archive_chats(t, a, True),
                 "unarchive_chats": lambda t, a: self.archive_chats(t, a, False), "delete_chats": self.delete_chats}
 
     def make_settings(self):
@@ -9446,33 +9459,6 @@ class BaudeMeta(meta.MetaChat):
         out["group_by"] = meta.Setting("group_by", "Group by", now, group_by, row, by,
                                        note="the left bar's chats, under their folders or their days")
 
-        def hosts():  # ([(key, name)]: New session's, as the left bar has them)
-            sidebar = getattr(win, "sidebar", None)
-            return sidebar.new_hosts() if sidebar is not None else [(HERE_HOST, THIS_MACHINE)]
-
-        def host_now():
-            kept = load_settings().get("new_session_host")
-            return dict(hosts()).get(kept, THIS_MACHINE)
-
-        def host_set(name):
-            key = next((k for k, n in hosts() if n == name), HERE_HOST)
-            save_settings(new_session_host=key)
-            if (sidebar := getattr(win, "sidebar", None)) is not None:
-                sidebar.fill_new_hosts()
-
-        def host_row():
-            names = [n for _k, n in hosts()]
-            r = Adw.ComboRow(title="New session's host", subtitle="Where a new session lives: its files and its tools",
-                             model=Gtk.StringList.new(names), selected=names.index(host_now()))
-            r.connect("notify::selected", lambda r, _p: r.get_selected() < len(names) and
-                      host_set(names[r.get_selected()]))
-            return r
-        out["new_session_host"] = meta.Setting(
-            "new_session_host", "New session's host", host_now, host_set, host_row,
-            lambda: [n for _k, n in hosts()],
-            note="the host a new session's made on, by its name (local: this machine), as New session's dropdown has "
-                 "it: where it lives, its files and its tools. Its model may run on any host; a chat stays where it's "
-                 "made. For one with a folder and a prompt, spawn_agent")
         return out
 
     def marks_changed(self):
@@ -9561,9 +9547,19 @@ class BaudeMeta(meta.MetaChat):
 
     def buttons(self):
         return {"trash": "Move to Trash… a chat (items: its id), to the system's trash or its host's; asks first, "
-                         "and can't be undone here"}
+                         "and can't be undone here",
+                "host": "Open a host (items: its name): the left bar lists its chats, and New session's on it"}
 
     def button(self, action, items):
+        if action == "host" and items:
+            sidebar = self.win.sidebar
+            key = next((k for k, n in sidebar.new_hosts() if n.lower() == str(items[0]).strip().lower()), None)
+            if key is None:
+                raise ValueError(f"No host {items[0]!r}: they're {', '.join(n for _k, n in sidebar.new_hosts())}.")
+            btn = Gtk.Button(label=f"Open {dict(sidebar.new_hosts())[key]}")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda *_: (sidebar.pick_host(key), sidebar.fill_new_hosts()))
+            return btn
         if action != "trash" or not items:
             raise ValueError(f"There's no button {action}{'' if items else ' without items'}: app_index buttons.")
         info = self._chat(items[0])["info"]
@@ -9632,7 +9628,7 @@ class BaudeMeta(meta.MetaChat):
         return {"text": f"Deleted {name}; its chats are in no group (action {a['id']})."}
 
     def _filter(self, turn, key, said, known, names):
-        """Which hosts or groups are listed (⋮), by their names (known: [(key, name, note)]); none: all."""
+        """Which groups are listed (⋮), by their names (known: [(key, name, note)]); none: all."""
         by_name = {name.lower(): k for k, name, _note in known}
         keys = []
         for n in names or ():
@@ -9650,9 +9646,6 @@ class BaudeMeta(meta.MetaChat):
 
     def show_groups(self, turn, args):
         return self._filter(turn, "sidebar_groups", "group", self.win.sidebar.known_groups(), args.get("groups"))
-
-    def show_hosts(self, turn, args):
-        return self._filter(turn, "sidebar_hosts", "host", self.win.sidebar.known_hosts(), args.get("hosts"))
 
     def archive_chats(self, turn, args, archive):
         sidebar, archived = self.win.sidebar, self.win.sidebar.archived_ids()
@@ -9773,6 +9766,8 @@ class BaudeMeta(meta.MetaChat):
                     picked = sorted({*picked, name})
                 self._groups_put(assigned, names, picked)
         elif kind == "filter":
+            if data["key"] != "sidebar_groups":  # (an old show_hosts': the host listed is New session's now)
+                raise ValueError("hosts aren't picked in ⋮ any more: the one listed is New session's")
             if load_settings().get(data["key"]) != data["expect"]:
                 raise ValueError("what's listed changed since")
             sidebar.filtered(**{data["key"]: data["value"]})
@@ -9836,7 +9831,7 @@ class BaudeMeta(meta.MetaChat):
         hosts, groups = sidebar.host_filter(), sidebar.group_filter()
         lines.append("hosts: " + ", ".join(name + (f" ({note})" if note else "") for _k, name, note in
                                            sidebar.known_hosts()) +
-                     f" · listed: {'all' if hosts is None else ', '.join(sorted(hosts))}")
+                     f" · listed: {', '.join(n for k, n, _n in sidebar.known_hosts() if k in hosts)}")
         lines.append("groups: " + ", ".join(f"{label} {counts.get(k, 0)}" for k, label, _n in sidebar.known_groups()) +
                      f" · listed: {'all' if groups is None else ', '.join(g or 'No group' for g in sorted(groups))}")
         lines.append(f"chats: {len(infos)}, {sum(i['id'] in archived or bool(i.get('archived')) for i in infos)} "
@@ -10169,15 +10164,25 @@ class SidePanel(Gtk.Box):
         self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
-        self.btw_list.set_placeholder(self._empty("No side questions"))
+        # (none asked: no placeholder, and the list hidden: empty, its outline would draw a line under the box)
+        self.btw_list.set_visible(False)
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        btw_top = Gtk.Box(margin_start=10, margin_end=10, margin_top=6)  # (+: a new one, its question typed in it)
-        self.btw_new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New side question",
-                                  halign=Gtk.Align.END, hexpand=True)
-        self.btw_new.add_css_class("flat")
-        self.btw_new.connect("clicked", lambda *_: self.new_side_question())
-        btw_top.append(self.btw_new)
-        btw_page.append(btw_top)
+        # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
+        # empty)
+        self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
+        self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
+        self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
+        self.btw_ask.set_margin_top(10)
+        self.btw_ask.input.get_parent().set_min_content_height(self.ASK_HEIGHT)
+        self.btw_ask.gate("empty", True)
+        self.btw_ask.input.get_buffer().connect("changed", lambda *_: self.btw_ask.gate(
+            "empty", not self.btw_ask.text().strip()))
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._ask_key)
+        self.btw_ask.input.add_controller(keys)
+        self.btw_ask.send.connect("clicked", lambda *_: self.ask_typed())
+        btw_page.append(self.btw_ask)
         self.btw_scroll = self._scrolled(self.btw_list)
         # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
         self.btw_list.set_margin_start(0)
@@ -10253,13 +10258,37 @@ class SidePanel(Gtk.Box):
         if self.btw_shown is not None:  # (back to the list, where it is)
             self.close_side_question()
         self.btw_list.prepend(sq)
+        self.btw_list.set_visible(True)
         sq.set_expanded(True)
 
-    def new_side_question(self):
-        """A side question with no question yet, at the top, its box focused for the first."""
+    ASK_HEIGHT = 63  # (px: the box's least)
+
+    def _ask_key(self, _c, keyval, _code, state):
+        """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
+        code block, is a new line: as in a side question's own box."""
+        if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            markdown = self.btw_ask.markdown
+            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
+                                                               or markdown.code_state()[0]):
+                return markdown.newline()
+            self.ask_typed()
+            return True
+        return False
+
+    def ask_typed(self):
+        """The question typed over the list: a side question of its own, at the top, open under its line; the box
+        emptied for the next. Kept there if it couldn't be asked (said in the window's note)."""
+        question = self.btw_ask.text().strip()
+        if not question:
+            return None
         sq = SideQuestion(self.win)
         self.add_side_question(sq)
-        sq.composer.grab_focus()
+        if not sq.start(question):
+            self.drop_side_question(sq)
+            return None
+        self.btw_ask.input.get_buffer().set_text("")
         return sq
 
     def side_questions(self):
@@ -10319,6 +10348,7 @@ class SidePanel(Gtk.Box):
             self.close_side_question(animate=False)
         if sq.get_parent() is self.btw_list:
             self.btw_list.remove(sq)
+            self.btw_list.set_visible(self.btw_list.get_row_at_index(0) is not None)
 
     def update_artifact(self, info):
         old = self.artifact_rows.pop(info["url"], None)
@@ -11835,6 +11865,50 @@ class SettingsDialog(Adw.PreferencesDialog):
     size_row = staticmethod(settings_size)
 
 
+class UserTurn(Gtk.Box):
+    """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
+    anywhere in the row, a revert button fades in just outside the bubble, level with its last line, and fades out as
+    it leaves (the chat's revert_to: this message and everything after it taken back, and what it said put back in
+    the box)."""
+
+    def __init__(self, win, bubble, text, uuid):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
+                                 tooltip_text="Revert: take back this message and everything after it, and put it "
+                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
+        self.revert.add_css_class("circular")
+        self.revert.add_css_class("revert-turn")
+        self.revert.connect("clicked", lambda *_: win.revert_to(self))
+        self.append(self.revert)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_revert(True))
+        hover.connect("leave", lambda *_: self.show_revert(False))
+        self.add_controller(hover)
+
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
+
+    def show_revert(self, on):
+        on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
+        self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
+
+
 class Repaint(Gtk.Widget):
     """Over the whole window, drawing nothing but for a frame when asked (flash): a change across all of it, which makes
     all of that frame's picture new. GTK 4.24's macOS backend shows a window as tiles, each given the new picture only
@@ -11911,6 +11985,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.orphan_results = {}   # tool_use_id -> result whose call isn't drawn yet
         self.history = None        # a loaded session's items not drawn yet (HistoryIndex)
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
+        self.reverting = None      # a revert not sent yet: {turn, hidden, draft, asked} (revert_to)
+        self.send_after_result = None  # (a revert made mid-turn: what's in the box sent once the turn's ended: reverted)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
         self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
@@ -12065,7 +12141,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
-        self.send_btn.connect("clicked", lambda *_: self.on_send())
+        self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
+                              else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
         self.attach_row = Gtk.Box(spacing=6)
         self.attach_strip = Gtk.ScrolledWindow(child=self.attach_row, visible=False, vexpand=False,
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -12298,7 +12375,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
-        draft (its caret and attachments too), a Feedback note put aside, the Feedback tab's reply."""
+        draft (its caret and attachments too), a side question typed over their list, a Feedback note put aside, the
+        Feedback tab's reply."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
         return {
@@ -12309,6 +12387,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
             "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
             "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
+            "btw_draft": widgets.typed_text(self.panel.btw_ask.input),  # (a side question typed, not yet asked)
             "attachments": [a.state() for a in self.attachments],
             "feedback_draft": self.feedback_draft.state() if self.feedback_draft else None,
             "fixes": fixes_page.state() if fixes_page else None, "fixes_shown": self.tabs.current() is fixes_page,
@@ -12332,6 +12411,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if state.get("draft"):
             self.input.get_buffer().set_text(state["draft"])
             widgets.put_caret(self.input, state.get("caret"))
+        if state.get("btw_draft"):
+            self.panel.btw_ask.input.get_buffer().set_text(state["btw_draft"])
         for att in state.get("attachments") or ():
             self.add_attachment(Attachment.from_state(att))
         if state.get("feedback_draft"):
@@ -12359,7 +12440,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return not self.restart_blockers()
 
     def restart_blockers(self):
-        """What a restart of Baude waits for in this window, said (the Update Available bar's tooltip), [] for none: a
+        """What a restart of Baude waits for in this window, said (the Update bar's tooltip), [] for none: a
         command of Baude's own claude's running (a Desktop chat's; a host's chats go on through a restart, commands and
         all), a side question's follow-up being written (that doesn't come back; what's typed elsewhere does:
         restart_state), a dialog or a capture open, and you at it (the window you're in, something typed, clicked or
@@ -12454,8 +12535,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         else:
             target = self.render_target or self.transcript
         if isinstance(widget, ToolCard):
-            return self.add_activity(target, widget)
-        target.append(widget)
+            self.add_activity(target, widget)
+        else:
+            target.append(widget)
+        if self.reverting is not None and target is self.transcript:  # (after the message being reverted: hidden too)
+            self.hide_reverted(self.transcript.get_last_child())
         return widget
 
     def add_activity(self, target, widget):
@@ -13338,7 +13422,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
                     self.drop_running = self.drop_session = None  # not tried again)
                 if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
-                    self.note(f"couldn't reach {remote_name(r)}: {e}")
+                    self.note(f"couldn't reach {'daemon' if r.mine else remote_name(r)}: {e}")
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -13564,6 +13648,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.remember_place()  # (to open it there again)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
+        if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it)
+            self.input.get_buffer().set_text(self.reverting["draft"])
+            self.reverting = None
+        if self.send_after_result is not None:  # (nor what was to be sent after one)
+            GLib.source_remove(self.send_after_result)
+            self.send_after_result = None
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
@@ -13705,6 +13795,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return self.composer_md.newline()  # False: the TextView inserts a plain newline
             self.on_send()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None:
+            if not self.revert_asked():  # (asked of claude already: its answer settles it)
+                self.cancel_revert()
+            return True
         if keyval == Gdk.KEY_Escape and self.busy:
             self.interrupt()
             return True
@@ -13739,6 +13833,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     self.sign_in(shlex.split(typed[len("/login"):]))
                 except ValueError as e:  # (a quote left open)
                     self.note(f"/login: {e}")
+            return
+        if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
+            if (typed or self.attachments) and not self.revert_asked():
+                self.commit_revert()  # (sent: the revert made, then this sent, reverted)
             return
         if self.busy:
             self.interrupt()
@@ -13796,9 +13894,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
-        self.add(self.user_bubble(text, atts))
+        said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
+        self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
-        self.proc.user(self.user_content(text, atts))
+        self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
 
     def chat_begun(self):
@@ -13844,6 +13943,181 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if text:
             bubble.append(MarkdownView(text))
         return bubble
+
+    def can_revert(self):
+        """Whether a message of yours can be reverted here: claude's chats can (it cuts its conversation itself:
+        rewind_conversation); pi's and Apple's models' can't, nor a chat that's only read here (live_elsewhere)."""
+        return model_program(self.model) == "claude" and not self.live_elsewhere()
+
+    def revert_to(self, turn):
+        """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
+        it's written in: it and everything after it hidden, and what it said put in the box. Esc puts them back, and the
+        draft that was there (cancel_revert); sending makes the revert (commit_revert), then sends. One already being
+        reverted is put back first (the draft kept: the one from before either)."""
+        if not self.can_revert() or turn.uuid is None:
+            return
+        draft = None
+        if self.reverting is not None:
+            if self.revert_asked():
+                return
+            draft = self.reverting["draft"]
+            self.cancel_revert(restore_draft=False)
+        buf = self.input.get_buffer()
+        if draft is None:
+            draft = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        self.reverting = {"turn": turn, "hidden": [], "draft": draft, "asked": None}
+        w = turn
+        while w is not None and w is not self.transcript:  # (it, what's after it, and after what it's in)
+            after = w.get_next_sibling() if w is not turn else w
+            while after is not None:
+                self.hide_reverted(after)
+                after = after.get_next_sibling()
+            w = w.get_parent()
+        buf.set_text(turn.text or "")
+        buf.place_cursor(buf.get_end_iter())
+        self.input.grab_focus()
+        self.stick_bottom = True
+
+    def hide_reverted(self, widget):
+        """A widget hidden while a revert's not sent (revert_to), to be shown again if it's not (cancel_revert)."""
+        if widget is not None and getattr(widget, "zoom_hidden", False):  # (hidden by a zoom, to be shown as it
+            widget.zoom_hidden = False                                     # settles: not now, but with the rest)
+            for side in ("above", "below"):
+                if self.zoom_job is not None and widget in self.zoom_job.get(side, ()):
+                    self.zoom_job[side].remove(widget)
+            self.reverting["hidden"].append(widget)
+        elif widget is not None and widget.get_visible():
+            widget.set_visible(False)
+            self.reverting["hidden"].append(widget)
+
+    def revert_asked(self):
+        """Whether the pending revert's been asked of claude, and it's still to answer (one gone meanwhile won't)."""
+        asked = self.reverting["asked"] if self.reverting is not None else None
+        return asked is not None and asked[0] is self.proc and asked[1] in self.pending
+
+    def say_now(self, text):
+        """A note shown while a revert's pending, below what's still shown (add hides what comes after the reverted
+        message)."""
+        rev, self.reverting = self.reverting, None
+        try:
+            return self.note(text)
+        finally:
+            self.reverting = rev
+
+    def show_waiting(self, widget):
+        """A permission asked while a revert's pending: what it's in shown again, to be answered (the turn waits on
+        it)."""
+        rev, w = self.reverting, widget
+        while rev is not None and w is not None and w is not self.transcript:
+            if w in rev["hidden"]:
+                rev["hidden"].remove(w)
+                w.set_visible(True)
+            w = w.get_parent()
+
+    def cancel_revert(self, restore_draft=True):
+        """Esc on a revert not sent: what it hid shown again, and the box as it was before."""
+        rev, self.reverting = self.reverting, None
+        if rev is None:
+            return
+        for widget in rev["hidden"]:
+            widget.set_visible(True)
+        if restore_draft:
+            buf = self.input.get_buffer()
+            buf.set_text(rev["draft"])
+            buf.place_cursor(buf.get_end_iter())
+
+    def commit_revert(self):
+        """A revert sent (on_send): claude takes the message and everything after it back (a turn at it stopped, what it
+        started since stopped too), then what's in the box is sent (reverted). A chat only viewed is resumed first, as
+        sending in it does (send_text)."""
+        rev = self.reverting
+        turn = rev["turn"]
+        self.reverting = None  # (what's said meanwhile shown, not hidden with what's being reverted: add)
+        try:
+            if self.resume_pending:
+                self.begin_resume()
+            if self.proc is None and self.remote is None and not self.runs_here():
+                took = self.take_up()
+                if took is False:  # (This Mac's host process isn't there yet: started, and sent once it is)
+                    self.note(f"Starting {THIS_MACHINE}'s host process…")
+                    self.local_server(lambda _r: self.reverting is rev and not self.revert_asked() and
+                                      self.commit_revert())
+                    return
+                if took is None:
+                    return
+            if self.proc is None:
+                self.start_proc()
+            if self.proc is None:
+                self.note("Couldn't revert: claude isn't running")
+                return
+        finally:
+            if rev["turn"].is_ancestor(self.transcript):
+                self.reverting = rev
+        rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid,
+                                 "interrupt_if_running": True})
+        self.pending[rid] = (lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
+        rev["asked"] = (self.proc, rid)
+
+    def revert_refused(self, rev, why):
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
+        rev["asked"] = None
+        if self.reverting is rev:
+            self.say_now(f"Couldn't revert: {why}")
+
+    def reverted(self, rev, response):
+        """claude's answer to commit_revert: rewound, the message and all after it gone from the chat, and what's in the
+        box sent; else why not, said."""
+        response = response or {}
+        if not response.get("rewound"):
+            why = next((v for k, v in response.items() if k != "rewound" and isinstance(v, str)), None)
+            return self.revert_refused(rev, why or "claude said no")
+        if self.reverting is not rev or not rev["turn"].is_ancestor(self.transcript):  # (another chat opened meanwhile)
+            return
+        self.reverting = None
+        self.drop_from(rev["turn"])
+        self.blocks, self.streamed_ids = {}, set()  # (a turn it stopped: what was half drawn is gone)
+        if self.busy:  # (a turn it stopped, its ending not said yet: what's in the box sent once it is, h_result; or
+            self.send_after_result = GLib.timeout_add(3000, self.send_reverted)  # in a moment, if it never is)
+        else:
+            self.send_reverted(waited=False)
+
+    def send_reverted(self, waited=True):
+        """After a revert's made (reverted): what's in the box sent. waited: once its stopped turn's ended, or a moment
+        after (whichever's first: once)."""
+        if waited and self.send_after_result is None:
+            return False
+        if self.send_after_result is not None:
+            GLib.source_remove(self.send_after_result) if GLib.MainContext.default().find_source_by_id(
+                self.send_after_result) else None
+            self.send_after_result = None
+        self.set_busy(False)
+        self.on_send()
+        return False
+
+    def drop_from(self, widget):
+        """widget and everything drawn after it, out of the chat (an earlier chunk it's in: the rest of that, and the
+        chunks after it, not drawn later either)."""
+        w = widget
+        while w is not None and w is not self.transcript:
+            parent, after = w.get_parent(), w.get_next_sibling()
+            while after is not None:
+                nxt = after.get_next_sibling()
+                parent.remove(after)
+                discard(after)
+                after = nxt
+            w = parent
+        widget.get_parent().remove(widget)
+        discard(widget)
+        if self.chunk_slots:
+            gone = [slot for slot in self.chunk_slots if slot.get_parent() is None]
+            self.chunk_slots = [slot for slot in self.chunk_slots if slot.get_parent() is not None]
+            for slot in gone:  # (the chunks after it not drawn yet: their items counted as drawn, never to be)
+                self.history.take(*slot.span)
+            if gone:
+                self.update_earlier_btn()
+        kept = [job for job in self.fill_jobs if job.slot.get_parent() is not None]
+        self.fill_jobs.clear()
+        self.fill_jobs.extend(kept)
 
     def interrupt(self):
         if self.proc:
@@ -14032,7 +14306,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # ---- inference providers: where the models besides Claude's run (Ollama, MLX, Apple's, an OpenAI-compatible
     # server), by host: this machine's, and every other member's of the mesh (network().providers()). Picked left of
     # the model picker, which lists Claude's (claude's: not a provider, bound to where it runs), then the provider's.
-    # Picking a provider changes the list; picking a model changes the chat's model, never its host: the chat stays
+    # Picking a provider changes the list and puts the chat on its model (the same one, else its first); picking a model
+    # changes the chat's model. Neither changes its host: the chat stays
     # where it is, with its files, and another host's model runs for it through the mesh's proxy where it serves an API,
     # else as an agent there whose tools are the chat's host's (providers.elsewhere). Where a chat lives is picked as
     # it's made (New Session's host), or by Meta. The picker's on the provider of the chat's model, as it's opened or
@@ -14044,8 +14319,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
-        """The host this chat lives on, its files and its agent's tools, as ⋮ → Hosts keys it: this machine (its own
-        claude, or its host process), or the server's."""
+        """The host this chat lives on, its files and its agent's tools, as New session's hosts key it: this machine (its
+        own claude, or its host process), or the server's."""
         return HERE_HOST if self.remote is None or baudelib.client.is_here(self.remote.info) else self.remote.key
 
     def provider_key_of(self, value):
@@ -14196,9 +14471,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def on_provider_changed(self, key):
         """A provider picked: the model picker lists its models after Claude's; kept for the chats after
-        (settings.json's provider). The chat goes on with its own model till one's picked, unless the provider has the
-        same one (alike: its own on another host): the chat's model is then that host's. On Apple's model, another
-        host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
+        (settings.json's provider). The chat's model is the provider's, as a model picked is: the same one as its own
+        where the provider has it (alike: its own on another host), else the provider's first. On Apple's model,
+        another host's Apple model. Picked mid-turn, the chat moves once the turn's over."""
         self.move_after_turn = None
         if key in getattr(self, "alike_keys", {}):
             self.move_to(self.alike_keys[key])
@@ -14212,6 +14487,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                       m["value"] != self.model and providerslib.same(m, mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):
             self.move_to(there["value"])
+            return
+        theirs = getattr(self, "provider_models", {}).get(key, [])
+        if theirs and self.provider_key_of(self.model) != key and \
+                not any(m["value"] == self.model for m in theirs):  # (not on one of its already: its first)
+            self.move_to(theirs[0]["value"])
             return
         self.sync_providers()
 
@@ -16149,7 +16429,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                self.add(self.user_bubble(text, atts))
+                self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:
@@ -16360,28 +16640,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         entry.grab_focus()
         return entry
 
-    def new_session_here(self, key):
-        """⋮ → Hosts, a host right-clicked → New Session Here: a session started on it, through its server (this
-        machine's: one started if there's none)."""
-        if key == HERE_HOST:
-            self.ask_remote_start(here=True)
-        elif (r := next((r for r in network().alive() if host_key(r) == key), None)) is not None:
-            self.ask_remote_start(server=r, fixed=True)
-        else:
-            toast(self.sidebar, "That host isn't there now")
-
-    def ask_remote_start(self, server=None, folder=None, hosts=None, fixed=False, here=False):
-        """New session through a server: the sidebar's New session while only other hosts are listed (hosts: their
-        keys), a server's folder's +, or New Session Here (fixed: on server only; here: this machine's, one started
-        there if there's none, local_server). A prompt, a folder and a group (the one group picked in ⋮, if one is);
+    def ask_remote_start(self, server=None, folder=None, hosts=None, here=False):
+        """New session through a server: the sidebar's New session while a new chat here isn't listed (hosts: the keys
+        of those that are), or a server's folder's + (here: this machine's, one started there if there's none,
+        local_server). A prompt, a folder and a group (the one group picked in ⋮, if one is);
         the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
         (remote_started)."""
         picked = self.sidebar.group_filter()
         group = next(iter(picked)) if picked is not None and len(picked) == 1 else None
         if here:
             servers = [r for r in network().alive() if host_key(r) == HERE_HOST][:1]
-        elif fixed:
-            servers = [server]
         else:
             servers = [r for r in network().alive(group) if hosts is None or host_key(r) in hosts]
             if server in servers:
@@ -16392,7 +16660,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if not servers:
                 toast(self.sidebar, "None of those hosts is there")
                 return
-        form = self.remote_start_form(servers or [None], folder, group, said=here or fixed, here=here)
+        form = self.remote_start_form(servers or [None], folder, group, said=here, here=here)
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="start",
                               close_response="cancel", body=form.body)
         if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
@@ -16416,7 +16684,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def remote_start_form(self, servers, folder=None, group=None, said=False, agents=False, here=False):
         """A new session's fields and what they do, New session…'s (ask_remote_start) and Meta's spawn_agent form's:
         the host (servers: those to pick from; None, this machine's host process, started as it's needed; said: the
-        one, said, not picked; here: this machine's, as New Session Here has it), with agents what runs on it (the
+        one, said, not picked; here: this machine's host process), with agents what runs on it (the
         models it offers: its own, or the top bar's), the folder (the one last used on that host, else its home; empty:
         its home, ~), the group and the prompt; the effort and mode the top
         bar has, and its model unless an agent's picked. Started, it's opened (remote_started)."""
@@ -16631,15 +16899,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                   lambda reply: self.remote_started(r, reply))
 
     def remote_started(self, r, reply):
-        """A server started a session asked for here: its host and group listed, and it opened."""
+        """A server started a session asked for here: its group listed, and it opened (another host's isn't listed till
+        that host's picked beside New session: Meta's button:host)."""
         if reply.get("op") != "started":
             self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
             return
         r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
         sb, info = self.sidebar, remote_info({**reply["session"], "server": r})
-        hosts, groups, group = sb.host_filter(), sb.group_filter(), chat_group(info)  # (listed, if ⋮ leaves them out)
-        sb.filtered(sidebar_hosts=sorted(hosts | {host_key(r)}) if hosts is not None else None,
-                    sidebar_groups=sorted(groups | {group}) if groups is not None else None)
+        groups, group = sb.group_filter(), chat_group(info)  # (and its group, if ⋮ leaves it out)
+        sb.filtered(sidebar_groups=sorted(groups | {group}) if groups is not None else None)
         self.open_remote_soon(info)
 
     def open_remote_link(self, uri):
@@ -16788,12 +17056,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
         if kind == "gone":
             name = remote_name(self.remote)
-            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
-                f"Looking for {name} on the network…"
+            text = ("Can't connect to daemon" if self.remote.mine else f"Can't connect to {name} at the moment") \
+                if self.remote.state == "dead" else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
         elif kind == "drop":
-            text = f"Connection to {remote_name(self.remote)} dropped"
+            text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
             m = self.retrying or {}
             what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"
@@ -16879,6 +17147,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
+        if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
+            GLib.idle_add(self.send_reverted)
         GLib.idle_add(lambda: self.follow_checkout() and False)  # (the turn may have moved into a worktree)
         if self.proc is not None:
             self.proc.asks.clear()  # (the turn's over: what it asked and wasn't answered can't be now)
@@ -16904,7 +17174,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its copy of the model now)
+        if move is not None and move[0] is self.proc:  # (a provider picked while it ran: its model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
@@ -17036,6 +17306,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             box.append(row)
         waiting = card if card is not None else box
         self.waiting_cards.add(waiting)
+        if self.reverting is not None:  # (asked mid-turn while a revert's pending: shown, once it's in the chat)
+            GLib.idle_add(lambda: self.show_waiting(waiting) and False)
         self.update_session_state()
         proc = self.proc
 
@@ -17108,6 +17380,8 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
+        else:
+            logo_icon()
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)
@@ -17156,7 +17430,7 @@ class BaudeApp(Adw.Application):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
         return all(w.idle() for w in self.windows())
 
-    # ---- Update Available: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
+    # ---- Update: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
     # or This Mac's host process's (on its commands: info's update)
     def update_waiting(self, waiting):
         self.update_held = waiting
@@ -17183,26 +17457,26 @@ class BaudeApp(Adw.Application):
                 bar.say(why)
 
     def update_now(self, win):
-        """The bar clicked: restarted now, what's running stopped (said first, and asked)."""
+        """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
+        asked."""
         why = [w for w in (self.update_reasons() or []) if not w.startswith("you, using")]
-        dlg = Adw.AlertDialog(heading="Restart now?", default_response="cancel", close_response="cancel",
-                              body="The new version is picked up now. "
-                                   + ("These are stopped, and their chats can be continued after:\n"
-                                      + "\n".join(f"• {w}" for w in why) if why else "Nothing's running."))
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("go", "Restart Now")
-        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE if why else Adw.ResponseAppearance.SUGGESTED)
 
-        def answered(_d, r):
-            if r != "go":
-                return
+        def go():
             host = local_host()
             if host is not None and host.info.get("update"):
                 host.request({"op": "quit"})  # (it comes back as a chat wants it: local_server)
             if self.updater is not None and self.updater.ready:
                 u = self.updater
                 self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})
-        dlg.connect("response", answered)
+        if not why:
+            return go()
+        dlg = Adw.AlertDialog(heading="Restart now?", default_response="cancel", close_response="cancel",
+                              body="The new version is picked up now. These are stopped, and their chats can be "
+                                   "continued after:\n" + "\n".join(f"• {w}" for w in why))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("go", "Restart Now")
+        dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda _d, r: r == "go" and go())
         dlg.present(win)
 
     def restart(self, updated=None):

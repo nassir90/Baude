@@ -1619,14 +1619,15 @@ def set_markup_safe(label, markup):
 
 
 class UpdateBar(Gtk.Box):
-    """At the foot of a sidebar, under a rule from what's listed above it: Update Available, while a new version's
-    waiting to be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now, asked)."""
+    """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's waiting to
+    be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now; asked only if that
+    stops something)."""
 
     def __init__(self, on_click):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
-        self.button = Gtk.Button(label="Update Available", halign=Gtk.Align.START, margin_start=6, margin_end=6,
+        self.button = Gtk.Button(label="Update", halign=Gtk.Align.START, margin_start=6, margin_end=6,
                                  margin_top=4, margin_bottom=4)
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: on_click())
@@ -4793,6 +4794,7 @@ class ExpandStack(Gtk.Widget):
         self.square.set_parent(self)
         self.square.set_child_visible(False)
         self.anim, self.move = None, None
+        self.stilled = None  # (the list kept from the pointer while it moves: _still)
 
     def do_get_request_mode(self):
         return self.stack.get_request_mode()
@@ -4897,8 +4899,11 @@ class ExpandStack(Gtk.Widget):
         self.finish()
         shown = self.stack.get_visible_child()
         row = self._seen(origin, within, across) if EXPAND_MS and self.get_mapped() and shown else None
+        if row is not None:
+            self._still(shown, origin)  # (before its pictures: the row as it is, not under the pointer that clicked it)
         lst = _frozen(shown) if row is not None else None
         if row is None or lst.get_intrinsic_width() <= 0:  # (just shown, not drawn since: where it is isn't known)
+            self._still(None)
             self.stack.set_visible_child_name(name)
             return
         start = [{"from": a, "to": b, "flip": bool(flip and flip[0]), "a": _place(a, self), "b": None,
@@ -4933,6 +4938,7 @@ class ExpandStack(Gtk.Widget):
             return
         frozen = _frozen
         page = self.stack.get_visible_child()
+        self._still(self.stack.get_child_by_name(name), origin)  # (the list, live as it comes back: none of it lit)
         move = {"live": False, "p": 1.0, "row": None, "list": None, "page": _rect(page, self) if page else None,
                 "origin": origin, "within": within, "across": across, "body_widget": body, "body": None,
                 "rides": [{"from": a, "to": b, "a": None, "b": _rect(b, self), "paint": frozen(b, RIDE_GROW)}
@@ -4972,7 +4978,28 @@ class ExpandStack(Gtk.Widget):
         if self.anim is not None:
             self.anim.skip()  # (to its end: done)
 
+    def _still(self, page, row=None):
+        """Nothing in page (the list, row the one moving) under the pointer from now till the move's done: what
+        the pointer was over not lit up any more, at once (not fading out, a picture of it taken as it fades: a lit row
+        stretched to the header, its button's square with it), and nothing lit up as it passes under the pointer
+        (while it moves nothing in it is anything the pointer's over: _run). None: page as it was again."""
+        if self.stilled is not None:
+            self.stilled.remove_css_class("expand-still")
+        self.stilled = page
+        if page is None:
+            return
+        page.add_css_class("expand-still")  # (no transitions in it: CSS)
+        for w in walk(page):  # (what's lit drawn again: a picture of it taken now is of it as it's now styled, not as
+            # it last drew, lit up; only that and the row, all of it (what's in it may be styled by its being lit), not
+            # a whole list of open threads)
+            if w.get_state_flags() & Gtk.StateFlags.PRELIGHT:
+                w.unset_state_flags(Gtk.StateFlags.PRELIGHT)
+                w.queue_draw()
+        for w in walk(row) if row is not None else ():
+            w.queue_draw()
+
     def _done(self):
+        self._still(None)
         self.anim, self.move = None, None
         self.square.set_child_visible(False)
         self.stack.set_can_target(True)
@@ -6576,6 +6603,59 @@ def view_bar(spacing=6, margin_start=12, margin_end=10, margin_top=6, margin_bot
     return bar
 
 
+class ChoiceDropDown(Gtk.DropDown):
+    """A DropDown over (value, label) pairs. on_pick(value) fires for user picks only,
+    not for select()/set_choices() calls that mirror what the CLI reports."""
+
+    def __init__(self, choices, tooltip, on_pick):
+        super().__init__(tooltip_text=tooltip, css_classes=["choice"])
+        # (its list centred under it: GTK's lines up their left sides, and a longer one runs on to the right)
+        if (popup := next((w for w in walk(self) if isinstance(w, Gtk.Popover)), None)) is not None:
+            popup.set_halign(Gtk.Align.CENTER)
+        self.strings = Gtk.StringList()
+        self.set_model(self.strings)
+        self.on_pick, self.values, self.quiet = on_pick, [], False
+        self.set_choices(choices)
+        self.connect("notify::selected", self._changed)
+
+    def _changed(self, *_):
+        if not self.quiet and self.value() is not None:
+            self.on_pick(self.value())
+
+    def _quietly(self, fn):
+        self.quiet = True
+        try:
+            fn()
+        finally:
+            self.quiet = False
+
+    def set_choices(self, choices):
+        """Replace the entries, keeping the current value selected if it is still there."""
+        keep = self.value()
+        def swap():
+            self.values = [v for v, _ in choices]
+            self.strings.splice(0, self.strings.get_n_items(), [lbl for _, lbl in choices])
+            self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
+        self._quietly(swap)
+
+    def select(self, value):
+        """Show `value` as selected (appending it if unknown) without firing on_pick."""
+        def pick():
+            if value not in self.values:
+                self.values.append(value)
+                self.strings.append(value)
+            self.set_selected(self.values.index(value))
+        self._quietly(pick)
+
+    def value(self):
+        i = self.get_selected()
+        return self.values[i] if i < len(self.values) else None
+
+    def label(self):
+        i = self.get_selected()
+        return self.strings.get_string(i) if i < len(self.values) else ""
+
+
 def ellipsize_dropdown(dd, chars=30):
     """dd's button shows its choice shortened with … (a long server or database name would widen the bar past the
     window); its list shows every choice whole."""
@@ -6819,6 +6899,8 @@ tabgrid > tabgridchild:focus:focus-visible .card, .navigation-sidebar > row:focu
 entry:focus-within, spinbutton:focus-within, spinbutton.vertical > text:focus-within,
 row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none; }
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
+.revert-turn { min-width: 24px; min-height: 24px; padding: 0; color: alpha(@view_fg_color, 0.6); }  /* (beside a
+   message of yours, on hover: small, and the grey of the chat's notes, .sysnote's) */
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }
@@ -6860,6 +6942,9 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 /* a wrapped block's lines can't be scrolled out from under them: they show while the pointer's on it */
 .codeblock.wrapped .code-corner { opacity: 0; transition: opacity 150ms; }
 .codeblock.wrapped:hover .code-corner, .codeblock.wrapped .code-corner:focus-within { opacity: 1; }
+/* a list in ExpandStack while its row opens into its page, or closes back into it: nothing lit up by the pointer
+   fading out, or in (ExpandStack._still) */
+.expand-still, .expand-still * { transition: none; }
 /* a one-line block stays one line tall: a vertical scrollbar's minimum would pad it out */
 .codeblock .code-scroll > scrollbar.vertical, .codeblock .code-scroll > scrollbar.vertical > range,
 .codeblock .code-scroll > scrollbar.vertical > range > trough { min-height: 0; }
@@ -7312,6 +7397,11 @@ def load_css():
 OVER_ADWAITA_CSS = """
 .baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
 headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: inherit; }
+/* (the box a side question's asked in, over their list: an entry's fill, as Search sessions' is: a theme's entries
+   have its own, and the box keeps a view's) */
+.composer-box.side-question-ask { background-color: alpha(currentColor, 0.1); }
+.side-question-ask textview, .side-question-ask textview > text, .side-question-ask .composer-head {
+  background-color: transparent; }
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }

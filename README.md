@@ -158,11 +158,12 @@ Moving to them, from `baude_server.py`:
   ended, as Baude's Move to Trash does with its own, and heads attached to it hear `deleted`.
 - On another machine, put `baude_headless.py` on `PATH` where `baude_server.py` was, for ssh to find.
 
-The sidebar lists every host's sessions: This Mac's own chats (Claude Code's and Claude Desktop's, and its host
-process's) with other hosts'. ⋮ beside its search → Hosts and Groups pick which are listed: a click lists only that one,
-and Shift or Ctrl (⌘) and a click adds or takes away one, as the Git page's branch list does. A group is the label a
-session was started with. Right-click a host → New Session Here starts a session there with the top bar's model, effort
-and mode, and a prompt and folder; on This Mac, its host process is started first if it isn't running.
+The sidebar lists one host's sessions: the host picked beside New session, where a new session is made (`local`: this
+machine's own chats, Claude Code's and Claude Desktop's, and its host process's), kept across restarts. A host that's
+gone or deactivated stays picked, its chats as they were last seen, and says so over them. Right-click the host for
+Host Command… (one reached over ssh) and Deactivate or Activate. ⋮ beside its search → Groups picks
+which groups are listed: a click lists only that one, and Shift or Ctrl (⌘) and a click adds or takes away one, as the
+Git page's branch list does. A group is the label a session was started with.
 
 Baude doesn't look for hosts on the network. This machine's host process it finds by its socket. Another machine's
 you give it by where ssh goes: ⋮ → Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or

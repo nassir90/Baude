@@ -721,18 +721,24 @@ def model_picked(chat, value):
 
 
 def provider_picked(chat, pid):
-    """Provider set to pid: Intelligence lists its models after Claude's. Meta goes on with its own till one's picked,
-    unless pid has the same one (alike: its own on another host): Meta's model is then that host's."""
+    """Provider set to pid: Intelligence lists its models after Claude's, and Meta's model is pid's from its next
+    message, as a model picked is: the same one as its own where pid has it (alike: its own on another host), else
+    pid's first."""
     widgets.save_settings(meta_provider=pid)
     offered = models()
     entry = model_entry(model(), offered)
+    if entry and entry[3] == pid:  # (on one of pid's already)
+        sync_rows()
+        return
+    theirs = [m for m in offered if m[3] == pid]
+    there = None
     if entry and providerslib.has_runtime(entry[3]) and providerslib.where(entry[3])[0] != providerslib.where(pid)[0]:
         known = providerslib.entries()
         mine = described(entry, known)
-        there = next((m for m in offered if m[3] == pid and providerslib.same(described(m, known), mine)), None)
-        if there is not None:
-            model_picked(chat, there[0])
-            return
+        there = next((m for m in theirs if providerslib.same(described(m, known), mine)), None)
+    if (there := there or (theirs[0] if theirs else None)) is not None:
+        model_picked(chat, there[0])
+        return
     sync_rows()
 
 
@@ -2581,8 +2587,8 @@ class MetaChat(Gtk.Box):
         acts = {a["id"]: a for a in self.actions()}
         batch = [acts[i] for i in it.get("actions") or () if i in acts]
         if it.get("state") != "error":
-            if base == "set_setting" and it.get("shown"):
-                return self.setting_box(it, batch), True
+            if base == "set_setting" and it.get("shown") and it["shown"][0].get("name") in self.settings:  # (one
+                return self.setting_box(it, batch), True  # that's gone since (an app's): its card)
             if base in ("show", "open_form", "fill_form"):  # (what they bring up speaks for itself)
                 return None, False
             if any(a.get("marks") for a in batch):

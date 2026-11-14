@@ -179,10 +179,11 @@ def listed_models(offered=None):
 
 def described(m, known=None):
     """An entry of models() as providers has a model: {value, displayName, provider}, and what it's served as, its
-    window and its version where they're said (known: providers.entries())."""
+    window, its version and its digest where they're said (known: providers.entries())."""
     known = providerslib.entries() if known is None else known
     return {"value": m[0], "displayName": m[1], "provider": m[3]} | \
-        {k: v for k, v in (known.get(m[0]) or {}).items() if k in ("resolvedModel", "id", "window", "version")}
+        {k: v for k, v in (known.get(m[0]) or {}).items()
+         if k in ("resolvedModel", "id", "window", "version", "digest")}
 
 
 def alike(offered=None, known=None):

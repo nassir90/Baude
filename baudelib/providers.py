@@ -112,10 +112,11 @@ def entries():
 
 def kind(m):
     """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
-    server; else its name; Apple's, with no runtime, by its name), its window and its version, where they're said."""
+    server; else its name; Apple's, with no runtime, by its name), its window, its version and Ollama's digest of it,
+    where they're said."""
     served = (None if not has_runtime(m.get("provider") or provider_of(m["value"])) else
               m.get("resolvedModel") or m.get("id")) or m.get("displayName") or m["value"]
-    return served, m.get("window"), m.get("version")
+    return served, m.get("window"), m.get("version"), m.get("digest")
 
 
 def alike(models, first=()):
@@ -128,13 +129,17 @@ def alike(models, first=()):
 
 
 def told_apart(m, listed):
-    """A model's name, with its window and version after it where another of listed (one of each kind) has its name:
-    Apple Foundation Model (32k, v3), qwen3:8b (16k). Just its name where none does."""
+    """A model's name, with what tells it from another of listed (one of each kind) with its name after it: its window
+    or version where they differ, else its digest: Apple Foundation Model (v3), qwen3:8b (16k), coder:latest
+    (b31e04f). Just its name where none has its name."""
     name = m.get("displayName") or m["value"]
     if sum((x.get("displayName") or x["value"]) == name for x in listed) < 2:
         return name
-    tags = [f"{m['window'] // 1024}k" if isinstance(m.get("window"), int) else None,
-            f"v{m['version']}" if m.get("version") else None]
+    same = [x for x in listed if (x.get("displayName") or x["value"]) == name and x is not m]
+    differs = {k: any(x.get(k) != m.get(k) for x in same) for k in ("window", "version")}
+    tags = [f"{m['window'] // 1024}k" if differs["window"] and isinstance(m.get("window"), int) else None,
+            f"v{m['version']}" if differs["version"] and m.get("version") else None,
+            m["digest"].removeprefix("sha256:")[:7] if m.get("digest") and not any(differs.values()) else None]
     return f"{name} ({', '.join(t for t in tags if t)})" if any(tags) else name
 
 
@@ -167,7 +172,7 @@ def elsewhere(p, member):
     host runs them, without moving: through the mesh's proxy here, as an endpoint's (mesh.endpoint_id), where it
     serves an API; else run there, as an agent whose tools are here (agent/<member>/<its value>: agentproxy)."""
     from baudelib import mesh
-    keep = ("id", "tools", "window", "version", "input", "thinking")
+    keep = ("id", "tools", "window", "version", "digest", "input", "thinking")
     if p.get("http"):
         pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
         return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,
@@ -396,6 +401,8 @@ def ollama(st=None, timeout=TIMEOUT):
         if not name:
             continue
         entry = ollama_entry(name, ollama_show(url, name, m.get("digest"), timeout), loaded.get(name), m.get("size"))
+        if entry is not None and isinstance(m.get("digest"), str):
+            entry["digest"] = m["digest"]  # (what it is: two hosts' models of one name may be different ones)
         if entry is not None:
             out["models"].append(entry)
     return out
@@ -575,7 +582,7 @@ def local_providers():
     """This machine's providers that run models now, as another host is told of them (the mesh: plain JSON, no
     secrets): [{"id", "kind" (apple, mlx, ollama, openai), "name", "base_url" (its OpenAI-compatible API; None for one a
     program runs: Apple's, MLX's), "models": [{"value", "displayName", "id" (its name to its server), "tools",
-    "window", "input", "thinking", "version" (where it's said)}]}]."""
+    "window", "input", "thinking", "version", "digest" (where they're said)}]}]."""
     out = []
     for p in usable(found(wait=True)):
         kind = "openai" if p["id"].startswith("openai/") else p["id"]
@@ -584,7 +591,7 @@ def local_providers():
             {"value": m["value"], "displayName": m["displayName"], "id": m.get("resolvedModel") or m["value"],
              "tools": m.get("tools", True), "window": m.get("window"), "input": m.get("input") or ["text"],
              "thinking": bool(m.get("thinking") or m.get("supportsEffort"))} |
-            ({"version": m["version"]} if isinstance(m.get("version"), str) else {}) for m in p["models"]]})
+            {k: m[k] for k in ("version", "digest") if isinstance(m.get(k), str)} for m in p["models"]]})
     return out
 
 

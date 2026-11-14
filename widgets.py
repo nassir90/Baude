@@ -7286,6 +7286,49 @@ class Spinner(Gtk.Widget):
 ICON_SLOT = 16  # status icon and disclosure arrow share one square column
 
 
+class WorkingDots(Gtk.Label):
+    """A turn running, at the bottom left (Baude's status bar, Meta's foot): •, ••, •••, and again; otherwise it isn't there, nor the room it takes.
+    All three are laid out, the rest see-through, so what's after it doesn't move with each dot. In a window you aren't
+    looking at it holds still (Ticker)."""
+
+    STEP_MS = 350
+
+    def __init__(self):
+        super().__init__(xalign=0, visible=False)
+        self.working, self.shown, self.source = False, 0, None
+        self.connect("map", WorkingDots._run)  # (plain functions: see Spinner)
+        self.connect("unmap", WorkingDots._stop)
+        self._show(0)
+
+    def set_working(self, working):
+        if working == self.working:
+            return
+        self.working = working
+        self.set_visible(working)
+        self.set_tooltip_text("Working" if working else None)
+        self._show(1 if working else 0)
+        self._stop()
+        self._run()
+
+    def _show(self, count):
+        self.shown = count
+        self.set_markup("•" * count + f'<span alpha="1">{"•" * (3 - count)}</span>')
+
+    def _run(self):
+        if self.working and self.source is None and self.get_mapped():
+            self.source = GLib.timeout_add(self.STEP_MS, self._step)
+
+    def _stop(self):
+        if self.source is not None:
+            GLib.source_remove(self.source)
+            self.source = None
+
+    def _step(self):
+        if Ticker.seen(self):
+            self._show(self.shown % 3 + 1)
+        return True
+
+
 def _slot(widget):
     widget.set_size_request(ICON_SLOT, ICON_SLOT)  # (at least: an image is at the icons' size, Settings → Size)
     widget.set_halign(Gtk.Align.CENTER)

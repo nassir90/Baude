@@ -1847,6 +1847,8 @@ class MetaChat(Gtk.Box):
         clear.add_css_class("flat")
         clear.connect("clicked", lambda *_: self._clear())
         foot.append(clear)
+        self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
+        foot.append(self.dots)
         self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
         self.context_soon_id = None
         foot.append(self.ctx)
@@ -1999,7 +2001,7 @@ class MetaChat(Gtk.Box):
         if agent is self.agent:
             self.agent = self.ask = None
             self.ctx.reset()
-            self.writing.set_busy(False)
+            self._busy(False)
             self._drop_asking()
             self.model_changed()  # (exhausted or not, as the conversation stands in the next session's window)
 
@@ -2814,7 +2816,7 @@ class MetaChat(Gtk.Box):
         self.context_soon(self.agent)
         self.live_widget = self._live(turn)
         self.render()
-        self.writing.set_busy(True)
+        self._busy(True)
         self.save(now=True)
 
     def agent_made(self, agent):
@@ -2928,10 +2930,14 @@ class MetaChat(Gtk.Box):
             self.box.remove(old)
         GLib.idle_add(self._to_bottom)
 
+    def _busy(self, busy):
+        """A turn running or not: the box's stop button, and the working dots in the foot."""
+        self.writing.set_busy(busy)
+        self.dots.set_working(busy)
+
     def _live(self, turn):
         if not turn["items"]:
-            reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            reply.append(label("Thinking…", css=("dim-label",)))
+            reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)  # (nothing yet: the dots say it's working)
             reply.bubble, reply.prose = reply, None
         else:
             reply = self._bubble({"role": "meta", "items": turn["items"]})
@@ -3013,7 +3019,7 @@ class MetaChat(Gtk.Box):
         session's first message is (the tokens it'd take: Agent.first), and wasn't sent. Either way, exhausted."""
         if agent is self.ask:
             self.ask, self.live_widget = None, None
-            self.writing.set_busy(False)
+            self._busy(False)
             self._drop_asking()
         if need is not None:
             self._unsent(turn)

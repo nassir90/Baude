@@ -6817,16 +6817,100 @@ UNDER_GTK_THEME_CSS = """
 """
 
 
-def theme_css():
+def theme_css(*app_css):
     """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
-    (libadwaita's, or a GTK_THEME's)."""
+    (libadwaita's, or a GTK_THEME's). app_css: the app's own stylesheets besides CSS (Record's), whose corners go
+    square with Baude's under a square theme (square_corners)."""
     display = Gdk.Display.get_default()
     if display is None or getattr(display, "baude_theme_css", None):
         return
     css = Gtk.CssProvider()
-    css.load_from_string(UNDER_GTK_THEME_CSS if os.environ.get("GTK_THEME") else OVER_ADWAITA_CSS)
+    themed = bool(os.environ.get("GTK_THEME"))
+    css.load_from_string(UNDER_GTK_THEME_CSS if themed else OVER_ADWAITA_CSS)
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     display.baude_theme_css = css
+    if themed:
+        display.baude_rounded_sheets = (CSS, *app_css)
+        _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
+
+
+# ---- a GTK theme's corners. Baude's own (a bubble's, the input box's, a table's, a code block's: its stylesheets'
+# border-radius) are libadwaita's roundness. Under a GTK theme they follow the theme's: the first window shown, one of
+# its buttons is drawn as the theme draws it, its corner's radius read off what's drawn (how far along the diagonal from
+# the corner it's clear), and every border-radius in Baude's stylesheets is held to it: 0 under Windows 95, Redmond,
+# CDE, NeXT; a few pixels under XP or Clearlooks; as it was under a theme as round as libadwaita. No theme is named:
+# it's what the theme draws.
+_corners = {"hook": None, "tries": 0, "done": False}
+
+
+def _first_window_mapped(window):
+    if _corners["done"]:
+        return False  # (the hook comes off)
+    if not isinstance(window, Gtk.Window):  # (the hook is on every widget's map)
+        return True
+    _corners["done"] = True
+    GLib.timeout_add(50, _probe_corners, window)
+    return False
+
+
+def _probe_corners(window):
+    """Once the window's laid out: its first solid button's corner radius, Baude's held to it (retried a while: none
+    laid out yet, or all flat). False: done."""
+    _corners["tries"] += 1
+    for w in walk(window):
+        if (w.get_css_name() == "button" and not w.has_css_class("flat") and w.get_mapped()
+                and w.get_width() >= 16 and w.get_height() >= 12):
+            radius = corner_radius(w)
+            if radius is not None:
+                fit_corners(window.get_display(), radius)
+                return False
+    return _corners["tries"] < 40
+
+
+def corner_radius(widget):
+    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
+    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
+    them). None: no solid top edge to tell by (a flat button)."""
+    w, h = widget.get_width(), widget.get_height()
+    snap = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(widget).snapshot(snap, w, h)
+    node = snap.to_node()
+    native = widget.get_native()
+    if node is None or native is None or native.get_renderer() is None:
+        return None
+    texture = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
+    down = Gdk.TextureDownloader.new(texture)
+    down.set_format(Gdk.MemoryFormat.R8G8B8A8)
+    data, stride = down.download_bytes()
+    data = data.get_data()
+    alpha = lambda x, y: data[y * stride + x * 4 + 3]  # noqa: E731
+    edge = alpha(texture.get_width() // 2, 0)
+    if edge < 128:
+        return None
+    clear = 0
+    while clear < min(texture.get_width(), texture.get_height()) // 2 and alpha(clear, clear) * 10 < edge * 9:
+        clear += 1
+    return round(clear / (1 - 0.5 ** 0.5))
+
+
+def fit_corners(display, radius):
+    """Every border-radius in Baude's stylesheets (and the app's: theme_css) held to radius, above them."""
+    def held(value):
+        return re.sub(r"(\d+(?:\.\d+)?)px", lambda m: f"{min(float(m.group(1)), radius):g}px", value)
+    rules = []
+    for sheet in getattr(display, "baude_rounded_sheets", (CSS,)):
+        sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", sheet, flags=re.S))  # (comments, @define-colors)
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+            for value in re.findall(r"border-radius:\s*([^;}]+)", body):
+                if held(value) != value:
+                    rules.append(f"{' '.join(sel.split())} {{ border-radius: {held(value).strip()}; }}")
+    display.baude_corner_radius = radius
+    if not rules:
+        return
+    css = Gtk.CssProvider()
+    css.load_from_string("\n".join(rules))
+    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+    display.baude_corners_css = css
 
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a

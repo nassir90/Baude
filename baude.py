@@ -11916,6 +11916,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.orphan_results = {}   # tool_use_id -> result whose call isn't drawn yet
         self.history = None        # a loaded session's items not drawn yet (HistoryIndex)
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
+        self.reverting = None      # a revert not sent yet: {turn, hidden, draft, asked} (revert_to)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
         self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
@@ -12459,8 +12460,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         else:
             target = self.render_target or self.transcript
         if isinstance(widget, ToolCard):
-            return self.add_activity(target, widget)
-        target.append(widget)
+            self.add_activity(target, widget)
+        else:
+            target.append(widget)
+        if self.reverting is not None and target is self.transcript:  # (after the message being reverted: hidden too)
+            self.hide_reverted(self.transcript.get_last_child())
         return widget
 
     def add_activity(self, target, widget):
@@ -13569,6 +13573,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.remember_place()  # (to open it there again)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
+        self.reverting = None  # (a revert not sent: gone with its chat)
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
@@ -13710,6 +13715,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return self.composer_md.newline()  # False: the TextView inserts a plain newline
             self.on_send()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None:
+            if not self.reverting["asked"]:  # (asked of claude already: its answer settles it)
+                self.cancel_revert()
+            return True
         if keyval == Gdk.KEY_Escape and self.busy:
             self.interrupt()
             return True
@@ -13744,6 +13753,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     self.sign_in(shlex.split(typed[len("/login"):]))
                 except ValueError as e:  # (a quote left open)
                     self.note(f"/login: {e}")
+            return
+        if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
+            if (typed or self.attachments) and not self.reverting["asked"]:
+                self.commit_revert()  # (sent: the revert made, then this sent, reverted)
             return
         if self.busy:
             self.interrupt()
@@ -13857,18 +13870,65 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return model_program(self.model) == "claude" and not self.live_elsewhere()
 
     def revert_to(self, turn):
-        """A message of yours reverted (UserTurn's button): claude takes it and everything after it back (a turn at it
-        stopped, what it started since stopped too), the chat drops them, and what it said is put back in the box. A chat
-        only viewed is resumed first, as sending in it does (send_text)."""
+        """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
+        it's written in: it and everything after it hidden, and what it said put in the box. Esc puts them back, and the
+        draft that was there (cancel_revert); sending makes the revert (commit_revert), then sends. One already being
+        reverted is put back first (the draft kept: the one from before either)."""
         if not self.can_revert() or turn.uuid is None:
             return
+        draft = None
+        if self.reverting is not None:
+            if self.reverting["asked"]:
+                return
+            draft = self.reverting["draft"]
+            self.cancel_revert(restore_draft=False)
+        buf = self.input.get_buffer()
+        if draft is None:
+            draft = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        self.reverting = {"turn": turn, "hidden": [], "draft": draft, "asked": False}
+        w = turn
+        while w is not None and w is not self.transcript:  # (it, what's after it, and after what it's in)
+            after = w.get_next_sibling() if w is not turn else w
+            while after is not None:
+                self.hide_reverted(after)
+                after = after.get_next_sibling()
+            w = w.get_parent()
+        buf.set_text(turn.text or "")
+        buf.place_cursor(buf.get_end_iter())
+        self.input.grab_focus()
+        self.stick_bottom = True
+
+    def hide_reverted(self, widget):
+        """A widget hidden while a revert's not sent (revert_to), to be shown again if it's not (cancel_revert)."""
+        if widget is not None and widget.get_visible():
+            widget.set_visible(False)
+            self.reverting["hidden"].append(widget)
+
+    def cancel_revert(self, restore_draft=True):
+        """Esc on a revert not sent: what it hid shown again, and the box as it was before."""
+        rev, self.reverting = self.reverting, None
+        if rev is None:
+            return
+        for widget in rev["hidden"]:
+            widget.set_visible(True)
+        if restore_draft:
+            buf = self.input.get_buffer()
+            buf.set_text(rev["draft"])
+            buf.place_cursor(buf.get_end_iter())
+
+    def commit_revert(self):
+        """A revert sent (on_send): claude takes the message and everything after it back (a turn at it stopped, what it
+        started since stopped too), then what's in the box is sent (reverted). A chat only viewed is resumed first, as
+        sending in it does (send_text)."""
+        rev = self.reverting
+        turn = rev["turn"]
         if self.resume_pending:
             self.begin_resume()
         if self.proc is None and self.remote is None and not self.runs_here():
             took = self.take_up()
-            if took is False:  # (This Mac's host process isn't there yet: started, and reverted once it is)
+            if took is False:  # (This Mac's host process isn't there yet: started, and sent once it is)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
-                self.local_server(lambda _r: turn.is_ancestor(self.transcript) and self.revert_to(turn))
+                self.local_server(lambda _r: self.reverting is rev and not rev["asked"] and self.commit_revert())
                 return
             if took is None:
                 return
@@ -13877,26 +13937,32 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.proc is None:
             self.note("Couldn't revert: claude isn't running")
             return
+        rev["asked"] = True
         self.request({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid, "interrupt_if_running": True},
-                     lambda r: self.reverted(turn, r), lambda error: self.note(f"Couldn't revert: {error}"))
+                     lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
 
-    def reverted(self, turn, response):
-        """claude's answer to revert_to: rewound, the message and all after it gone from the chat and the message in the
-        box; else why not, said."""
+    def revert_refused(self, rev, why):
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
+        rev["asked"] = False
+        if self.reverting is rev:
+            self.reverting = None  # (said below what's still shown, not hidden with what's being reverted: add)
+            self.note(f"Couldn't revert: {why}")
+            self.reverting = rev
+
+    def reverted(self, rev, response):
+        """claude's answer to commit_revert: rewound, the message and all after it gone from the chat, and what's in the
+        box sent; else why not, said."""
         response = response or {}
         if not response.get("rewound"):
             why = next((v for k, v in response.items() if k != "rewound" and isinstance(v, str)), None)
-            self.note(f"Couldn't revert: {why or 'claude said no'}")
+            return self.revert_refused(rev, why or "claude said no")
+        if self.reverting is not rev or not rev["turn"].is_ancestor(self.transcript):  # (another chat opened meanwhile)
             return
-        if not turn.is_ancestor(self.transcript):  # (gone already: another chat opened meanwhile)
-            return
-        self.drop_from(turn)
+        self.reverting = None
+        self.drop_from(rev["turn"])
         self.blocks, self.streamed_ids = {}, set()  # (a turn it stopped: what was half drawn is gone)
-        buf = self.input.get_buffer()
-        buf.set_text(turn.text or response.get("prefillText") or "")
-        buf.place_cursor(buf.get_end_iter())
-        self.input.grab_focus()
-        self.stick_bottom = True
+        self.set_busy(False)
+        self.on_send()
 
     def drop_from(self, widget):
         """widget and everything drawn after it, out of the chat (an earlier chunk it's in: the rest of that, and the

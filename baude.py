@@ -8897,16 +8897,15 @@ class SideQuestion(Gtk.Box):
         self.append(self.body)
         self.follow = Gtk.Entry(placeholder_text="Ask a follow-up…" if question else "Ask a side question…",
                                 sensitive=not question)
-        self.follow.connect("activate", lambda e: self.ask(e.get_text()) or e.set_text(""))
+        # (kept if a first question from + couldn't be asked: said in the window's note, there to send again)
+        self.follow.connect("activate", lambda e: self.ask(e.get_text()) is False or e.set_text(""))
         self.append(self.follow)
         if question:
             self.start(question)
 
     def start(self, question):
-        """Its claude, and the first question to it."""
+        """Its claude, and the first question to it: False if it couldn't be had (said)."""
         win = self.win
-        self.title.set_label(question)
-        self.follow.set_placeholder_text("Ask a follow-up…")
         if not win.runs_here():  # (a chat of Baude's, or a host's: its side question's the host process's too)
             self.proc, self.forked = win.side_question_proc(self.on_msg, self.on_exit)
         else:
@@ -8915,13 +8914,17 @@ class SideQuestion(Gtk.Box):
             self.forked = bool(info)
             self.proc = ClaudeProc(self.on_msg, self.on_exit, win.run_cwd, win.model, "plan",
                                    info["id"] if info else None, None, extra=fork + ["--no-session-persistence"])
+        if self.proc is None:
+            return False
+        self.title.set_label(question)
+        self.follow.set_placeholder_text("Ask a follow-up…")
         self.ask(question, first=True)
+        return True
 
     def ask(self, text, first=False):
         text = (text or "").strip()
         if text and not first and self.proc is None and self.answer is None:  # (from +: its first question)
-            self.start(text)
-            return
+            return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
         if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
@@ -9686,7 +9689,7 @@ class BaudeMeta(meta.MetaChat):
                        ", ".join(f"{s['id'][:8]} {s.get('state')}" for s in busy[:8]))
         panel = win.panel
         for n, said in ((len(panel.agent_rows), "subagent"), (len(panel.proc_rows), "background process"),
-                        (len(panel.side_questions()), "side question")):
+                        (len([q for q in panel.side_questions() if q.proc is not None]), "side question")):
             if n:
                 out.append(f"{n} {said}{'s' if n != 1 else ''} in the open chat")
         if self.agent is not None and not self.agent.closed:

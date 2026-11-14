@@ -6193,6 +6193,9 @@ def _dropdown_pressed(gesture, n_press, _x, _y):
     pop = _dropdown_list(widget)
     if n_press != 1 or pop is None or pop.get_visible():
         return
+    device = gesture.get_current_event_device()
+    if device is not None and device.get_source() == Gdk.InputSource.TOUCHSCREEN:
+        return  # (a finger's left to GTK, opening on the lift: a drag from here is a scroll, not a pick)
     gesture.set_state(Gtk.EventSequenceState.CLAIMED)  # (its own click, on the release, isn't to toggle it again)
     # (opened as it opens itself; a Gtk.DropDown's activate() is Space's, which waits a quarter second to)
     if isinstance(widget, Gtk.MenuButton):

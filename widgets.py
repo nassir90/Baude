@@ -6852,7 +6852,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .side-panel .baude-inside .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
                                     mix(@baude_inside, @view_fg_color, 0.06) 14px); }
-.side-panel list.nested .codeblock .code-corner {
+.side-panel list.nested .codeblock .code-corner, .side-panel .process-row .process-body .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(@baude_raised, 0), @baude_raised 14px),
     linear-gradient(to right, transparent, color-mix(in srgb, var(--card-shade-color) 50%, transparent) 14px),
     linear-gradient(to right, alpha(@card_bg_color, 0), @card_bg_color 14px),
@@ -6928,6 +6928,13 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
+/* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its
+   command and output open under it across the card, on the row's fill (half its card shade, as an open expander
+   row's), a rule over them; filling the page, on the panel's own */
+.side-panel .process-row { padding: 0; }
+.side-panel .process-row > box > row { margin: 2px; }
+.side-panel .process-row .process-body { background-color: color-mix(in srgb, var(--card-shade-color) 50%, transparent);
+  box-shadow: inset 0 1px var(--border-color); }
 .composer-box.slim .composer-actions button { min-width: 28px; min-height: 28px; }
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */
@@ -6950,7 +6957,6 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .md-table .md-head { background: @baude_raised; padding: 5px 12px;
                      border-bottom: 1px solid @baude_rule; }
 .md-table .md-cell { padding: 4px 12px; border-bottom: 1px solid alpha(@baude_rule, 0.5); }
-.artifact-chip { border: 1px solid @baude_rule; border-radius: 10px; padding: 8px 10px; }
 .artifact-chip .artifact-icon { color: @accent_color; }
 .tasks-indicator { padding: 0 8px; min-height: 0; font-size: 0.95em; }
 .ref-kind { font-size: 0.85em; font-weight: bold; opacity: 0.6; }

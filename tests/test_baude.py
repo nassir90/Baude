@@ -3824,7 +3824,7 @@ def test_artifacts_in_chat(app):
         assert reply.get_label().count("<a href=") == 2, "both inline, clickable, at text size"
         # the side panel lists them
         assert set(win.panel.artifact_rows) == {url, "https://claude.ai/code/artifact/0b7c-11"}
-        assert not win.panel.artifact_empty.get_visible()
+        assert win.panel.artifact_list.get_row_at_index(0) is not None, "listed, not the empty page's words"
         win.show_panel(True, "artifacts")
         snapshot(win, "artifacts")
     finally:

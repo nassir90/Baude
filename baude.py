@@ -16067,6 +16067,7 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
+        ensure_icons()
         pointers.start()
         install_debug_hooks(self)
 

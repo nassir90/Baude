@@ -8170,6 +8170,7 @@ class App(Adw.Application):
     def do_startup(self):
         Adw.Application.do_startup(self)
         self.do_startup_look()
+        widgets.ensure_icons()
         pointers.start()
         import signal  # (told to stop, as logging out or `kill` does: what's typed is saved, then it stops)
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):

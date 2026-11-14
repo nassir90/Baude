@@ -373,7 +373,9 @@ def load_settings():
 
 
 def save_settings(**changes):
-    settings = {**load_settings(), **changes}
+    """The changes kept in settings.json; made new (Baude's or Record's first save), full-width text is on."""
+    fresh = {} if os.path.exists(_settings_path()) else {"full_width": True}
+    settings = {**fresh, **load_settings(), **changes}
     try:
         os.makedirs(os.path.dirname(_settings_path()), exist_ok=True)
         with open(_settings_path(), "w") as f:

@@ -5328,7 +5328,8 @@ class MarkdownView(Gtk.Box):
         if text:
             self.set_text(text)
 
-    relink_due = None  # (its "map" handler, while it's out of sight with links that changed)
+    relink_due = None  # (its "map" handler, while it's out of sight with links that changed, and the links then:
+    # SIGNAL and base_dir are every chat's in turn, Record's each Reader's as it's shown, after a page is mapped)
 
     def relink(self):
         """Draw the same text again with the links as they are now: blocks whose markup changed are
@@ -5338,6 +5339,7 @@ class MarkdownView(Gtk.Box):
         if not self.get_mapped():
             if self.relink_due is None:
                 self.relink_due = self.connect("map", MarkdownView._relink_seen)
+            self.relink_with = (SIGNAL, MarkdownView.base_dir)
             return
         if self.streaming is not None:
             self.streaming[0] = None  # (the blocks it settled have the links as they were: the next frame reads all)
@@ -5361,9 +5363,15 @@ class MarkdownView(Gtk.Box):
         self.blocks = blocks
 
     def _relink_seen(self):
+        global SIGNAL
         self.disconnect(self.relink_due)
         self.relink_due = None
-        self.relink()
+        was, (SIGNAL, MarkdownView.base_dir) = (SIGNAL, MarkdownView.base_dir), self.relink_with
+        self.relink_with = None
+        try:
+            self.relink()
+        finally:
+            SIGNAL, MarkdownView.base_dir = was
 
     def append(self, delta):
         if self.streaming is None:

@@ -11498,7 +11498,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.panel.connect("notify::visible", lambda *_: self.panel.get_visible() and self.place_split())
         self.sidebar = SessionSidebar(self)
         for pane in (self.sidebar.scroller, self.panel.meta.scroll):  # (see pane_moving)
-            pane.get_vadjustment().connect("value-changed", BaudeWindow.pane_scrolled, self)
+            hand = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL,
+                                             propagation_phase=Gtk.PropagationPhase.CAPTURE)
+            hand.connect("scroll", BaudeWindow.pane_touched)
+            pane.add_controller(hand)
+            pane.get_vadjustment().connect("value-changed", BaudeWindow.pane_scrolled)
         network().listen(self.on_network)
         providerslib.listen(self.providers_found)  # (Ollama started, a model pulled, an endpoint added: the pickers)
         self.outer = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.sidebar,
@@ -11791,6 +11795,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if parent_tool and isinstance(widget, ToolCard):
             self.tool_parent[widget.tool_id] = parent_tool
         if parent_tool and (view := self.panel.agent_view(parent_tool)) is not None:
+            self.subagent_opened(parent_tool)  # (one not drawn yet, a message of its come live: what's before it first)
             target = view
         elif parent_tool in self.tool_cards:
             self.tool_cards[parent_tool].show_output()
@@ -11924,17 +11929,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """Scrolled by the reader, and not still since (chat_still): what's drawn ahead waits for that."""
         return self.still_timer is not None or self.scroll_glide.gliding()
 
-    PANE_STILL_S = 0.3
-    pane_moved = 0.0
+    PANE_STILL_S, PANE_HAND_S = 0.3, 1.5
 
     @staticmethod
-    def pane_scrolled(_adj, win):
-        win.pane_moved = time.monotonic()
+    def pane_touched(hand, _dx, _dy):
+        hand.get_widget().touched_at = time.monotonic()
+        return False
+
+    @staticmethod
+    def pane_scrolled(adj):
+        adj.moved_at = time.monotonic()
 
     def pane_moving(self):
-        """The left pane or Meta scrolled in the last PANE_STILL_S: the chat's earlier messages aren't drawn ahead
-        meanwhile (fill_frame), as they'd take the frame those need."""
-        return time.monotonic() - self.pane_moved < self.PANE_STILL_S
+        """The left pane or Meta scrolled by the reader in the last PANE_STILL_S (a wheel's or a trackpad's, its glide
+        after: moved within PANE_HAND_S of their last scroll; not Meta following its reply to the end): the chat's
+        earlier messages aren't drawn meanwhile (fill_frame), as they'd take the frames those need, the chat's laid out
+        again with each one shown."""
+        now = time.monotonic()
+        return any(now - getattr(pane.get_vadjustment(), "moved_at", 0.0) < self.PANE_STILL_S and
+                   now - getattr(pane, "touched_at", 0.0) < self.PANE_HAND_S
+                   for pane in (self.sidebar.scroller, self.panel.meta.scroll))
 
     stick_bottom = property(lambda self: self.follow.stick, lambda self, on: setattr(self.follow, "stick", on))
 
@@ -14888,14 +14902,49 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         self.sub_tails[agent_id] = {"path": path, "offset": 0, "partial": b"", "tool_use_id": tool_use_id,
                                     "first": True, "opened": opened}
+        if not opened:
+            self.subagent_artifacts(path)
         self.read_subagent(agent_id)
 
     def subagent_opened(self, tool_use_id):
-        """Its view opened in the side panel: its transcript drawn there now, if it waited for that."""
+        """Its view opened in the side panel (or a message of its come live): its transcript drawn there now, if it
+        waited for that; its calls that never got a result interrupted, as the chat's are (render_history), unless
+        it's still running."""
         for agent_id, st in list(self.sub_tails.items()):
             if st["tool_use_id"] == tool_use_id and not st["opened"]:
                 st["opened"] = True
+                before = set(self.tool_cards)
                 self.read_subagent(agent_id)
+                task = self.tasks.get(agent_id) or {}
+                if getattr(self, "history_final", False) or task.get("status") != "running":
+                    for tid, card in self.tool_cards.items():
+                        if tid not in before and card.state == "running" and tid not in self.orphan_results:
+                            card.set_state("interrupted")
+
+    def subagent_artifacts(self, path):
+        """What a subagent not drawn yet (follow_subagent) published, listed in the side panel's Artifacts and named as
+        its links read, without its transcript drawn: read only if it has an Artifact call in it at all."""
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            return
+        if b"Artifact" not in data:
+            return
+        calls = {}
+        for _kind, content, *_ in history_items(data.decode("utf-8", "replace").splitlines(), sidechain=True):
+            for c in content if isinstance(content, list) else ():
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "tool_use" and str(c.get("name", "")).split("__")[-1] == "Artifact":
+                    calls[c.get("id")] = c.get("input") or {}
+                elif c.get("type") == "tool_result" and c.get("tool_use_id") in calls:
+                    res = c.get("content")
+                    text = "\n".join(x.get("text", "") if isinstance(x, dict) else str(x or "")
+                                     for x in (res if isinstance(res, list) else [res]))
+                    if (info := artifact_from_tool(calls[c["tool_use_id"]], text)) is not None:
+                        ARTIFACT_TITLES[info["url"]] = info["title"]
+                        self.register_artifact(info)
 
     def read_subagent(self, agent_id):
         st = self.sub_tails.get(agent_id)

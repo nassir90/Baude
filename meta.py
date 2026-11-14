@@ -1747,12 +1747,12 @@ def rows_group(rows, title=None, limit=None):
 class Form:
     """A form of an app's (MetaChat.forms: its name -> what makes one): heading, body (what it says, as its dialog's
     body), child (its fields, as its dialog has them), fields [(name, what it takes, widget: an entry, a text view, a
-    drop-down)], verb (its button's word), check() -> what's wrong (to say), or None; submit() -> what was done (said),
-    or ValueError saying why not."""
+    drop-down)], verb (its button's word), check() -> what's wrong (to say), or None; submit() -> what was done (told
+    the model, and with said, on its card too), or ValueError saying why not."""
 
-    def __init__(self, heading, child, fields, check, submit, verb="Submit", body=""):
+    def __init__(self, heading, child, fields, check, submit, verb="Submit", body="", said=True):
         self.heading, self.child, self.fields, self.verb, self.body = heading, child, fields, verb, body
-        self.check, self.submit = check, submit
+        self.check, self.submit, self.said = check, submit, said
 
     @staticmethod
     def get(widget):
@@ -2314,9 +2314,9 @@ class MetaChat(Gtk.Box):
             filled = any(str(v).strip() for v in form.values().values())
             wrong.set_text((spec.get("error") or problem or "") if open_ and (filled or spec.get("error")) else "")
             wrong.set_visible(bool(wrong.get_text()))
-            said.set_text({"submitted": f"Done: {spec.get('said') or form.verb}", "cancelled": "Cancelled"}.get(
-                spec.get("state"), ""))
-            said.set_visible(not open_)
+            said.set_text({"submitted": f"Done: {spec.get('said') or form.verb}" if form.said else "",
+                           "cancelled": "Cancelled"}.get(spec.get("state"), ""))
+            said.set_visible(not open_ and bool(said.get_text()))
             card.set_tooltip_text("Right-click: Unpin" if open_ and spec.get("pinned", True) else
                                   "Right-click: Pin" if open_ else None)
 

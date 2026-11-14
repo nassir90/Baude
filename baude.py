@@ -15572,7 +15572,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         field("Prompt", frame, top=True)
         effort = lambda: (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None  # noqa: E731  (the top bar's as it's started)
-        runs = " · ".join(x for x in (None if agents else self.model_dd.label(),
+        runs = " · ".join(x for x in (None if agents else self.model_said(self.model_dd.value()),
                                       self.effort_dd.label() if effort() else "", self.mode_dd.label()) if x)
 
         def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)

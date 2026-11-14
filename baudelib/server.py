@@ -368,7 +368,10 @@ class Server:
                 continue
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
-        self.notes_seen = notes.stamp()  # (records.json here as last looked at: info's notes, _look)
+        self.notes_file, self.notes_seen = notes.file_key(), notes.stamp()  # (records.json here as last looked at:
+        # info's notes, _look)
+        self.notes_ops = queue.Queue()  # (notes ops, in the order they came: _notes)
+        threading.Thread(target=self._notes, daemon=True, name="notes").start()
         self.socket_path = socket_path or wire.socket_path()
         self.catalogue_lock, self.catalogue_asked = threading.Lock(), {}  # (catalogue's: when each folder was first asked for)
         self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
@@ -751,14 +754,8 @@ class Server:
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
-        if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; on a thread
-            def notes_op():  # of its own: a change waits on the Record running here)
-                try:
-                    reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
-                                      else notes.listing(msg.get("have"))))
-                except Exception as e:  # noqa: BLE001 (said to the Record that asked)
-                    reply("error", error=f"{type(e).__name__}: {e}")
-            threading.Thread(target=notes_op, daemon=True, name="notes").start()
+        if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; one at a time,
+            self.notes_ops.put((msg, reply))  # in the order asked, on a thread of their own: _notes)
             return None
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():
@@ -1424,12 +1421,25 @@ class Server:
         return s.proc is not None and not s.busy and not s.asks and not s.live and \
             not getattr(s.proc, "stopping", False) and models.program(s.meta.get("model"))["resumes"]
 
+    def _notes(self):
+        """The notes ops, one at a time in the order they came (a change after another applied after it, a listing
+        after the changes asked for before it)."""
+        while True:
+            msg, reply = self.notes_ops.get()
+            try:
+                reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
+                                  else notes.listing(msg.get("have"))))
+            except Exception as e:  # noqa: BLE001 (said to the Record that asked)
+                reply("error", error=f"{type(e).__name__}: {e}")
+
     def _look(self, pinged):
         """One look (_watch): (when subscribers were last pinged). Record's notebooks here written since the last:
         subscribers told too (info's notes), so a Record elsewhere showing them lists them again."""
-        if (seen := notes.stamp()) != self.notes_seen:
-            with self.lock:
-                self.notes_seen, self.dirty = seen, True
+        if (written := notes.file_key()) != self.notes_file:  # (read again only once it's written)
+            self.notes_file = written
+            if (seen := notes.stamp()) != self.notes_seen:
+                with self.lock:
+                    self.notes_seen, self.dirty = seen, True
         with self.lock:
             for s in list(self.sessions.values()):
                 grew = self.rescan(s)

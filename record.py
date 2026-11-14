@@ -557,11 +557,11 @@ class Store:
         merged where both (a page deleted on one side and written on the other: written)."""
         if was is None or mine == was:
             return theirs
-        if theirs == was or was == self.UNSENT:
-            return mine if mine is not None else theirs
+        if theirs == was:
+            return mine
         if mine is None or theirs is None:
             return mine if mine is not None else theirs
-        return notes.merge3(was, mine, theirs)
+        return notes.merge3("" if was == self.UNSENT else was, mine, theirs)  # (UNSENT: made on both: both kept)
 
     def books_of(self, host):
         """A host's notebooks, as listed here (this machine's, records.json's)."""
@@ -584,7 +584,9 @@ class Store:
         host = host or self.host
         if host == HERE_HOST or host in self.loading or self.sender is None:
             return False
-        base = self.remote_base.setdefault(host, {})
+        base = self.remote_base.get(host)
+        if base is None:  # (never listed here: nothing known of what it has)
+            return False
         now = {t["id"]: notes.shared(t) for t in self.remote.get(host, [])}
         changes = []
         for i, b in now.items():
@@ -597,11 +599,9 @@ class Store:
                 c["name"] = b["name"]
             pages = {p: text for p, text in b["pages"].items() if was["pages"].get(p) != text}
             pages.update({p: None for p in was["pages"] if p not in b["pages"]})
-            if pages:
+            if pages:  # (with what it had of each, was: where it's changed there since, both kept: notes.apply)
                 c["pages"] = pages
-                if said := {p: was["pages"][p] for p, text in pages.items()  # (what it had: kept as well as this,
-                            if text is not None and was["pages"].get(p) not in (None, self.UNSENT)}:  # where it's
-                    c["was"] = said  # changed there since: notes.apply)
+                c["was"] = {p: was["pages"][p] for p in pages if was["pages"].get(p) not in (None, self.UNSENT)}
             if len(c) > 1:
                 changes.append(c)
         changes += [{"id": i, "drop": True} for i in base if i not in now]
@@ -612,7 +612,8 @@ class Store:
 
     def failed(self, host, changes):
         """Changes a host didn't take: marked in what it's said to have (remote_base), so the next push sends them
-        again (a notebook made: made again; dropped: dropped again; a name, a page: set again), and nothing else."""
+        again (a notebook made: made again; dropped: dropped again; a name, a page: set again, with what it had of the
+        page then, so what's been written there since is kept too), and nothing else."""
         base = self.remote_base.setdefault(host, {})
         for c in changes:
             if c.get("new"):
@@ -625,7 +626,7 @@ class Store:
             if "name" in c:
                 was["name"] = self.UNSENT
             for p in c.get("pages") or {}:
-                was["pages"][p] = self.UNSENT
+                was["pages"][p] = (c.get("was") or {}).get(p, self.UNSENT)
 
     def apply_here(self, changes):
         """Changes another machine's Record made to this machine's notebooks (handed over by the host process here:
@@ -5813,8 +5814,13 @@ class RecordChat(meta.MetaChat):
             return f"{full_name(nb)}/{key.partition(chr(10))[2]}"  # (another notebook's: its notebook's name too)
         return super().mark_name(kind, key, action)
 
-    def _book(self, book_id):
-        return next((t for t in self.win.store.every_book() if t.get("id") == book_id), None)
+    def _book(self, book_id, host=None):
+        """A notebook by its id: on host (its key), if said; else the picked host's first, then any listed."""
+        store = self.win.store
+        if host is not None:
+            return next((t for t in store.books_of(host) if t.get("id") == book_id), None) \
+                if host == HERE_HOST or host in store.remote_base else None
+        return next((t for t in [*store.notebooks, *store.every_book()] if t.get("id") == book_id), None)
 
     def open_mark(self, kind, key, how, action):
         """A page in a change's box clicked: opened (in its notebook); one deleted, its text as it was, all red, in a
@@ -6358,13 +6364,15 @@ class RecordChat(meta.MetaChat):
         btn.connect("clicked", lambda *_: self.win.delete())
         return btn
 
-    def _pages_act(self, turn, said, before, moved=None, marks=(), moved_in=None):
-        """Pages changed (before: {notebook id: {page: its text before, or None}}, of every one touched; moved: {old
-        name: new}, in notebook moved_in (the one open, if not said)), kept as an action: undone, they're put back as
-        they were, and done again, as the action left them; either only while every one it touched is as the other
-        left it (apply_app)."""
-        moved_in = (moved_in or self.notebook or {}).get("id")
-        books = {t.get("id"): t for t in self.win.store.every_book()}  # (any host's)
+    def _pages_act(self, turn, said, before, moved=None, marks=(), moved_in=None, on=()):
+        """Pages changed (before: {notebook id: {page: its text before, or None}}, of every one touched, on: those
+        notebooks; moved: {old name: new}, in notebook moved_in (the one open, if not said)), kept as an action: undone,
+        they're put back as they were, and done again, as the action left them; either only while every one it touched
+        is as the other left it (apply_app). Each notebook kept with its host (hosts: two hosts' may share an id)."""
+        store, moved_in = self.win.store, moved_in or self.notebook
+        hosts = {t["id"]: store.host_of(t) for t in (*on, moved_in) if t is not None}
+        moved_in = (moved_in or {}).get("id")
+        books = {b: self._book(b, hosts.get(b)) for b in before}
         after = {b: {p: books[b]["pages"].get(p) for p in pages} for b, pages in before.items()}
         marked = {m[1] for m in marks}  # (and those whose text it changed, there before and after: edited)
         marks = list(marks) + [("page", f"{b}\n{p}", "edited", "") for b, pages in before.items()
@@ -6372,17 +6380,19 @@ class RecordChat(meta.MetaChat):
                                after[b][p] != text and f"{b}\n{p}" not in marked]
         return self.act(turn, said, "pages",
                         {"books": before, "expect": after, "moved": {v: k for k, v in (moved or {}).items()},
-                         "in": moved_in},
-                        {"books": after, "expect": before, "moved": dict(moved or {}), "in": moved_in}, marks)
+                         "in": moved_in, "hosts": hosts},
+                        {"books": after, "expect": before, "moved": dict(moved or {}), "in": moved_in, "hosts": hosts},
+                        marks)
 
     def apply_app(self, kind, data):
         if kind == "notebook":
             return self.apply_notebook(data)
         if kind != "pages":
             raise ValueError(f"No such action: {kind}")
-        books = {t.get("id"): t for t in self.win.store.every_book()}  # (any host's: Meta's tools change any)
-        if any(b not in books for b in data["books"]):
-            raise ValueError(f"its {book().lower()} is gone")
+        hosts = data.get("hosts") or {}  # (each notebook's host: Meta's tools change any; none said, from before)
+        books = {b: self._book(b, hosts.get(b)) for b in set(data["books"]) | ({data["in"]} if data.get("in") else set())}
+        if any(books[b] is None for b in data["books"]):
+            raise ValueError(f"its {book().lower()} is gone (or its host's {book(plural=True).lower()} aren't listed)")
         changed = [p for b, pages in (data.get("expect") or {}).items() for p, text in pages.items()
                    if books[b]["pages"].get(p) != text]
         if changed:  # (written in since, or changed by what came after: that would be lost)
@@ -6394,7 +6404,7 @@ class RecordChat(meta.MetaChat):
                     books[b]["pages"].pop(p, None)
                 else:
                     books[b]["pages"][p] = text
-        here = self.notebook is not None and data.get("in", self.notebook.get("id")) == self.notebook.get("id")
+        here = self.notebook is not None and (books.get(data["in"]) is self.notebook if data.get("in") else True)
         if not here and data.get("moved") and (nb := books.get(data.get("in"))) is not None:
             self.follow_moves(nb, data["moved"])
         self.pages_changed(data.get("moved") or {} if here else {})
@@ -6404,8 +6414,11 @@ class RecordChat(meta.MetaChat):
         made again (add: as it was made)."""
         store = self.win.store
         if "add" in data:
-            if self._book(data["add"]["id"]) is None:
-                store.books_of(data.get("host") or store.host).insert(0, copy.deepcopy(data["add"]))
+            host = data.get("host") or store.host
+            if host != HERE_HOST and host not in store.remote_base:
+                raise ValueError(f"its host's {book(plural=True).lower()} aren't listed here: open it first")
+            if self._book(data["add"]["id"], host) is None:
+                store.books_of(host).insert(0, copy.deepcopy(data["add"]))
         else:
             nb = self._book(data["drop"])
             if nb is None:
@@ -6518,7 +6531,7 @@ class RecordChat(meta.MetaChat):
         nb["pages"][name] = str(args.get("text") or "")
         here = nb is self.notebook
         a = self._pages_act(turn, f"Added {short_page(name)}" + ("" if here else f" to {full_name(nb)}{self._on(key)}"),
-                            before, marks=[("page", page_key(nb, name), "added")], moved_in=nb)
+                            before, marks=[("page", page_key(nb, name), "added")], moved_in=nb, on=[nb])
         if here:
             self.win.open_note(name, select=False)
         self.pages_changed({})
@@ -6539,7 +6552,7 @@ class RecordChat(meta.MetaChat):
         nb["pages"].pop(page, None)
         a = self._pages_act(turn, f"Deleted {short_page(page)}" +
                             ("" if nb is self.notebook else f" from {full_name(nb)}{self._on(key)}"), before,
-                            marks=[("page", page_key(nb, page), "removed")], moved_in=nb)
+                            marks=[("page", page_key(nb, page), "removed")], moved_in=nb, on=[nb])
         self.pages_changed({})
         return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
 
@@ -6586,6 +6599,9 @@ class RecordChat(meta.MetaChat):
         moved = {k: v for k, v in moved.items() if k != v or src is not nb}
         if not moved:
             return {"text": "They're there already."}
+        if src is not nb and src["id"] == nb["id"]:  # (two hosts' copies of one notebook: a records.json copied)
+            raise ValueError(f"{full_name(src)}{self._on(from_key)} and {full_name(nb)}{self._on(to_key)} are copies "
+                             "of one notebook (the same id): pages can't be moved between them here.")
         if src is not nb and (waiting := [p["page"] for p in self.pending(src) if p["page"] in moved]):
             raise ValueError(f"{short_page(waiting[0])} has edits of yours waiting: they're accepted or rejected (or "
                              "withdrawn) before it moves to another notebook.")
@@ -6604,7 +6620,7 @@ class RecordChat(meta.MetaChat):
                       page_key(nb, old)) for old, new in moved.items() if old in was]
             a = self._pages_act(turn, said + (f" in {full_name(nb)}{self._on(to_key)}" if nb is not self.notebook
                                               else ""), before,
-                                moved, marks, moved_in=nb)
+                                moved, marks, moved_in=nb, on=[nb])
             if nb is not self.notebook:
                 self.follow_moves(nb, moved)
             self.pages_changed(moved if nb is self.notebook else {})
@@ -6619,7 +6635,7 @@ class RecordChat(meta.MetaChat):
                      for old, new in moved.items() if new in nb["pages"]]
             into = f" into {full_name(nb)}{self._on(to_key)}" if nb is not self.notebook else ""
             a = self._pages_act(turn, said + f" from {full_name(src)}{self._on(from_key)}{into}", before, marks=marks,
-                                moved_in=nb)
+                                moved_in=nb, on=[src, nb])
             self.pages_changed({})
         return {"text": f"Moved {len(moved)} page{'s' if len(moved) != 1 else ''} under {where}"
                         f"{f' in {full_name(nb)}{self._on(to_key)}' if nb is not self.notebook else ''} "
@@ -6665,7 +6681,8 @@ class RecordChat(meta.MetaChat):
         before = {nb["id"]: {page: text}}
         nb["pages"][page] = text[:at] + new + text[at + len(found):]
         a = self._pages_act(turn, f"Edited {short_page(page)}" +
-                            ("" if nb is self.notebook else f" in {full_name(nb)}{self._on(key)}"), before, moved_in=nb)
+                            ("" if nb is self.notebook else f" in {full_name(nb)}{self._on(key)}"), before, moved_in=nb,
+                            on=[nb])
         self.pages_changed({})
         return {"text": f"Edited {page} (change {a['id']}, undone as one with the rest of this turn's)."}
 
@@ -7000,6 +7017,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.host_up, self.net_on = {}, False  # (by host: there, as last seen; the hosts looked for: start_network)
         self.notes_seen = {}  # (by host: its notebooks as last listed here, its info's notes: on_network)
         self.listed_at, self.list_later = {}, set()  # (by host: when it was last asked; hosts to ask in a moment)
+        self.list_whole = set()  # (hosts to list whole next, not only what's changed: list_notes)
         books.append(self.books_head)
         self.notebook_list = Gtk.ListBox()
         self.notebook_list.add_css_class("navigation-sidebar")
@@ -7918,6 +7936,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         at, self.notes_seen[key] = self.sent.get(key, 0), r.info.get("notes") or ""
         base = self.store.remote_base.get(key) or {}
         have = {i: notes.digest(b) for i, b in base.items()}  # (only those changed since are sent)
+        if key in self.list_whole:
+            self.list_whole.discard(key)
+            have = {}
 
         def got(reply):
             self.asked.discard(key)
@@ -7926,7 +7947,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 store.flush()  # (what's typed since: sent first, and listed again after)
             store.push(key)  # (what wasn't sent it before: sent now)
             if self.sends.get(key) or self.sent.get(key, 0) != at or store.unsent.get(key) is not None:
-                self.notes_seen.pop(key, None)  # (not taken: listed again, not as listed)
+                if self.sends.get(key) or self.sent.get(key, 0) != at:  # (not taken: listed again once they're
+                    self.notes_seen.pop(key, None)  # answered; one that won't take them: as it's written next)
                 self.list_again.add(key)
                 if not self.sends.get(key) and key == store.host:  # (nothing on its way: asked again now)
                     self.list_again.discard(key)
@@ -7942,11 +7964,20 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                      and isinstance(b.get("pages"), dict)]
             first = key in store.loading
             ids = [i for i in reply.get("ids") or () if isinstance(i, str)] if "ids" in reply else None
+            have_now, sent_ids = store.remote_base.get(key) or {}, {b["id"] for b in books}
+            by_id = {t.get("id") for t in store.remote.get(key) or ()}
+            if ids is not None and any(i not in sent_ids and (i not in have_now or i not in by_id) for i in ids):
+                self.list_whole.add(key)  # (one it left out as had here, that isn't: listed whole)
+                self.notes_seen.pop(key, None)
+                GLib.timeout_add(100, lambda: self.list_notes(key) and False)
+                return
             merged = store.take(key, remote_name(r), [notes.shared(b) for b in books], ids)
             if key == store.host:
                 self.notes_changed(first)
             if merged:  # (changed here and there: what's merged sent to it)
                 store.save()
+            if (r.info.get("notes") or "") != self.notes_seen.get(key):  # (written again while it was listed)
+                self.list_notes(key)
         r.request({"op": "notes", "have": have}, got)
 
     def send_notes(self, key, changes):

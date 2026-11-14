@@ -450,7 +450,7 @@ class Network:
         r.command = command or None
         r.wake.set()
         self.link(r)
-        self.save(force=True)
+        self.save(force=True, only=r.key)
 
     # ---- the mesh: this machine's host process linked to each host given by hand, the link used both ways, and
     # every member it reaches known here, reached through it (baudelib/mesh.py)
@@ -471,7 +471,7 @@ class Network:
         r.untold = True
         if (here := self.here_alive(4)) is not None and not r.mine:
             self.tell(r, here)
-        self.save(force=True)
+        self.save(force=True, only=r.key)
         self.changed()
 
     def tell(self, r, here):
@@ -630,13 +630,15 @@ class Network:
                 fn()
         self.dispatch(tell)
 
-    def save(self, force=False):
+    def save(self, force=False, only=None):
         """servers.json: every host reached or given by hand, and what's in it that isn't known here (put there
         meanwhile: take_saved takes it up), not written over. (readonly: not written, but for force: a change the user
-        made here, a host deactivated, say.)"""
+        made here to one host, only, its key, the rest left as they are there.)"""
         self.saved_at = time.time()
         if self.readonly and not force:
             return
+        if self.readonly:
+            return self._save_one(only)
         on_disk = self.saved()
         with self.lock:
             servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
@@ -651,6 +653,26 @@ class Network:
             tmp = f"{target}.{os.getpid()}.tmp"  # (another process's write at once: not into the same file)
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f)
+            os.replace(tmp, target)
+        except OSError:
+            pass
+
+    def _save_one(self, key):
+        """servers.json with one host's entry as it is here, every other as it is there (a read-only Network's: what
+        it knows of the rest may be older than Baude's)."""
+        with self.lock:
+            r = self.servers.get(key)
+            mine = r.cached() if r is not None else None
+        if mine is None:
+            return
+        on_disk = self.saved()
+        on_disk[key] = mine
+        target = os.path.join(self.home, "servers.json")
+        try:
+            os.makedirs(self.home, exist_ok=True)
+            tmp = f"{target}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"servers": on_disk}, f)
             os.replace(tmp, target)
         except OSError:
             pass

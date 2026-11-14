@@ -10148,10 +10148,11 @@ class SidePanel(Gtk.Box):
         self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
-        self.btw_list.set_placeholder(self._empty("No side questions"))
+        # (none asked: no placeholder, and the list hidden: empty, its outline would draw a line under the box)
+        self.btw_list.set_visible(False)
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        # (over them, a pill of its own: the box a new one's asked in, as tall as the pill a page with none shows; Enter
-        # and its send button off while it's empty)
+        # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
+        # empty)
         self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
@@ -10241,9 +10242,10 @@ class SidePanel(Gtk.Box):
         if self.btw_shown is not None:  # (back to the list, where it is)
             self.close_side_question()
         self.btw_list.prepend(sq)
+        self.btw_list.set_visible(True)
         sq.set_expanded(True)
 
-    ASK_HEIGHT = 63  # (px: the box's least, so its pill's as tall as the one a page with none shows: _empty's)
+    ASK_HEIGHT = 63  # (px: the box's least)
 
     def _ask_key(self, _c, keyval, _code, state):
         """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
@@ -10330,6 +10332,7 @@ class SidePanel(Gtk.Box):
             self.close_side_question(animate=False)
         if sq.get_parent() is self.btw_list:
             self.btw_list.remove(sq)
+            self.btw_list.set_visible(self.btw_list.get_row_at_index(0) is not None)
 
     def update_artifact(self, info):
         old = self.artifact_rows.pop(info["url"], None)

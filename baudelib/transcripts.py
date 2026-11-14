@@ -329,6 +329,36 @@ def rewind_mark(line):
     return (rec.get("leafUuid"),)
 
 
+def rewind_target(path, target):
+    """For a revert of the message of yours with this uuid, in a transcript Baude's server keeps (pi's and Apple's
+    chats: records in the order said, earlier reverts marked): (the uuid of the record it keeps last, None for none;
+    which of the messages of yours still in the conversation it is, from 0), or None if it isn't there."""
+    kept = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if (mark := rewind_mark(line)) is not None:
+                    at = next((i for i, r in enumerate(kept) if r.get("uuid") == mark[0]), None) \
+                        if mark[0] is not None else -1
+                    if at is not None:
+                        del kept[at + 1:]
+                    continue
+                if '"type":"user"' not in line and '"type":"assistant"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("type") in ("user", "assistant"):
+                    kept.append(rec)
+    except OSError:
+        return None
+    for i, rec in enumerate(kept):
+        if rec.get("uuid") == target and _is_prompt(rec):
+            return (kept[i - 1].get("uuid") if i else None), sum(1 for r in kept[:i] if _is_prompt(r))
+    return None
+
+
 def line_of_uuid(path, uuid, before):
     """Where the line of the record with this uuid starts, searched back from before (a revert's kept record): -1 for
     none kept (uuid None: all that's before is dropped); None if it isn't there."""

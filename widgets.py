@@ -4793,6 +4793,7 @@ class ExpandStack(Gtk.Widget):
         self.square.set_parent(self)
         self.square.set_child_visible(False)
         self.anim, self.move = None, None
+        self.stilled = None  # (the list kept from the pointer while it moves: _still)
 
     def do_get_request_mode(self):
         return self.stack.get_request_mode()
@@ -4897,8 +4898,11 @@ class ExpandStack(Gtk.Widget):
         self.finish()
         shown = self.stack.get_visible_child()
         row = self._seen(origin, within, across) if EXPAND_MS and self.get_mapped() and shown else None
+        if row is not None:
+            self._still(shown)  # (before its pictures: the row as it is, not under the pointer that clicked it)
         lst = _frozen(shown) if row is not None else None
         if row is None or lst.get_intrinsic_width() <= 0:  # (just shown, not drawn since: where it is isn't known)
+            self._still(None)
             self.stack.set_visible_child_name(name)
             return
         start = [{"from": a, "to": b, "flip": bool(flip and flip[0]), "a": _place(a, self), "b": None,
@@ -4933,6 +4937,7 @@ class ExpandStack(Gtk.Widget):
             return
         frozen = _frozen
         page = self.stack.get_visible_child()
+        self._still(self.stack.get_child_by_name(name))  # (the list, live as it comes back: none of it lit up)
         move = {"live": False, "p": 1.0, "row": None, "list": None, "page": _rect(page, self) if page else None,
                 "origin": origin, "within": within, "across": across, "body_widget": body, "body": None,
                 "rides": [{"from": a, "to": b, "a": None, "b": _rect(b, self), "paint": frozen(b, RIDE_GROW)}
@@ -4972,7 +4977,24 @@ class ExpandStack(Gtk.Widget):
         if self.anim is not None:
             self.anim.skip()  # (to its end: done)
 
+    def _still(self, page):
+        """Nothing in page (the list, its row the one moving) under the pointer from now till the move's done: what
+        the pointer was over not lit up any more, at once (not fading out, a picture of it taken as it fades: a lit row
+        stretched to the header, its button's square with it), and nothing lit up as it passes under the pointer
+        (while it moves nothing in it is anything the pointer's over: _run). None: page as it was again."""
+        if self.stilled is not None:
+            self.stilled.remove_css_class("expand-still")
+        self.stilled = page
+        if page is None:
+            return
+        page.add_css_class("expand-still")  # (no transitions in it: CSS)
+        for w in walk(page):  # (and drawn again: a picture of it taken now is of it as it's now styled, not as it last
+            # drew, lit up)
+            w.unset_state_flags(Gtk.StateFlags.PRELIGHT)
+            w.queue_draw()
+
     def _done(self):
+        self._still(None)
         self.anim, self.move = None, None
         self.square.set_child_visible(False)
         self.stack.set_can_target(True)
@@ -6915,6 +6937,9 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 /* a wrapped block's lines can't be scrolled out from under them: they show while the pointer's on it */
 .codeblock.wrapped .code-corner { opacity: 0; transition: opacity 150ms; }
 .codeblock.wrapped:hover .code-corner, .codeblock.wrapped .code-corner:focus-within { opacity: 1; }
+/* a list in ExpandStack while its row opens into its page, or closes back into it: nothing lit up by the pointer
+   fading out, or in (ExpandStack._still) */
+.expand-still, .expand-still * { transition: none; }
 /* a one-line block stays one line tall: a vertical scrollbar's minimum would pad it out */
 .codeblock .code-scroll > scrollbar.vertical, .codeblock .code-scroll > scrollbar.vertical > range,
 .codeblock .code-scroll > scrollbar.vertical > range > trough { min-height: 0; }

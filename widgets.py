@@ -405,9 +405,9 @@ def save_settings(**changes):
 # The settings Baude and Record share, in settings.json (this machine's: they never go to another host). Changed in
 # one app, every other one running here takes it as it's written (watch_settings): the accent, the text's, the icons'
 # and the Global Scale, Auto restart on update and the code font (each read where it's used, the font at the next
-# start), and Meta's model, effort and Code mode. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
+# start), and Meta's model, effort, Code mode and Run commands. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
 SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
-                   "meta_model", "meta_effort", "meta_code_mode")
+                   "meta_model", "meta_effort", "meta_code_mode", "meta_commands")
 SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
 _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
 _following = weakref.WeakSet()  # (Settings rows up that show a shared setting: follow_setting)

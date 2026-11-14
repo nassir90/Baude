@@ -5871,7 +5871,7 @@ class ToolCard(Gtk.Box):
         self.input_stale, self.pending_output = True, []
         self.input_toggle.on_expand.append(self.build_input)
         self.output_toggle.on_expand.append(self.build_output)
-        self.set_input({})
+        self.set_input({}, whole=False)
 
     # ---- state
     def set_state(self, state):
@@ -5883,7 +5883,7 @@ class ToolCard(Gtk.Box):
             self.remove_css_class("error")
         if state == "error":
             self.output_toggle.set_label("Error")
-        if state == "interrupted" and not self.input:  # (stopped before its input came in whole: nothing to open)
+        if state == "interrupted" and not self.input_whole:  # (stopped before its input came in: nothing to open)
             self.input_toggle.set_visible(False)
             self.toggles.set_visible(self.output_toggle.get_visible())
         self.refresh_header()
@@ -5961,8 +5961,10 @@ class ToolCard(Gtk.Box):
             return  # (a subagent's: View opens it in the side panel, in place of an Output to fold open; an Error stays)
         self.output_toggle.set_visible(True)
 
-    def set_input(self, inp):
+    def set_input(self, inp, whole=True):
+        """What it was given; whole: all of it (not yet, as a card's first drawn, before its input streams in)."""
         self.input = inp if isinstance(inp, dict) else {}
+        self.input_whole = whole
         self.refresh_header()
         # a plain Read's only input is the path, which the header already shows
         redundant = self.name == "Read" and not (self.input.get("offset") or self.input.get("limit") or
@@ -13696,6 +13698,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 card.set_input(c.get("input", {}))
                 if c["id"] in self.orphan_results:  # its result was drawn before it (older history)
                     self.render_tool_results([self.orphan_results.pop(c["id"])])
+            elif str(c.get("type")).endswith("_tool_result") and c.get("tool_use_id") in self.tool_cards:
+                # (a server tool's result, a web search's: in the reply itself; an error's a dict of type …_error)
+                failed = isinstance(c.get("content"), dict) and str(c["content"].get("type")).endswith("_error")
+                self.tool_cards[c["tool_use_id"]].set_state("error" if failed else "done")
             elif c.get("type") == "text" and c.get("text", "").strip():
                 self.queue_refs(c["text"], written_at)  # first: new names are drawn pending, not redrawn
                 if not streamed:
@@ -15879,11 +15885,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if card.state != "running":
                 continue
             parent = self.tool_parent.get(tid)
-            while parent is not None and getattr(self.tool_cards.get(parent), "state", None) != "background":
+            while parent is not None and not self.goes_on(parent):
                 parent = self.tool_parent.get(parent)
             if parent is None:
                 card.answered()  # (asked whether to allow it: nothing to answer now)
                 card.set_state("interrupted")
+
+    def goes_on(self, tool_id):
+        """Whether a subagent's call goes on after its turn: run in the background (its card says so, or, its card
+        not running in the turn, a running task's is it), or not drawn here, so not known to have stopped."""
+        card = self.tool_cards.get(tool_id)
+        if card is None or card.state == "background":
+            return True
+        return card.state != "running" and any(
+            t.get("tool_use_id") == tool_id and t.get("status") == "running" for t in self.tasks.values())
 
     def h_control_response(self, msg):
         r = msg.get("response", {})

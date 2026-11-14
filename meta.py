@@ -2611,7 +2611,7 @@ class MetaChat(Gtk.Box):
         header = Gtk.Label(label=self.tool_summary(name, it.get("input") or {}), xalign=0, hexpand=True,
                            ellipsize=Pango.EllipsizeMode.END)
         if it.get("state") == "interrupted":
-            header.set_label(header.get_label() + " · interrupted")
+            header.set_label(" · ".join(filter(None, (header.get_label(), "interrupted"))))
         for w in (title, toggles, header):
             line.append(w)
         grid.attach(line, 0, 0, 1, 1)

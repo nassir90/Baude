@@ -147,7 +147,7 @@ from widgets import (  # noqa: E402,F401
     _memo_bytes, _settings_path, _web_images, _web_waiting, bullet_for, code_spans,
     HostPicker, code_style, discard, editor_args, editor_command, ellipsize_dropdown, empty_label,
     ensure_icons, fetch_web_image, file_href, find_attrs, find_label, fit_size,
-    fmt_scale, globe_icon, image_cache_path, image_dims, image_widget, link_markup,
+    IMAGE_LINK, fmt_scale, globe_icon, image_cache_path, image_dims, image_link_markup, image_widget, link_markup,
     link_paths, load_settings, make_image_interactive, markdown_blocks,
     markdown_parse, markdown_table, on_label_link, open_code, open_in_editor, paned_grip,
     pretty_path, ref_code_markup, ref_command, ref_commit_range, ref_decision_markup, ref_epoch,
@@ -5846,6 +5846,8 @@ class ToolCard(Gtk.Box):
         self.title = Gtk.Label(xalign=0)
         self.header = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True, selectable=True)
         self.header.set_can_focus(False)  # selectable for copying, but not a tab stop in every card
+        self.image_acts = None  # (a Read of an image: its path in the header the link that opens it)
+        self.header.connect("activate-link", lambda _l, uri: uri == IMAGE_LINK and (self.image_acts.launch() or True))
         toggles = self.toggles = Gtk.Box(spacing=4)
         for w in (self.title, toggles, self.header):
             self.line.append(w)
@@ -5941,13 +5943,16 @@ class ToolCard(Gtk.Box):
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
         shown = html.escape(s)
-        if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
+        if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):
+            shown = image_link_markup(s, self.image_acts)
+        elif self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
         markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)
-        self.header.set_attributes(Pango.parse_markup(markup, -1, "\0")[1])
+        # (Pango's markup has no links: the label draws its own)
+        self.header.set_attributes(Pango.parse_markup(re.sub(r"</?a\b[^>]*>", "", markup), -1, "\0")[1])
 
     def show_output(self):
         self.toggles.set_visible(True)
@@ -6052,7 +6057,10 @@ class ToolCard(Gtk.Box):
         for data in images:
             try:
                 path = self.input.get("file_path") if self.base == "Read" else None
-                self.media_box.append(image_widget(data, path=path))
+                image = image_widget(data, path=path)
+                self.media_box.append(image)
+                if path and self.image_acts is None:
+                    self.image_acts = image.image_actions
             except GLib.Error:
                 self.media_box.append(sel_label("[image could not be decoded]"))
         self.artifact = artifact_from_tool(self.input, text) if self.base == "Artifact" else None

@@ -6677,6 +6677,197 @@ class ChoiceDropDown(Gtk.DropDown):
         return self.strings.get_string(i) if i < len(self.values) else ""
 
 
+# Each model's family, by what its value or name says (the first that matches): the monotone icon its row in a model
+# picker shows (vendor/model-icons) and the heading it's listed under. Claude's by its own names too.
+MODEL_FAMILIES = [
+    ("claude", "Claude", r"claude|opus|sonnet|haiku|fable|^default$"),
+    ("qwen", "Qwen", r"qwen|qwq"),
+    ("gemma", "Gemma", r"gemma"),
+    ("gemini", "Gemini", r"gemini"),
+    ("openai", "GPT", r"gpt|openai|(^|[/:])o[134]\b"),
+    ("meta", "Llama", r"llama"),
+    ("mistral", "Mistral", r"mistral|mixtral|stral\b|ministral"),
+    ("deepseek", "DeepSeek", r"deepseek"),
+    ("microsoft", "Phi", r"(^|[/:\-])phi"),
+    ("ibm", "Granite", r"granite"),
+    ("kimi", "Kimi", r"kimi|moonshot"),
+    ("zhipu", "GLM", r"glm"),
+    ("nvidia", "Nemotron", r"nemotron|nvidia"),
+    ("cohere", "Command", r"command-r|cohere|\baya\b"),
+    ("minimax", "MiniMax", r"minimax"),
+    ("huggingface", "SmolLM", r"smol"),
+    ("ai2", "OLMo", r"olmo|tulu"),
+    ("internlm", "InternLM", r"internlm"),
+    ("yi", "Yi", r"(^|[/:\-])yi[\-:]"),
+    ("stepfun", "Step", r"stepfun|(^|[/:\-])step-"),
+    ("baichuan", "Baichuan", r"baichuan"),
+    ("apple", "Apple", r"^apple$|apple/|foundation"),
+]
+MODEL_ICONS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vendor", "model-icons")
+
+
+def model_family(value, label=""):
+    """(key, name) of the family value (labelled label) is of, or (None, "Other"): by its name, else by its value's
+    last part (not what serves it: ollama/…'s "llama", openai/<endpoint>/…'s "openai")."""
+    for said in ((label or "").lower().split(), [(value or "").lower().rsplit("/", 1)[-1]]):
+        for key, name, pattern in MODEL_FAMILIES:
+            if any(re.search(pattern, s) for s in said):
+                return key, name
+    return None, "Other"
+
+
+def model_icon(value, label=""):
+    """The themed icon name of value's family (recoloured as the text is: a -symbolic icon), or None."""
+    key = model_family(value, label)[0]
+    display = Gdk.Display.get_default()
+    if key is None or display is None:
+        return None
+    theme = Gtk.IconTheme.get_for_display(display)
+    if MODEL_ICONS not in theme.get_search_path():
+        theme.add_search_path(MODEL_ICONS)
+    return f"baude-model-{key}-symbolic"
+
+
+class ModelPicker(Gtk.MenuButton):
+    """A model picker as a command palette: a search box over the models, each with its family's icon, listed under
+    its family's name in the order first given. Typing narrows them (every word, in the name, the value or the
+    family's), ↑ ↓ move, Enter picks, Esc closes. ChoiceDropDown's interface: on_pick(value) for the user's picks only,
+    not set_choices() or select()."""
+
+    def __init__(self, choices, tooltip, on_pick, chars=30):
+        super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice", "model-picker"])
+        self.on_pick, self.values, self.labels, self.quiet, self.picked = on_pick, [], {}, False, None
+        face = Gtk.Box(spacing=6)
+        self.face_icon = Gtk.Image(pixel_size=16, visible=False)
+        self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=chars)
+        face.append(self.face_icon)
+        face.append(self.shown)
+        self.set_child(face)
+        pop = Gtk.Popover(css_classes=["model-palette"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.search = Gtk.SearchEntry(placeholder_text="Search models")
+        self.search.connect("search-changed", lambda *_: self._filter())
+        self.search.connect("activate", lambda *_: self._activate(self.list.get_selected_row()))
+        self.search.connect("stop-search", lambda *_: self.popdown())
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._key)
+        self.search.add_controller(keys)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE, css_classes=["model-list"])
+        self.list.set_filter_func(self._shown)
+        self.list.set_header_func(self._header)
+        self.list.connect("row-activated", lambda _l, row: self._activate(row))
+        self.none = Gtk.Label(label="No models match", css_classes=["dim-label"], margin_top=12, margin_bottom=12)
+        self.list.set_placeholder(self.none)
+        self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                         propagate_natural_height=True, max_content_height=420, min_content_width=280)
+        box.append(self.search)
+        box.append(self.scroll)
+        pop.set_child(box)
+        pop.connect("show", lambda *_: self._opened())
+        self.set_popover(pop)
+        self.set_choices(choices)
+
+    def set_choices(self, choices):
+        """Replace the entries ((value, label)), keeping the picked one picked if it's still there."""
+        keep = self.value()
+        self.values, self.labels = [v for v, _ in choices], dict(choices)
+        order = {}  # (each family's place: where its first model was)
+        for v, lbl in choices:
+            order.setdefault(model_family(v, lbl)[1], len(order))
+        rows = sorted(enumerate(choices), key=lambda c: (order[model_family(*c[1])[1]], c[0]))
+        while (row := self.list.get_row_at_index(0)) is not None:
+            self.list.remove(row)
+        for _i, (value, lbl) in rows:
+            row = Gtk.ListBoxRow(css_classes=["model-row"])
+            row.value, row.family = value, model_family(value, lbl)[1]
+            row.said = f"{value} {lbl} {row.family}".lower()
+            line = Gtk.Box(spacing=8)
+            icon = model_icon(value, lbl)
+            line.append(Gtk.Image(icon_name=icon, pixel_size=16) if icon else Gtk.Box(width_request=16))
+            line.append(Gtk.Label(label=lbl, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
+                                  max_width_chars=40, tooltip_text=lbl if len(lbl) > 40 else None))
+            row.check = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16, opacity=0)
+            line.append(row.check)
+            row.set_child(line)
+            self.list.append(row)
+        self.select(keep if keep in self.labels else None)
+
+    def select(self, value):
+        """Show value as picked (appended if unknown; None: nothing), without on_pick."""
+        if value is not None and value not in self.labels:
+            self.set_choices([*self.labels.items(), (value, value)])
+        self.picked = value
+        self.shown.set_label(self.labels.get(value, ""))
+        icon = model_icon(value, self.labels.get(value, "")) if value is not None else None
+        self.face_icon.set_from_icon_name(icon)
+        self.face_icon.set_visible(icon is not None)
+        for row in self._rows():
+            row.check.set_opacity(1 if row.value == value else 0)
+
+    def value(self):
+        return self.picked
+
+    def label(self):
+        return self.labels.get(self.picked, "")
+
+    def _rows(self):
+        i = 0
+        while (row := self.list.get_row_at_index(i)) is not None:
+            yield row
+            i += 1
+
+    def _shown(self, row):
+        return all(w in row.said for w in self.search.get_text().lower().split())
+
+    def _header(self, row, before):
+        if before is None or before.family != row.family:  # (its family's name over its first model; filtered: shown's)
+            row.set_header(Gtk.Label(label=row.family, xalign=0, css_classes=["model-family", "dim-label"]))
+        else:
+            row.set_header(None)
+
+    def _filter(self):
+        self.list.invalidate_filter()
+        self.list.invalidate_headers()
+        first = next((r for r in self._rows() if r.get_child_visible() and self._shown(r)), None)
+        self.list.select_row(first)
+
+    def _opened(self):
+        self.search.set_text("")
+        self._filter()
+        now = next((r for r in self._rows() if r.value == self.picked), None)
+        if now is not None:  # (the picked one lit, Enter's; typing narrows from the first)
+            self.list.select_row(now)
+        self.search.grab_focus()
+
+    def _key(self, _c, keyval, _code, _state):
+        if keyval not in (Gdk.KEY_Down, Gdk.KEY_Up):
+            return False
+        shown = [r for r in self._rows() if self._shown(r)]
+        if not shown:
+            return True
+        now = self.list.get_selected_row()
+        i = shown.index(now) if now in shown else -1
+        row = shown[max(0, min(len(shown) - 1, i + (1 if keyval == Gdk.KEY_Down else -1)))]
+        self.list.select_row(row)
+        adj, (ok, rect) = self.scroll.get_vadjustment(), row.compute_bounds(self.list)
+        if ok:  # (kept in view)
+            y, h = rect.get_y(), rect.get_height()
+            if y < adj.get_value():
+                adj.set_value(y)
+            elif y + h > adj.get_value() + adj.get_page_size():
+                adj.set_value(y + h - adj.get_page_size())
+        return True
+
+    def _activate(self, row):
+        if row is None or not self._shown(row):
+            return
+        self.popdown()
+        if row.value != self.picked:
+            self.select(row.value)
+            if not self.quiet:
+                self.on_pick(row.value)
+
+
 def ellipsize_dropdown(dd, chars=30):
     """dd's button shows its choice shortened with … (a long server or database name would widen the bar past the
     window); its list shows every choice whole."""
@@ -6988,6 +7179,12 @@ levelbar block.ctx-high { background-color: @error_color; }
 .session-sidebar list.navigation-sidebar > row:first-child > box.sidebar-header { margin-top: 0; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
 dropdown.choice > button, menubutton.choice > button { font-weight: normal; }
+/* the top bar's pickers (provider, model, effort, mode): each list's rows the same height, a palette's as a menu's */
+dropdown.choice popover listview > row, menubutton.choice popover modelbutton, .model-palette row.model-row {
+  min-height: 30px; padding-top: 0; padding-bottom: 0; }
+.model-palette row.model-row { padding-left: 8px; padding-right: 8px; border-radius: 6px; }
+.model-palette list.model-list { background: none; }
+.model-palette .model-family { font-size: 0.8em; font-weight: bold; margin: 8px 8px 2px; }
 /* a provider picker with one provider to pick (Baude's beside its model picker, Meta's in Settings): there, a little
    greyed, as there's nothing to choose */
 .one-provider { opacity: 0.55; }

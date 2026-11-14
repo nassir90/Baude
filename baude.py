@@ -15477,11 +15477,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                              ("command", "its host process's command there, if baude_headless.py "
                                                          "isn't on its PATH (or empty)", command)],
                          lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
-                         submit, verb="Add", body="Reached over ssh with your keys, never a password: the host must be "
-                                                  "in known_hosts, and your key in its authorized_keys. Linked both "
-                                                  "ways: it, and every host it's linked to, can then start chats "
-                                                  f"on {THIS_MACHINE} and run its models, as {THIS_MACHINE} can "
-                                                  "on them")
+                         submit, verb="Add", said=False)
 
     def ask_add_host(self):
         """⋮ → Hosts → Add Host…: another machine's host, by where ssh goes, as host_form has it."""

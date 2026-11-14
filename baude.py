@@ -13074,8 +13074,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.new_session()
             return
         if self.remote is not None:
-            self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
-                                                         f"claude exited ({code})") + ". Send a message to carry on.")
+            # (-1: let go of without its claude's exit said: its host process went, or restarted onto an update, or
+            # the connection fell silent. The session's kept there as it was, so it's as any chat opened again: viewed,
+            # nothing started till the next message resumes it (begin_resume). A host that's gone: the banner says so)
+            if code != -1:
+                self.note(f"{remote_name(self.remote)}: claude exited ({code}). Send a message to carry on.")
             self.proc = None
             self.set_busy(False)
             self.remote_view()

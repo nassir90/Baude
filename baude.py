@@ -13075,10 +13075,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         if self.remote is not None:
             # (-1: let go of without its claude's exit said: its host process went, or restarted onto an update, or
-            # the connection fell silent. The session's kept there as it was, so it's as any chat opened again: viewed,
-            # nothing started till the next message resumes it (begin_resume). A host that's gone: the banner says so)
-            if code != -1:
-                self.note(f"{remote_name(self.remote)}: claude exited ({code}). Send a message to carry on.")
+            # the connection fell silent. The session's kept there as it was, so between turns it's as any chat opened
+            # again: viewed, nothing started till the next message resumes it (begin_resume), and nothing said. A host
+            # that's gone: the banner says so. At a turn, what was sent may never have got there: that's said)
+            if code != -1 or self.busy:
+                self.note(f"{remote_name(self.remote)}: " + ("the connection's gone" if code == -1 else
+                                                             f"claude exited ({code})") + ". Send a message to carry on.")
             self.proc = None
             self.set_busy(False)
             self.remote_view()

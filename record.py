@@ -409,7 +409,8 @@ def diary_mentions(notebook, term):
 class Store:
     def __init__(self):
         self.path = os.path.join(data_dir(), "records.json")
-        self.notebooks, self.full_width, saved_notes = [], True, None  # (full_width: ☰ → Full-width text, as Baude's; on, new)
+        self.notebooks, saved_notes = [], None
+        self.full_width = not os.path.exists(self.path)  # (☰ → Full-width text, as Baude's: on for a new installation)
         self.page_files, self.mirrored = {}, {}  # (each page's file, and what's been written in them: mirror_pages)
         self.backup_all = False  # (☰ → Settings…: the rolling zip with the glossary and the chats too: Window.roll_backup)
         self.unzipped = True  # (saved since that zip was made)

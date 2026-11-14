@@ -1206,6 +1206,7 @@ def test_paste_and_drop(app):
 
 
 def test_full_width(app):
+    baude.save_settings(full_width=False)  # (an installation's that has it off)
     app.next_size = (1260, 800)  # sized before it is shown: resizing a mapped window is unreliable
     try:
         win = app.window()

@@ -105,10 +105,9 @@ def proxied(value):
     return (member, inner) if member and inner else None
 
 
-def same_kind(a, b):
-    """Can a conversation go on from model b to model a: the same program runs them, on the same host (another's,
-    as an agent of its, keeps its own sessions: proxied)?"""
-    return model_program(a) == model_program(b) and (proxied(a) or (None,))[0] == (proxied(b) or (None,))[0]
+def runs_on(value):
+    """The member of the mesh a model's program runs on, as an agent of its (proxied); None for this machine."""
+    return (proxied(value) or (None,))[0]
 
 
 def model_program(value):

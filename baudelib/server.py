@@ -507,9 +507,9 @@ class Server:
             program = models.program(s.meta.get("model"))["name"]
             names = {s.meta.get("cli_id") or s.id, s.id}
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None]
-        pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, by its id)
-        if program == "pi" and os.path.isdir(pi):
-            paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(n.startswith(i) for i in names)]
+        pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
+        if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)
+            paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(i in n for i in names)]
         went = []
         for p in paths:
             if p and os.path.exists(p):
@@ -1057,14 +1057,15 @@ class Server:
             self.ensure_proc(s)
             return
         if sub == "set_model" and request.get("model") and \
-                not models.same_kind(request["model"], s.meta.get("model")):
+                models.model_program(request["model"]) != models.model_program(s.meta.get("model")):
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid,
                 "error": "another kind of model can't carry this conversation on: start a session with it"}}})
-        if sub == "set_model" and models.model_program(request.get("model")) == "pi" and s.proc is not None \
-                and request.get("model") != s.meta.get("model"):
-            s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model: the next message starts it on
-            s.proc.kill()                               # this one, pi's session going on: nothing's gone)
+        if sub == "set_model" and s.proc is not None and request.get("model") != s.meta.get("model") and \
+                (models.model_program(request.get("model")) == "pi" or
+                 models.runs_on(request.get("model")) != models.runs_on(s.meta.get("model"))):
+            s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model, and one on another host runs
+            s.proc.kill()  # there: the next message starts it on this one, pi's session going on: nothing's gone)
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
             undo = (key, s.meta.get(key), request.get(field) or s.meta.get(key))  # (put back if claude says no)

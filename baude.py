@@ -13087,8 +13087,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if value == was:  # (the one it's on)
             return
         self.outgrown = False  # (another model's window: as its usage says)
-        if self.remote is not None and not modelslib.same_kind(value, was):  # (another program, or one run on
-            label = self.model_dd.label()  # another host, whose sessions are its own)
+        if self.remote is not None and model_program(value) != model_program(was):
+            label = self.model_dd.label()
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
             return
@@ -13097,13 +13097,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
-        if self.remote is None and not modelslib.same_kind(value, was):  # (Claude's to Apple's: another program; or
-            # one run on another host, whose sessions are its own)
+        if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
             self.note(f"model → {self.model_dd.label()}: a new conversation")
             self.restart_proc(resume=False)
             return
-        if self.remote is None and model_program(value) == "pi" and value != was:  # (pi-claude serves one model: pi's
-            # session goes on; a network session's server starts it again on the new one itself)
+        if self.remote is None and value != was and \
+                (model_program(value) == "pi" or modelslib.runs_on(value) != modelslib.runs_on(was)):  # (pi-claude serves one model, and one on another host runs there: pi's session
+            # goes on, kept on the chat's host; a network session's server starts it again on the new one itself)
             self.note(f"model → {self.model_dd.label()}")
             self.restart_proc(resume=True)
             return

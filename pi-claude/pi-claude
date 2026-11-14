@@ -478,7 +478,8 @@ class Engine:
                 json.dump({"compaction": {"reserveTokens": max(out_room(model.get("thinking")), window // 4),
                                           "keepRecentTokens": window // 4}}, f)
         node = which("node", os.path.expanduser("~/.local/node/bin/node"), "/opt/homebrew/bin/node")
-        sessions = os.path.join(HOME, "sessions")
+        sessions = os.environ.get("BAUDE_PI_SESSIONS") or os.path.join(HOME, "sessions")  # (run on another host as
+        # an agent: a folder of the run's own, carried to and from the chat's host, whose they are)
         os.makedirs(sessions, exist_ok=True)
         args = [node, os.path.realpath(PI), "--mode", "rpc", "--provider", provider, "--model", model["repo"],
                 *(("--session-dir", sessions, "--session-id", session_id) if keep_session else ("--no-session",)),

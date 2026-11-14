@@ -1536,7 +1536,7 @@ def _(app):
 
 
 @scene("72b-panel-processes-long", "Side panel, Processes: commands without a description are one line of code "
-                                   "(the whole command when opened, and in the tooltip)", size=(1200 + SIDEBAR, H))
+                                   "(the whole command when opened, highlighted)", size=(1200 + SIDEBAR, H))
 def _(app):
     win = app.window(opts())
     cmds = [

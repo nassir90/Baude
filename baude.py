@@ -5473,42 +5473,34 @@ def artifact_from_tool(inp, result_text):
             "version": int(version.group(1)) if version else None, "description": inp.get("description")}
 
 
-class ArtifactChip(Gtk.Box):
-    """[icon] Title / claude.ai/artifact/... · v2   [Open] [Copy link] — click anywhere to open."""
+class ArtifactChip(Adw.ActionRow):
+    """An artifact's row in the side panel's list, as a subagent's is (as wide, as tall): [icon] Title /
+    claude.ai/artifact/... · v2   [Open] [Copy link]; activated (a click anywhere on it), opened."""
 
     def __init__(self, info):
-        super().__init__(spacing=10, halign=Gtk.Align.START)
+        super().__init__(activatable=True, title_lines=1, subtitle_lines=1)
         self.add_css_class("artifact-chip")
         self.info = info
         ensure_icons()
         icon = Gtk.Image.new_from_icon_name(themed_icon(ARTIFACT_ICONS.get(info.get("icon") or ""), globe_icon()))
         icon.add_css_class("artifact-icon")  # (the icons' size: Settings → Size)
-        self.append(icon)
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
-        self.title = Gtk.Label(label=info.get("title") or "Artifact", xalign=0, ellipsize=Pango.EllipsizeMode.END,
-                               max_width_chars=48)
-        self.title.add_css_class("heading")
+        self.add_prefix(icon)
         sub = info["url"].replace("https://", "")
         if info.get("version"):
             sub += f" · v{info['version']}"
-        self.subtitle = Gtk.Label(label=sub, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=48)
-        self.subtitle.add_css_class("dim-label")
-        self.subtitle.add_css_class("caption")
-        text.append(self.title)
-        text.append(self.subtitle)
-        self.append(text)
+        self.set_title(html.escape(info.get("title") or "Artifact"))
+        self.set_subtitle(html.escape(sub))
+        self.title, self.subtitle = (next(w for w in walk(self) if isinstance(w, Gtk.Label) and w.has_css_class(c))
+                                     for c in ("title", "subtitle"))
+        self.subtitle.set_ellipsize(Pango.EllipsizeMode.MIDDLE)  # (a link's start and end say which it is)
         self.open_btn = Gtk.Button(label="Open", valign=Gtk.Align.CENTER, tooltip_text=info["url"])
         self.open_btn.connect("clicked", lambda *_: self.open())
         self.copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER, tooltip_text="Copy link")
         self.copy_btn.add_css_class("flat")
         self.copy_btn.connect("clicked", lambda *_: (self.get_clipboard().set(info["url"]), toast(self, "Link copied")))
-        self.append(self.open_btn)
-        self.append(self.copy_btn)
-        click = Gtk.GestureClick()
-        click.connect("released", lambda *_: self.open())
-        text.add_controller(click)
-        icon.add_controller(Gtk.GestureClick())
-        pointers.hand(text)
+        self.add_suffix(self.open_btn)
+        self.add_suffix(self.copy_btn)
+        self.connect("activated", lambda *_: self.open())
         self.set_tooltip_text(info.get("description") or info["url"])
 
     def open(self):
@@ -9924,6 +9916,131 @@ class BaudeMeta(meta.MetaChat):
         return ["<referenced>\n" + "\n".join(said) + "\n</referenced>"] if said else []
 
 
+class ProcessRow(Gtk.ListBoxRow):
+    """A background process's row in the side panel, as a subagent's is (as wide, as tall: its line an ActionRow):
+    its status, what it is (Claude's words for it, else its command's first line, highlighted), stop while it runs;
+    its command and its output's tail (inside) open under its line (toggle: ⌄, − to close it again, or a click on the
+    line) or fill the page (full: SidePanel.open_process, back out of it), as a side question's do. Not on the darker
+    inside (that's a chat's): under its line on the row's own fill, filling the page on the panel's."""
+
+    def __init__(self, panel, tid):
+        super().__init__(activatable=False)
+        self.add_css_class("process-row")
+        self.task_id = tid
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(rows)
+        self.head = Adw.ActionRow(title_lines=1, subtitle_lines=1)
+        self.status = StatusSlot()
+        self.head.add_prefix(self.status)
+        self.stop = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop this process",
+                               valign=Gtk.Align.CENTER)
+        self.stop.add_css_class("flat")
+        self.stop.connect("clicked", lambda *_: panel.win.stop_task(tid))
+        self.toggle = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.toggle.add_css_class("flat")
+        self.toggle.connect("clicked", lambda *_: self.set_expanded(not self.expanded()))
+        self.full = Gtk.Button(icon_name="window-maximize-symbolic", valign=Gtk.Align.CENTER,
+                               tooltip_text="Open this process in the whole panel")
+        self.full.add_css_class("flat")
+        self.full.add_css_class("side-question-full")  # (the size of a side question's)
+        self.full.connect("clicked", lambda *_: panel.open_process(self))
+        for w in (self.stop, self.toggle, self.full):
+            self.head.add_suffix(w)
+        click = Gtk.GestureClick()  # (the line, not its buttons: opened or closed under it, as it was)
+        click.connect("released", lambda _g, _n, x, y: self._clicked(x, y))
+        self.head.add_controller(click)
+        self.title, self.subtitle = (next(w for w in walk(self.head) if isinstance(w, Gtk.Label) and w.has_css_class(c))
+                                     for c in ("title", "subtitle"))
+        rows.append(self.head)
+        # its command and its output: under its line, or the page's whole
+        self.inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.inside.add_css_class("process-body")
+        self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
+                            margin_top=12, margin_bottom=12)
+        self.body.add_css_class("zoomable")
+        self.command = None
+        self.output = CodeBlock("(no output yet)", "output")
+        self.body.append(self.output)
+        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.inside.append(self.scroll)
+        self.reveal = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        rows.append(self.reveal)
+        self.put_inside_row()
+        self.set_expanded(False)
+
+    def _clicked(self, x, y):
+        hit = self.head.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if hit is None or not (isinstance(hit, Gtk.Button) or hit.get_ancestor(Gtk.Button)):
+            self.set_expanded(not self.expanded())
+
+    def set_command(self, cmd):
+        """Its command, over its output, highlighted as the shell's (once: a process's command doesn't change)."""
+        if cmd and self.command is None:
+            self.command = CodeBlock(cmd, "bash", syntax="bash")
+            self.body.prepend(self.command)
+
+    def get_subtitle(self):
+        return self.head.get_subtitle()
+
+    def expanded(self):
+        return self.reveal.get_reveal_child()
+
+    def opened(self):
+        """Its command and output open under its line, all the way (not opening or closing there)."""
+        return self.reveal.get_reveal_child() and self.reveal.get_child_revealed()
+
+    def set_expanded(self, on):
+        self.reveal.set_reveal_child(on)
+        self.toggle.set_icon_name("list-remove-symbolic" if on else "pan-down-symbolic")
+        self.toggle.set_tooltip_text("Hide this process's output" if on else "Show this process's output")
+
+    def put_inside_row(self):
+        """Its command and output back under its line (from the whole page), as tall as they are."""
+        if (parent := self.inside.get_parent()) is not None:
+            parent.remove(self.inside)
+        self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        self.scroll.set_propagate_natural_height(True)
+        self.scroll.set_vexpand(False)
+        self.inside.set_vexpand(False)
+        self.inside.add_css_class("in-row")
+        self.inside.set_margin_end(0)
+        self.reveal.set_child(self.inside)
+
+    def take_inside(self):
+        """Its command and output, for the whole page: scrolled there."""
+        self.reveal.set_child(None)
+        self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scroll.set_propagate_natural_height(False)
+        self.scroll.set_vexpand(True)
+        self.inside.set_vexpand(True)
+        self.inside.remove_css_class("in-row")
+        self.inside.set_margin_end(widgets.INSIDE_GAP)  # (its right edge the list's)
+        return self.inside
+
+
+def paint_command(label, text):
+    """label's text (text: a shell command, as it's drawn) in the code's colours, light or dark as the theme is, as a
+    CodeBlock has them (Pygments loaded off the main thread the first time, as there)."""
+    label.command_text = text
+    ref = weakref.ref(label)
+
+    def done(spans):
+        if (lbl := ref()) is not None and getattr(lbl, "command_text", None) == text:
+            lbl.command_spans = spans
+            lbl.set_attributes(widgets.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark())
+                               if spans else None)
+        return False
+    if widgets._pygments_loaded():
+        done(widgets.code_spans(text, lang="bash"))
+    else:
+        IMAGE_POOL.submit(lambda: GLib.idle_add(done, widgets.code_spans(text, lang="bash")))
+
+
+def unpaint_command(label):
+    label.command_text = None
+    label.set_attributes(None)
+
+
 class SidePanel(Gtk.Box):
     """Right-hand pane: Meta (BaudeMeta), subagents (each with its own transcript) and background processes
     (status, live output tail, stop)."""
@@ -9990,17 +10107,54 @@ class SidePanel(Gtk.Box):
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
         page.set_icon_name("system-users-symbolic")
 
-        # background processes
+        # background processes: rows as wide and tall as subagents', each opening under its line or filling the
+        # page, out of its row, as a side question's does (list -> detail: ExpandStack)
+        self.proc_expand = widgets.ExpandStack(vexpand=True)
+        self.proc_stack = self.proc_expand.stack
         self.proc_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.proc_list.add_css_class("boxed-list")
         self.proc_list.set_placeholder(self._empty("No background processes"))
-        page = self.stack.add_titled(self._scrolled(self.proc_list), "processes", "Processes")
+        self.proc_scroll = self._scrolled(self.proc_list)
+        self.proc_list.set_margin_start(0)  # (edge to edge with a process's square, as the subagents' list is)
+        self.proc_list.set_margin_end(widgets.INSIDE_GAP)
+        self.proc_stack.add_named(self.proc_scroll, "list")
+        proc_detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # its row, as its header: its status, what it is and under that how it stands, stop while it runs, and back
+        # at the end, where the row's square is, the row's ⌄ going out
+        top = Gtk.Box(spacing=6, margin_start=15, margin_end=15 + widgets.INSIDE_GAP, margin_top=6, margin_bottom=6)
+        self.proc_status = StatusSlot()
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
+                         margin_start=6)
+        self.proc_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.proc_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.proc_info.add_css_class("dim-label")
+        self.proc_info.add_css_class("caption")
+        titles.append(self.proc_title)
+        titles.append(self.proc_info)
+        self.proc_stop = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop this process",
+                                    valign=Gtk.Align.CENTER)
+        self.proc_stop.add_css_class("flat")
+        self.proc_stop.connect("clicked", lambda *_: self.proc_shown and self.win.stop_task(self.proc_shown.task_id))
+        self.proc_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All processes",
+                                    valign=Gtk.Align.CENTER)
+        self.proc_back.add_css_class("flat")
+        self.proc_back.add_css_class("side-question-full")  # (the size of the button it's in place of)
+        self.proc_back.connect("clicked", lambda *_: self.close_process())
+        for w in (self.proc_status, titles, self.proc_stop, self.proc_back):
+            top.append(w)
+        proc_detail.append(top)
+        self.proc_holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True, margin_top=6)
+        proc_detail.append(self.proc_holder)
+        self.proc_stack.add_named(proc_detail, "detail")
+        self.proc_shown = None
+        page = self.stack.add_titled(self.proc_expand, "processes", "Processes")
         page.set_icon_name("utilities-terminal-symbolic")
+        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.repaint_commands())
 
-        # artifacts published (or linked) in this session
-        self.artifact_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.artifact_empty = self._empty("No artifacts yet")
-        self.artifact_list.append(self.artifact_empty)
+        # artifacts published (or linked) in this session: rows as wide and tall as subagents'
+        self.artifact_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.artifact_list.add_css_class("boxed-list")
+        self.artifact_list.set_placeholder(self._empty("No artifacts yet"))
         self.artifact_rows = {}
         # /btw side questions, newest first: rows titled with their questions, each opening under its line or
         # filling the page, out of its row as a subagent's does (list -> detail: ExpandStack)
@@ -10046,7 +10200,10 @@ class SidePanel(Gtk.Box):
         self.btw_shown = None
         page = self.stack.add_titled(self.btw_expand, "btw", "Side questions")
         page.set_icon_name("dialog-question-symbolic")
-        page = self.stack.add_titled(self._scrolled(self.artifact_list), "artifacts", "Artifacts")
+        artifact_scroll = self._scrolled(self.artifact_list)
+        self.artifact_list.set_margin_start(0)  # (edge to edge, as the subagents' list is)
+        self.artifact_list.set_margin_end(widgets.INSIDE_GAP)
+        page = self.stack.add_titled(artifact_scroll, "artifacts", "Artifacts")
         page.set_icon_name(globe_icon())
         # (code shown in Baude is a tab of its own in the main area: BaudeWindow.show_code)
         # folders: a tree, opened down to the one clicked (not the file manager)
@@ -10160,21 +10317,24 @@ class SidePanel(Gtk.Box):
         old = self.artifact_rows.pop(info["url"], None)
         chip = ArtifactChip(info)
         if old is not None:
-            self.artifact_list.insert_child_after(chip, old)
+            self.artifact_list.insert(chip, old.get_index())
             self.artifact_list.remove(old)
             discard(old)
         else:
             self.artifact_list.prepend(chip)
         self.artifact_rows[info["url"]] = chip
-        self.artifact_empty.set_visible(False)
 
     def reset(self):
         self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)
+        self.proc_expand.finish()
+        if self.proc_shown is not None:  # (its command and output go with its row)
+            self.proc_shown.put_inside_row()
+            self.proc_shown = None
+        self.proc_stack.set_visible_child_name("list")
         for chip in self.artifact_rows.values():
             self.artifact_list.remove(chip)
             discard(chip)
         self.artifact_rows.clear()
-        self.artifact_empty.set_visible(True)
         for lst in (self.agent_list, self.proc_list):
             while (row := lst.get_row_at_index(0)) is not None:
                 lst.remove(row)
@@ -10330,42 +10490,87 @@ class SidePanel(Gtk.Box):
         tid = task["task_id"]
         row = self.proc_rows.get(tid)
         if row is None:
-            row = Adw.ExpanderRow(title_lines=1, subtitle_lines=1)  # one line each; all of it below
-            row.task_id = tid
-            row.status = StatusSlot()
-            row.add_prefix(row.status)
-            row.stop = Gtk.Button(icon_name="media-playback-stop-symbolic", tooltip_text="Stop this process",
-                                  valign=Gtk.Align.CENTER)
-            row.stop.add_css_class("flat")
-            row.stop.connect("clicked", lambda *_: self.win.stop_task(tid))
-            row.add_suffix(row.stop)
-            card = self.win.tool_cards.get(task.get("tool_use_id"))
-            cmd = card.input.get("command") if card is not None else None
-            body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                           margin_start=12, margin_end=12, margin_top=10, margin_bottom=12)
-            if cmd:
-                body.append(CodeBlock(cmd, "bash"))
-            row.output = CodeBlock("(no output yet)", "output")
-            body.append(row.output)
-            row.add_row(Gtk.ListBoxRow(child=body, activatable=False))  # (nothing to do on it: no hover tint)
+            row = ProcessRow(self, tid)
             self.proc_rows[tid] = row
             self.proc_list.prepend(row)
         card = self.win.tool_cards.get(task.get("tool_use_id"))
         cmd = (card.input.get("command") if card is not None else None) or ""
         said = (card.input.get("description") if card is not None else None) or ""
         desc = task.get("description") or ""
+        row.set_command(cmd)
         if said.strip() or (desc.strip() and desc.strip() != cmd.strip() and not cmd):
-            row.set_title(html.escape(said or desc))  # Claude's words for it
-        else:  # no description: the command itself, as code (never our own summary of it)
+            row.head.set_title(html.escape(said or desc))  # Claude's words for it
+            unpaint_command(row.title)
+        else:  # no description: the command itself, as code (never our own summary of it), highlighted
             first = (cmd or desc or tid).strip().splitlines()[0] if (cmd or desc or tid).strip() else tid
-            row.set_title(f"<tt>{html.escape(first[:300])}</tt>")
-        row.set_tooltip_text(cmd or desc or None)
-        row.set_subtitle(html.escape(self.describe(task, marked=True)))
+            row.head.set_title(f"<tt>{html.escape(first[:300])}</tt>")
+            if cmd and row.title.get_text() != getattr(row.title, "command_text", None):
+                paint_command(row.title, row.title.get_text())
+        # (no tooltip: it was the whole command, and a command's often far too long for one; opened, it's all there)
+        row.head.set_subtitle(html.escape(self.describe(task, marked=True)))
         running = task.get("status", "running") == "running"
         row.stop.set_visible(running)
         row.status.set_state("running" if running else {"completed": "done", "interrupted": "interrupted"}
                              .get(task.get("status"), "error"))
+        if row is self.proc_shown:
+            self.process_header(row)
         self.refresh_output(row, task)
+
+    def process_header(self, row):
+        """The page's header as the shown process's row has it."""
+        self.proc_title.set_markup(row.head.get_title())
+        if getattr(row.title, "command_text", None):
+            paint_command(self.proc_title, self.proc_title.get_text())
+        else:
+            unpaint_command(self.proc_title)
+        text = row.head.get_subtitle()
+        self.proc_info.set_markup(text)
+        self.proc_info.set_visible(bool(text))
+        self.proc_status.set_state(row.status.state)
+        self.proc_stop.set_visible(row.stop.get_visible())
+
+    def repaint_commands(self):
+        """The commands drawn as rows' titles in the code's colours, light or dark as the theme is now."""
+        for label in [row.title for row in self.proc_rows.values()] + [self.proc_title]:
+            if getattr(label, "command_spans", None) and getattr(label, "command_text", None):
+                label.set_attributes(widgets.code_attrs(label.command_text, label.command_spans,
+                                                        Adw.StyleManager.get_default().get_dark()))
+
+    def open_process(self, row):
+        """row's command and output filling the page, opening out of its row (out of them under it, if they're open
+        there), back (close_process) into it."""
+        self.proc_expand.finish()  # (one opening or closing: at its end, before the page's changed under it)
+        if self.proc_shown is not None:
+            self.proc_shown.put_inside_row()
+        self.proc_shown = row
+        self.process_header(row)
+        if self.proc_stack.get_visible_child_name() == "list" and self.stack.get_visible_child_name() == "processes":
+            self.proc_expand.open("detail", row, row.inside, **self.proc_parts(row), within=self.proc_scroll,
+                                  across=self.proc_list)
+        else:
+            self.proc_stack.set_visible_child_name("detail")
+        self.proc_holder.append(row.take_inside())  # (after: the row's picture taken with it in it)
+        self.show_page("processes")
+
+    def proc_parts(self, row):
+        """How a process's row turns into its page's header (ExpandStack): its title, line, status and stop into the
+        header's, its square into back (where it is), its ⌄ going out."""
+        return {"pairs": [(row.title, self.proc_title), (row.subtitle, self.proc_info), (row.status, self.proc_status),
+                          (row.stop, self.proc_stop), (row.full.get_child(), self.proc_back.get_child())],
+                "leave": [row.toggle], "body": row.inside if row.opened() else None}
+
+    def close_process(self, animate=True):
+        """Back to the list, the process shown closing into its row (into what's open under it, if it was open
+        there)."""
+        self.proc_expand.finish()
+        row, self.proc_shown = self.proc_shown, None
+        if row is not None and animate and row.get_parent() is self.proc_list:
+            self.proc_expand.close("list", row, row.inside, **self.proc_parts(row), within=self.proc_scroll,
+                                   across=self.proc_list)
+        else:
+            self.proc_stack.set_visible_child_name("list")
+        if row is not None:
+            row.put_inside_row()  # (after: the page's picture taken with it in it)
 
     def refresh_output(self, row, task):
         text = read_tail(task.get("output_file"), 4000)

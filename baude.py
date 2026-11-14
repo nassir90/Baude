@@ -10002,7 +10002,7 @@ class SidePanel(Gtk.Box):
                 body.append(CodeBlock(cmd, "bash"))
             row.output = CodeBlock("(no output yet)", "output")
             body.append(row.output)
-            row.add_row(body)
+            row.add_row(Gtk.ListBoxRow(child=body, activatable=False))  # (nothing to do on it: no hover tint)
             self.proc_rows[tid] = row
             self.proc_list.prepend(row)
         card = self.win.tool_cards.get(task.get("tool_use_id"))

@@ -6208,11 +6208,25 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .kube-error-fix { background: @baude_raised; border-radius: 6px; padding: 2px 2px 2px 10px; }
 .codeblock .code-scroll > viewport > label, .codeblock .code-scroll > label { padding: 6px 8px; }
 .codeblock .code-scroll box { padding: 6px 0; }
-/* the tag and copy button sit over the code's first line: give them the block's own colour (opaque,
-   with a soft edge) so a long line runs under them instead of through them */
-.codeblock .code-corner { padding: 3px 4px 3px 4px; border-radius: 0 6px 0 6px;
-  background: mix(@baude_inside, @view_fg_color, 0.06);
-  box-shadow: -10px 0 8px -2px mix(@baude_inside, @view_fg_color, 0.06); }
+/* the tag and copy button sit over the code's first line: give them the block's own colour (opaque, feathered in
+   from the left) so a long line runs under them instead of through them */
+.codeblock .code-corner { padding: 3px 4px 3px 18px; border-radius: 0 6px 0 0;
+  background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
+                                    mix(@baude_inside, @view_fg_color, 0.06) 14px); }
+/* a block on the side panel is on the frame (a side question's); in an open row of its list (Processes), on the
+   row's fill (libadwaita's: half its card shade) on the card on the frame: the corner's the block's colour over
+   that, layer by layer */
+.side-panel .codeblock .code-corner {
+  background-image: linear-gradient(to right, alpha(mix(@baude_frame, @view_fg_color, 0.06), 0),
+                                    mix(@baude_frame, @view_fg_color, 0.06) 14px); }
+.side-panel .baude-inside .codeblock .code-corner {
+  background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
+                                    mix(@baude_inside, @view_fg_color, 0.06) 14px); }
+.side-panel list.nested .codeblock .code-corner {
+  background-image: linear-gradient(to right, alpha(@baude_raised, 0), @baude_raised 14px),
+    linear-gradient(to right, transparent, color-mix(in srgb, var(--card-shade-color) 50%, transparent) 14px),
+    linear-gradient(to right, alpha(@card_bg_color, 0), @card_bg_color 14px),
+    linear-gradient(to right, alpha(@baude_frame, 0), @baude_frame 14px); }
 /* a wrapped block's lines can't be scrolled out from under them: they show while the pointer's on it */
 .codeblock.wrapped .code-corner { opacity: 0; transition: opacity 150ms; }
 .codeblock.wrapped:hover .code-corner, .codeblock.wrapped .code-corner:focus-within { opacity: 1; }

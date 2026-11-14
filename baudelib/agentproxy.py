@@ -348,8 +348,9 @@ class ProxiedProc(ClaudeProc):
                          daemon=True, name="agent-proxy").start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None})
 
-    def _say(self, text):
-        self.dispatch(lambda: self.on_msg(self, {"type": "_stderr", "text": text}))
+    def _say(self, text, warn=False):
+        """A note in the chat; warn: one Meta shows over its reply too (it shows the others only if the model fails)."""
+        self.dispatch(lambda: self.on_msg(self, {"type": "_stderr", "text": text} | ({"warn": True} if warn else {})))
 
     def _run(self, where):
         if self.pi_session is not None:  # (a run of this session's before it: its last notices taken first)
@@ -400,7 +401,8 @@ class ProxiedProc(ClaudeProc):
                     if not kept:
                         self._say("pi's session couldn't be kept on this host as it was written")
                 elif isinstance(said, dict):
-                    if said.get("type") in ("stream_event", "assistant", "result", "control_request"):
+                    if said.get("type") in ("stream_event", "control_request"):  # (what it says once it runs: not
+                        # the error a program that didn't start ends its turn with, whose servers never started)
                         self._check(info.get("name") or self.member[:8])
                     self.dispatch(lambda m=bare(said): self.on_msg(self, m))
             elif op == "err":
@@ -430,11 +432,11 @@ class ProxiedProc(ClaudeProc):
             missing = sorted(set(self.servers) - self.opened)
         if not missing or not self._calls_tools():
             return
-        which = [f"this chat's tools ({', '.join(self.host_tools)})" if n == hosttools.NAME else f"{n}'s tools"
-                 for n in missing]
+        which = [f"this chat's tools ({', '.join(self.host_tools)})" if n == hosttools.NAME else
+                 f"{n[:1].upper()}{n[1:]}'s tools" for n in missing]
         said = " and ".join(which)
         self._say(f"{said[0].upper()}{said[1:]} didn't reach {host}, which runs this model: it can't use "
-                  "them in this conversation, and may make up what they'd return")
+                  "them in this conversation, and may make up what they'd return", warn=True)
 
     def _calls_tools(self):
         """Does the model call tools, as its host says (one that doesn't only talks: its program starts no servers)?"""
@@ -559,7 +561,6 @@ class Run:
             else []
         self.sessions, self.stamps = os.path.join(self.folder, "sessions"), {}
         self.notices = bool(msg.get("relay"))  # (a caller that takes pi's notices; an older one, files each turn: sync)
-        # (not self.relay: that's the method the host process calls as each of the program's MCP servers connects)
         self.told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
         if self.ids and not unpack(self.sessions, msg.get("sessions"), self.ids, os.path.realpath(self.folder)):
             shutil.rmtree(self.folder, ignore_errors=True)

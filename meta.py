@@ -1346,6 +1346,8 @@ class Agent:
         t, turn = msg.get("type"), self.turn
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
+            if msg.get("warn") and turn is not None:  # (its tools didn't reach the model's host: over the reply)
+                turn.setdefault("warned", []).append(msg.get("text", ""))
         elif t == "control_request":
             if (msg.get("request") or {}).get("subtype") == "can_use_tool":
                 self.permission(msg)
@@ -2154,6 +2156,8 @@ class MetaChat(Gtk.Box):
             return outer
         reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         reply.bubble, reply.prose = reply, None
+        for text in m.get("warned") or ():  # (what it was told it can't do, as the chat says it: over what it said)
+            reply.append(label(text, css=("dim-label", "caption"), select=True))
         items = m.get("items")
         if m.get("error"):
             drawn = set()
@@ -3100,6 +3104,8 @@ class MetaChat(Gtk.Box):
                     it["state"] = "interrupted"
             if turn.get("actions"):
                 m["actions"] = turn["actions"]  # (undo's turn: true)
+            if turn.get("warned"):
+                m["warned"] = turn["warned"]
             self.finish(m, turn)
             if error:  # (what it did before the error: kept, its actions undone from its cards)
                 m["text"], m["error"] = error, True

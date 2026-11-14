@@ -8853,12 +8853,12 @@ class SessionSidebar(Gtk.Box):
             return  # (a ghost: a chat Meta's deleted, its transcript in Baude's trash)
         self.win.show_chat()  # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while
         # its transcript's fetched, this one too)
+        if info.get("remote") is not None and not info.get("unsaved") and info["id"] != self.win.session_id:
+            self.win.open_remote_soon(info)  # (its transcript fetched first)
+            return
+        self.win.opening_remote = None  # (another picked meanwhile, this one too: not opened after all)
         if info.get("unsaved") or info["id"] == self.win.session_id:
             return
-        if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
-            self.win.open_remote_soon(info)
-            return
-        self.win.opening_remote = None  # (another picked meanwhile: not opened after all)
         self.win.switch_to(lambda: self.win.resume_session(info))
 
     def focus_search(self):
@@ -9506,8 +9506,11 @@ class BaudeMeta(meta.MetaChat):
     def open_chat(self, info):
         """A chat's row clicked (show chats): it's opened, as the sidebar opens one."""
         win = self.win
-        win.show_chat()  # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while
-        if info["id"] == win.session_id:  # its transcript's fetched)
+        # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while its transcript's
+        # fetched; another picked meanwhile isn't opened after all, this one picked again too)
+        win.show_chat()
+        if info["id"] == win.session_id:
+            win.opening_remote = None
             return
         if info.get("remote") is not None:
             win.open_remote_soon(info)
@@ -13684,12 +13687,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_tasks_indicator()
 
     # ---- swapping the chat, with Claude's fade: the chat goes lighter, swaps, and the new one comes back
-    def switch_to(self, action):
+    def switch_to(self, action, show=True):
         """Swap the chat (another session, a new one, another folder) after a short fade, so the swap is seen.
         Clicks while it's faded (or a slow session still loading) don't start the fade again: the chat stays
         faded and the last one wins (Fade.swap). The chat's tab is shown first, whatever was (the Feedback tab, a
-        file's code), so the swap's seen and what's picked is what's shown."""
-        self.show_chat()
+        file's code), so the swap's seen and what's picked is what's shown; show False: not (a network chat's, once
+        it's fetched: shown as it was picked, and what's been shown since is left in front)."""
+        if show:
+            self.show_chat()
         self.chat_fade.swap(action)
 
     def show_chat(self):
@@ -16477,7 +16482,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
         def fetched():
             if self.opening_remote == info["id"] and not getattr(self, "let_go_done", False):
-                self.switch_to(lambda: self.resume_session(info))
+                self.switch_to(lambda: self.resume_session(info), show=False)
         self.sync_remote(r, info["id"], fetched)
 
     def open_remote(self, info):
@@ -16889,6 +16894,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """New session, on another host (r, picked beside it): a blank chat there, opened to be written in, in the
         folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
         once it's written in, as a new chat here is."""
+        self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
         picked = self.sidebar.group_filter()
         group = next(iter(picked)) if picked is not None and len(picked) == 1 else ""
         model = self.model if self.model and model_program(self.model) == "claude" else None

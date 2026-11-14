@@ -373,15 +373,24 @@ def load_settings():
 
 
 def save_settings(**changes):
-    """The changes kept in settings.json; made new (Baude's or Record's first save), full-width text is on."""
+    """changes kept in settings.json, written whole beside it and put in its place, so another app reading it as it's
+    written (watch_settings) never reads half of it. Made new (Baude's or Record's first save), full-width text is on."""
     fresh = {} if os.path.exists(_settings_path()) else {"full_width": True}
     settings = {**fresh, **load_settings(), **changes}
+    path, written = os.path.realpath(_settings_path()), None  # (a link to it kept a link)
     try:
-        os.makedirs(os.path.dirname(_settings_path()), exist_ok=True)
-        with open(_settings_path(), "w") as f:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=os.path.dirname(path), prefix=".settings-", suffix=".json",
+                                         delete=False) as f:
+            written = f.name
             json.dump(settings, f, indent=2)
+        os.replace(written, path)
     except OSError:
-        pass
+        if written is not None and os.path.exists(written):
+            try:
+                os.remove(written)
+            except OSError:
+                pass
     if _watch["seen"] is not None:  # (this process's own change: no news to it)
         _watch["seen"].update({k: v for k, v in changes.items() if k in SHARED_SETTINGS})
 
@@ -394,6 +403,15 @@ SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_u
                    "meta_model", "meta_provider", "meta_effort", "meta_code_mode")
 SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
 _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
+_following = weakref.WeakSet()  # (Settings rows up that show a shared setting: follow_setting)
+
+
+def follow_setting(row, key, show):
+    """row, a Settings row for the shared setting key, shown again (show(value)) as another app here changes it. Its
+    own handler isn't run for that (it checks row.syncing): it's no change of this app's."""
+    row.setting_key, row.show_setting, row.syncing = key, show, False
+    _following.add(row)
+    return row
 
 
 def watch_settings(changed):
@@ -444,8 +462,18 @@ def _settings_read():
     if keys:
         if "accent" in keys and (display := Gdk.Display.get_default()) is not None:
             apply_accent(display)
+        for row in list(_following):
+            if row.setting_key in keys:
+                row.syncing = True
+                try:
+                    row.show_setting(now.get(row.setting_key))
+                finally:
+                    row.syncing = False
         for changed in list(_watch["listeners"]):
-            changed(keys, before)
+            try:
+                changed(keys, before)
+            except Exception:  # noqa: BLE001 (the others are still told)
+                traceback.print_exc()
     return False
 
 
@@ -6927,11 +6955,13 @@ def settings_accent():
     row.set_factory(factory)
 
     def changed(r, _p):
+        if r.syncing:
+            return
         name = names[r.get_selected()]
         save_settings(accent=name if name in ACCENTS else None)
         apply_accent(r.get_display())
     row.connect("notify::selected", changed)
-    return row
+    return follow_setting(row, "accent", lambda v: row.set_selected(names.index(v) if v in ACCENTS else 0))
 
 
 def put_back(win, frame, maximized):
@@ -6995,14 +7025,17 @@ def settings_switch(title, subtitle, action):
     return row
 
 
-def settings_size(title, subtitle, size, apply, low=SCALE_MIN, high=SCALE_MAX):
-    """A Settings row for a size, 1.0 the usual, in the zoom's steps of 0.1, applied as it changes."""
+def settings_size(title, subtitle, size, apply, low=SCALE_MIN, high=SCALE_MAX, key=None):
+    """A Settings row for a size, 1.0 the usual, in the zoom's steps of 0.1, applied as it changes; key: the shared
+    setting it is, followed as another app changes it (follow_setting)."""
     row = Adw.SpinRow.new_with_range(low, high, ZOOM_STEP)
     row.set_digits(1)
     row.set_title(title)
     row.set_subtitle(subtitle or "")
     row.set_value(size)
-    row.connect("notify::value", lambda r, _p: apply(round(r.get_value(), 2)))
+    row.connect("notify::value", lambda r, _p: getattr(r, "syncing", False) or apply(round(r.get_value(), 2)))
+    if key is not None:
+        follow_setting(row, key, lambda v: row.set_value(float(v or 1.0)))
     return row
 
 
@@ -7027,11 +7060,12 @@ def settings_code_font(win, app):
         row.set_subtitle("" if font == running else f"{font} from {app}'s next start")
 
     def changed(r, _p):
-        save_settings(code_font=fonts[r.get_selected()])
+        if not r.syncing:
+            save_settings(code_font=fonts[r.get_selected()])
         show(fonts[r.get_selected()])
     row.connect("notify::selected", changed)
     show(fontsetup.code_font())
-    return row
+    return follow_setting(row, "code_font", lambda v: v in fonts and row.set_selected(fonts.index(v)))
 
 
 def _data_home():

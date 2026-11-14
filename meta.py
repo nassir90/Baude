@@ -776,9 +776,9 @@ def code_mode_row(chat):
     """Settings → Meta → Code mode: Meta acts by writing a few lines of Python (run_python), from its next message."""
     row = Adw.SwitchRow(title="Code mode", subtitle=f"{NAME} acts by writing up to {CODE_LINES} lines of Python",
                         active=code_mode())
-    row.connect("notify::active", lambda r, _p: (widgets.save_settings(meta_code_mode=r.get_active()),
-                                                 chat is not None and chat.model_changed()))
-    return row
+    row.connect("notify::active", lambda r, _p: r.syncing or (widgets.save_settings(meta_code_mode=r.get_active()),
+                                                              chat is not None and chat.model_changed()))
+    return widgets.follow_setting(row, "meta_code_mode", lambda v: row.set_active(bool(v)))
 
 
 def settings_group(chat):
@@ -822,16 +822,16 @@ def shared_settings(win, chat, app, zoom_default):
         Setting("text_scale", "Text Scale", lambda: widgets.scale_setting("text_scale"),
                 lambda v: win.set_scale("text_scale", v),
                 lambda: widgets.settings_size("Text Scale", None, widgets.scale_setting("text_scale"),
-                                              lambda s: win.set_scale("text_scale", s)),
+                                              lambda s: win.set_scale("text_scale", s), key="text_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
         Setting("icon_scale", "Icon Scale", lambda: widgets.scale_setting("icon_scale"),
                 lambda v: win.set_scale("icon_scale", v),
                 lambda: widgets.settings_size("Icon Scale", None, widgets.scale_setting("icon_scale"),
-                                              lambda s: win.set_scale("icon_scale", s)),
+                                              lambda s: win.set_scale("icon_scale", s), key="icon_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
         Setting("global_scale", "Global Scale", zoom_default, win.set_zoom_default,
                 lambda: widgets.settings_size("Global Scale", None, zoom_default(), win.set_zoom_default,
-                                              widgets.ZOOM_MIN, widgets.ZOOM_MAX),
+                                              widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"),
                 (widgets.ZOOM_MIN, widgets.ZOOM_MAX), note="what ⌘0 / Ctrl+0 goes back to"),
         Setting("full_width", "Full-width text",
                 lambda: bool((a := win.lookup_action("fullwidth")) and a.get_state().get_boolean()), wide,

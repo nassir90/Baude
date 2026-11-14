@@ -11150,11 +11150,11 @@ class SettingsDialog(Adw.PreferencesDialog):
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")
         self.text_row = self.size_row("Text Scale", None, scale_setting("text_scale"),
-                                      lambda size: win.set_scale("text_scale", size))
+                                      lambda size: win.set_scale("text_scale", size), key="text_scale")
         self.icon_row = self.size_row("Icon Scale", None, scale_setting("icon_scale"),
-                                      lambda size: win.set_scale("icon_scale", size))
+                                      lambda size: win.set_scale("icon_scale", size), key="icon_scale")
         self.zoom_row = self.size_row("Global Scale", None, win.zoom_default,  # (the chat's zoom: what ⌘0 goes back to)
-                                      win.set_zoom_default, ZOOM_MIN, ZOOM_MAX)
+                                      win.set_zoom_default, ZOOM_MIN, ZOOM_MAX, key="zoom_default")
         for row in (self.text_row, self.icon_row, self.zoom_row):
             sizes.add(row)
         page.add(sizes)
@@ -11258,7 +11258,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             save_settings()
         self.settings = load_settings()
         self.zoom = min(ZOOM_MAX, max(ZOOM_MIN, float(load_settings().get("zoom", 1.0))))
-        self.zoom_default = min(ZOOM_MAX, max(ZOOM_MIN, float(self.settings.get("zoom_default") or 1.0)))  # (Ctrl+0's)
+        self.zoom_default = round(min(ZOOM_MAX, max(ZOOM_MIN, float(self.settings.get("zoom_default") or 1.0))), 2)  # (Ctrl+0's)
         self.zoom_css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(self.get_display(), self.zoom_css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)

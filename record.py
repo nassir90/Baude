@@ -6465,11 +6465,11 @@ class Settings(Adw.PreferencesDialog):
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")  # (the text's and the icons' are Baude's too)
         sizes.add(widgets.settings_size("Text Scale", None, widgets.scale_setting("text_scale"),
-                                        lambda s: win.set_scale("text_scale", s)))
+                                        lambda s: win.set_scale("text_scale", s), key="text_scale"))
         sizes.add(widgets.settings_size("Icon Scale", None, widgets.scale_setting("icon_scale"),
-                                        lambda s: win.set_scale("icon_scale", s)))
+                                        lambda s: win.set_scale("icon_scale", s), key="icon_scale"))
         sizes.add(widgets.settings_size("Global Scale", None, win.store.zoom_default,  # (the zoom ⌘0 goes back to)
-                                        win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX))
+                                        win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"))
         page.add(sizes)
 
         def go(row, action):  # (this goes first: a capture is of the window, not of this over it)

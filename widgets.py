@@ -4687,6 +4687,199 @@ def inside(widget, start=True, end=True):
     return widget
 
 
+EXPAND_MS = 260  # (a list's row opened into its page, and closed back into it: ExpandStack. 0: at once)
+
+
+def _lerp(a, b, p):
+    return a + (b - a) * p
+
+
+def _rect(widget, to):
+    ok, r = widget.compute_bounds(to)
+    return (r.get_x(), r.get_y(), r.get_width(), r.get_height()) if ok else None
+
+
+def _graphene(r):
+    return Graphene.Rect().init(*r)
+
+
+class ExpandStack(Gtk.Widget):
+    """A Gtk.Stack (stack: its pages added and shown as any stack's) whose page of one thing opens out of that thing's
+    row in a list: the row's rectangle grows into the page's square (its darker inside) as the row's title moves up to be
+    the page's header, the rest of the page fading in and the list fading out; back, the other way, into the row
+    (open, close). Between the two pages nothing else is drawn of them, only those parts."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+        self.stack = Gtk.Stack(hexpand=True, vexpand=True)
+        self.stack.set_parent(self)
+        self.square = Gtk.Box(can_target=False)  # (the square as it grows: the page's square's background, any size)
+        self.square.set_parent(self)
+        self.square.set_child_visible(False)
+        self.anim, self.move = None, None
+
+    def do_measure(self, orientation, for_size):
+        return self.stack.measure(orientation, for_size)
+
+    def do_size_allocate(self, width, height, baseline):
+        self.stack.allocate(width, height, baseline, None)
+        m = self.move
+        if m is None:
+            return
+        if m["live"]:  # (opening: the page's parts where they are as it's laid out)
+            for part in m["parts"].values():
+                part["rect"] = _rect(part["widget"], self) or part["rect"]
+        else:  # (closing: the row where it is, the list shown again)
+            m["from"], m["from_title"] = self._origin(m["origin"], m["origin_title"], m["within"])
+        r = self.square_rect()
+        self.square.allocate(max(1, round(r[2])), max(1, round(r[3])), -1,
+                             Gsk.Transform().translate(Graphene.Point().init(r[0], r[1])))
+
+    def _origin(self, origin, origin_title, within):
+        """origin's rectangle as it's seen (within: the scrolled window it's in, the part of it showing), and its
+        title's; None if it isn't seen."""
+        r = _rect(origin, self) if origin.get_mapped() else None
+        if r is None:
+            return None, None
+        if within is not None and (w := _rect(within, self)) is not None:
+            x0, y0 = max(r[0], w[0]), max(r[1], w[1])
+            x1, y1 = min(r[0] + r[2], w[0] + w[2]), min(r[1] + r[3], w[1] + w[3])
+            if x1 - x0 < 1 or y1 - y0 < 1:
+                return None, None
+            r = (x0, y0, x1 - x0, y1 - y0)
+        return r, (_rect(origin_title, self) if origin_title is not None else None) or r
+
+    def square_rect(self):
+        m = self.move
+        a, b = m["from"], m["parts"]["square"]["rect"]
+        if a is None or b is None:
+            return b or (0, 0, 1, 1)
+        return tuple(_lerp(a[i], b[i], m["p"]) for i in range(4))
+
+    def open(self, name, origin, origin_title, title, square, fades=(), within=None):
+        """Show page name, opened out of origin, a row of the page shown now: square (the page's, a widget in it) grows
+        from origin's rectangle (within: the scrolled window the row's in, the part of it showing) to its own; title
+        moves from origin_title's place to its own; fades (the rest of the page) fade in. Just shown when there'd be
+        nothing to see move: the row not on screen, or EXPAND_MS 0."""
+        self._finish()
+        shown = self.stack.get_visible_child()
+        start = self._origin(origin, origin_title, within) if EXPAND_MS and self.get_mapped() and shown else (None, None)
+        if start[0] is None:
+            self.stack.set_visible_child_name(name)
+            return
+        lst, lst_rect = Gtk.WidgetPaintable.new(shown).get_current_image(), _rect(shown, self)
+        self.stack.set_visible_child_name(name)
+        parts = {"title": title, "square": square, **{f"fade{i}": w for i, w in enumerate(fades)}}
+        self.move = {"live": True, "p": 0.0, "from": start[0], "from_title": start[1], "list": (lst, lst_rect),
+                     "parts": {k: {"widget": w, "paint": Gtk.WidgetPaintable.new(w), "rect": None}
+                               for k, w in parts.items()}}
+        self._run(square, 0.0, 1.0)
+
+    def close(self, name, origin, origin_title, title, square, fades=(), within=None):
+        """Show page name (the list origin's a row of) again, the page shown now closing back into origin: open's
+        parts, as open was given them, the other way."""
+        self._finish()
+        if not (EXPAND_MS and self.get_mapped()) or origin is None or origin.get_parent() is None:
+            self.stack.set_visible_child_name(name)
+            return
+        parts = {"title": title, "square": square, **{f"fade{i}": w for i, w in enumerate(fades)}}
+        frozen = {k: {"widget": w, "paint": Gtk.WidgetPaintable.new(w).get_current_image(), "rect": _rect(w, self)}
+                  for k, w in parts.items()}
+        self.stack.set_visible_child_name(name)
+        self.move = {"live": False, "p": 1.0, "from": None, "from_title": None, "list": None, "parts": frozen,
+                     "origin": origin, "origin_title": origin_title, "within": within}
+        self._run(square, 1.0, 0.0)
+
+    def _run(self, square, a, b):
+        for cls in self.square.get_css_classes():
+            self.square.remove_css_class(cls)
+        for cls in square.get_css_classes():
+            self.square.add_css_class(cls)
+        self.square.set_child_visible(True)
+        anim = Adw.TimedAnimation.new(self, a, b, EXPAND_MS, Adw.CallbackAnimationTarget.new(self._step))
+        anim.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+        anim.connect("done", lambda an: an is self.anim and self._done())
+        self.anim = anim
+        self.queue_allocate()
+        anim.play()
+
+    def _step(self, p):
+        if self.move is not None:
+            self.move["p"] = p
+            self.queue_allocate()
+            self.queue_draw()
+
+    def _finish(self):
+        if self.anim is not None:
+            self.anim.skip()  # (to its end: done)
+
+    def _done(self):
+        self.anim, self.move = None, None
+        self.square.set_child_visible(False)
+        self.queue_allocate()
+        self.queue_draw()
+
+    def do_snapshot(self, snap):
+        m = self.move
+        if m is None or (not m["live"] and m["from"] is None):  # (closing into a row not seen: just the list)
+            self.snapshot_child(self.stack, snap)
+            return
+        p = min(1.0, max(0.0, m["p"]))
+        if m["live"]:  # (the page drawn, unseen: a widget's paintable is what it last drew, nothing till it has)
+            self.snapshot_child(self.stack, Gtk.Snapshot())
+        snap.push_opacity(1 - p)  # the list, fading out (or in, as it closes)
+        if m["list"] is not None:
+            self._paint(snap, *m["list"])
+        else:
+            self.snapshot_child(self.stack, snap)
+        snap.pop()
+        parts = m["parts"]
+        sq = self.square_rect()
+        snap.push_opacity(min(1.0, p / 0.25))  # the square, darker than the row, at once as it starts to grow
+        self.snapshot_child(self.square, snap)
+        snap.pop()
+        snap.push_clip(_graphene(sq))  # what's in it, from its top, as there's room
+        snap.push_opacity(min(1.0, max(0.0, (p - 0.3) / 0.5)))
+        rect = parts["square"]["rect"]
+        if rect is not None:
+            self._paint(snap, parts["square"]["paint"], (sq[0], sq[1], rect[2], rect[3]))
+        snap.pop()
+        snap.pop()
+        title, a, dx, dy = parts["title"], m["from_title"], 0, 0
+        if title["rect"] is not None and a is not None:  # the row's title, moving up to be the header's: its middle
+            b = title["rect"]  # from the row's title's middle, its start from that one's start
+            dx, dy = _lerp(a[0] - b[0], 0, p), _lerp(a[1] + a[3] / 2 - b[1] - b[3] / 2, 0, p)
+        for key, part in parts.items():  # the rest of the page, the header's with it, coming in as it gets there
+            if key.startswith("fade") and (r := part["rect"]) is not None:
+                snap.push_opacity(p * p)
+                self._paint(snap, part["paint"], (r[0] + dx, r[1] + dy, r[2], r[3]))
+                snap.pop()
+        if (r := title["rect"]) is not None:  # (cross-fading with the row's own, in the list, where they meet)
+            snap.push_opacity(min(1.0, p * 3))
+            self._paint(snap, title["paint"], (r[0] + dx, r[1] + dy, r[2], r[3]))
+            snap.pop()
+
+    @staticmethod
+    def _paint(snap, paintable, rect):
+        if paintable is None or rect is None:
+            return
+        snap.save()
+        snap.translate(Graphene.Point().init(rect[0], rect[1]))
+        paintable.snapshot(snap, rect[2], rect[3])
+        snap.restore()
+
+    def do_dispose(self):
+        if self.anim is not None:
+            self.anim.pause()
+            self.anim = None
+        self.move = None
+        for child in (self.stack, self.square):
+            if child is not None and child.get_parent() is self:
+                child.unparent()
+        Gtk.Widget.do_dispose(self)
+
+
 def markdown_scroller(child, **kw):
     """The scrolled window markdown (MarkdownView) is read in: Baude's chat, Record's Read and its Record's answers.
     Its child at its natural height (at its minimum, GTK's default, a code block is squashed to a line), nothing

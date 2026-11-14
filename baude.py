@@ -9754,18 +9754,22 @@ class SidePanel(Gtk.Box):
         page = self.stack.add_titled(self.meta, "meta", meta.NAME)
         page.set_icon_name("baude-meta-symbolic")
 
-        # subagents: list -> detail
-        self.agent_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
+        # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
+        # chat's in) and closing back into it
+        self.agent_expand = widgets.ExpandStack(vexpand=True)
+        self.agent_stack = self.agent_expand.stack
         self.agent_list = TreeList(line_x=8, selection_mode=Gtk.SelectionMode.NONE)
         self.agent_list.add_css_class("boxed-list")
         self.agent_list.set_placeholder(self._empty("No subagents yet"))
         self.agent_list.connect("row-activated", lambda _l, row: self.open_agent(row.tool_use_id))
-        self.agent_stack.add_named(self._scrolled(self.agent_list), "list")
+        self.agent_scroll = self._scrolled(self.agent_list)
+        self.agent_stack.add_named(self.agent_scroll, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
         back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All subagents")
         back.add_css_class("flat")
-        back.connect("clicked", lambda *_: self.agent_stack.set_visible_child_name("list"))
+        back.connect("clicked", lambda *_: self.close_agent())
+        self.agent_back = back
         self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
         self.detail_title.add_css_class("heading")
         top.append(back)
@@ -9782,7 +9786,7 @@ class SidePanel(Gtk.Box):
                                                                margin_top=6), start=False)
         detail.append(self.detail_holder)
         self.agent_stack.add_named(detail, "detail")
-        page = self.stack.add_titled(self.agent_stack, "agents", "Subagents")
+        page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
         page.set_icon_name("system-users-symbolic")
 
         # background processes
@@ -9977,8 +9981,25 @@ class SidePanel(Gtk.Box):
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
-        self.agent_stack.set_visible_child_name("detail")
+        row = self.agent_rows.get(tool_use_id)
+        if self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, if it's seen)
+            self.agent_expand.open("detail", row, self.row_title(row), *self.detail_parts(), within=self.agent_scroll)
+        else:
+            self.agent_stack.set_visible_child_name("detail")
         self.show_page("agents")
+
+    def detail_parts(self):
+        """A subagent's page's parts, as ExpandStack opens it: its title, its square, and what fades in."""
+        return self.detail_title, self.detail_holder, (self.agent_back, self.detail_info)
+
+    @staticmethod
+    def row_title(row):
+        return next((w for w in walk(row) if isinstance(w, Gtk.Label) and w.has_css_class("title")), None)
+
+    def close_agent(self):
+        """Back to the list, the subagent shown closing into its row."""
+        row = self.agent_rows.get(self.current)
+        self.agent_expand.close("list", row, row and self.row_title(row), *self.detail_parts(), within=self.agent_scroll)
 
     # ---- background processes
     def update_process(self, task):

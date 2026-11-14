@@ -15,6 +15,9 @@ func flag(_ name: String) -> String? {
     return args[i + 1]
 }
 let cwd = FileManager.default.currentDirectoryPath
+/// The chat's folder, as the model's told it: run on another host as an agent (Baude's agentproxy), the one on the
+/// chat's host, where its tools (mcp__host__*) work; else this one.
+let toldCwd = ProcessInfo.processInfo.environment["BAUDE_TOOLS_CWD"].flatMap { $0.isEmpty ? nil : $0 } ?? cwd
 let sessionID = flag("--resume") ?? UUID().uuidString.lowercased()
 /// Whether the model has Exec: unless --tools leaves out Bash (Meta's: only those that read, and its own).
 let execAllowed = flag("--tools").map { $0.split(separator: ",").contains { ["Bash", "Exec"].contains($0.trimmingCharacters(in: .whitespaces)) } } ?? true
@@ -146,8 +149,9 @@ final class Agent: @unchecked Sendable {
 
     static let maxCommands = 8
     static let instructions = """
-        You are a helpful assistant working in the user's project folder (\(cwd)). You can run shell commands there \
-        with the Exec tool. Run a command when you need to look at files or the system, then say briefly what you found. \
+        You are a helpful assistant working in the user's project folder (\(toldCwd)). You can run shell commands there \
+        with the \(execAllowed ? "Exec" : "Bash") tool. Run a command when you need to look at files or the system, \
+        then say briefly what you found. \
         If the user only chats or asks a question, just answer.
         """
 
@@ -187,7 +191,7 @@ final class Agent: @unchecked Sendable {
             emit(["type": "control_response", "response": ["subtype": "success", "request_id": msg["request_id"] ?? "",
                                                            "response": response] as [String: Any]])
             if subtype == "initialize" {
-                emit(["type": "system", "subtype": "init", "session_id": sessionID, "cwd": cwd, "model": modelName,
+                emit(["type": "system", "subtype": "init", "session_id": sessionID, "cwd": toldCwd, "model": modelName,
                       "tools": execAllowed ? ["Exec"] : [String](), "permissionMode": mode])
             } else if subtype == "set_permission_mode" {
                 emit(["type": "system", "subtype": "status", "status": NSNull(), "permissionMode": mode, "session_id": sessionID])

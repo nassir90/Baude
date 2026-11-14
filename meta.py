@@ -44,6 +44,7 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+from baudelib import agentproxy  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
@@ -74,18 +75,20 @@ REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
+UNAVAILABLE = "This model is unavailable"  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
 HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
 
 
-def models():
+def models(live=False):
     """What Intelligence offers, as (value, label, effort levels or None, provider or None): the models this machine's
     claude listed last (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude),
     in its order (MODELS_OFFERED till it has); then those of this machine's inference providers that call tools
     (baudelib.models.runnable_models: Apple's once apple-claude's built, MLX's that are downloaded, Ollama's, an
-    OpenAI-compatible server's), as Baude's chats offer them; and those of other hosts' in the mesh that serve HTTP
-    (providers.mesh_endpoints: run here, through the mesh's proxy, so Meta's tools stay this app's). Claude's have no
-    provider: claude runs them, wherever it is."""
+    OpenAI-compatible server's), as Baude's chats offer them; and every other host's in the mesh: one that serves an API
+    run here, through the mesh's proxy (providers.mesh_endpoints), any other run there as an agent whose tools are
+    Meta's here (providers.mesh_agents: agentproxy). Claude's have no provider: claude runs them, wherever it is. And
+    Meta's own, if it's none of these (unavailable), unless live."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     out = [(m["value"], m.get("displayName") or m["value"],
@@ -96,10 +99,22 @@ def models():
             for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
     out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"], None, f"openai/{e['id']}")
             for e in providerslib.mesh_endpoints() for m in e["models"] if m.get("tools", True)]
+    out += [(m["value"], f"{m['displayName']} · {m['host']}", None, m["provider"])
+            for m in providerslib.mesh_agents() if m.get("tools", True)]  # (another host's that serves no API: run
+    # there, its tools Meta's here)
+    if live:
+        return out
     chosen = widgets.load_settings().get("meta_model")  # (one picked from another claude's list, or a model this Mac
     if isinstance(chosen, str) and chosen and model_entry(chosen, out) is None:  # ran then: still there to see)
         out.append((chosen, local_name(chosen), None, providerslib.provider_of(chosen)))
     return out
+
+
+def available(value=None):
+    """Is a model (Meta's, if none's given) one Meta can run now: Claude's, or one in the mesh still (models, live)?
+    One that's gone (its host left the mesh, its model removed) is listed still, as unavailable."""
+    value = model() if value is None else value
+    return model_program(value) == "claude" or model_entry(value, models(live=True)) is not None
 
 
 def local_name(value):
@@ -1181,6 +1196,11 @@ class MetaProc(ClaudeProc):
         super().__init__(*args, **kw)
 
 
+class MetaProxiedProc(agentproxy.ProxiedProc):
+    """A model of another host's run there as Meta's agent (agentproxy), its tools here: on GTK's main loop."""
+    dispatch = staticmethod(GLib.idle_add)
+
+
 class Agent:
     """Meta's session: a Claude Code session for a conversation (one turn at a time: ask), on the model chosen. Its
     tools only read (READ_TOOLS), in Claude Code's own default permission mode: what's under roots it reads as it
@@ -1221,8 +1241,11 @@ class Agent:
                 "--disable-slash-commands", "--setting-sources", ""]
         for root in self.roots:
             args += ["--add-dir", root]
-        self.proc = MetaProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args, env=AGENT_ENV,
-                             exe=exe, env_of=env_of)
+        if modelslib.proxied(model) is not None:  # (another host's: run there, Meta's tools here, relayed)
+            self.proc = MetaProxiedProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args)
+        else:
+            self.proc = MetaProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args,
+                                 env=AGENT_ENV, exe=exe, env_of=env_of)
 
     def ask(self, text, turn):
         """A message (turn: what the reply's made of, as it comes: its text, actions, what it shows). A session's
@@ -1966,7 +1989,9 @@ class MetaChat(Gtk.Box):
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         agent = self.agent
-        if agent is not None and not agent.closed and not agent.fresh:
+        if not available():  # (its host gone from the mesh, or its model: said so, till another's picked)
+            self.exhausted.set(True, UNAVAILABLE)
+        elif agent is not None and not agent.closed and not agent.fresh:
             self._context_now()
         elif self.used is not None:
             self.show_usage({"totalTokens": self.used, "maxTokens": agent.window if agent else window(model())})
@@ -1986,7 +2011,8 @@ class MetaChat(Gtk.Box):
         outgrown = agent is not None and agent is self.outgrew and agent.model == model()
         if outgrown:
             self.ctx.bar.set_value(1)
-        self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
+        if available():
+            self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
 
     def close_agent(self):
         """Its session stopped (the conversation cleared, the window gone): the next message starts another, told what
@@ -2779,6 +2805,8 @@ class MetaChat(Gtk.Box):
     def submit(self):
         buf = self.composer.get_buffer()
         text = self.writing.text().strip()
+        if not self.ask and not available():
+            self.model_changed()  # (gone since it was picked: said so)
         if self.ask or self.exhausted.on or not self.ready() or not (text or self.can_ask_empty()):
             return
         if text.lower() in self.CLEAR:

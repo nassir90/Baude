@@ -81,7 +81,8 @@ def level(effort):
 
 thinking = level(flag("--effort"))
 mode = {"manual": "default", None: "default"}.get(flag("--permission-mode"), flag("--permission-mode"))
-cwd = os.getcwd()
+cwd = os.environ.get("BAUDE_TOOLS_CWD") or os.getcwd()  # (run on another host as an agent: the chat's folder
+# there, where its tools work, mcp__host__*; this one, os.getcwd(), an empty one of its own)
 system_prompt = flag("--system-prompt")
 keep_session = "--no-session-persistence" not in sys.argv
 PI_TOOLS = {"Read": "read", "Bash": "bash", "Edit": "edit", "MultiEdit": "edit", "Write": "write", "Grep": "grep",
@@ -507,7 +508,7 @@ class Engine:
                      "mention are there, not in pi's own documentation."]
         os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
         log = open(os.path.join(HOME, "logs", "pi.log"), "a")
-        self.pi = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
+        self.pi = subprocess.Popen(args, cwd=os.getcwd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
                                    env=os.environ | {"PI_CODING_AGENT_DIR": self.agent_dir, "PI_OFFLINE": "1",
                                                      "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
         threading.Thread(target=self._read_pi, daemon=True).start()

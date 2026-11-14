@@ -75,6 +75,24 @@ def endpoint_id(member, provider):
     return f"mesh-{re.sub(r'[^a-z0-9]', '', member.lower())[:8]}-{slug}"
 
 
+def _kept(path=None):
+    """What this machine's host process keeps of other members' providers (changed), if it's running: {} if not."""
+    try:
+        with open(path or os.path.join(wire.runtime_dir(), ENDPOINTS), encoding="utf-8") as f:
+            kept = json.load(f)
+        os.kill(int(kept["pid"]), 0)
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    return kept if isinstance(kept, dict) else {}
+
+
+def agents(path=None):
+    """Other members' providers that serve no API (Apple's, MLX's), whose models run there as agents (agentproxy):
+    [{provider, provider_name, host (the member's id), host_name, models: [{value, displayName, window, tools, input,
+    thinking}]}], from the file this machine's host process keeps (endpoints'). [] if it isn't running."""
+    return [a for a in _kept(path).get("agents") or [] if isinstance(a, dict) and wire.is_id(a.get("host"))]
+
+
 def endpoints(path=None):
     """Other members' providers that serve HTTP, as OpenAI-compatible endpoints on this machine (its host process's
     Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, provider, provider_name, host
@@ -713,15 +731,19 @@ class Mesh:
                 "models": [{k: x[k] for k in ("id", "displayName", "window", "tools", "input") if k in x}
                            for x in p["models"]]}
                for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
+        agents = [{"provider": p["id"], "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
+                   "models": [{k: x[k] for k in ("value", "displayName", "window", "tools", "input", "thinking")
+                               if k in x} for x in p["models"]]}
+                  for m in view["members"] for p in m["providers"] if not p.get("http")]
         with self.lock:
-            if eps == self.told:
+            if (eps, agents) == self.told:
                 return
-            self.told = eps
+            self.told = (eps, agents)
             path = self.endpoints_path()
             try:
                 fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump({"pid": os.getpid(), "endpoints": eps}, f)
+                    json.dump({"pid": os.getpid(), "endpoints": eps, "agents": agents}, f)
                 os.replace(path + ".tmp", path)
             except OSError as e:
                 self.log(f"mesh: {path}: {e}")

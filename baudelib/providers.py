@@ -46,9 +46,12 @@ ENDPOINT_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,30}")
 
 
 def provider_of(value):
-    """A model's provider, by its value: "apple", "mlx", "ollama", "openai/<id>"; None for Claude's."""
+    """A model's provider, by its value: "apple", "mlx", "ollama", "openai/<id>"; "agent/<member>/<its there>" for one
+    run on another host as an agent; None for Claude's."""
     if not isinstance(value, str) or not value:
         return None
+    if (agent := modelslib.proxied(value)) is not None:
+        return f"{modelslib.AGENT}{agent[0]}/{'apple' if agent[1] == modelslib.APPLE_MODEL['value'] else 'mlx'}"
     if value == modelslib.APPLE_MODEL["value"]:
         return "apple"
     if any(m["value"] == value for m in modelslib.mlx_models()):
@@ -64,6 +67,10 @@ def provider_name(pid, settings=None):
     """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name (another host's in the mesh: Ollama · studio)."""
     if pid in NAMES:
         return NAMES[pid]
+    if isinstance(pid, str) and pid.startswith(modelslib.AGENT):  # (another host's, run there: Apple · studio)
+        member, _, inner = pid[len(modelslib.AGENT):].partition("/")
+        host = next((m["host"] for m in mesh_agents() if m["provider"] == pid), member[:8])
+        return f"{NAMES.get(inner, inner)} · {host}"
     if isinstance(pid, str) and pid.startswith("openai/"):
         ep = next((e for e in endpoints(settings) + mesh_endpoints() if e["id"] == pid[len("openai/"):]), None)
         return ep["name"] if ep else pid[len("openai/"):]
@@ -76,6 +83,9 @@ def model_name(value):
         for m in p["models"]:
             if m["value"] == value:
                 return m["displayName"]
+    if (agent := modelslib.proxied(value)) is not None:  # (another host's, run there: its name · its host's)
+        there = next((m for m in mesh_agents() if m["value"] == value), None)
+        return f"{there['displayName']} · {there['host']}" if there else f"{model_name(agent[1])} · {agent[0][:8]}"
     pid = provider_of(value)
     if pid == "ollama":
         return f"{value[len('ollama/'):]} (Ollama)"
@@ -86,13 +96,18 @@ def model_name(value):
 
 def has_runtime(pid):
     """Is a provider one to pick, a runtime its models are served by (MLX's, Ollama, an endpoint)? Apple's on-device
-    model has none: macOS runs it, as claude runs Claude's, so it's listed with Claude's."""
-    return bool(pid) and pid != "apple"
+    model has none, here or on another host (agent/<member>/apple): macOS runs it, as claude runs Claude's, so it's
+    listed with Claude's."""
+    return bool(pid) and pid != "apple" and not (pid.startswith(modelslib.AGENT) and pid.endswith("/apple"))
 
 
 def where(pid):
     """(its host's name, None for this machine; its own name) of a provider: ("studio", "Ollama") for another host's in
     the mesh, (None, "MLX") for this machine's."""
+    if isinstance(pid, str) and pid.startswith(modelslib.AGENT):  # (another host's, run there as an agent)
+        member, _, inner = pid[len(modelslib.AGENT):].partition("/")
+        host = next((m["host"] for m in mesh_agents() if m["provider"] == pid), member[:8])
+        return host, NAMES.get(inner, inner)
     if isinstance(pid, str) and pid.startswith("openai/"):
         eid = pid[len("openai/"):]
         ep = next((e for e in mesh_endpoints() if e["id"] == eid), None)
@@ -101,6 +116,23 @@ def where(pid):
         if m := re.fullmatch(r"mesh-([a-z0-9]+)-(.+)", eid):  # (a member gone from the mesh: by what its id says)
             return m[1], m[2]
     return None, provider_name(pid)
+
+
+def elsewhere(p, member):
+    """The models of another host's provider p (network().providers()'s; member: that host's id) as a chat on this
+    host runs them, without moving: through the mesh's proxy here, as an endpoint's (mesh.endpoint_id), where it
+    serves an API; else run there, as an agent whose tools are here (agent/<member>/<its value>: agentproxy)."""
+    from baudelib import mesh
+    keep = ("tools", "window", "input", "thinking")
+    if p.get("http"):
+        pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
+        return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,
+                      "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m}
+                     for m in p.get("models") or []]
+    pid = f"{modelslib.AGENT}{member}/{p['id']}"
+    return pid, [{"value": f"{modelslib.AGENT}{member}/{m['value']}", "provider": pid,
+                  "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m}
+                 for m in p.get("models") or []]
 
 
 def rank(pid):
@@ -154,6 +186,25 @@ def mesh_endpoints():
                         "provider": provider, "url": e["url"].rstrip("/"),
                         "key": e.get("key") if isinstance(e.get("key"), str) else None, "window": None,
                         "models": [m for m in e.get("models") or [] if isinstance(m, dict) and isinstance(m.get("id"), str)]})
+    return out
+
+
+def mesh_agents():
+    """Other hosts' models in the mesh that serve no API (Apple's, MLX's), as this machine runs them: there, as agents
+    whose tools are here (agentproxy): [{"value" (agent/<member>/<its value>), "displayName", "provider", "host"
+    (its name), "providerName", "tools", "window", "input", "thinking"}]; [] with no mesh here."""
+    try:
+        from baudelib import mesh
+        found = mesh.agents()
+    except Exception:  # noqa: BLE001 (no mesh, or its file unreadable: none)
+        return []
+    out = []
+    for a in found:
+        pid, models = elsewhere({"id": str(a.get("provider") or ""), "models": [
+            m for m in a.get("models") or [] if isinstance(m, dict) and isinstance(m.get("value"), str)]}, a["host"])
+        host = str(a.get("host_name") or a["host"][:8])
+        out += [m | {"host": host, "providerName": f"{a.get('provider_name') or a.get('provider')} · {host}"}
+                for m in models]
     return out
 
 

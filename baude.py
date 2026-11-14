@@ -7787,9 +7787,21 @@ class SessionSidebar(Gtk.Box):
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=8, margin_end=8,
                       margin_top=8, margin_bottom=4)
         self.new_btn = self._action("document-new-symbolic", "New session", "Ctrl+N", self.new_chat)
+        self.new_btn.set_hexpand(True)
         self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
                                        lambda: win.pick_folder())
-        top.append(self.new_btn)
+        # (beside it: the host a new session's made on, by its name, verbatim (this machine's local); kept in
+        # settings.json's new_session_host, which Meta sets too: fill_new_hosts)
+        self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)], "The host a new session is made "
+                                                         "on: where it lives, its files and its tools",
+                                                         lambda key: save_settings(new_session_host=key)), 12)
+        self.host_dd.add_css_class("flat")
+        self.host_dd.add_css_class("new-host")
+        self.host_dd.set_valign(Gtk.Align.CENTER)
+        new_row = Gtk.Box(spacing=2)
+        new_row.append(self.new_btn)
+        new_row.append(self.host_dd)
+        top.append(new_row)
         top.append(self.folder_btn)
         find_row = Gtk.Box(spacing=2, margin_top=6)
         self.search = Gtk.SearchEntry(placeholder_text="Search sessions", hexpand=True)
@@ -8005,6 +8017,7 @@ class SessionSidebar(Gtk.Box):
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
         off = {host_key(r) for r in network().remotes() if r.deactivated}  # (grayed)
         self.host_list.fill([(*h, h[0] in off) for h in self.known_hosts()], self.host_filter())
+        self.fill_new_hosts()
         self.group_list.fill(self.known_groups(), self.group_filter())
         self.actions.lookup_action("show_all").set_enabled(  # (as it is after both: a fill can change what's picked)
             self.host_filter() is not None or self.group_filter() is not None)
@@ -8696,6 +8709,26 @@ class SessionSidebar(Gtk.Box):
             self.win.new_session()
         self.refresh()
 
+    def new_hosts(self):
+        """[(key, name)]: the hosts a new session can be made on: this machine (local), then each other that's there,
+        by its name, verbatim."""
+        out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
+        for r in sorted(network().alive(), key=lambda r: remote_name(r).lower()):
+            if (key := host_key(r)) not in seen and not r.deactivated:
+                seen.add(key)
+                out.append((key, remote_name(r)))
+        return out
+
+    def fill_new_hosts(self):
+        """New session's host, as the network has them now, on the one picked (settings.json's new_session_host; this
+        machine while that one isn't there)."""
+        hosts = self.new_hosts()
+        self.host_dd.set_choices(hosts)
+        kept = load_settings().get("new_session_host")
+        self.host_dd.select(kept if kept in dict(hosts) else HERE_HOST)
+        (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
+        # no other host to pick)
+
     def mine_listed(self):
         """Is a new chat here listed (This Mac's host, and No group, picked in ⋮: it's in no group till it's put in
         one)?"""
@@ -8703,9 +8736,13 @@ class SessionSidebar(Gtk.Box):
         return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
 
     def new_chat(self):
-        """New session: a chat here; or, while a new one here isn't listed (⋮: only other hosts, or only groups), one
-        through a host that's listed (ask_remote_start: in the group picked, if one is), so it's listed too."""
-        if self.mine_listed():
+        """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here; or, while a new
+        one here isn't listed (⋮: only other hosts, or only groups), one through a host that's listed
+        (ask_remote_start: in the group picked, if one is), so it's listed too."""
+        key = self.host_dd.value() or HERE_HOST
+        if key != HERE_HOST and (r := next((r for r in network().alive() if host_key(r) == key), None)) is not None:
+            self.win.new_session_on(r)
+        elif self.mine_listed():
             self.win.switch_to(self.win.new_session)
         else:
             self.win.ask_remote_start(hosts=self.host_filter())
@@ -9128,6 +9165,34 @@ class BaudeMeta(meta.MetaChat):
         now = lambda: "date" if load_settings().get("sidebar_group") == "date" else "folder"  # noqa: E731
         out["group_by"] = meta.Setting("group_by", "Group by", now, group_by, row, by,
                                        note="the left bar's chats, under their folders or their days")
+
+        def hosts():  # ([(key, name)]: New session's, as the left bar has them)
+            sidebar = getattr(win, "sidebar", None)
+            return sidebar.new_hosts() if sidebar is not None else [(HERE_HOST, THIS_MACHINE)]
+
+        def host_now():
+            kept = load_settings().get("new_session_host")
+            return dict(hosts()).get(kept, THIS_MACHINE)
+
+        def host_set(name):
+            key = next((k for k, n in hosts() if n == name), HERE_HOST)
+            save_settings(new_session_host=key)
+            if (sidebar := getattr(win, "sidebar", None)) is not None:
+                sidebar.fill_new_hosts()
+
+        def host_row():
+            names = [n for _k, n in hosts()]
+            r = Adw.ComboRow(title="New session's host", subtitle="Where a new session lives: its files and its tools",
+                             model=Gtk.StringList.new(names), selected=names.index(host_now()))
+            r.connect("notify::selected", lambda r, _p: r.get_selected() < len(names) and
+                      host_set(names[r.get_selected()]))
+            return r
+        out["new_session_host"] = meta.Setting(
+            "new_session_host", "New session's host", host_now, host_set, host_row,
+            lambda: [n for _k, n in hosts()],
+            note="the host a new session's made on, by its name (local: this machine), as New session's dropdown has "
+                 "it: where it lives, its files and its tools. Its model may run on any host; a chat stays where it's "
+                 "made. For one with a folder and a prompt, spawn_agent")
         return out
 
     def marks_changed(self):
@@ -11206,7 +11271,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # (left of it: the inference providers, by host, whose models it lists after Claude's: sync_providers)
         self.provider_dd = HostPicker("Inference provider", self.on_provider_changed, 24)
         self.provider_dd.set_visible(False)
-        self.provider_key, self.elsewhere = None, {}
+        self.provider_key = None
         self.mode_dd = ChoiceDropDown([], "Permission mode", self.on_mode_changed)
         self.effort_dd = ChoiceDropDown([], "Thinking effort", self.on_effort_changed)
         self.effort_dd.set_sensitive(False)
@@ -11355,6 +11420,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         statusbar.add_css_class("statusbar")
         self.working_dots = widgets.WorkingDots()
         statusbar.append(self.working_dots)
+        # (left of the path: the host the chat lives on, by its name, verbatim: local for this machine)
+        self.host_label = Gtk.Label(label=THIS_MACHINE, css_classes=["chat-host", "mono"])
+        statusbar.append(self.host_label)
         statusbar.append(self.status)
         self.tasks_btn = Gtk.Button(visible=False, tooltip_text="Background tasks")
         self.tasks_btn.add_css_class("flat")
@@ -11441,7 +11509,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.meta_from = None  # (where the focus was last outside the side panel: close_meta)
         self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
-        for triggers, fn in (("<Control>n", lambda: self.switch_to(self.new_session)), ("<Control>o", self.show_sessions),
+        for triggers, fn in (("<Control>n", lambda: self.sidebar.new_chat()), ("<Control>o", self.show_sessions),
                              # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
                              # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
@@ -12446,9 +12514,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if extra is not None:
             self.status_extra = extra
         self.working_dots.set_working(self.busy)
-        self.status.set_text(f"{self.short_cwd()}   ${self.total_cost:.4f}   "
-                             f"{getattr(self, 'status_extra', '')}")
-        self.status.set_tooltip_text(self.run_cwd)
+        here = self.chat_host() == HERE_HOST
+        there = None if here else (self.remote.sessions.get(self.session_id) or {}).get("cwd")  # (its folder there)
+        self.status.set_text(f"{remote_path(there, self.remote) if there else self.short_cwd()}   "
+                             f"${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
+        self.status.set_tooltip_text(there or self.run_cwd)
+        self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
+        self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
+                                         ("" if here else f" ({self.remote.host})"))
 
     # ---- process lifecycle
     def runs_here(self):
@@ -12999,11 +13072,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.note("interrupt requested")
 
     def on_model_changed(self, value):
-        if value in self.elsewhere:  # (a provider's on another host: a new conversation there, this one as it is)
-            r, label = self.elsewhere[value], self.model_dd.label()
-            self.sync_providers()  # (the picker back on the model this chat has)
-            self.new_conversation_on(r, value, label)
-            return
         was = self.model
         if value == was:  # (the one it's on)
             return
@@ -13178,15 +13246,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # ---- inference providers: where the models besides Claude's run (Ollama, MLX, Apple's, an OpenAI-compatible
     # server), by host: this machine's, and every other member's of the mesh (network().providers()). Picked left of
     # the model picker, which lists Claude's (claude's: not a provider, bound to where it runs), then the provider's.
-    # Picking a provider changes the list; picking a model changes the chat. Another member's that serves HTTP runs
-    # here, through the mesh's proxy (an endpoint here: providers.mesh_endpoints); one a program runs there (MLX's) is
-    # a new conversation there. The picker's on the provider of the chat's model, as it's opened or picked. It's gone
-    # while the chat's on Claude's, and empty while it's on Apple's (no runtime: listed with Claude's)
+    # Picking a provider changes the list; picking a model changes the chat's model, never its host: the chat stays
+    # where it is, with its files, and another host's model runs for it through the mesh's proxy where it serves an API,
+    # else as an agent there whose tools are the chat's host's (providers.elsewhere). Where a chat lives is picked as
+    # it's made (New Session's host), or by Meta. The picker's on the provider of the chat's model, as it's opened or
+    # picked. It's gone while the chat's on Claude's, and empty while it's on Apple's (no runtime: listed with Claude's,
+    # another host's too)
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
-        """The host this chat's model runs on, as ⋮ → Hosts keys it: this machine (its own claude, or its host
-        process), or the server's."""
+        """The host this chat lives on, its files and its agent's tools, as ⋮ → Hosts keys it: this machine (its own
+        claude, or its host process), or the server's."""
         return HERE_HOST if self.remote is None or baudelib.client.is_here(self.remote.info) else self.remote.key
 
     def provider_key_of(self, value):
@@ -13199,47 +13269,40 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return f"{self.chat_host()}|{pid}" if providerslib.has_runtime(pid) else None
 
     def provider_choices(self):
-        """[(key, host name, provider name, models, the Remote a model of it runs on, or None for the chat's own
-        host)], a host's together: this machine's
-        providers (as they're found here, whether its own claude or its host process runs the chat); those of the
-        chat's host, when it's another (the models it lists: models_info); and each other member's of the mesh: one
-        that serves HTTP run here, through the mesh's proxy (its models as an endpoint's here), one a program runs
-        run on its host."""
+        """[(key, host name, provider name, models)], a host's together: the providers of the chat's host (this
+        machine's, as they're found here, whether its own claude or its host process runs the chat; another's, the
+        models it lists: models_info), then every other host's in the mesh (this machine's too, for a chat on another),
+        each model as the chat runs it where it is: through the mesh's proxy, or as an agent there whose tools are the
+        chat's host's (providers.elsewhere). Another host's Apple model is one too, its provider none to pick (no
+        runtime: sync_providers lists it with Claude's)."""
         own, out = self.chat_host(), []
 
-        def add(host, name, models, r):
+        def add(host, name, models):
             for pid, pname, ms in providerslib.group(models):
-                out.append((f"{host}|{pid}", name, pname, ms, r))
-        here = modelslib.runnable_models(wait=False)
+                out.append((f"{host}|{pid}", name, pname, ms))
         if own == HERE_HOST:
-            add(own, THIS_MACHINE, here, None)
+            add(own, THIS_MACHINE, modelslib.runnable_models(wait=False))
+            theirs = set()
         else:
-            add(own, remote_name(self.remote), [m for m in self.models_info.values() if m["value"] != "default"], None)
-            add(HERE_HOST, THIS_MACHINE, here, local_host() or "here")
-        mine = None if own == HERE_HOST else (local_host() or "here")  # (what runs on this machine, from this chat)
-        theirs = {self.remote.info.get("id"), own} if self.remote is not None else set()
+            add(own, remote_name(self.remote), [m for m in self.models_info.values() if m["value"] != "default"])
+            theirs = {self.remote.info.get("id"), own}
         for p in network().providers():
             host = p.get("host") or {}
-            if host.get("here") or host.get("id") in theirs or not p.get("models") or \
-                    not providerslib.has_runtime(p.get("kind") or p.get("id")):
+            if (host.get("here") if own == HERE_HOST else host.get("id") in theirs) or not p.get("models") or \
+                    not baudelib.wire.is_id(host.get("id")):
                 continue
-            hname, pname = host.get("name") or str(host.get("id"))[:8], p.get("name") or p.get("id")
-            name = f"{pname} · {hname}"
-            if p.get("endpoint"):
-                pid = f"openai/{p['endpoint']}"
-                models = [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid, "providerName": name,
-                           "displayName": m.get("displayName") or m["value"]} |
-                          {k: m[k] for k in ("tools", "window", "input") if k in m} for m in p["models"]]
-                out.append((f"{host.get('id')}|{p['id']}", hname, pname, models, mine))
-            elif (r := next((r for r in network().remotes() if host.get("id") in (r.key, r.info.get("id"))),
-                            None)) is not None:
-                out.append((f"{host.get('id')}|{p['id']}", hname, pname, [m | {"provider": p["id"]} for m in p["models"]],
-                            r))
+            hname, pname = THIS_MACHINE if host.get("here") else host.get("name") or str(host["id"])[:8], \
+                p.get("name") or p.get("id")
+            pid, models = providerslib.elsewhere(p, host["id"])
+            out.append((f"{host['id']}|{p['id']}", hname, pname,
+                        [m | {"providerName": f"{pname} · {hname}"} |
+                         ({} if providerslib.has_runtime(pid) else {"displayName": f"{m['displayName']} · {hname}"})
+                         for m in models]))
         return out
 
     def providers_listed(self, found=None):
         """What the provider picker lists (found: provider_choices'), to tell whether it's changed."""
-        return [(k, host, label, [m["value"] for m in ms]) for k, host, label, ms, _r in
+        return [(k, host, label, [m["value"] for m in ms]) for k, host, label, ms in
                 (self.provider_choices() if found is None else found)]
 
     def follow_model(self, value):
@@ -13256,13 +13319,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         found = self.provider_choices()
         self.providers_seen = self.providers_listed(found)
         self.provider_index = {}  # (each model's provider, the first that lists it: this machine's before the mesh's)
-        for k, _h, _l, ms, _r in found:
+        for k, _h, _l, ms in found:
             for m in ms:
                 self.provider_index.setdefault(m["value"], k)
-        if self.chat_host() == HERE_HOST:  # (this machine's models as they're found now: their effort levels)
-            for _k, _h, _l, ms, r in found:
-                for m in ms if r is None else ():
-                    self.models_info.setdefault(m["value"], m)
+                self.models_info.setdefault(m["value"], m)  # (as it's run: its effort levels, its name)
+        found = [f for f in found if providerslib.has_runtime(f[0].split("|", 1)[1])]  # (another host's Apple model:
+        # listed with Claude's, its provider none to pick)
         keys = [k for k, *_ in found]
         shown = shown or self.model or getattr(self, "model_shown", None)
         key = self.provider_key
@@ -13284,11 +13346,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (self.provider_dd.add_css_class if len(found) == 1 else self.provider_dd.remove_css_class)("one-provider")
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
                                           (" (the only one there is)" if len(found) == 1 else ""))
-        chosen = next(((ms, r) for k, _h, _l, ms, r in found if k == key), ([], None))
-        self.elsewhere = {m["value"]: chosen[1] for m in chosen[0]} if chosen[1] is not None else {}
+        chosen = next((ms for k, _h, _l, ms in found if k == key), [])
         listed = [m for m in self.models_info.values() if m["value"] != "default" and
                   (model_program(m["value"]) == "claude" or not providerslib.has_runtime(
-                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen[0])
+                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen)
         if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
             listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
         self.model_dd.set_choices([(m["value"], m.get("displayName") or m["value"]) for m in listed] or MODELS)
@@ -13312,20 +13373,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.sync_models(self.claude_models)  # (an own claude's: the models this machine runs, again)
         else:
             self.sync_providers()
-
-    def new_conversation_on(self, r, model, label):
-        """A model picked that runs on another host (r: its Remote, or "here" for this machine with no host process
-        yet): a new conversation there, on it, in its home folder, opened to be written in; this one as it is."""
-        if r == "here" or r is None:
-            self.note(f"model → {label}: {THIS_MACHINE}'s host process isn't there yet: try again in a moment")
-            self.local_server(lambda _r: None, quiet=True)
-            return
-        effort = self.local_effort if model_program(model) == "pi" else None
-        self.note(f"model → {label}: a new conversation on {remote_name(r)}")
-        r.request({"op": "start", "prompt": "", "cwd": self.run_cwd if r.mine else "~", "model": model,
-                   "effort": effort, "mode": "default", "group": "", "draft": True,
-                   **({"env": claudelib.claude_env()} if r.mine else {})},
-                  lambda reply: self.remote_started(r, reply))
 
     def read_only_mode(self):
         """Every chat opened (a new one, or one picked in the sidebar) starts in Plan, read-only, whatever mode the
@@ -15260,6 +15307,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         else:
             self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
         self.apply_read_only()
+        self.update_status()  # (its host, and its folder there)
         self.sidebar.fill()
 
     def sync_remote(self, r, sid, then=None):
@@ -15644,6 +15692,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 r is not None and fn(r)
             return False
         GLib.timeout_add(250, look)
+
+    def new_session_on(self, r):
+        """New session, on another host (r, picked beside it): a blank chat there, opened to be written in, in the
+        folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
+        once it's written in, as a new chat here is."""
+        picked = self.sidebar.group_filter()
+        group = next(iter(picked)) if picked is not None and len(picked) == 1 else ""
+        model = self.model if self.model and model_program(self.model) == "claude" else None
+        self.note(f"a new session on {remote_name(r)}")
+        r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
+                   "model": model, "effort": self.effort if model else None, "mode": "plan", "group": group,
+                   "draft": True, **({"env": claudelib.claude_env()} if r.mine else {})},
+                  lambda reply: self.remote_started(r, reply))
 
     def remote_new_conversation(self, model, label):
         """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new

@@ -14381,6 +14381,8 @@ def test_ref_palette(app):
         assert sc.get_action().activate(Gtk.ShortcutActionFlags(0), win, None)
         wait_for(lambda: isinstance(win.get_visible_dialog(), baude.RefPalette), "the palette")
         pal = win.get_visible_dialog()
+        pal.space.chat_items = lambda: []  # (the glossary's and the catalogue's names: the chats it lists too, aside)
+        pal.fill()
         wait_for(lambda: win.get_focus() is not None and win.get_focus().is_ancestor(pal.entry), "its entry focused")
 
         def shown():
@@ -14425,9 +14427,10 @@ def test_ref_palette(app):
         win.open_db_name = lambda table, *a, **kw: calls.append(("db", table))
         try:
             pal = baude.RefPalette(win)
+            pal.space.chat_items = lambda: []
             pal.present(win)
             wait_for(lambda: win.get_visible_dialog() is pal and pal.waiting is not None, "waiting for the catalogue")
-            assert pal.spinner.get_visible(), "spinning: the count isn't final yet"
+            assert pal.dots.get_visible(), "the dots: more names on their way"
             stub.catalogue = {
                 "orders-api": {"kind": "k8s", "hint": None, "sources": [("Deployment running", "k3d-dev · shop"),
                                                                        ("Deployment", "k8s/orders.yaml")]},
@@ -14438,7 +14441,7 @@ def test_ref_palette(app):
                 "relay_gen_job": {"kind": "symbol", "hint": None, "sources": [("Database table", "relay (pg-1)")]},
                 "relay_gen_job_event": {"kind": "symbol", "hint": None, "sources": [("Database table", "relay (pg-1)")]}}
             stub.catalogue_busy = False
-            wait_for(lambda: pal.waiting is None and pal.count.get_label() == "10 out of 10" and not pal.spinner.get_visible(), "the catalogue listed")
+            wait_for(lambda: pal.waiting is None and pal.count.get_label() == "10 out of 10" and not pal.dots.get_visible(), "the catalogue listed")
             logos = {pal.store.get_item(i).item["surface"]: pal.store.get_item(i).item["icon"]
                      for i in range(pal.store.get_n_items())}
             assert pal.shown().count("staging") == 1

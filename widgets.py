@@ -8034,8 +8034,9 @@ class RefPalette(Adw.Dialog):
     in any order; the best match first), in a table as the Kubernetes view's: Name (with the logo its links have),
     Kind, Where. Enter, or a click, opens it (on_open(item): Baude opens a looked-up name as its link does, Record
     where it is, in its viewers); Up and Down (Page Up, Page Down) pick; Esc closes. The catalogue is made afresh if
-    it's old, and the table follows. space: a lookup.SearchSpace (Baude's of its chat's Signal, Record's of its
-    notebook's folders)."""
+    it's old, and the table follows, a part at a time as it comes, dots at the bottom left till it's all in. space: a
+    lookup.SearchSpace (Baude's what @ lists: every host's chats and the chat's folder's names from its host; Record's
+    its notebook's folders, the chats and the notebooks)."""
     LIMIT = 400  # rows shown at most (a glossary has thousands)
 
     def __init__(self, win, space, on_open):
@@ -8058,19 +8059,20 @@ class RefPalette(Adw.Dialog):
                                      lambda pos: self.choose(self.store.get_item(pos)))
         self.scroll = Gtk.ScrolledWindow(child=self.table, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         box.append(self.scroll)
-        self.count = Gtk.Label(xalign=0)
+        # (as @'s list has it, PickList: dots at the left while more names are on their way, the count at the right)
+        self.count = Gtk.Label(xalign=1, hexpand=True)
         self.count.add_css_class("dim-label")
         self.count.add_css_class("caption")
-        # (spinning while the catalogue is made: the count isn't final yet)
-        self.spinner = Adw.Spinner(visible=False, width_request=12, height_request=12)
+        self.dots = WorkingDots()
+        self.dots.add_css_class("dim-label")
         foot = Gtk.Box(spacing=6)
+        foot.append(self.dots)
         foot.append(self.count)
-        foot.append(self.spinner)
         box.append(foot)
         self.set_child(box)
-        # (while the catalogue is made: checked for, to list it once it's in)
+        # (while the catalogue is made: checked for, to list what's come in as it comes)
         self.waiting = self.space.refresh(self.catalogue_in)
-        self.spinner.set_visible(self.waiting is not None)
+        self.dots.set_working(self.waiting is not None)
         self.connect("closed", lambda *_: self.waiting and GLib.source_remove(self.waiting))
         self.items = self.space.items()
         self.fill()
@@ -8133,15 +8135,27 @@ class RefPalette(Adw.Dialog):
 
     # ---- filling and picking
     def catalogue_in(self):
-        self.waiting = None
-        self.spinner.set_visible(False)
+        """What's come in listed (all of it, or a part, more on its way: waited for in turn), what's picked kept picked
+        if it's still there and isn't the first."""
+        row = self.selection.get_selected_item() if self.selection.get_selected() else None
+        self.waiting = self.space.refresh(self.catalogue_in) if self.space.busy else None
+        self.dots.set_working(self.waiting is not None)
         self.items = self.space.items()
         self.fill()
+        if row is not None:  # (the same row: two folders, or two hosts, can have a name)
+            same = lambda it: all(it.get(k) == row.item.get(k) for k in ("surface", "what", "summary", "host", "root"))  # noqa: E731
+            at = next((i for i in range(self.store.get_n_items()) if same(self.store.get_item(i).item)), None)
+            if at is not None:
+                self.selection.set_selected(at)
+                self.table.scroll_to(at, None, Gtk.ListScrollFlags.NONE, None)
 
     def fill(self):
         q = self.entry.get_text().strip().lower()
         self.items = self.space.items()
         shown, matched = self.space.search(q, self.LIMIT)
+        if self.waiting is None and self.space.busy:  # (made afresh since, while it's up: a search can start it)
+            self.waiting = self.space.refresh(self.catalogue_in)
+            self.dots.set_working(self.waiting is not None)
         self.store.splice(0, self.store.get_n_items(), [RefPaletteRow(it, q.split()) for it in shown])
         if self.store.get_n_items():
             self.selection.set_selected(0)

@@ -2379,7 +2379,8 @@ def items(source):
 
 class SearchSpace:
     """What ⌘K searches: a source's items (items), ranked as you type (ref_palette_rank), and found in a text
-    (mentions). The source is a Signal (Baude's ⌘K) or a Folder (Record's @, and what its questions say a name is).
+    (mentions). The source is a Signal (Baude's own chat's names, in @ and ⌘K) or a Folder (Record's @ and ⌘K, and what
+    its questions say a name is).
     schedule(ms, fn) waits for a catalogue being made (GLib.timeout_add, unless given)."""
 
     def __init__(self, source, schedule=None):
@@ -2397,7 +2398,8 @@ class SearchSpace:
 
     def refresh(self, on_ready=None):
         """Catalogue the names afresh if it's been a while; on_ready() once that's in, or once some of it is (a source
-        whose catalogue comes in parts: Baude's HostFolder). What waits for it (a GLib source, to remove if on_ready
+        whose catalogue comes in parts: Baude's HostFolder; and Record's Spaces, a folder at a time), asked again then
+        for the rest while it's busy. What waits for it (a GLib source, to remove if on_ready
         isn't wanted any more), or None: nothing to wait for."""
         if self.source is None:
             return None

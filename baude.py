@@ -9283,7 +9283,9 @@ class HostFolder:
             here = host_key(self.remote)  # (that host's: its paths are paths there)
             self.catalogue = tuple(
                 {**self.DEFAULTS, **{k: v for k, v in it.items() if isinstance(v, type(self.DEFAULTS.get(k, v)))},
-                 "path": None, "line": None, "host": here}
+                 "path": None, "line": None, "host": here,
+                 "host_path": it.get("path") if isinstance(it.get("path"), str) else None,  # (there, for ⌘K: read_file)
+                 "host_line": it.get("line") if isinstance(it.get("line"), int) else None}
                 for it in reply["items"] if isinstance(it, dict) and isinstance(it.get("surface"), str))
         if ok and reply.get("busy"):  # (not all made yet: what there is listed, the rest waited for there)
             return self.remote.request({"op": "catalogue", "cwd": self.root, "wait": True}, self._got)
@@ -9507,6 +9509,7 @@ class BaudeMeta(meta.MetaChat):
         if info.get("remote") is not None:
             win.open_remote_soon(info)
         else:
+            win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
             win.switch_to(lambda: win.resume_session(info))
 
     def chats_rows(self, refs):
@@ -11159,11 +11162,41 @@ class SearchSpace(lookup.SearchSpace):
 
 
 class RefPalette(widgets.RefPalette):
-    """⌘K in Baude: the glossary's search of its chat's Signal (SearchSpace), a name opened as its link is (each item's
-    open, ref_palette_items)."""
+    """⌘K in Baude: what @ lists (MetaNames): every host's chats, and the names the open chat's folder has, made on its
+    host (this machine's Signal's, or fetched from the host it runs on, listed as they come). Opened: palette_open."""
 
     def __init__(self, win):
-        super().__init__(win, SearchSpace(win.catalogue_signal()), lambda item: item["open"](win))
+        super().__init__(win, MetaNames(win), lambda item: palette_open(win, item))
+
+
+def palette_open(win, item):
+    """A ⌘K row opened: a name of this machine's as its link is (its open, ref_palette_items); a chat, as the sidebar
+    opens it (the open one: its tab shown); another host's pull request or issue on GitHub, its file (or a manifest's
+    object, at its manifest) read from it and shown in a tab, and anything else of it said, as Baude's views of
+    branches, clusters and databases look at this machine."""
+    if (opened := item.get("open")) is not None:
+        return opened(win)
+    if item.get("kind") == "chat":
+        info = next((i for i in all_chats(win.sidebar) if i["id"] == item.get("id")), None)
+        if info is None:
+            return None
+        if info["id"] == win.session_id:
+            return win.tabs.show("chat")
+        if info.get("remote") is not None:
+            return win.open_remote_soon(info)
+        win.opening_remote = None  # (another host's, still being fetched: not opened after all, as the sidebar's)
+        return win.switch_to(lambda: win.resume_session(info))
+    entry = item.get("entry") or {}
+    if (listed := entry.get("github")) is not None:
+        return fixview.open_github(win, listed)
+    r, host = win.remote, item.get("host")
+    on = remote_name(r) if r is not None and host == host_key(r) else "another host"
+    first = (entry.get("sources") or [["", ""]])[0]
+    manifest = item.get("kind") == "k8s" and entry.get("hint") != "context" and \
+        not str(first[0]).endswith(" running") and first[1]  # (an object written in a file there, not one running)
+    if (item.get("kind") == "file" or manifest) and item.get("host_path") and on != "another host":
+        return win.show_remote_file(r, item["host_path"], item.get("host_line"))
+    return win.ref_toast(f"{item['surface']}: {(item.get('what') or 'a name').lower()} on {on}")
 
 
 class RefPopover(AnchoredPopover):
@@ -16924,8 +16957,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         raw = urllib.parse.unquote(m[1])
         raw = home + raw[1:] if raw == "~" or raw.startswith("~/") else raw
         cwd = (r.sessions.get(self.session_id) or {}).get("cwd") or home
-        path, line = os.path.normpath(os.path.join(cwd, raw)), int(m[2] or m[3]) if m[2] or m[3] else None
+        self.show_remote_file(r, os.path.normpath(os.path.join(cwd, raw)), int(m[2] or m[3]) if m[2] or m[3] else None)
+        return True
 
+    def show_remote_file(self, r, path, line=None):
+        """A file on r's host, fetched from it (read_file) and shown in a tab, as a file here is (show_code)."""
         def shown(reply):
             data = base64.b64decode(reply.get("data") or "") if reply.get("op") == "file" else b""
             if reply.get("op") != "file" or reply.get("error") or b"\0" in data[:8192]:
@@ -16933,7 +16969,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return
             self.show_code(path, line, text=data.decode("utf-8", "replace"), note=f"on {remote_name(r)}")
         r.request({"op": "read_file", "path": path}, shown)
-        return True
 
     def show_sessions(self):
         self.sidebar_slide.set_shown(True)

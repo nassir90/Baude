@@ -8960,6 +8960,7 @@ class SideQuestion(Gtk.ListBoxRow):
         # (no scrollbar: a shown one's least length would keep it two lines tall; still scrolled, past nine)
         box.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
         self._slim(True)
+        self.comp.set_margin_bottom(10)
         self.foot.set_visible(False)
         self.reveal.set_child(self.inside)
 
@@ -8975,6 +8976,7 @@ class SideQuestion(Gtk.ListBoxRow):
         box.set_min_content_height(56)  # (Composer's own)
         box.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._slim(False)
+        self.comp.set_margin_bottom(0)  # (as Meta's: its box as far up from the page's foot as Meta's and the chat's)
         self.foot.set_visible(True)
         return self.inside
 

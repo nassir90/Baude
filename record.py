@@ -5617,7 +5617,7 @@ class RecordChat(meta.MetaChat):
     # ---- what's asked
     def set_quote(self, text):
         self.quote, self.selection = text[:QUOTE_LIMIT], None
-        self.quote_label.set_text("“" + " ".join(text.split()) + "”" if text else "")
+        self.quote_label.set_text(" ".join(text.split()))
         self.quote_box.set_visible(bool(text))
 
     def set_passages(self, texts):
@@ -5627,14 +5627,13 @@ class RecordChat(meta.MetaChat):
         if len(texts) < 2:
             return self.set_quote(texts[0] if texts else "")
         self.set_quote("\n\n".join(f"[{n}] {t}" for n, t in enumerate(texts, 1)))
-        self.quote_label.set_text("  ".join(f"{n} “{' '.join(t.split())}”" for n, t in enumerate(texts, 1)))
 
     def set_selection(self, notebook, page, start, end, text):
         """A passage selected on a page of notes (DiaryEditor._quote_selection), quoted with where it is: what's asked
         is about it, and a change the agent proposes to it replaces it (propose)."""
         self.set_quote(text)
         self.selection = {"notebook": notebook.get("id"), "page": page, "start": start, "end": end, "text": text}
-        self.quote_label.set_text(f"{short_page(page)} · “{' '.join(text.split())}”")
+        self.quote_label.set_text(f"{short_page(page)} · {' '.join(text.split())}")
 
     def plain(self, text):
         return plain_refs(text)

@@ -2522,20 +2522,23 @@ def ensure_icons():
         return
     base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     folder = os.path.join(base, "baude", "icons")
-    os.makedirs(folder, exist_ok=True)
-    for name, body in {**BAUDE_ICONS, **BAUDE_SHAPES, **KUBE_ICONS}.items():
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-               f'<g fill="#2e3436">{body}</g></svg>')
-        path = os.path.join(folder, f"{name}.svg")
-        try:
-            with open(path) as f:
-                same = f.read() == svg
-        except OSError:
-            same = False
-        if not same:
-            with open(path, "w") as f:
-                f.write(svg)
     theme = Gtk.IconTheme.get_for_display(display)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for name, body in {**BAUDE_ICONS, **BAUDE_SHAPES, **KUBE_ICONS}.items():
+            svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+                   f'<g fill="#2e3436">{body}</g></svg>')
+            path = os.path.join(folder, f"{name}.svg")
+            try:
+                with open(path) as f:
+                    same = f.read() == svg
+            except OSError:
+                same = False
+            if not same:
+                with open(path, "w") as f:
+                    f.write(svg)
+    except OSError as e:  # (a cache that can't be written: the app starts all the same, Adwaita's icons still found)
+        print("baude: couldn't write its icons:", e, file=sys.stderr)
     theme.add_search_path(folder)
     # GTK 4 looks only in the desktop's icon theme and hicolor, not Adwaita, so under another theme (Breeze,
     # Papirus…) an Adwaita name that theme lacks draws nothing. Adwaita's own folders, searched after every theme,

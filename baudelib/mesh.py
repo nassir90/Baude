@@ -734,7 +734,7 @@ class Mesh:
                            for x in p["models"]]}
                for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
         agents = [{"provider": p["id"], "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
-                   "models": [{k: x[k] for k in ("value", "displayName", "window", "version", "tools", "input",
+                   "models": [{k: x[k] for k in ("value", "displayName", "id", "window", "version", "tools", "input",
                                                  "thinking") if k in x} for x in p["models"]]}
                   for m in view["members"] for p in m["providers"] if not p.get("http")]
         with self.lock:

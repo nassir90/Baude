@@ -1738,11 +1738,13 @@ class ContextUsage(Gtk.Box):
 
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
-    over its box, in plain grey, and the box off, till a model with a bigger window's picked or the conversation's
-    cleared. box: the Composer, already in its column; chat: what has the focus instead while it's off."""
+    over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
+    with a bigger window's picked or the conversation's cleared. The text box stays as it is, to write in. It's the
+    chat's own state, which only you change: what's in its way from outside it is said in a banner. box: the Composer,
+    already in its column; chat: (kept for its callers)."""
 
     def __init__(self, chat, box):
-        self.chat, self.box, self.on = chat, box, False
+        self.box, self.on = box, False
         self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
@@ -1752,10 +1754,7 @@ class Exhausted:
         self.on = on
         self.label.set_text(text)
         self.label.set_visible(on)
-        if on and self.box.input.is_focus():
-            self.chat.grab_focus()
-        self.box.input.set_cursor_visible(not on)
-        self.box.set_sensitive(not on)
+        self.box.gate("exhausted", on)
 
 
 class FindBar(Gtk.SearchBar):
@@ -3220,10 +3219,19 @@ class Composer(Gtk.Overlay):
         self.add_css_class("card")
         self.add_css_class("composer-box")
         self.set_overflow(Gtk.Overflow.HIDDEN)
+        self.gates, self.busy = set(), False  # (what keeps what's written from being sent now: gate)
         self.set_busy(False)
+
+    def gate(self, name, on):
+        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),
+        on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
+        (self.gates.add if on else self.gates.discard)(name)
+        self.send.set_sensitive(self.busy or not self.gates)
 
     def set_busy(self, busy):
         """The send button: grey, to send; red, to stop, while the reply's coming."""
+        self.busy = busy
+        self.send.set_sensitive(busy or not self.gates)
         if busy:
             self.send.set_icon_name("media-playback-stop-symbolic")
             self.send.set_tooltip_text("Stop (Esc)")

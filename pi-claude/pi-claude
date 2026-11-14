@@ -65,7 +65,10 @@ def flag(name):
     return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
 
 
-model = providers.resolve(flag("--model") or "") or MODELS.get(flag("--model") or "") or next(iter(MODELS.values()))
+asked = flag("--model") or ""
+model = providers.resolve(asked) or MODELS.get(asked) or \
+    ({"value": asked, "repo": asked, "displayName": asked, "input": ["text"], "gone": True}  # (found once, not now)
+     if asked.startswith("mlx-") else next(iter(MODELS.values())))
 kind = model.get("kind") or "mlx"  # (mlx; or ollama, openai: a served model, its server its own)
 window = model.get("window") or CONTEXT  # (its context window: a served model's, Ollama's once it's loaded)
 session_id = flag("--resume") or str(uuid.uuid4())
@@ -347,6 +350,8 @@ def serve():
 
 def use_server():
     """Count this chat in, start the server if it isn't running, and wait until it answers."""
+    if model.get("gone"):
+        raise RuntimeError(f"{model['value']} isn't downloaded here now (its folder's gone, or not mounted)")
     if not mlx_vlm_server():
         raise RuntimeError("mlx_vlm.server isn't installed (uv tool install mlx-vlm)")
     with run_lock():

@@ -185,22 +185,29 @@ def scan_downloaded():
                 if snap := hub_snapshot(os.path.join(root, d)):
                     one(d[len("models--"):].replace("--", "/", 1), snap, "Hugging Face")
 
-    hub(hf_hub())
+    try:
+        hub(hf_hub())
+    except OSError:
+        pass
     lm = {os.path.realpath(os.path.expanduser(d)) for d in ("~/.lmstudio/models", "~/.cache/lm-studio/models")}
     for root in mlx_dirs():
         where = "LM Studio" if os.path.realpath(root) in lm or "lmstudio" in root.lower().replace("-", "") else "folder"
         todo = [(root, 0)]
         while todo:
             d, depth = todo.pop(0)
-            if os.path.basename(d) == "hub" or any(n.startswith("models--") for n in os.listdir(d)[:50]):
-                hub(d)  # (a Hugging Face cache, given as a folder)
+            try:  # (one folder unreadable, or gone: the rest still looked in)
+                names = sorted(os.listdir(d))
+                if os.path.basename(d) == "hub" or any(n.startswith("models--") for n in names):
+                    hub(d)  # (a Hugging Face cache, given as a folder)
+                    continue
+                if os.path.isfile(os.path.join(d, "config.json")):
+                    one(d, d, where)
+                    continue
+                if depth < 2:
+                    todo += [(os.path.join(d, n), depth + 1) for n in names
+                             if not n.startswith(".") and os.path.isdir(os.path.join(d, n))]
+            except OSError:
                 continue
-            if os.path.isfile(os.path.join(d, "config.json")):
-                one(d, d, where)
-                continue
-            if depth < 2:
-                with_dirs = sorted(n for n in os.listdir(d) if not n.startswith("."))
-                todo += [(os.path.join(d, n), depth + 1) for n in with_dirs if os.path.isdir(os.path.join(d, n))]
     return out
 
 
@@ -229,13 +236,14 @@ def mlx_found(named=(), taken=()):
     """The MLX models downloaded here that models.json and settings.json don't name (by repo: named), as models.json
     would have them: value mlx-<its name> (mlx-<its whole id>, where that's taken), named as its folder is."""
     out, taken = [], set(taken)
-    for m in downloaded():
+    slug = lambda s: "mlx-" + re.sub(r"[^a-z0-9.]+", "-", s.lower()).strip("-")  # noqa: E731
+    # (the Hugging Face cache's first, whatever order they're scanned in: a name both have is its)
+    for m in sorted(downloaded(), key=lambda m: m["where"] != "Hugging Face"):
         if m["repo"] in named:
             continue
-        slug = lambda s: "mlx-" + re.sub(r"[^a-z0-9.]+", "-", s.lower()).strip("-")  # noqa: E731
         value = slug(m["name"])
         if value in taken:
-            value = slug(m["repo"].replace(os.sep, "-"))
+            value = slug(f"{m['name']} {m['where']}")
         if value in taken:
             continue
         taken.add(value)
@@ -312,7 +320,9 @@ def model_program(value):
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
         return "pi"
-    return "pi" if any(m["value"] == value for m in mlx_models()) else "claude"
+    # (an mlx- value not found now, its folder gone or not mounted: pi-claude's, to say it isn't downloaded)
+    return "pi" if isinstance(value, str) and value.startswith("mlx-") or \
+        any(m["value"] == value for m in mlx_models()) else "claude"
 
 
 def pi_exe():

@@ -11554,6 +11554,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.apply_zoom()
         apply_scales(self.get_display())
         widgets.apply_accent(self.get_display())  # (Settings → Accent Colour)
+        widgets.watch_settings(BaudeWindow.settings_changed)  # (and each as it's changed in Record, or another Baude)
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
@@ -12335,10 +12336,39 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return False
 
     def set_zoom_default(self, zoom):
-        """Settings → Size → Chat zoom: the zoom Ctrl+0 (⌘0) goes back to; the chat goes to it now, to show it."""
-        self.zoom_default = round(min(ZOOM_MAX, max(ZOOM_MIN, zoom)), 2)
-        save_settings(zoom_default=self.zoom_default)
-        self.set_zoom(self.zoom_default)
+        """Settings → Size → Global Scale: the zoom Ctrl+0 (⌘0) goes back to; the chat goes to it now, to show it, and
+        every other window's that was at the one before (zoom_default_changed)."""
+        zoom = round(min(ZOOM_MAX, max(ZOOM_MIN, zoom)), 2)
+        save_settings(zoom_default=zoom)
+        for win in Gtk.Window.list_toplevels():
+            if isinstance(win, BaudeWindow) and win is not self:
+                win.zoom_default_changed(zoom)
+        self.zoom_default = zoom
+        self.set_zoom(zoom)
+
+    def zoom_default_changed(self, zoom):
+        """The Global Scale changed elsewhere (another window, another app): Ctrl+0 (⌘0) goes back to zoom now, and a
+        chat that was at the one before goes to it too (one zoomed apart stays as it is)."""
+        zoom = round(min(ZOOM_MAX, max(ZOOM_MIN, zoom)), 2)
+        following = self.zoom == self.zoom_default
+        self.zoom_default = zoom
+        if following:
+            self.set_zoom(zoom)
+
+    @staticmethod
+    def settings_changed(keys, _before):
+        """Shared settings changed in another app here (widgets.watch_settings): the text's and the icons' sizes, and
+        the Global Scale, in every window. (The accent's taken already; Meta's are meta.settings_changed's.)"""
+        display = Gdk.Display.get_default()
+        if keys & {"text_scale", "icon_scale"}:
+            if BaudeWindow.scale_timer:
+                GLib.source_remove(BaudeWindow.scale_timer)
+            BaudeWindow.scale_timer = GLib.timeout_add(150, BaudeWindow.scales_changed, display)
+        if "zoom_default" in keys:
+            zoom = float(load_settings().get("zoom_default") or 1.0)
+            for win in Gtk.Window.list_toplevels():
+                if isinstance(win, BaudeWindow):
+                    win.zoom_default_changed(zoom)
 
     scale_timer = None  # (one for the display, as the sizes are)
 

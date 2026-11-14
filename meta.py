@@ -655,6 +655,18 @@ def sync_rows():
 
 providerslib.listen(sync_rows)  # (this machine's providers found again, and changed: the rows as they are now)
 
+CHATS = weakref.WeakSet()  # (the MetaChats up: each told as its model changes in another app, settings_changed)
+META_SETTINGS = {"meta_model", "meta_provider", "meta_effort", "meta_code_mode"}
+
+
+def settings_changed(keys, _before):
+    """Meta's model, provider, effort or Code mode changed in another app here (widgets.watch_settings): every row up
+    shows it, and each conversation's next message is the new model's."""
+    if keys & META_SETTINGS:
+        sync_rows()
+        for chat in list(CHATS):
+            chat.model_changed()
+
 
 def model_picked(chat, value):
     """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, every Effort row
@@ -1826,6 +1838,8 @@ class MetaChat(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         install_css(Gdk.Display.get_default())
         widgets.ensure_icons()
+        widgets.watch_settings(settings_changed)
+        CHATS.add(self)
         self.win, self.ask, self.agent = win, None, None
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)

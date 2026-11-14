@@ -382,6 +382,71 @@ def save_settings(**changes):
             json.dump(settings, f, indent=2)
     except OSError:
         pass
+    if _watch["seen"] is not None:  # (this process's own change: no news to it)
+        _watch["seen"].update({k: v for k, v in changes.items() if k in SHARED_SETTINGS})
+
+
+# The settings Baude and Record share, in settings.json (this machine's: they never go to another host). Changed in
+# one app, every other one running here takes it as it's written (watch_settings): the accent, the text's, the icons'
+# and the Global Scale, Auto restart on update and the code font (each read where it's used, the font at the next
+# start), and Meta's model, provider, effort and Code mode. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
+SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
+                   "meta_model", "meta_provider", "meta_effort", "meta_code_mode")
+SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
+_watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
+
+
+def watch_settings(changed):
+    """changed(keys, before) as another process here changes shared settings (SHARED_SETTINGS) in settings.json: the
+    keys that changed, and what they were before. The accent's taken in every window here first (apply_accent). A
+    listener given again is the one listener."""
+    if changed not in _watch["listeners"]:
+        _watch["listeners"].append(changed)
+    if _watch["monitor"] is not None:
+        return
+    _watch["seen"] = _shared_now() or {}
+    try:
+        os.makedirs(os.path.dirname(_settings_path()), exist_ok=True)
+        mon = Gio.File.new_for_path(_settings_path()).monitor_file(Gio.FileMonitorFlags.NONE, None)
+    except (OSError, GLib.Error):
+        return
+    mon.connect("changed", _settings_event)
+    _watch["monitor"] = mon
+
+
+def _shared_now():
+    """The shared settings as settings.json has them now; None while it can't be read whole (being written)."""
+    try:
+        with open(_settings_path()) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    return {k: settings.get(k) for k in SHARED_SETTINGS} if isinstance(settings, dict) else None
+
+
+def _settings_event(_mon, _file, _other, event):
+    if event != Gio.FileMonitorEvent.DELETED:
+        if _watch["wait"] is not None:
+            GLib.source_remove(_watch["wait"])
+        _watch["wait"] = GLib.timeout_add(SETTINGS_WAIT_MS, _settings_read)
+
+
+def _settings_read():
+    _watch["wait"] = None
+    now = _shared_now()
+    if now is None:
+        return False
+    before = _watch["seen"]
+    keys = {k for k in SHARED_SETTINGS if now.get(k) != before.get(k)}
+    _watch["seen"] = now
+    if keys:
+        if "accent" in keys and (display := Gdk.Display.get_default()) is not None:
+            apply_accent(display)
+        for changed in list(_watch["listeners"]):
+            changed(keys, before)
+    return False
 
 
 def fmt_scale(scale):

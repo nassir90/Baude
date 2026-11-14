@@ -8926,8 +8926,10 @@ class SideQuestion(Gtk.ListBoxRow):
         rows.append(self.reveal)
         self.put_inside_row()
         self.set_expanded(False)
-        if question:
-            self.start(question)
+        if question and not self.start(question):  # (couldn't be had: kept in its box, as one from +'s, to send again)
+            self.status.set_visible(False)
+            self.follow.set_sensitive(True)
+            self.follow.set_text(question)
 
     def expanded(self):
         return self.reveal.get_reveal_child()
@@ -9019,8 +9021,9 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def on_exit(self, code):
         if self.proc is not None:
+            if self.busy:  # (ended mid-answer; one answered keeps its ✓)
+                self.status.set_state("interrupted")
             self.busy = False
-            self.status.set_state("interrupted")
             self.follow.set_sensitive(False)
         return False
 

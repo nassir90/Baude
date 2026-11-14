@@ -144,7 +144,7 @@ from widgets import (  # noqa: E402,F401
     _RULE, _STAR_ITALIC, _STRIKE, _TABLE_RULE, _UNDERSCORE_ITALIC, _dispose_tree,
     _emphasis, _exists_cache, _image_ext, _inline, _inline_markup, _inline_memo,
     _memo_bytes, _settings_path, _web_images, _web_waiting, bullet_for, code_spans,
-    code_style, discard, editor_args, editor_command, ellipsize_dropdown, empty_label,
+    HostPicker, code_style, discard, editor_args, editor_command, ellipsize_dropdown, empty_label,
     ensure_icons, fetch_web_image, file_href, find_attrs, find_label, fit_size,
     fmt_scale, globe_icon, image_cache_path, image_dims, image_widget, link_markup,
     link_paths, load_settings, make_image_interactive, markdown_blocks,
@@ -7582,7 +7582,7 @@ def is_desktop(session_id):
 
 
 HERE_HOST = "here"  # (⋮ → Hosts: this machine's key; another's is its server's)
-THIS_MACHINE = "This Mac" if sys.platform == "darwin" else "This computer"
+THIS_MACHINE = "local"  # (this machine, as every host is written: by its name, which here is local)
 
 
 def host_key(r):
@@ -11247,7 +11247,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.mode = "plan"  # read-only until you pick another mode
         self.model_dd = ChoiceDropDown([], "Model", self.on_model_changed)
         # (left of it: the inference providers, by host, whose models it lists after Claude's: sync_providers)
-        self.provider_dd = ellipsize_dropdown(ChoiceDropDown([], "Inference provider", self.on_provider_changed), 24)
+        self.provider_dd = HostPicker("Inference provider", self.on_provider_changed, 24)
         self.provider_dd.set_visible(False)
         self.provider_key, self.elsewhere = None, {}
         self.mode_dd = ChoiceDropDown([], "Permission mode", self.on_mode_changed)
@@ -13170,7 +13170,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.model = model
         if model:
             self.follow_model(model)
-            self.sync_providers()
+        self.sync_providers()
         self.sync_effort_choices()
         self.sync_local()
 
@@ -13222,8 +13222,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # server), by host: this machine's, and every other member's of the mesh (network().providers()). Picked left of
     # the model picker, which lists Claude's (claude's: not a provider, bound to where it runs), then the provider's.
     # Picking a provider changes the list; picking a model changes the chat. Another member's that serves HTTP runs
-    # here, through the mesh's proxy (an endpoint here: providers.mesh_endpoints); one a program runs there (Apple's,
-    # MLX's) is a new conversation there. The picker's on the provider of the chat's model, as it's opened or picked
+    # here, through the mesh's proxy (an endpoint here: providers.mesh_endpoints); one a program runs there (MLX's) is
+    # a new conversation there. The picker's on the provider of the chat's model, as it's opened or picked. It's gone
+    # while the chat's on Claude's, and empty while it's on Apple's (no runtime: listed with Claude's)
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
     def chat_host(self):
@@ -13238,10 +13239,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return self.provider_index[value]
         entry = self.models_info.get(value) or {}
         pid = entry.get("provider") or providerslib.provider_of(value)
-        return f"{self.chat_host()}|{pid}" if pid else None
+        return f"{self.chat_host()}|{pid}" if providerslib.has_runtime(pid) else None
 
     def provider_choices(self):
-        """[(key, label, models, the Remote a model of it runs on, or None for the chat's own host)]: this machine's
+        """[(key, host name, provider name, models, the Remote a model of it runs on, or None for the chat's own
+        host)], a host's together: this machine's
         providers (as they're found here, whether its own claude or its host process runs the chat); those of the
         chat's host, when it's another (the models it lists: models_info); and each other member's of the mesh: one
         that serves HTTP run here, through the mesh's proxy (its models as an endpoint's here), one a program runs
@@ -13250,7 +13252,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
         def add(host, name, models, r):
             for pid, pname, ms in providerslib.group(models):
-                out.append((f"{host}|{pid}", f"{pname} · {name}", ms, r))
+                out.append((f"{host}|{pid}", name, pname, ms, r))
         here = modelslib.runnable_models(wait=False)
         if own == HERE_HOST:
             add(own, THIS_MACHINE, here, None)
@@ -13261,23 +13263,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         theirs = {self.remote.info.get("id"), own} if self.remote is not None else set()
         for p in network().providers():
             host = p.get("host") or {}
-            if host.get("here") or host.get("id") in theirs or not p.get("models"):
+            if host.get("here") or host.get("id") in theirs or not p.get("models") or \
+                    not providerslib.has_runtime(p.get("kind") or p.get("id")):
                 continue
-            name = f"{p.get('name') or p.get('id')} · {host.get('name') or str(host.get('id'))[:8]}"
+            hname, pname = host.get("name") or str(host.get("id"))[:8], p.get("name") or p.get("id")
+            name = f"{pname} · {hname}"
             if p.get("endpoint"):
                 pid = f"openai/{p['endpoint']}"
                 models = [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid, "providerName": name,
                            "displayName": m.get("displayName") or m["value"]} |
                           {k: m[k] for k in ("tools", "window", "input") if k in m} for m in p["models"]]
-                out.append((f"{host.get('id')}|{p['id']}", name, models, mine))
+                out.append((f"{host.get('id')}|{p['id']}", hname, pname, models, mine))
             elif (r := next((r for r in network().remotes() if host.get("id") in (r.key, r.info.get("id"))),
                             None)) is not None:
-                out.append((f"{host.get('id')}|{p['id']}", name, [m | {"provider": p["id"]} for m in p["models"]], r))
+                out.append((f"{host.get('id')}|{p['id']}", hname, pname, [m | {"provider": p["id"]} for m in p["models"]],
+                            r))
         return out
 
     def providers_listed(self, found=None):
         """What the provider picker lists (found: provider_choices'), to tell whether it's changed."""
-        return [(k, label, [m["value"] for m in ms]) for k, label, ms, _r in
+        return [(k, host, label, [m["value"] for m in ms]) for k, host, label, ms, _r in
                 (self.provider_choices() if found is None else found)]
 
     def follow_model(self, value):
@@ -13286,17 +13291,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.provider_key = key
 
     def sync_providers(self, shown=None):
-        """The provider picker as the chat's host and the mesh have them, on the one picked (else the provider of the
-        model shown, else the one picked last time): hidden with none, dimmed with one; and the model picker: Claude's
-        models, then the provider's, on shown (the chat's model, if not given), which is listed too if it isn't."""
+        """The provider picker as the chat's host and the mesh have them, by host, on the one picked (else the provider
+        of the model shown, else the one picked last time): hidden with none, or with Claude's the chat's model (claude
+        runs where it is: no provider of its); empty and off with Apple's (no runtime); dimmed with one; and the model
+        picker: Claude's models and Apple's, then the provider's, on shown (the chat's model, if not given), which is
+        listed too if it isn't."""
         found = self.provider_choices()
         self.providers_seen = self.providers_listed(found)
         self.provider_index = {}  # (each model's provider, the first that lists it: this machine's before the mesh's)
-        for k, _l, ms, _r in found:
+        for k, _h, _l, ms, _r in found:
             for m in ms:
                 self.provider_index.setdefault(m["value"], k)
         if self.chat_host() == HERE_HOST:  # (this machine's models as they're found now: their effort levels)
-            for _k, _l, ms, r in found:
+            for _k, _h, _l, ms, r in found:
                 for m in ms if r is None else ():
                     self.models_info.setdefault(m["value"], m)
         keys = [k for k, *_ in found]
@@ -13308,17 +13315,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             kept = load_settings().get("provider")
             key = kept if kept in keys else keys[0] if keys else None
         self.provider_key = key
-        self.provider_dd.set_choices([(k, label) for k, label, *_ in found])
-        if key:
-            self.provider_dd.select(key)
-        self.provider_dd.set_visible(bool(found))
+        hosts = {}  # (by host, its key's: two hosts of a name are two)
+        for k, host, label, *_ in found:
+            hosts.setdefault(k.split("|", 1)[0], (host, []))[1].append((k, label))
+        self.provider_dd.set_choices(list(hosts.values()))
+        pid = ((self.models_info.get(shown) or {}).get("provider") or providerslib.provider_of(shown)) if shown else None
+        runtime = not shown or providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
+        self.provider_dd.select(key if runtime else None)
+        self.provider_dd.set_sensitive(runtime)
+        self.provider_dd.set_visible(bool(found) and not (shown and pid is None))  # (Claude's: none)
         (self.provider_dd.add_css_class if len(found) == 1 else self.provider_dd.remove_css_class)("one-provider")
         self.provider_dd.set_tooltip_text("Inference provider: where the models after Claude's run" +
                                           (" (the only one there is)" if len(found) == 1 else ""))
-        chosen = next(((ms, r) for k, _l, ms, r in found if k == key), ([], None))
+        chosen = next(((ms, r) for k, _h, _l, ms, r in found if k == key), ([], None))
         self.elsewhere = {m["value"]: chosen[1] for m in chosen[0]} if chosen[1] is not None else {}
         listed = [m for m in self.models_info.values() if m["value"] != "default" and
-                  model_program(m["value"]) == "claude"] + list(chosen[0])
+                  (model_program(m["value"]) == "claude" or not providerslib.has_runtime(
+                      m.get("provider") or providerslib.provider_of(m["value"])))] + list(chosen[0])
         if shown and listed and not any(m["value"] == shown for m in listed):  # (the chat's, another provider's)
             listed.append(self.models_info.get(shown) or {"value": shown, "displayName": providerslib.model_name(shown)})
         self.model_dd.set_choices([(m["value"], m.get("displayName") or m["value"]) for m in listed] or MODELS)

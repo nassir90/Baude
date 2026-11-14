@@ -74,7 +74,7 @@ REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
-HERE_NAME = "This Mac" if sys.platform == "darwin" else "This computer"
+HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
 
 
@@ -110,10 +110,11 @@ def local_name(value):
 
 
 def providers_offered(offered=None):
-    """[(provider id, its name)]: the providers whose models Intelligence offers (models), in their order."""
+    """[(provider id, its name)]: the providers whose models Intelligence offers (models), in their order: those with
+    a runtime (Apple's model is listed with Claude's)."""
     seen = {}
     for m in models() if offered is None else offered:
-        if m[3] and m[3] not in seen:
+        if providerslib.has_runtime(m[3]) and m[3] not in seen:
             seen[m[3]] = providerslib.provider_name(m[3])
     return sorted(seen.items(), key=lambda kv: providerslib.rank(kv[0]))
 
@@ -131,11 +132,11 @@ def provider(offered=None):
 
 
 def listed_models(offered=None):
-    """What Intelligence lists: Claude's models, then the provider's (provider); and Meta's own, if it's another
-    provider's (it goes on with it till another's picked)."""
+    """What Intelligence lists: Claude's models and Apple's, then the provider's (provider); and Meta's own, if it's
+    another provider's (it goes on with it till another's picked)."""
     offered = models() if offered is None else offered
     pid = provider(offered)
-    out = [m for m in offered if m[3] is None or m[3] == pid]
+    out = [m for m in offered if not providerslib.has_runtime(m[3]) or m[3] == pid]
     entry = model_entry(model(), offered)
     return out + [entry] if entry and entry not in out else out
 
@@ -644,7 +645,7 @@ def model_picked(chat, value):
     """Intelligence set to value (its row, set_setting): Meta's next message is the new model's, every Effort row
     offers its levels, and a provider's model puts Provider on its provider."""
     changes = {"meta_model": value}
-    if pid := providerslib.provider_of(value):
+    if providerslib.has_runtime(pid := providerslib.provider_of(value)):
         changes["meta_provider"] = pid
     widgets.save_settings(**changes)
     sync_rows()
@@ -684,25 +685,32 @@ def model_row(chat):
 
 
 def provider_row(chat):
-    """Settings → Meta → Provider: the inference provider whose models Intelligence lists after Claude's (Ollama, MLX,
-    Apple's, an OpenAI-compatible server), on this machine; dimmed when there's only one, gone when there's none."""
-    row = Adw.ComboRow(title="Provider", subtitle="Where the models after Claude's run")
-    state = {"ids": [], "syncing": False}
+    """Settings → Meta → Provider: the inference provider whose models Intelligence lists after Claude's (MLX, Ollama,
+    an OpenAI-compatible server), by host: this machine's (local), then other hosts' in the mesh. Gone when there's
+    none, or Meta's on Claude's (claude runs where it is: no provider of its); empty and off on Apple's (no runtime);
+    dimmed when there's only one."""
+    row = Adw.ActionRow(title="Provider", subtitle="Where the models after Claude's run")
+    picker = widgets.HostPicker("Inference provider", lambda pid: provider_picked(chat, pid))
+    picker.set_valign(Gtk.Align.CENTER)
+    picker.add_css_class("flat")
+    row.add_suffix(picker)
+    row.set_activatable_widget(picker)
 
     def sync():
-        found = providers_offered()
-        current = provider()
-        state["ids"], state["syncing"] = [pid for pid, _ in found], True
-        row.set_model(Gtk.StringList.new([name if " · " in name else f"{name} · {HERE_NAME}" for _, name in found]))
-        row.set_selected(state["ids"].index(current) if current in state["ids"] else 0)
-        state["syncing"] = False
-        row.set_visible(bool(found))
+        offered = models()
+        found = providers_offered(offered)
+        hosts = {HERE_NAME: []}  # (this machine's first)
+        for pid, _name in found:
+            host, name = providerslib.where(pid)
+            hosts.setdefault(host or HERE_NAME, []).append((pid, name))
+        picker.set_choices([(host, choices) for host, choices in hosts.items() if choices])
+        entry = model_entry(model(), offered)
+        pid = entry[3] if entry else providerslib.provider_of(model())
+        runtime = providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
+        picker.select(provider(offered) if runtime else None)
+        row.set_sensitive(runtime)
+        row.set_visible(bool(found) and pid is not None)  # (Claude's: none)
         (row.add_css_class if len(found) == 1 else row.remove_css_class)("one-provider")
-
-    def picked(r, _p):
-        if not state["syncing"] and r.get_selected() < len(state["ids"]):
-            provider_picked(chat, state["ids"][r.get_selected()])
-    row.connect("notify::selected", picked)
     row.sync = sync
     sync()
     MODEL_ROWS.add(row)

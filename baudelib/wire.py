@@ -474,10 +474,10 @@ def is_local(where):
 
 
 def said_where(where):
-    """Where a host process is, as people say it: user@host, through the mesh, or this machine."""
+    """Where a host process is, as people say it: user@host, through the mesh, or local (this machine)."""
     if (where or {}).get("via") == "mesh":
         return "through the mesh"
-    return where.get("dest") if (where or {}).get("via") == "ssh" else "this machine"
+    return where.get("dest") if (where or {}).get("via") == "ssh" else "local"
 
 
 def bridge(sock, rfd=0, wfd=1):

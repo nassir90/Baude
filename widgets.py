@@ -7430,8 +7430,8 @@ def _status_icon(state):
 
 
 def _card_status(state):
-    """What a tool card shows of its state at the end of its line: a spinner while it runs, a stop for one that never
-    finished; nothing once it's done (most are), nor for a failed one, whose border is red."""
-    if state in ("running", "background", "interrupted"):
+    """What a tool card shows of its state at the end of its line: a spinner while it runs; nothing once it's done
+    (most are), nor for a failed or interrupted one, whose border is red."""
+    if state in ("running", "background"):
         return _status_icon(state)
     return None

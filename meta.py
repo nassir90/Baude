@@ -2602,7 +2602,7 @@ class MetaChat(Gtk.Box):
         name = it.get("name") or ""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         card.add_css_class("tool-card")
-        if it.get("state") == "error":
+        if it.get("state") in ("error", "interrupted"):  # (one stopped part way: red, as a failed one)
             card.add_css_class("error")
         grid, line = Gtk.Grid(), Gtk.Box(spacing=8)
         title = Gtk.Label(xalign=0)
@@ -2610,6 +2610,8 @@ class MetaChat(Gtk.Box):
         toggles = Gtk.Box(spacing=4)
         header = Gtk.Label(label=self.tool_summary(name, it.get("input") or {}), xalign=0, hexpand=True,
                            ellipsize=Pango.EllipsizeMode.END)
+        if it.get("state") == "interrupted":
+            header.set_label(header.get_label() + " · interrupted")
         for w in (title, toggles, header):
             line.append(w)
         grid.attach(line, 0, 0, 1, 1)

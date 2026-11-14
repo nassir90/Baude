@@ -5834,7 +5834,8 @@ def said_nothing(base, text, is_error):
 
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
-    when the CLI runs it as a background task (its result only says it started)."""
+    when the CLI runs it as a background task (its result only says it started); running -> interrupted when its turn
+    ends without its result (stopped with Esc)."""
 
     def __init__(self, name, tool_id):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -5874,11 +5875,17 @@ class ToolCard(Gtk.Box):
 
     # ---- state
     def set_state(self, state):
-        self.state = state
+        was, self.state = self.state, state
         self.show_status()
-        if state == "error":
+        if state in ("error", "interrupted"):  # (one stopped part way: red, as a failed one)
             self.add_css_class("error")
+        elif was == "interrupted":  # (its result in a later part of the chat after all)
+            self.remove_css_class("error")
+        if state == "error":
             self.output_toggle.set_label("Error")
+        if state == "interrupted" and not self.input:  # (stopped before its input came in whole: nothing to open)
+            self.input_toggle.set_visible(False)
+            self.toggles.set_visible(self.output_toggle.get_visible())
         self.refresh_header()
         for fn in self.listeners:
             fn(self)
@@ -5942,7 +5949,7 @@ class ToolCard(Gtk.Box):
         shown = html.escape(s)
         if self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
-        markup = f"{src}{shown}{tail}"
+        markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)
@@ -6135,7 +6142,9 @@ class ToolGroup(Gtk.Grid):
     def refresh(self):
         cards = self.cards()
         failed = sum(c.state == "error" for c in cards)
-        self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else ""))
+        cut = sum(c.state == "interrupted" for c in cards)
+        self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else "")
+                              + (f", {cut} interrupted" if cut else ""))
         states = {c.state for c in cards if c.asking is None}  # (one waiting to be allowed isn't running)
         state = "running" if states & {"running", "background"} else "error" if "error" in states else \
             "interrupted" if "interrupted" in states and len(states) == 1 else "done"
@@ -15843,6 +15852,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
         self.blocks.clear()
+        self.cut_short()
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
@@ -15861,6 +15871,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
                            f" · in {tok} / out {u.get('output_tokens', 0)} tok")
+
+    def cut_short(self):
+        """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning
+        for ever. A background subagent's calls go on after the turn: left running."""
+        for tid, card in list(self.tool_cards.items()):
+            if card.state != "running":
+                continue
+            parent = self.tool_parent.get(tid)
+            while parent is not None and getattr(self.tool_cards.get(parent), "state", None) != "background":
+                parent = self.tool_parent.get(parent)
+            if parent is None:
+                card.answered()  # (asked whether to allow it: nothing to answer now)
+                card.set_state("interrupted")
 
     def h_control_response(self, msg):
         r = msg.get("response", {})

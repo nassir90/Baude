@@ -6530,6 +6530,68 @@ def load_css():
         display.baude_css = css
 
 
+# ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a
+# side) and its arrow's room; picom (or compton, or xcompmgr -c) puts a shadow of its own round the whole window, a
+# larger rectangle round the box. There they're drawn as libadwaita draws them with no compositor (its .solid-csd look): no
+# shadow, square corners, an edge, no arrow, so the window is the box and picom's shadow is the popover's.
+SHADOWING_COMPOSITORS = ("picom", "compton", "xcompmgr")
+FLAT_POPOVER_CSS = """
+popover.background:not(.touch-selection):not(.magnifier) { background: @popover_bg_color; color: @popover_fg_color; border: 1px solid alpha(currentColor, 0.15); }
+popover > contents, popover > arrow { box-shadow: none; border-radius: 0; background-clip: border-box; border: none; }
+"""
+_flat = {"display": None, "provider": None, "on": False, "hook": None, "arrowless": weakref.WeakSet()}
+
+
+def shadowing_compositor():
+    """Whether picom (or another of SHADOWING_COMPOSITORS) is running on this machine."""
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                if f.read().strip() in SHADOWING_COMPOSITORS:
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def flat_popovers(display):
+    """Popovers drawn flat (FLAT_POPOVER_CSS, no arrow) while display is X11 composited by picom: looked at again as
+    the compositor comes and goes. Once a widget exists (the hook is on GtkWidget's realize)."""
+    if display is None or display.__gtype__.name != "GdkX11Display" or _flat["display"] is display:
+        return
+    _flat["display"], _flat["provider"] = display, Gtk.CssProvider()
+    _flat["provider"].load_from_string(FLAT_POPOVER_CSS)
+
+    def realized(widget, *_):
+        if _flat["on"] and isinstance(widget, Gtk.Popover) and widget.get_has_arrow():
+            widget.set_has_arrow(False)
+            _flat["arrowless"].add(widget)  # (its arrow back if picom goes)
+        return True
+
+    def update(*_):
+        on = display.is_composited() and shadowing_compositor()
+        if on == _flat["on"]:
+            return
+        _flat["on"] = on
+        if on:
+            Gtk.StyleContext.add_provider_for_display(display, _flat["provider"],
+                                                      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+            if _flat["hook"] is None:
+                _flat["hook"] = GObject.add_emission_hook(Gtk.Widget, "realize", realized)
+        else:
+            Gtk.StyleContext.remove_provider_for_display(display, _flat["provider"])
+            for pop in list(_flat["arrowless"]):
+                pop.set_has_arrow(True)
+            _flat["arrowless"].clear()
+
+    display.connect("notify::composited", update)
+    update()
+
+
 # The app's own sizes (Settings → Size), the same in every window and pane, Baude's and Record's: the text's and the
 # icons'. 1.0 is the usual. And light or dark as macOS is (macos_appearance).
 SCALE_MIN, SCALE_MAX = 0.7, 2.0

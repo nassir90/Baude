@@ -16147,6 +16147,7 @@ class BaudeApp(Adw.Application):
                 win.connect("realize", lambda w: clock_id.append(
                     w.get_frame_clock().connect("after-paint", painted)))
             update.show(win, restore)  # (in the order they were in: the last one you were in, last, on top)
+        widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         if restore:
             update.restarted(win, restore, "Baude")
         if self.updater is None and not TRACE:

@@ -6625,12 +6625,12 @@ def load_css():
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a
 # side) and its arrow's room; picom (or compton, or xcompmgr -c) puts a shadow of its own round the whole window, a
-# larger rectangle round the box. There they're drawn as libadwaita draws them with no compositor (its .solid-csd look): no
-# shadow, square corners, an edge, no arrow, so the window is the box and picom's shadow is the popover's.
+# larger rectangle round the box. There they're drawn without GTK's shadow (its outline ring drawn inside instead) and
+# with no arrow, so the window is the box and picom's shadow is the popover's. Their corners stay round: picom's shadow
+# is square unless its corner-radius rounds the window too.
 SHADOWING_COMPOSITORS = ("picom", "compton", "xcompmgr")
 FLAT_POPOVER_CSS = """
-popover.background:not(.touch-selection):not(.magnifier) { background: @popover_bg_color; color: @popover_fg_color; border: 1px solid alpha(currentColor, 0.15); }
-popover > contents, popover > arrow { box-shadow: none; border-radius: 0; background-clip: border-box; border: none; }
+popover:not(.touch-selection):not(.magnifier) > contents { box-shadow: inset 0 0 0 1px alpha(black, 0.05); }
 """
 _flat = {"display": None, "provider": None, "on": False, "hook": None, "arrowless": weakref.WeakSet()}
 
@@ -6652,8 +6652,8 @@ def shadowing_compositor():
 
 
 def flat_popovers(display):
-    """Popovers drawn flat (FLAT_POPOVER_CSS, no arrow) while display is X11 composited by picom: looked at again as
-    the compositor comes and goes. Once a widget exists (the hook is on GtkWidget's realize)."""
+    """Popovers drawn without GTK's shadow (FLAT_POPOVER_CSS) or an arrow while display is X11 composited by picom:
+    looked at again as the compositor comes and goes. Once a widget exists (the hook is on GtkWidget's realize)."""
     if display is None or display.__gtype__.name != "GdkX11Display" or _flat["display"] is display:
         return
     _flat["display"], _flat["provider"] = display, Gtk.CssProvider()

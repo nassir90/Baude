@@ -84,6 +84,22 @@ def model_name(value):
     return value
 
 
+def has_runtime(pid):
+    """Is a provider one to pick, a runtime its models are served by (MLX's, Ollama, an endpoint)? Apple's on-device
+    model has none: macOS runs it, as claude runs Claude's, so it's listed with Claude's."""
+    return bool(pid) and pid != "apple"
+
+
+def where(pid):
+    """(its host's name, None for this machine; its own name) of a provider: ("studio", "Ollama") for another host's in
+    the mesh, (None, "MLX") for this machine's."""
+    if isinstance(pid, str) and pid.startswith("openai/"):
+        ep = next((e for e in mesh_endpoints() if e["id"] == pid[len("openai/"):]), None)
+        if ep is not None:
+            return ep["host"], ep["provider"] or ep["host"]
+    return None, provider_name(pid)
+
+
 def rank(pid):
     """Where a provider's listed: Apple's, MLX, Ollama, then the endpoints."""
     return (ORDER.index(pid), "") if pid in ORDER else (len(ORDER), str(pid))
@@ -115,7 +131,8 @@ def endpoints(st=None):
 
 def mesh_endpoints():
     """Other hosts' providers in the mesh that serve HTTP, as endpoints on this machine (baudelib.mesh.endpoints: its
-    host process's proxy, which runs each request there): [{"id", "name" (Ollama · studio), "url", "key", "window":
+    host process's proxy, which runs each request there): [{"id", "name" (Ollama · studio), "host" (studio),
+    "provider" (Ollama), "url", "key", "window":
     None, "models": [{"id", "displayName", "window", "tools", "input"}]}]; [] with no mesh here."""
     try:
         from baudelib import mesh
@@ -130,7 +147,8 @@ def mesh_endpoints():
             if not (isinstance(provider, str) and provider and isinstance(host, str) and host):  # (a host process
                 # here that names them only as "Ollama on studio")
                 provider, _, host = str(e.get("name") or e["id"]).rpartition(" on ")
-            out.append({"id": e["id"], "name": f"{provider} · {host}" if provider else host, "url": e["url"].rstrip("/"),
+            out.append({"id": e["id"], "name": f"{provider} · {host}" if provider else host, "host": host,
+                        "provider": provider, "url": e["url"].rstrip("/"),
                         "key": e.get("key") if isinstance(e.get("key"), str) else None, "window": None,
                         "models": [m for m in e.get("models") or [] if isinstance(m, dict) and isinstance(m.get("id"), str)]})
     return out
@@ -480,14 +498,14 @@ def endpoint_key(pid):
 
 
 def group(models):
-    """Models (initialize's, or a host's hello's) by provider: [(provider id, its name, [models])], Claude's left
-    out, in ORDER."""
+    """Models (initialize's, or a host's hello's) by provider: [(provider id, its name, [models])], Claude's and
+    Apple's left out (has_runtime), in ORDER."""
     out = {}
     for m in models or []:
         if not isinstance(m, dict) or not m.get("value"):
             continue
         pid = m.get("provider") or provider_of(m["value"])
-        if not pid:
+        if not has_runtime(pid):
             continue
         name = m.get("providerName") or provider_name(pid)
         out.setdefault(pid, (name, []))[1].append(m)

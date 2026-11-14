@@ -5960,6 +5960,58 @@ def ellipsize_dropdown(dd, chars=30):
     return dd
 
 
+class HostPicker(Gtk.MenuButton):
+    """A picker of choices by host, as ⋮'s menu lists its sections: each host's name a header, its choices under it,
+    a rule between hosts. Its button shows the choice picked, shortened with … past chars. on_pick(key) for the
+    user's picks only, not for select() or set_choices()."""
+
+    def __init__(self, tooltip, on_pick, chars=30):
+        super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice"])
+        self.on_pick, self.labels, self.quiet = on_pick, {}, False
+        self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=chars)
+        self.set_child(self.shown)
+        self.action = Gio.SimpleAction.new_stateful("pick", GLib.VariantType.new("s"), GLib.Variant.new_string(""))
+        self.action.connect("change-state", self._changed)
+        group = Gio.SimpleActionGroup()
+        group.add_action(self.action)
+        self.insert_action_group("hostpicker", group)
+
+    def _changed(self, action, value):
+        action.set_state(value)
+        self.shown.set_label(self.labels.get(value.get_string(), ""))
+        if not self.quiet and value.get_string() in self.labels:
+            self.on_pick(value.get_string())
+
+    def set_choices(self, hosts):
+        """hosts: [(host name, [(key, label)])], in order. The key picked stays picked if it's still there."""
+        menu, self.labels = Gio.Menu(), {}
+        for host, choices in hosts:
+            section = Gio.Menu()
+            for key, label in choices:
+                item = Gio.MenuItem.new(label, None)
+                item.set_action_and_target_value("hostpicker.pick", GLib.Variant.new_string(key))
+                section.append_item(item)
+                self.labels[key] = f"{label} · {host}"
+            menu.append_section(host, section)
+        self.set_menu_model(menu)
+        self.select(self.value())
+
+    def select(self, key):
+        """Show key as picked (None, or one not listed: nothing), without on_pick."""
+        self.quiet = True
+        try:
+            self.action.change_state(GLib.Variant.new_string(key if key in self.labels else ""))
+        finally:
+            self.quiet = False
+
+    def value(self):
+        key = self.action.get_state().get_string()
+        return key if key in self.labels else None
+
+    def label(self):
+        return self.shown.get_label()
+
+
 def empty_label(text):
     """A list's placeholder: a dim line of text."""
     lbl = Gtk.Label(label=text, margin_top=24, margin_bottom=24)
@@ -6050,7 +6102,7 @@ levelbar block.ctx-high { background-color: @error_color; }
   margin-top: 1px; margin-bottom: 0; }
 .session-sidebar list.navigation-sidebar > row:first-child > box.sidebar-header { margin-top: 0; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
-dropdown.choice > button { font-weight: normal; }
+dropdown.choice > button, menubutton.choice > button { font-weight: normal; }
 /* a provider picker with one provider to pick (Baude's beside its model picker, Meta's in Settings): there, a little
    greyed, as there's nothing to choose */
 .one-provider { opacity: 0.55; }

@@ -3,6 +3,7 @@ in) and the conversation it records, item by item as Baude draws it. No GTK: the
 reads them too."""
 import array
 import base64
+import bisect
 import collections
 import json
 import os
@@ -307,10 +308,57 @@ def find_session(session_id):
 
 
 def history_items(lines, sidechain=False):
-    """Visible items from transcript lines: ('user'|'assistant', content, is_error),
+    """Visible items from transcript lines: ('user'|'assistant', content, is_error, timestamp, uuid),
     ('tool_results', content) or ('artifact', info). Sidechain records are skipped unless
     sidechain (a subagent's own transcript is nothing but); meta records always are."""
     return [item for line in lines if (item := history_item(line, sidechain)) is not None]
+
+
+def rewind_mark(line):
+    """A revert's mark (claude's rewind_conversation: what came after the last record it keeps is dropped from the
+    conversation, the transcript only ever appended to): (the uuid of that record, None for none kept), or None if the
+    line isn't one."""
+    if '"rewound"' not in line or '"last-prompt"' not in line:
+        return None
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(rec, dict) or rec.get("type") != "last-prompt" or rec.get("rewound") is not True:
+        return None
+    return (rec.get("leafUuid"),)
+
+
+def line_of_uuid(path, uuid, before):
+    """Where the line of the record with this uuid starts, searched back from before (a revert's kept record): -1 for
+    none kept (uuid None: all that's before is dropped); None if it isn't there."""
+    if uuid is None:
+        return -1
+    needles = (f'"uuid":"{uuid}"'.encode(), f'"uuid": "{uuid}"'.encode())
+    span, end = 1 << 20, before
+    try:
+        with open(path, "rb") as f:
+            while end > 0:
+                begin = max(0, end - span)
+                f.seek(begin)
+                block = f.read(end - begin + 200)  # (a needle across the block's end: read a little past it)
+                found = max(block.rfind(n) for n in needles)
+                if found >= 0 and begin + found < before:
+                    return begin + block.rfind(b"\n", 0, found) + 1
+                end = begin
+    except OSError:
+        return None
+    return None
+
+
+def cut_after(starts, at, *others):
+    """Drop the indexed items whose lines start after at (a revert's kept record): from starts and the arrays beside
+    it (in order, as starts is). How many went."""
+    i = bisect.bisect_right(starts, at)
+    gone = len(starts) - i
+    for a in (starts,) + others:
+        del a[i:]
+    return gone
 
 
 def history_item(line, sidechain=False):
@@ -348,7 +396,7 @@ def history_item(line, sidechain=False):
         return None
     if rec["type"] == "user" and isinstance(content, str):
         content = _command_text(content)
-    return rec["type"], content, rec.get("isApiErrorMessage", False), rec.get("timestamp")
+    return rec["type"], content, rec.get("isApiErrorMessage", False), rec.get("timestamp"), rec.get("uuid")
 
 
 def _has_text(content):
@@ -387,6 +435,7 @@ class HistoryIndex:
         self.later = None               # (the items indexed on opening, after that part: they go after it)
         self.taken = []                 # [begin, end) ranges drawn out of order (take), still numbered among them
         self.taken_count = 0            # items take has read in all
+        self.cuts = []                  # (kept, mark): reverts, what's between the two lines dropped (rewind_mark)
 
     @property
     def unshown(self):
@@ -424,17 +473,21 @@ class HistoryIndex:
         while True:
             begin = max(0, size - span)
             starts, sums, replies = array.array("q"), array.array("q"), bytearray()
-            newest = collections.deque(maxlen=keep)
+            newest, self.cuts = collections.deque(maxlen=keep), []
             try:
                 with open(self.path, "rb") as f:
                     f.seek(begin)
                     at = first = begin + (len(f.readline()) if begin else 0)  # (a line cut in two: the part before's)
                     for raw in f:
-                        if (item := history_item(raw.decode("utf-8", "replace"))) is not None:
+                        line = raw.decode("utf-8", "replace")
+                        if (item := history_item(line)) is not None:
                             starts.append(at)
                             sums.append(_line_sum(raw))
                             replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
                             newest.append(item)
+                        elif (gone := self._cut(line, at, starts, sums, replies)) is not None:
+                            for _ in range(min(gone, len(newest))):
+                                newest.pop()
                         at += len(raw)
             except OSError:
                 return []
@@ -474,10 +527,14 @@ class HistoryIndex:
                     if not raw:  # (cut shorter since: what's indexed is all there is; drawing finds where it went)
                         at = self.todo[1]
                         break
-                    if (item := history_item(raw.decode("utf-8", "replace"))) is not None:
-                        self.starts.append(at)
-                        self.sums.append(_line_sum(raw))
-                        self.replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
+                    line = raw.decode("utf-8", "replace")
+                    if (item := history_item(line)) is not None:
+                        if not self.dropped(at):
+                            self.starts.append(at)
+                            self.sums.append(_line_sum(raw))
+                            self.replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
+                    else:
+                        self._cut(line, at, self.starts, self.sums, self.replies)
                     at += len(raw)
                     if time.monotonic() > end_at:
                         break
@@ -494,19 +551,37 @@ class HistoryIndex:
         while self.index_some(1.0):
             pass
 
+    def _cut(self, line, at, starts, *others):
+        """A revert's mark at at (rewind_mark): what it drops, dropped from what's indexed (the items whose lines are
+        between the record it keeps and it) and kept in cuts for what's indexed after (index_some: the start of the
+        file, read after its end). How many items went; None if the line isn't a mark."""
+        if (mark := rewind_mark(line)) is None or (kept := line_of_uuid(self.path, mark[0], at)) is None:
+            return None
+        self.cuts.append((kept, at))
+        return cut_after(starts, kept, *others)
+
+    def dropped(self, at):
+        """Whether the item whose line starts at at was taken back by a revert (cuts)."""
+        return any(kept < at < mark for kept, mark in self.cuts)
+
     def _index(self, keep):
         """(Re)read the whole file; all but the newest `keep` items are left undrawn, and those are returned."""
         import collections
         starts, sums, replies, newest = array.array("q"), array.array("q"), bytearray(), collections.deque(maxlen=keep)
+        self.cuts = []
         try:
             with open(self.path, "rb") as f:
                 at = 0
                 for raw in f:  # (one line at a time: only the newest items stay parsed)
-                    if (item := history_item(raw.decode("utf-8", "replace"))) is not None:
+                    line = raw.decode("utf-8", "replace")
+                    if (item := history_item(line)) is not None:
                         starts.append(at)
                         sums.append(_line_sum(raw))
                         replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
                         newest.append(item)
+                    elif (gone := self._cut(line, at, starts, sums, replies)) is not None:
+                        for _ in range(min(gone, len(newest))):
+                            newest.pop()
                     at += len(raw)
         except OSError:
             pass

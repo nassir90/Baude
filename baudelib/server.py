@@ -1086,8 +1086,9 @@ class Server:
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         self.save(s)
-        if s.proc is None or getattr(s.proc, "stopping", False):  # (stopped: answered from what's kept, for when it
-            self.changed()                                          # runs; only a message starts it)
+        if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
+            self.changed()  # (stopped: answered from what's kept, for when it runs; only a message starts it, and a
+            # revert, which its claude makes)
             if sub == "get_settings":
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             return answer({})

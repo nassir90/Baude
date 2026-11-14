@@ -111,11 +111,12 @@ def entries():
 
 def kind(m):
     """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
-    server; else its name; Apple's, with no runtime, by its name), its window and its version, where they're said. Two
-    of a kind are the same one unless their digests differ (same)."""
+    server; else its name; Apple's, with no runtime, by its name), whatever its case (gpt-oss:20B on one host is
+    gpt-oss:20b on another), its window and its version, where they're said. Two of a kind are the same one unless
+    their digests differ (same). Each keeps its own case to show."""
     served = (None if not has_runtime(m.get("provider") or provider_of(m["value"])) else
               m.get("resolvedModel") or m.get("id")) or m.get("displayName") or m["value"]
-    return served, m.get("window"), m.get("version")
+    return served.casefold(), m.get("window"), m.get("version")
 
 
 def same(a, b):
@@ -142,9 +143,10 @@ def told_apart(m, listed):
     or version where they differ, else its digest: Apple Foundation Model (v3), qwen3:8b (16k), coder:latest
     (b31e04f). Just its name where none has its name."""
     name = m.get("displayName") or m["value"]
-    if sum((x.get("displayName") or x["value"]) == name for x in listed) < 2:
+    named = [x for x in listed if (x.get("displayName") or x["value"]).casefold() == name.casefold()]  # (any case)
+    if len(named) < 2:
         return name
-    same = [x for x in listed if (x.get("displayName") or x["value"]) == name and x is not m]
+    same = [x for x in named if x is not m]
     differs = {k: any(x.get(k) != m.get(k) for x in same) for k in ("window", "version")}
     tags = [f"{m['window'] // 1024}k" if differs["window"] and isinstance(m.get("window"), int) else None,
             f"v{m['version']}" if differs["version"] and m.get("version") else None,

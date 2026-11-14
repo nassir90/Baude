@@ -1856,6 +1856,21 @@ def _(app):
     return win
 
 
+@scene("60m-models-any-case", "The same model on two hosts, named in different case (gpt-oss:20b here, gpt-oss:20B on "
+                              "another host): listed once, as this machine names it")
+def _(app):
+    here = {"value": "ollama/gpt-oss:20b", "displayName": "gpt-oss:20b", "provider": "ollama"}
+    there = {"value": "openai/mesh-other/gpt-oss:20B", "id": "gpt-oss:20B", "displayName": "gpt-oss:20B",
+             "provider": "openai/mesh-other"}
+    win = app.window(opts())
+    T.wait_for(lambda: win.model_dd.values, "models")
+    win.provider_choices = lambda: [("local|ollama", "This Mac", "Ollama", [here]),
+                                    ("other|ollama", "other-host", "Ollama", [there])]
+    win.sync_providers()
+    popup_choices(win.model_dd)
+    return win
+
+
 @scene("60-effort-unavailable", "A model without thinking effort: the effort picker is greyed out")
 def _(app):
     win = app.window(opts())

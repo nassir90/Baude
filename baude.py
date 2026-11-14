@@ -12059,7 +12059,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # None = let the CLI decide (settings / account default); shown once it reports back
         self.model = None if opts.model in (None, "default") else opts.model
         self.mode = "auto"  # until you pick another mode
-        self.model_dd = ChoiceDropDown([], "Model", self.on_model_changed)
+        self.model_dd = widgets.ModelPicker([], "Model", self.on_model_changed)
         # (left of it: where the chat's model runs, each provider that has it by host: sync_providers)
         self.provider_dd = HostPicker("Where the chat's model runs", self.on_provider_changed, 24)
         self.provider_dd.set_visible(False)

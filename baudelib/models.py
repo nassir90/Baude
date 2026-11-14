@@ -3,8 +3,12 @@ or an OpenAI-compatible server serves on this machine in pi-claude (pi-claude/: 
 claude's stream-json on stdin and stdout, and each is started, given an id and carried on differently: PROGRAMS says
 how, for Baude and the headless server alike (launch). Where the models besides Claude's are, and which there are:
 baudelib.providers."""
+import glob
 import json
 import os
+import re
+import shutil
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (apple-claude/ and pi-claude/ are beside baudelib/)
 
@@ -22,7 +26,7 @@ def apple_exe():
 
 # (beta) models on this Mac, through pi-claude (pi-claude/: pi, the coding agent, on a model mlx_lm.server or
 # mlx_vlm.server serves, each tool call asked): those in pi-claude/models.json, and those settings.json adds
-# (mlx_models: Meta's add_mlx_model), that are downloaded, after Apple's; Manual only, like Apple's, and no effort but a
+# (mlx_models: Meta's add_mlx_model), and any other found downloaded (mlx_found), after Apple's; Manual only, like Apple's, and no effort but a
 # thinking level for those that think; one to another keeps the conversation (pi's session), to Claude's doesn't
 PI_CLAUDE = os.path.join(REPO, "pi-claude")
 
@@ -38,7 +42,7 @@ try:
         MLX_OWN = [m for m in json.load(f) if isinstance(m, dict) and m.get("value") and m.get("repo")]
 except (OSError, ValueError):
     MLX_OWN = []
-LOCAL_MODELS = [_entry(m) for m in MLX_OWN]  # (models.json's: mlx_models has those settings.json adds too)
+LOCAL_MODELS = [_entry(m) for m in MLX_OWN]  # (models.json's: mlx_models has settings.json's and those found too)
 _ADDED = {"at": None, "list": []}
 
 
@@ -66,13 +70,15 @@ def mlx_added():
 
 
 def mlx_list():
-    """Every MLX model pi-claude knows, as models.json has them: its own, then settings.json's (mlx_added)."""
-    return MLX_OWN + [{"input": ["text"]} | m for m in mlx_added()]
+    """Every MLX model pi-claude knows, as models.json has them: its own, then settings.json's (mlx_added), then those
+    found downloaded that neither names (mlx_found)."""
+    named = MLX_OWN + [{"input": ["text"]} | m for m in mlx_added()]
+    return named + mlx_found({m["repo"] for m in named}, {m["value"] for m in named})
 
 
 def mlx_models():
     """mlx_list's models as initialize lists them."""
-    return LOCAL_MODELS + [_entry(m) for m in mlx_added()]
+    return [_entry(m) for m in mlx_list()]
 
 
 def hf_hub():
@@ -82,14 +88,207 @@ def hf_hub():
                                                   "huggingface"), "hub")
 
 
+_DIRS = {"at": None, "list": []}
+
+
+def mlx_dirs():
+    """The folders besides the Hugging Face cache where MLX models are looked for: LM Studio's (~/.lmstudio/models, its
+    older ~/.cache/lm-studio/models, LMSTUDIO_MODELS_DIR), then settings.json's mlx_dirs (each a model's folder, or one
+    holding them, two levels down at most)."""
+    from baudelib.selfupdate import settings_path
+    try:
+        st = os.stat(settings_path())
+        at = (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        at = None
+    if at != _DIRS["at"]:
+        try:
+            with open(settings_path()) as f:
+                extra = json.load(f).get("mlx_dirs") or []
+        except (OSError, ValueError, AttributeError):
+            extra = []
+        _DIRS.update(at=at, list=[os.path.expanduser(d) for d in extra if isinstance(d, str) and d.strip()]
+                     if isinstance(extra, list) else [])
+    out = [os.environ.get("LMSTUDIO_MODELS_DIR") or "", os.path.expanduser("~/.lmstudio/models"),
+           os.path.expanduser("~/.cache/lm-studio/models"), *_DIRS["list"]]
+    seen, dirs = set(), []
+    for d in out:
+        if d and os.path.isdir(d) and os.path.realpath(d) not in seen:
+            seen.add(os.path.realpath(d))
+            dirs.append(d)
+    return dirs
+
+
+def talks(snap):
+    """Whether a downloaded model is one to talk to: it has a chat template (a speech or embedding model hasn't)."""
+    if glob.glob(os.path.join(snap, "chat_template.*")):
+        return True
+    try:
+        with open(os.path.join(snap, "tokenizer_config.json")) as f:
+            return bool(json.load(f).get("chat_template"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def mlx_folder(snap):
+    """A model's folder as MLX loads it, if it's one to talk to with its weights there in full: {"size" (bytes),
+    "vision"}, else None. Any safetensors model with a config and a chat template: mlx-vlm's server loads an MLX
+    conversion and the original alike (GGUF, PyTorch's .bin: not MLX's)."""
+    try:
+        with open(os.path.join(snap, "config.json")) as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(config, dict) or not talks(snap):
+        return None
+    weights = [w for w in glob.glob(os.path.join(snap, "*.safetensors")) if os.path.exists(w)]
+    try:
+        with open(os.path.join(snap, "model.safetensors.index.json")) as f:
+            shards = set((json.load(f).get("weight_map") or {}).values())
+    except (OSError, ValueError, AttributeError):
+        shards = set()
+    have = {os.path.basename(w) for w in weights}
+    if not have or not shards <= have:  # (none, or some still downloading)
+        return None
+    return {"size": sum(os.path.getsize(w) for w in weights), "vision": "vision_config" in config}
+
+
+def hub_snapshot(path):
+    """The snapshot of a repo's folder in the Hugging Face cache that refs/main names, else the newest; None if none."""
+    try:
+        with open(os.path.join(path, "refs", "main")) as f:
+            snap = os.path.join(path, "snapshots", f.read().strip())
+    except OSError:
+        snaps = [p for p in glob.glob(os.path.join(path, "snapshots", "*")) if os.path.isdir(p)]
+        snap = max(snaps, key=os.path.getmtime) if snaps else None
+    return snap if snap and os.path.isdir(snap) else None
+
+
+def scan_downloaded():
+    """Every MLX model downloaded here: [{"repo" (its Hugging Face id, for one in the cache; its folder's path, for
+    one elsewhere), "name", "size", "vision", "where" ("Hugging Face", "LM Studio", "folder")}]."""
+    out, seen = [], set()
+
+    def one(repo, snap, where):
+        try:
+            found = mlx_folder(snap)
+        except OSError:  # (changing as it's looked at: left out this time)
+            return
+        real = os.path.realpath(snap)
+        if found is not None and real not in seen:
+            seen.add(real)
+            out.append(found | {"repo": repo, "name": repo.rstrip("/").split("/")[-1], "where": where})
+
+    def hub(root):
+        for d in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            if d.startswith("models--") and "--" in d[len("models--"):]:
+                if snap := hub_snapshot(os.path.join(root, d)):
+                    one(d[len("models--"):].replace("--", "/", 1), snap, "Hugging Face")
+
+    try:
+        hub(hf_hub())
+    except OSError:
+        pass
+    lm = {os.path.realpath(os.path.expanduser(d)) for d in ("~/.lmstudio/models", "~/.cache/lm-studio/models")}
+    for root in mlx_dirs():
+        where = "LM Studio" if os.path.realpath(root) in lm or "lmstudio" in root.lower().replace("-", "") else "folder"
+        todo = [(root, 0)]
+        while todo:
+            d, depth = todo.pop(0)
+            try:  # (one folder unreadable, or gone: the rest still looked in)
+                names = sorted(os.listdir(d))
+                if os.path.basename(d) == "hub" or any(n.startswith("models--") for n in names):
+                    hub(d)  # (a Hugging Face cache, given as a folder)
+                    continue
+                if os.path.isfile(os.path.join(d, "config.json")):
+                    one(d, d, where)
+                    continue
+                if depth < 2:
+                    todo += [(os.path.join(d, n), depth + 1) for n in names
+                             if not n.startswith(".") and os.path.isdir(os.path.join(d, n))]
+            except OSError:
+                continue
+    return out
+
+
+_FOUND = {"key": None, "at": 0.0, "list": []}
+FOUND_AGE = 30  # (s a scan's kept, while none of the folders looked in changes)
+
+
+def downloaded():
+    """scan_downloaded's list, scanned again only once a folder it looks in has changed, or FOUND_AGE on."""
+    key = []
+    for d in [hf_hub(), *mlx_dirs()]:
+        try:
+            key.append((d, os.stat(d).st_mtime_ns))
+        except OSError:
+            key.append((d, None))
+    if key != _FOUND["key"] or time.monotonic() - _FOUND["at"] > FOUND_AGE:
+        try:
+            _FOUND.update(list=scan_downloaded())
+        except OSError:
+            pass
+        _FOUND.update(key=key, at=time.monotonic())
+    return list(_FOUND["list"])
+
+
+def mlx_found(named=(), taken=()):
+    """The MLX models downloaded here that models.json and settings.json don't name (by repo: named), as models.json
+    would have them: value mlx-<its name> (mlx-<its whole id>, where that's taken), named as its folder is."""
+    out, taken = [], set(taken)
+    slug = lambda s: "mlx-" + re.sub(r"[^a-z0-9.]+", "-", s.lower()).strip("-")  # noqa: E731
+    # (the Hugging Face cache's first, whatever order they're scanned in: a name both have is its)
+    for m in sorted(downloaded(), key=lambda m: m["where"] != "Hugging Face"):
+        if m["repo"] in named:
+            continue
+        value = slug(m["name"])
+        if value in taken:
+            value = slug(f"{m['name']} {m['where']}")
+        if value in taken:
+            continue
+        taken.add(value)
+        out.append({"value": value, "repo": m["repo"], "displayName": m["name"],
+                    "input": ["text", "image"] if m["vision"] else ["text"], "found": m["where"]})
+    return out
+
+
+def is_downloaded(repo):
+    """Whether an MLX model's weights are here: its folder (a path), or its repo in the Hugging Face cache."""
+    if os.path.isabs(os.path.expanduser(repo)):
+        return os.path.isdir(os.path.expanduser(repo))
+    return os.path.isdir(os.path.join(hf_hub(), "models--" + repo.replace("/", "--")))
+
+
+def pi_path():
+    return os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
+
+
+def mlx_server():
+    """mlx-vlm's server (mlx_vlm.server), which pi-claude serves MLX models with; None if it isn't installed."""
+    exe = shutil.which("mlx_vlm.server") or os.path.expanduser("~/.local/bin/mlx_vlm.server")
+    return exe if os.access(exe, os.X_OK) else None
+
+
+def mlx_missing():
+    """What MLX's models need here and haven't, each with how it's put right: [] when they run."""
+    out = []
+    if not os.access(pi_path(), os.X_OK):
+        out.append(f"pi isn't installed (it goes in {os.path.dirname(os.path.dirname(os.path.dirname(pi_path())))})")
+    if not mlx_server():
+        lm = shutil.which("mlx_lm.server") or os.access(os.path.expanduser("~/.local/bin/mlx_lm.server"), os.X_OK)
+        out.append("mlx-vlm isn't installed (uv tool install mlx-vlm)" +
+                   ("; mlx-lm is, but MLX's models run on mlx-vlm's server" if lm else ""))
+    return out
+
+
+def downloaded_models():
+    """mlx_models whose weights are here (models.json's and settings.json's that are downloaded, and those found)."""
+    return [m for m in mlx_models() if is_downloaded(m["resolvedModel"])]
+
+
 def local_models():
-    """mlx_models whose weights are in the Hugging Face cache, while pi (in ~/.local/share/baude/pi) is installed."""
-    pi = os.environ.get("BAUDE_PI") or os.path.expanduser("~/.local/share/baude/pi/node_modules/.bin/pi")
-    if not os.access(pi, os.X_OK):
-        return []
-    hub = hf_hub()
-    return [m for m in mlx_models()
-            if os.path.isdir(os.path.join(hub, "models--" + m["resolvedModel"].replace("/", "--")))]
+    """downloaded_models, while they can run here (mlx_missing: pi, and mlx-vlm's server)."""
+    return [] if mlx_missing() else downloaded_models()
 
 
 SERVED = ("ollama/", "openai/")  # (the values of models Ollama or an OpenAI-compatible server serves: baudelib.providers)
@@ -121,7 +320,9 @@ def model_program(value):
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
         return "pi"
-    return "pi" if any(m["value"] == value for m in mlx_models()) else "claude"
+    # (an mlx- value not found now, its folder gone or not mounted: pi-claude's, to say it isn't downloaded)
+    return "pi" if isinstance(value, str) and value.startswith("mlx-") or \
+        any(m["value"] == value for m in mlx_models()) else "claude"
 
 
 def pi_exe():

@@ -11848,8 +11848,9 @@ class SettingsDialog(Adw.PreferencesDialog):
 
 class UserTurn(Gtk.Box):
     """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
-    anywhere in the row, a revert button shows just outside the bubble, level with its last line (the chat's
-    revert_to: this message and everything after it taken back, and what it said put back in the box)."""
+    anywhere in the row, a revert button fades in just outside the bubble, level with its last line, and fades out as
+    it leaves (the chat's revert_to: this message and everything after it taken back, and what it said put back in
+    the box)."""
 
     def __init__(self, win, bubble, text, uuid):
         super().__init__(spacing=6, hexpand=True)
@@ -11870,6 +11871,8 @@ class UserTurn(Gtk.Box):
         self.add_controller(hover)
 
     BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
 
     def show_revert(self, on):
         on = on and self.uuid is not None and self.win.can_revert()
@@ -11877,8 +11880,14 @@ class UserTurn(Gtk.Box):
             metrics = self.bubble.get_pango_context().get_metrics(None, None)
             line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
             self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
-        self.revert.set_opacity(1 if on else 0)
         self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
 
 
 class Repaint(Gtk.Widget):

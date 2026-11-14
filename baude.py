@@ -16245,7 +16245,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.banner.set_use_markup(retry)
         if gone:
             name = remote_name(self.remote)
-            self.banner.set_title(f"{name} isn't on the network: this session is as it was last seen"
+            self.banner.set_title(f"Can't connect to {name} at the moment"
                                   if self.remote.state == "dead" else f"Looking for {name} on the network…")
         elif live:
             self.banner.set_title("This session is currently active elsewhere")

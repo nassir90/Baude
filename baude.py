@@ -11553,18 +11553,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tabs.prepend(self.tabs.bar)
         self.tabs.open("chat", lambda: root, "Chat", icon="baude-claude-symbolic", pinned=True)  # (Claude's logo)
         widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
-        self.banner = Adw.Banner(revealed=False)
+        self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
         self.exhausted = widgets.Exhausted(self.scroller, box_overlay)
-        # (a host's connection dropped: said there too, an ellipsis going, till it's attached again: drop)
-        self.dropped = widgets.GateLine(box_overlay, "network", dots=True)
-        self.drop_running = self.drop_session = None  # (dropped: whether its claude was running then, and the chat)
+        self.drop_running = self.drop_session = None  # (a host's connection dropped: whether its claude was running
+        # then, and the chat: drop)
         self.drop_timer = self.resume_reason = None  # (resume_reason: (chat, why) the next message resumes it)
-        self.retrying, self.retry_timer, self.retry_dots, self.banner_kind = None, None, 0, None  # (show_retry)
+        self.retrying, self.banner_kind = None, None  # (show_retry; what the banner says: update_banner)
+        self.banner_timer, self.banner_dots = None, 0  # (its ellipsis going, while it's waiting something out)
         self.outgrown = False  # (a turn ended with claude saying the prompt's too long: exhausted, show_context)
         root.append(statusbar)
         self.panel = SidePanel(self)
@@ -13111,7 +13111,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.set_busy(False)
             self.remote_view()
             return
-        self.note(f"claude exited ({code}). Send a message to restart / resume.")
+        if code != 0 and self.session_id:  # (nothing said now: the next message resumes it, and says why: send_text)
+            self.resume_reason = (self.session_id, "claude binary error")
         self.proc = None
         self.set_busy(False)
 
@@ -13219,6 +13220,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 buf.set_text(text)
                 return
         if self.proc is None:
+            if self.remote is None and self.resume_reason and self.resume_reason[0] == self.session_id:
+                self.note(f"— Resumed from {self.resume_reason[1]} —")  # (its claude here exited: on_exit)
+            self.resume_reason = None
             self.start_proc()
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
             buf.set_text(text)
@@ -16185,7 +16189,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return self.tail.in_use() and background_proc(self.session_id) is None
 
     def drop(self, running):
-        """A host's session's connection dropped (on_exit's "lost"): "Connection to <host> dropped…" under the chat, its
+        """A host's session's connection dropped (on_exit's "lost"): "Connection to <host> dropped…" in the banner, its
         send button off, till it's attached again (start_remote_proc, tried every 10 s or so); its host off the network
         meanwhile: the banner says that instead. running: its claude was running (written in from here), so if it's
         gone by then, the next message resumes it, and says so."""
@@ -16213,50 +16217,57 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if msg is None and self.retrying is None:
             return
         self.retrying = msg
-        if msg is not None and self.retry_timer is None:
-            self.retry_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_retry)
         self.update_banner()
 
-    def tick_retry(self):
-        if self.retrying is None or getattr(self, "let_go_done", False):
-            self.retry_timer = None
+    def banner_text(self, kind):
+        """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
+        if kind == "gone":
+            name = remote_name(self.remote)
+            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
+                f"Looking for {name} on the network…"
+        elif kind == "live":
+            text = "This session is currently active elsewhere"
+        elif kind == "drop":
+            text = f"Connection to {remote_name(self.remote)} dropped"
+        else:
+            m = self.retrying or {}
+            what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"
+            tries = f", attempt {m['attempt']} of {m['max_retries']}" if m.get("attempt") and m.get("max_retries") else ""
+            text = f"{what}: retrying{tries}"
+        if kind not in ("drop", "retry"):
+            return GLib.markup_escape_text(text)
+        n = self.banner_dots or 1
+        return GLib.markup_escape_text(text) + "." * n + f'<span alpha="1">{"." * (3 - n)}</span>'
+
+    def tick_banner(self):
+        if self.banner_kind not in ("drop", "retry") or getattr(self, "let_go_done", False):
+            self.banner_timer = None
             return False
-        self.retry_dots = self.retry_dots % 3 + 1
-        if self.banner_kind == "retry":
-            self.banner.set_title(self.retry_title())
+        self.banner_dots = self.banner_dots % 3 + 1
+        self.banner.set_title(self.banner_text(self.banner_kind))
         return True
 
-    def retry_title(self):
-        m = self.retrying or {}
-        what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"
-        tries = f", attempt {m['attempt']} of {m['max_retries']}" if m.get("attempt") and m.get("max_retries") else ""
-        n = self.retry_dots or 1
-        return GLib.markup_escape_text(f"{what}: retrying{tries}") + "." * n + f'<span alpha="1">{"." * (3 - n)}</span>'
-
     def update_banner(self):
-        """While another program (not Baude: live_elsewhere) has the session, say so, with no text box (show_composer):
-        two writers would interleave two conversations in one transcript. While a host's session's host isn't there,
-        or claude's retrying the model's API (show_retry), say so; a host that's gone, its send button off
-        (Composer.gate): it has no one to send to. A dropped connection with its host there: said under the chat (drop)."""
+        """What's in the way of this chat from outside it, said in the banner till it's gone. Another program (not Baude:
+        live_elsewhere) has the session: no text box (show_composer), as two writers would interleave two
+        conversations in one transcript. Its host isn't there, or its connection's dropped (drop): its send button off
+        (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
+        here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
         gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
-        retry = self.retrying is not None and not (gone or live)
-        self.banner_kind = "gone" if gone else "live" if live else "retry" if retry else None
-        self.banner.set_use_markup(retry)
-        if gone:
-            name = remote_name(self.remote)
-            self.banner.set_title(f"Can't connect to {name} at the moment"
-                                  if self.remote.state == "dead" else f"Looking for {name} on the network…")
-        elif live:
-            self.banner.set_title("This session is currently active elsewhere")
-        elif retry:
-            self.banner.set_title(self.retry_title())
-        self.banner.set_button_label(None)
-        self.banner.set_revealed(live or gone or retry)
-        self.locked = live
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
-        if hasattr(self, "dropped"):
-            self.dropped.set(dropped and not gone, f"Connection to {remote_name(self.remote)} dropped" if dropped else None)
+        kind = "gone" if gone else "live" if live else "drop" if dropped else \
+            "retry" if self.retrying is not None else None
+        self.banner_kind = kind
+        if kind is not None:
+            self.banner.set_title(self.banner_text(kind))
+        if kind in ("drop", "retry") and self.banner_timer is None:
+            self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
+        self.banner.set_button_label(None)
+        self.banner.set_revealed(kind is not None)
+        self.locked = live
+        if hasattr(self, "composer_box"):
+            self.composer_box.gate("network", dropped)
             self.composer_box.gate("host", gone)
         self.show_composer()
 

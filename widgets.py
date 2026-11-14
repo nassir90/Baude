@@ -1736,44 +1736,25 @@ class ContextUsage(Gtk.Box):
         self.set_tooltip_text("Context window usage")
 
 
-class GateLine:
-    """A line over a chat's box saying why what's written can't be sent now, the send button off meanwhile (and Enter:
-    its owner looks at the box's gates). The text box stays as it is, to write in. name: the gate it is (Composer.gate);
-    dots: an ellipsis going after it while it's waited out. box: the Composer, already in its column."""
-
-    def __init__(self, box, name, text="", dots=False):
-        self.box, self.name, self.on = box, name, False
-        self.line = Gtk.Box(margin_start=10, visible=False)
-        self.label = Gtk.Label(label=text, xalign=0)
-        self.label.add_css_class("dim-label")
-        self.line.append(self.label)
-        self.dots = WorkingDots(mark=".", tip=None) if dots else None
-        if self.dots is not None:
-            self.dots.add_css_class("dim-label")
-            self.line.append(self.dots)
-        box.get_parent().insert_child_after(self.line, box.get_prev_sibling())
-
-    def set(self, on, text=None):
-        self.on = on
-        if text is not None:
-            self.label.set_text(text)
-        self.line.set_visible(on)
-        if self.dots is not None:
-            self.dots.set_working(on)
-        self.box.gate(self.name, on)
-
-
-class Exhausted(GateLine):
+class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
-    over its box, in plain grey, and its send button off, till a model with a bigger window's picked or the
-    conversation's cleared. chat: (kept for its callers)."""
+    over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
+    with a bigger window's picked or the conversation's cleared. The text box stays as it is, to write in. It's the
+    chat's own state, which only you change: what's in its way from outside it is said in a banner. box: the Composer,
+    already in its column; chat: (kept for its callers)."""
 
     def __init__(self, chat, box):
-        super().__init__(box, "exhausted", "Context Exhausted")
+        self.box, self.on = box, False
+        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
+        self.label.add_css_class("dim-label")
+        box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 
     def set(self, on, text="Context Exhausted"):
         """On or off; on, what's said (This model is unavailable, Meta's: its model's gone from the mesh)."""
-        super().set(on, text)
+        self.on = on
+        self.label.set_text(text)
+        self.label.set_visible(on)
+        self.box.gate("exhausted", on)
 
 
 class FindBar(Gtk.SearchBar):
@@ -3242,7 +3223,7 @@ class Composer(Gtk.Overlay):
         self.set_busy(False)
 
     def gate(self, name, on):
-        """A reason what's written can't be sent now (GateLine's: the context exhausted, a host's connection dropped),
+        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),
         on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
         (self.gates.add if on else self.gates.discard)(name)
         self.send.set_sensitive(self.busy or not self.gates)
@@ -7665,9 +7646,8 @@ class WorkingDots(Gtk.Label):
 
     STEP_MS = 350
 
-    def __init__(self, mark="•", tip="Working"):
+    def __init__(self):
         super().__init__(xalign=0, visible=False)
-        self.mark, self.tip = mark, tip  # (GateLine's: an ellipsis, ".", with no tip)
         self.working, self.shown, self.source = False, 0, None
         self.connect("map", WorkingDots._run)  # (plain functions: see Spinner)
         self.connect("unmap", WorkingDots._stop)
@@ -7678,14 +7658,14 @@ class WorkingDots(Gtk.Label):
             return
         self.working = working
         self.set_visible(working)
-        self.set_tooltip_text(self.tip if working else None)
+        self.set_tooltip_text("Working" if working else None)
         self._show(1 if working else 0)
         self._stop()
         self._run()
 
     def _show(self, count):
         self.shown = count
-        self.set_markup(self.mark * count + f'<span alpha="1">{self.mark * (3 - count)}</span>')
+        self.set_markup("•" * count + f'<span alpha="1">{"•" * (3 - count)}</span>')
 
     def _run(self):
         if self.working and self.source is None and self.get_mapped():

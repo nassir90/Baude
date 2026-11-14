@@ -95,6 +95,38 @@ def model_name(value):
     return value
 
 
+def entry(value):
+    """A model's entry as this machine knows it (found's, else another host's: mesh_agents'), or {}."""
+    return next((m for p in found() for m in p["models"] if m["value"] == value), None) or \
+        next((m for m in mesh_agents() if m["value"] == value), None) or {}
+
+
+def kind(m):
+    """What makes a model with no runtime (Apple's) the same one on every host that has it: its name, its window and
+    its version, where they're said."""
+    return m.get("displayName") or m["value"], m.get("window"), m.get("version")
+
+
+def alike(models, first=()):
+    """Models with no runtime (Apple's, each host's) as one of each kind: [(the one listed, every one of its kind)], in
+    models' order. The one listed is the first of first (values) that's of its kind, else its kind's first."""
+    kinds = {}
+    for m in models:
+        kinds.setdefault(kind(m), []).append(m)
+    return [(next((m for v in first for m in ms if m["value"] == v), ms[0]), ms) for ms in kinds.values()]
+
+
+def told_apart(m, listed):
+    """A model's name, with its window and version after it where another of listed (alike's models listed) has its
+    name: Apple Foundation Model (32k, v3). Just its name where none does."""
+    name = m.get("displayName") or m["value"]
+    if sum((x.get("displayName") or x["value"]) == name for x in listed) < 2:
+        return name
+    tags = [f"{m['window'] // 1024}k" if isinstance(m.get("window"), int) else None,
+            f"v{m['version']}" if m.get("version") else None]
+    return f"{name} ({', '.join(t for t in tags if t)})" if any(tags) else name
+
+
 def has_runtime(pid):
     """Is a provider one to pick, a runtime its models are served by (MLX's, Ollama, an endpoint)? Apple's on-device
     model has none, here or on another host (agent/<member>/apple): macOS runs it, as claude runs Claude's, so it's
@@ -124,7 +156,7 @@ def elsewhere(p, member):
     host runs them, without moving: through the mesh's proxy here, as an endpoint's (mesh.endpoint_id), where it
     serves an API; else run there, as an agent whose tools are here (agent/<member>/<its value>: agentproxy)."""
     from baudelib import mesh
-    keep = ("tools", "window", "input", "thinking")
+    keep = ("tools", "window", "version", "input", "thinking")
     if p.get("http"):
         pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
         return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,

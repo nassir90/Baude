@@ -6432,8 +6432,8 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
 /* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed */
 .side-panel { background: transparent; }
-.side-question { border: 1px solid @baude_rule; border-radius: 10px; padding: 10px 12px; }
 .side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
+.side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */
 paned.main-split { background-color: @baude_frame; }

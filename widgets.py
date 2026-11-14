@@ -7397,6 +7397,11 @@ def load_css():
 OVER_ADWAITA_CSS = """
 .baude-frame headerbar { background-color: @baude_frame; box-shadow: none; }
 headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: inherit; }
+/* (the box a side question's asked in, over their list: an entry's fill, as Search sessions' is: a theme's entries
+   have its own, and the box keeps a view's) */
+.composer-box.side-question-ask { background-color: alpha(currentColor, 0.1); }
+.side-question-ask textview, .side-question-ask textview > text, .side-question-ask .composer-head {
+  background-color: transparent; }
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }

@@ -1301,8 +1301,9 @@ class Server:
             s.waiting_init = []
             self.drop_routes(s)
             if not getattr(made[0], "restarting", False):
+                stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)
                 for conn in s.live:
-                    conn.send({"op": "exited", "session": s.id, "code": code})
+                    conn.send({"op": "exited", "session": s.id, "code": code, **stopped})
             self.changed()
 
     def drop_routes(self, s):

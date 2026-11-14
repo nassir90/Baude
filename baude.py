@@ -12760,6 +12760,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         says, as it says it. Nothing if its server's gone."""
         r = self.remote
         self.proc, self.remote_tried = None, time.monotonic()
+        if self.drop_session != self.session_id:  # (another chat's drop: not this one's to end, or say)
+            self.drop_running = self.drop_session = None
         if r.state == "alive":
             try:
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.reach_where(), self.session_id,
@@ -12767,6 +12769,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
                                        always_allow=sorted(self.always_allow))
             except OSError as e:
+                if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
+                    self.drop_running = self.drop_session = None  # not tried again)
                 if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
                     self.note(f"couldn't reach {remote_name(r)}: {e}")
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
@@ -13091,10 +13095,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             # an update) or the connection fallen silent: the host keeps the session, its claude going on with a turn
             # if it's at one, and it's said under the chat till it's attached again (drop). Its claude's own exit, a
             # code (-1 too): the next message resumes it, and says why)
-            running = bool(getattr(self.proc, "live", False))  # (written in from here: its claude was running)
+            # (its claude running: attached live, and its host listing it started, not just its draft attached)
+            running = bool(getattr(self.proc, "live", False)) and \
+                (self.remote.sessions.get(self.session_id) or {}).get("state") not in (None, "stopped")
             if code == "lost":
                 self.drop(running)
-            elif code != 0:
+            elif code not in (0, "stopped"):  # (stopped: Stop, not an error)
                 self.resume_reason = (self.session_id, "claude binary error")
             for waiting in list(self.waiting_cards):  # (what it asked: asked again as it's attached again, if it still
                 if isinstance(waiting, ToolCard):  # waits; a copy: answered() takes it out as it goes)
@@ -13804,7 +13810,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
-        elif st == "api_retry":
+        elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)
         elif st == "compact_boundary":
             self.note("— conversation compacted —")
@@ -16180,7 +16186,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def drop(self, running):
         """A host's session's connection dropped (on_exit's "lost"): "Connection to <host> dropped…" under the chat, its
-        send button off, till it's attached again (start_remote_proc, tried every 5 s or so); its host off the network
+        send button off, till it's attached again (start_remote_proc, tried every 10 s or so); its host off the network
         meanwhile: the banner says that instead. running: its claude was running (written in from here), so if it's
         gone by then, the next message resumes it, and says so."""
         self.drop_running, self.drop_session = running, self.session_id
@@ -16188,12 +16194,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.drop_timer = GLib.timeout_add_seconds(2, self.watch_drop)
 
     def watch_drop(self):
+        if getattr(self, "let_go_done", False):  # (the window's gone)
+            self.drop_timer = None
+            return False
         if self.drop_running is None or self.remote is None or self.drop_session != self.session_id:
             self.drop_running = self.drop_session = self.drop_timer = None
             self.update_banner()
             return False
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
-                time.monotonic() - getattr(self, "remote_tried", 0.0) > 5:  # (a try waits up to 3 s for its host)
+                time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:  # (a try waits seconds for its host, as
+            # on_network's: on the main loop)
             self.start_remote_proc()
         return True
 
@@ -16208,7 +16218,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_banner()
 
     def tick_retry(self):
-        if self.retrying is None:
+        if self.retrying is None or getattr(self, "let_go_done", False):
             self.retry_timer = None
             return False
         self.retry_dots = self.retry_dots % 3 + 1
@@ -16226,8 +16236,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def update_banner(self):
         """While another program (not Baude: live_elsewhere) has the session, say so, with no text box (show_composer):
         two writers would interleave two conversations in one transcript. While a host's session's host isn't there,
-        or claude's retrying the model's API (show_retry), say so, its send button off (Composer.gate): a host that's
-        gone has no one to send to. A dropped connection with its host there: said under the chat (drop)."""
+        or claude's retrying the model's API (show_retry), say so; a host that's gone, its send button off
+        (Composer.gate): it has no one to send to. A dropped connection with its host there: said under the chat (drop)."""
         live = self.live_elsewhere()
         gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
         retry = self.retrying is not None and not (gone or live)
@@ -16248,7 +16258,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if hasattr(self, "dropped"):
             self.dropped.set(dropped and not gone, f"Connection to {remote_name(self.remote)} dropped" if dropped else None)
             self.composer_box.gate("host", gone)
-            self.composer_box.gate("retry", self.retrying is not None)
         self.show_composer()
 
     def tail_lines(self, lines):

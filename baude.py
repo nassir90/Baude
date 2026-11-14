@@ -16466,6 +16466,7 @@ class BaudeApp(Adw.Application):
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)
+        widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
 
     def do_activate(self):
         trace("activate")

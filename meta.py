@@ -99,7 +99,7 @@ def models(live=False):
             for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
     out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"], None, f"openai/{e['id']}")
             for e in providerslib.mesh_endpoints() for m in e["models"] if m.get("tools", True)]
-    out += [(m["value"], f"{m['displayName']} · {m['host']}", None, m["provider"])
+    out += [(m["value"], m["displayName"], None, m["provider"])
             for m in providerslib.mesh_agents() if m.get("tools", True)]  # (another host's that serves no API: run
     # there, its tools Meta's here)
     if live:
@@ -687,22 +687,17 @@ def provider_picked(chat, pid):
     sync_rows()
 
 
-def model_row(chat, beside_provider=False):
+def model_row(chat):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then the
-    provider's (provider_row). Its sync() lists them as they are now (sync_rows). beside_provider: under the Provider
-    row, which names the provider, so its models are listed without it (Qwen3 4B, not Qwen3 4B (MLX))."""
+    provider's (provider_row). Its sync() lists them as they are now (sync_rows)."""
     row = Adw.ComboRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
     state = {"values": [], "syncing": False}
 
     def sync():
-        every = models()
-        offered = listed_models(every)
+        offered = listed_models()
         entry = model_entry(model(), offered)
-        pid = provider(every) if beside_provider and providerslib.has_runtime(entry[3] if entry else None) else None
-        host, name = providerslib.where(pid) if pid else (None, None)
         state["values"], state["syncing"] = [m[0] for m in offered], True
-        row.set_model(Gtk.StringList.new([providerslib.bare_name(m[1], name, host) if pid and m[3] == pid else m[1]
-                                          for m in offered]))
+        row.set_model(Gtk.StringList.new([m[1] for m in offered]))
         row.set_selected(offered.index(entry) if entry else 0)
         state["syncing"] = False
 
@@ -719,8 +714,8 @@ def model_row(chat, beside_provider=False):
 def provider_row(chat):
     """Settings → Meta → Provider: the inference provider whose models Intelligence lists after Claude's (MLX, Ollama,
     an OpenAI-compatible server), by host: this machine's (local), then other hosts' in the mesh. Gone when there's
-    none, or Meta's on Claude's (claude runs where it is: no provider of its); empty and off on Apple's (no runtime);
-    dimmed when there's only one."""
+    none, or Meta's on Claude's (claude runs where it is: no provider of its); on Apple's own and off on Apple's (no
+    runtime: the only one there is for it); dimmed when there's only one."""
     row = Adw.ActionRow(title="Provider", subtitle="Where the models after Claude's run")
     picker = widgets.HostPicker("Inference provider", lambda pid: provider_picked(chat, pid))
     picker.set_valign(Gtk.Align.CENTER)
@@ -735,14 +730,20 @@ def provider_row(chat):
         for pid, _name in found:
             host, name = providerslib.where(pid)
             hosts.setdefault(host or HERE_NAME, []).append((pid, name))
-        picker.set_choices([(host, choices) for host, choices in hosts.items() if choices])
         entry = model_entry(model(), offered)
         pid = entry[3] if entry else providerslib.provider_of(model())
-        runtime = providerslib.has_runtime(pid)  # (on Apple's, none: no runtime)
-        picker.select(provider(offered) if runtime else None)
+        runtime = providerslib.has_runtime(pid)
+        if runtime:
+            picker.set_choices([(host, choices) for host, choices in hosts.items() if choices])
+            picker.select(provider(offered))
+        elif pid is not None:  # (Apple's: its own provider, the only one there is for it)
+            host, name = providerslib.where(pid)
+            picker.set_choices([(host or HERE_NAME, [(pid, name)])])
+            picker.select(pid)
         row.set_sensitive(runtime)
-        row.set_visible(bool(found) and pid is not None)  # (Claude's: none)
-        (row.add_css_class if len(found) == 1 else row.remove_css_class)("one-provider")
+        row.set_visible((bool(found) or not runtime) and pid is not None)  # (Claude's: none)
+        (row.add_css_class if len(found) == 1 and runtime else row.remove_css_class)("one-provider")  # (Apple's:
+        # greyed, off, rather than dimmed too)
     row.sync = sync
     sync()
     MODEL_ROWS.add(row)
@@ -791,7 +792,7 @@ def settings_group(chat):
     this machine's providers as they're found (Ollama started, a model pulled)."""
     group = Adw.PreferencesGroup(title=NAME)
     group.add(provider_row(chat))
-    group.add(model_row(chat, beside_provider=True))
+    group.add(model_row(chat))
     group.add(effort_row(chat))
     group.add(code_mode_row(chat))
     return group
@@ -3522,7 +3523,7 @@ class MetaChat(Gtk.Box):
             n = 2
             while value in taken:
                 value, n = f"{base}-{n}", n + 1
-            shown = (str(args.get("name") or "").strip() or repo.split("/")[-1]) + " (MLX)"
+            shown = str(args.get("name") or "").strip() or repo.split("/")[-1]
             entry = {"value": value, "repo": repo, "displayName": shown,
                      "input": ["text", "image"] if m["vision"] else ["text"]} | \
                 ({"thinking": True} if args.get("thinking") else {})

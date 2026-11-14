@@ -64,7 +64,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Graphene", "1.0")
 gi.require_version("Gsk", "4.0")
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside this file)
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
@@ -6963,7 +6963,7 @@ class Settings(Adw.PreferencesDialog):
 class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, widgets.AccentFade):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
-    code), their bar the window's top; on the right Meta (your conversation with it), Files and Git, as Baude's
+    code), their bar at the top of the inside, as Baude's are over its chat; on the right Meta (your conversation with it), Files and Git, as Baude's
     side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
     focused, or closes it."""
 
@@ -7041,31 +7041,27 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         column = FixedWidth(side, self.store.books_width or self.BOOKS_WIDTH)
         column.resized = self._books_resized
         split.append(column)
-        # the middle: what's open, a tab each, their bar at the top of it, as Baude's chat has its tabs
+        # the middle: what's open, a tab each, their bar at the top of it, in the inside with what they show: the tabs
+        # and the page they're over one island set into the frame, as Baude's chat has its tabs
         # (⌥⌘← ⌥⌘→: back and forward through them)
         self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True,
                                      rename=(lambda c: isinstance(c, Reader) and c.chat, self.ask_rename_chat))
         self.tabs.view.connect("notify::selected-page", lambda *_: self._tab_shown())
+        self.tabs.prepend(self.tabs.bar)
         main = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, hexpand=True)
         main.add_css_class("record-content")
         main.add_css_class("baude-frame")
-        # the window's bar, all the way across over the three: the window's buttons and the notebooks' toggle at its
-        # start, the tabs, then the right bar's toggle and ☰. Nothing a side bar's dragged over hides them. (All of it
-        # the bar's title, nothing either side of it: a title's centred, with a gap to match whatever's beside it, so
-        # the tabs would have had less on one side. The window's buttons native on macOS, as a bar's own are: otherwise
-        # they take no room, the traffic lights over what's there)
-        self.tabs.bar.set_hexpand(True)
-        whole = Gtk.Box(spacing=6, hexpand=True)
-        head = Adw.HeaderBar(title_widget=whole, show_start_title_buttons=False, show_end_title_buttons=False)
-        head.add_css_class("tabs-head")  # (the tabs on the bar, as tall as it: widgets.CSS)
-        start_buttons = Gtk.WindowControls(side=Gtk.PackType.START, use_native_controls=sys.platform == "darwin")
-        end_buttons = Gtk.WindowControls(side=Gtk.PackType.END, use_native_controls=sys.platform == "darwin")
-        for buttons in (start_buttons, end_buttons):  # (none to show, none's gap: as a header bar's)
-            buttons.bind_property("empty", buttons, "visible",
-                                  GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN)
-        whole.append(start_buttons)
-        whole.append(side_toggle)
-        whole.append(self.tabs.bar)
+        # the window's bar, all the way across over the three, as Baude's: the notebooks' toggle at its start, by the
+        # window's buttons, the notebook open in its middle (as Baude's has the chat's name), and the right bar's toggle
+        # and ☰ at its end. Nothing a side bar's dragged over hides them
+        head = Adw.HeaderBar()
+        head.pack_start(side_toggle)
+        # (the name in the text's own weight, as Baude's chat's is: .title for a GTK theme's title bar)
+        self.title_label = Gtk.Label(max_width_chars=48, ellipsize=Pango.EllipsizeMode.END,
+                                     css_classes=["title", "baude-title"],
+                                     tooltip_text=f"Rename: right-click the {book().lower()} in the sidebar, or F2")
+        head.set_title_widget(self.title_label)
+        self.show_title()
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
@@ -7169,9 +7165,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         right.set_size_request(340, -1)
         self.right_toggle = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic", active=True,
                                              tooltip_text=f"{meta.NAME}, Files and Git (Ctrl+Alt+B)")
-        whole.append(self.right_toggle)
-        whole.append(menu_btn)
-        whole.append(end_buttons)
+        head.pack_end(menu_btn)
+        head.pack_end(self.right_toggle)
         self.content_stack = Gtk.Stack()
         none = Adw.StatusPage(icon_name="system-users-symbolic", title=f"Make a {book()}",
                               description=f"A {book()} is your notes on a subject; {meta.NAME}, in the right bar, "
@@ -7689,6 +7684,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if r.notebook is notebook:
                 self._fill_row(r)
             i += 1
+        if notebook is self.current:  # (renamed, here or on its host: the bar's name too)
+            self.show_title()
+
+    def show_title(self):
+        """The window's bar's middle: the notebook open, by its name (none open: the app's name, as the window's)."""
+        self.title_label.set_text(full_name(self.current) if self.current else noun())
 
     def _selected(self, _lb, row):
         self._show(row.notebook if row else None)
@@ -7699,6 +7700,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             GLib.idle_add(self.drop_blank, self.current)  # (left blank: not kept; once the selection has settled)
         changed = notebook is not self.current
         self.current = notebook
+        self.show_title()
         if changed:
             self.viewer_at = None
             self.viewer_folder_changed()  # (the viewers on this notebook's folder)

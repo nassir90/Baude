@@ -6885,11 +6885,6 @@ CSS = """
 .baude-frame { background-color: @baude_frame; box-shadow: none; }
 /* (square; its edge a border, inside it: a ring outside it was clipped where it meets the bar above) */
 .baude-inside { background-color: @baude_inside; border: 1px solid @baude_rule; }
-/* the main area's tabs (MainTabs) on a window's bar (Record's), as tall as it, on the frame */
-headerbar.tabs-head tabbar, headerbar.tabs-head tabbar .box { background: none; box-shadow: none; min-height: 0;
-  padding-top: 0; padding-bottom: 0; }
-headerbar.tabs-head tabbar tabbox { padding-top: 0; padding-bottom: 0; min-height: 0; }
-headerbar.tabs-head tabbar scrolledwindow { min-height: 0; }
 /* no focus ring: not on what's clicked, nor on what the keys move to, nor round a box being typed in. The theme's is on
    what has the focus or, these others, on a part of it. */
 :focus:focus-visible, expander-widget:focus:focus-visible > box > title,

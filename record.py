@@ -6963,9 +6963,9 @@ class Settings(Adw.PreferencesDialog):
 class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, widgets.AccentFade):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
     (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
-    code), their bar at the top of the inside, as Baude's are over its chat; on the right Meta (your conversation with it), Files and Git, as Baude's
-    side panel has them. Either side shown or hidden at once (Ctrl+B, Ctrl+Alt+B); Ctrl+M shows Meta, its box
-    focused, or closes it."""
+    code), their bar at the top of the inside, as Baude's are over its chat; on the right Meta (your conversation
+    with it), Files and Git, as Baude's side panel has them. Either side shown or hidden at once (Ctrl+B,
+    Ctrl+Alt+B); Ctrl+M shows Meta, its box focused, or closes it."""
 
     def do_snapshot(self, snapshot):
         self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
@@ -7058,8 +7058,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         head.pack_start(side_toggle)
         # (the name in the text's own weight, as Baude's chat's is: .title for a GTK theme's title bar)
         self.title_label = Gtk.Label(max_width_chars=48, ellipsize=Pango.EllipsizeMode.END,
-                                     css_classes=["title", "baude-title"],
-                                     tooltip_text=f"Rename: right-click the {book().lower()} in the sidebar, or F2")
+                                     css_classes=["title", "baude-title"])
         head.set_title_widget(self.title_label)
         self.show_title()
         menu = Gio.Menu()
@@ -7684,12 +7683,15 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if r.notebook is notebook:
                 self._fill_row(r)
             i += 1
-        if notebook is self.current:  # (renamed, here or on its host: the bar's name too)
+        if notebook is self.current:  # (renamed here: the bar's name too)
             self.show_title()
 
     def show_title(self):
-        """The window's bar's middle: the notebook open, by its name (none open: the app's name, as the window's)."""
-        self.title_label.set_text(full_name(self.current) if self.current else noun())
+        """The window's bar's middle: the notebook open, by its name; none open, nothing (the app's name says
+        nothing there)."""
+        self.title_label.set_text(full_name(self.current) if self.current else "")
+        self.title_label.set_tooltip_text(
+            f"Rename: right-click the {book().lower()} in the sidebar, or F2" if self.current else None)
 
     def _selected(self, _lb, row):
         self._show(row.notebook if row else None)
@@ -8026,6 +8028,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.open_first()
             return
         self.books_changed()
+        self.show_title()  # (the open one renamed on its host, or from another machine)
         if self.current is not None and not any(t is self.current for t in self.store.notebooks):
             self.notebook_list.unselect_all()
             self._show(None)

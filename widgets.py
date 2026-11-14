@@ -4799,7 +4799,7 @@ class ExpandStack(Gtk.Widget):
             for pair in m["pairs"]:
                 pair["b"] = _place(pair["to"], self) or pair["b"]
         else:  # (closing: the row where it is, the list shown again; not seen, nothing to move: over)
-            m["row"] = self._seen(m["origin"], m["within"])
+            m["row"] = self._seen(m["origin"], m["within"], m["across"])
             if m["row"] is None and not m.get("ending"):
                 m["ending"] = True
                 GLib.idle_add(lambda anim=self.anim: (anim is self.anim and self.finish(), False)[1])
@@ -4813,12 +4813,15 @@ class ExpandStack(Gtk.Widget):
             self.square.allocate(max(1, round(r[2])), max(1, round(r[3])), -1,
                                  Gsk.Transform().translate(Graphene.Point().init(r[0], r[1])))
 
-    def _seen(self, origin, within):
-        """origin's rectangle as it's seen (within: the scrolled window it's in, the part of it showing), on whole
-        pixels (the list's parts, cut there, meet without a seam); None if it isn't seen."""
+    def _seen(self, origin, within, across=None):
+        """origin's rectangle as it's seen (within: the scrolled window it's in, the part of it showing), from side to
+        side across's (the list it's a card in, its edge too: as wide as the page's square, nothing grows across), on
+        whole pixels (the list's parts, cut there, meet without a seam); None if it isn't seen."""
         r = _rect(origin, self) if origin.get_mapped() else None
         if r is None:
             return None
+        if across is not None and (a := _rect(across, self)) is not None:
+            r = (a[0], r[1], a[2], r[3])
         if within is not None and (w := _rect(within, self)) is not None:
             x0, y0 = max(r[0], w[0]), max(r[1], w[1])
             x1, y1 = min(r[0] + r[2], w[0] + w[2]), min(r[1] + r[3], w[1] + w[3])
@@ -4852,16 +4855,16 @@ class ExpandStack(Gtk.Widget):
             parts["inside"] = square.get_child()  # (what's in it, scrolled as it is: without its edge)
         return parts
 
-    def open(self, name, origin, square, pairs=(), enter=(), leave=(), within=None):
+    def open(self, name, origin, square, pairs=(), enter=(), leave=(), within=None, across=None):
         """Show page name, opened out of origin, a row of the page shown now (within: the scrolled window it's in):
         the row goes up to be the page's header and square (the page's darker inside) opens under it. pairs: (the
         row's widget, the page's[, True]), each turning into the other (with True, one drawing of it all the way,
         flipped across its middle: an arrow into its mirror); enter: the page's, coming in from the left; leave: the
-        row's, going out to the right. Just shown when there'd be nothing to see move: the row not on screen, the list
+        row's, going out to the right; across: what the row's a card in, whose sides it starts at. Just shown when there'd be nothing to see move: the row not on screen, the list
         not drawn since it was shown, or EXPAND_MS 0."""
         self.finish()
         shown = self.stack.get_visible_child()
-        row = self._seen(origin, within) if EXPAND_MS and self.get_mapped() and shown else None
+        row = self._seen(origin, within, across) if EXPAND_MS and self.get_mapped() and shown else None
         lst = _frozen(shown) if row is not None else None
         if row is None or lst.get_intrinsic_width() <= 0:  # (just shown, not drawn since: where it is isn't known)
             self.stack.set_visible_child_name(name)
@@ -4884,7 +4887,7 @@ class ExpandStack(Gtk.Widget):
             self.move["parts"][f"enter{id(part)}"] = part  # (laid out with the rest)
         self._run(square, 0.0, 1.0)
 
-    def close(self, name, origin, square, pairs=(), enter=(), leave=(), within=None):
+    def close(self, name, origin, square, pairs=(), enter=(), leave=(), within=None, across=None):
         """Show page name (the list origin's a row of) again, the page shown now closing back into origin: open's
         parts, as open was given them, the other way."""
         self.finish()
@@ -4894,7 +4897,7 @@ class ExpandStack(Gtk.Widget):
         frozen = _frozen
         page = self.stack.get_visible_child()
         move = {"live": False, "p": 1.0, "row": None, "list": None, "page": _rect(page, self) if page else None,
-                "origin": origin, "within": within,
+                "origin": origin, "within": within, "across": across,
                 "pairs": [{"from": a, "to": b, "flip": bool(flip and flip[0]), "a": None, "b": _place(b, self),
                            "paint": frozen(b), "paint_from": Gtk.WidgetPaintable.new(a)} for a, b, *flip in pairs],
                 "leave": [{"widget": w, "rect": None, "paint": Gtk.WidgetPaintable.new(w)} for w in leave],
@@ -4975,23 +4978,21 @@ class ExpandStack(Gtk.Widget):
         piece((row[0] + row[2], row[1], big, row[3]), y=up - row[3] * p)
         down = sq[1] + sq[3] - row[1] - row[3] + (self.get_height() - end[1] - end[3]) * p
         piece((-big, row[1] + row[3], 2 * big, big), y=max(0.0, down))
-        # the header: the row's background, as wide as the square, fading to the page's (a column of the row's own
-        # just before its first text, spread over it)
+        # the header: the row's background (the card's edges with it), as wide as the square, fading to the page's.
+        # Its top and bottom edges go with the header's; between them a line of it from above its text, repeated
         snap.push_clip(_graphene(head))
         lead = g["lead"]
-        col = round(lead["a"]["x"]) - 2 if lead else None
-        if col is not None and row[0] <= col < row[0] + row[2] and row[3] > 4 and p < 1:
+        if row[3] > 6 and p < 1:
             fade = p > 0  # (none at its start: not even an opacity of 1, which rounds)
             if fade:
                 snap.push_opacity(1 - p)
-            # (its edges, the list's lines, top and bottom; between them its colour, each a column of it, repeated)
-            for y0, h, at in ((row[1], 2, head[1]), (row[1] + 2, row[3] - 4, head[1] + 2),
-                              (row[1] + row[3] - 2, 2, head[1] + head[3] - 2)):
-                fill = (head[0], at, head[2], h if h == 2 else max(0.0, head[3] - 4))
-                if fill[3] <= 0:
+            sx = head[2] / row[2] if row[2] else 1.0
+            for y0, h, at, size in ((row[1], 2, head[1], 2), (row[1] + 3, 1, head[1] + 2, head[3] - 4),
+                                    (row[1] + row[3] - 2, 2, head[1] + head[3] - 2, 2)):
+                if size <= 0:
                     continue
-                snap.push_repeat(_graphene(fill), _graphene((head[0], at, 1, h)))
-                piece((col, y0, 1, h), x=head[0] - col, y=at - y0)
+                snap.push_repeat(_graphene((head[0], at, head[2], size)), _graphene((head[0], at, head[2], h)))
+                piece((row[0], y0, row[2], h), x=head[0] - row[0], y=at - y0, sx=sx)
                 snap.pop()
             if fade:
                 snap.pop()

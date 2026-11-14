@@ -9763,6 +9763,9 @@ class SidePanel(Gtk.Box):
         self.agent_list.set_placeholder(self._empty("No subagents yet"))
         self.agent_list.connect("row-activated", lambda _l, row: self.open_agent(row.tool_use_id))
         self.agent_scroll = self._scrolled(self.agent_list)
+        # (as wide as a subagent's square, edge to edge with it: opening, its row grows only down, never wider)
+        self.agent_list.set_margin_start(0)
+        self.agent_list.set_margin_end(widgets.INSIDE_GAP)
         self.agent_stack.add_named(self.agent_scroll, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
@@ -9995,7 +9998,8 @@ class SidePanel(Gtk.Box):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
-            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll)
+            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+                                   across=self.agent_list)
         else:
             self.agent_stack.set_visible_child_name("detail")
         self.show_page("agents")
@@ -10028,7 +10032,8 @@ class SidePanel(Gtk.Box):
         if row is None:
             self.agent_stack.set_visible_child_name("list")
             return
-        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll)
+        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+                                across=self.agent_list)
 
     # ---- background processes
     def update_process(self, task):

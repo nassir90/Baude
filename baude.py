@@ -8849,8 +8849,12 @@ class SessionSidebar(Gtk.Box):
             self.fill()
             return
         info = getattr(row, "info", None)
-        if info is None or info.get("unsaved") or info.get("ghost") or info["id"] == self.win.session_id:
+        if info is None or info.get("ghost"):
             return  # (a ghost: a chat Meta's deleted, its transcript in Baude's trash)
+        self.win.show_chat()  # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while
+        # its transcript's fetched, this one too)
+        if info.get("unsaved") or info["id"] == self.win.session_id:
+            return
         if info.get("remote") is not None:  # (its transcript fetched first: open_remote_soon)
             self.win.open_remote_soon(info)
             return
@@ -9502,7 +9506,8 @@ class BaudeMeta(meta.MetaChat):
     def open_chat(self, info):
         """A chat's row clicked (show chats): it's opened, as the sidebar opens one."""
         win = self.win
-        if info["id"] == win.session_id:
+        win.show_chat()  # (from the Feedback tab or a file's code: the chat picked's shown, a network one's while
+        if info["id"] == win.session_id:  # its transcript's fetched)
             return
         if info.get("remote") is not None:
             win.open_remote_soon(info)
@@ -13682,8 +13687,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def switch_to(self, action):
         """Swap the chat (another session, a new one, another folder) after a short fade, so the swap is seen.
         Clicks while it's faded (or a slow session still loading) don't start the fade again: the chat stays
-        faded and the last one wins (Fade.swap)."""
+        faded and the last one wins (Fade.swap). The chat's tab is shown first, whatever was (the Feedback tab, a
+        file's code), so the swap's seen and what's picked is what's shown."""
+        self.show_chat()
         self.chat_fade.swap(action)
+
+    def show_chat(self):
+        """The chat's tab shown (from the Feedback tab, a file's code)."""
+        self.tabs.show("chat")
 
     def new_session(self, run_in=None):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with

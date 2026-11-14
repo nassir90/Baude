@@ -5501,6 +5501,7 @@ class ArtifactChip(Adw.ActionRow):
         self.add_suffix(self.open_btn)
         self.add_suffix(self.copy_btn)
         self.connect("activated", lambda *_: self.open())
+        pointers.hand(self)  # (a click anywhere on it opens it; its buttons keep their own)
         self.set_tooltip_text(info.get("description") or info["url"])
 
     def open(self):
@@ -9947,14 +9948,13 @@ class ProcessRow(Gtk.ListBoxRow):
         for w in (self.stop, self.toggle, self.full):
             self.head.add_suffix(w)
         click = Gtk.GestureClick()  # (the line, not its buttons: opened or closed under it, as it was)
-        click.connect("released", lambda _g, _n, x, y: self._clicked(x, y))
+        click.connect("released", lambda _g, n, x, y: n == 1 and self._clicked(x, y))  # (a double-click: once)
         self.head.add_controller(click)
         self.title, self.subtitle = (next(w for w in walk(self.head) if isinstance(w, Gtk.Label) and w.has_css_class(c))
                                      for c in ("title", "subtitle"))
         rows.append(self.head)
         # its command and its output: under its line, or the page's whole
         self.inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.inside.add_css_class("process-body")
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
                             margin_top=12, margin_bottom=12)
         self.body.add_css_class("zoomable")
@@ -9963,7 +9963,10 @@ class ProcessRow(Gtk.ListBoxRow):
         self.body.append(self.output)
         self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.inside.append(self.scroll)
+        # (the row's fill under its line is the revealer's, so what goes to the page, and the square ExpandStack grows
+        # for it, are on the panel's own, there and back)
         self.reveal = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.reveal.add_css_class("process-body")
         rows.append(self.reveal)
         self.put_inside_row()
         self.set_expanded(False)
@@ -10002,7 +10005,6 @@ class ProcessRow(Gtk.ListBoxRow):
         self.scroll.set_propagate_natural_height(True)
         self.scroll.set_vexpand(False)
         self.inside.set_vexpand(False)
-        self.inside.add_css_class("in-row")
         self.inside.set_margin_end(0)
         self.reveal.set_child(self.inside)
 
@@ -10013,7 +10015,6 @@ class ProcessRow(Gtk.ListBoxRow):
         self.scroll.set_propagate_natural_height(False)
         self.scroll.set_vexpand(True)
         self.inside.set_vexpand(True)
-        self.inside.remove_css_class("in-row")
         self.inside.set_margin_end(widgets.INSIDE_GAP)  # (its right edge the list's)
         return self.inside
 
@@ -10026,7 +10027,7 @@ def paint_command(label, text):
 
     def done(spans):
         if (lbl := ref()) is not None and getattr(lbl, "command_text", None) == text:
-            lbl.command_spans = spans
+            lbl.command_spans = (text, spans)
             lbl.set_attributes(widgets.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark())
                                if spans else None)
         return False
@@ -10044,6 +10045,8 @@ def unpaint_command(label):
 class SidePanel(Gtk.Box):
     """Right-hand pane: Meta (BaudeMeta), subagents (each with its own transcript) and background processes
     (status, live output tail, stop)."""
+    live = weakref.WeakSet()  # (every window's, while it's there: their commands' colours follow the theme)
+    styled = False
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -10149,7 +10152,11 @@ class SidePanel(Gtk.Box):
         self.proc_shown = None
         page = self.stack.add_titled(self.proc_expand, "processes", "Processes")
         page.set_icon_name("utilities-terminal-symbolic")
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.repaint_commands())
+        SidePanel.live.add(self)
+        if not SidePanel.styled:  # (one hook for every window's panel: none kept alive by it once closed)
+            SidePanel.styled = True
+            Adw.StyleManager.get_default().connect("notify::dark", lambda *_: [
+                panel.repaint_commands() for panel in list(SidePanel.live)])
 
         # artifacts published (or linked) in this session: rows as wide and tall as subagents'
         self.artifact_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -10504,7 +10511,9 @@ class SidePanel(Gtk.Box):
         else:  # no description: the command itself, as code (never our own summary of it), highlighted
             first = (cmd or desc or tid).strip().splitlines()[0] if (cmd or desc or tid).strip() else tid
             row.head.set_title(f"<tt>{html.escape(first[:300])}</tt>")
-            if cmd and row.title.get_text() != getattr(row.title, "command_text", None):
+            if not cmd:
+                unpaint_command(row.title)
+            elif row.title.get_text() != getattr(row.title, "command_text", None):
                 paint_command(row.title, row.title.get_text())
         # (no tooltip: it was the whole command, and a command's often far too long for one; opened, it's all there)
         row.head.set_subtitle(html.escape(self.describe(task, marked=True)))
@@ -10520,7 +10529,8 @@ class SidePanel(Gtk.Box):
         """The page's header as the shown process's row has it."""
         self.proc_title.set_markup(row.head.get_title())
         if getattr(row.title, "command_text", None):
-            paint_command(self.proc_title, self.proc_title.get_text())
+            if self.proc_title.get_text() != getattr(self.proc_title, "command_text", None):
+                paint_command(self.proc_title, self.proc_title.get_text())
         else:
             unpaint_command(self.proc_title)
         text = row.head.get_subtitle()
@@ -10532,9 +10542,9 @@ class SidePanel(Gtk.Box):
     def repaint_commands(self):
         """The commands drawn as rows' titles in the code's colours, light or dark as the theme is now."""
         for label in [row.title for row in self.proc_rows.values()] + [self.proc_title]:
-            if getattr(label, "command_spans", None) and getattr(label, "command_text", None):
-                label.set_attributes(widgets.code_attrs(label.command_text, label.command_spans,
-                                                        Adw.StyleManager.get_default().get_dark()))
+            text, spans = getattr(label, "command_spans", None) or (None, None)
+            if spans and text == getattr(label, "command_text", None):  # (not another's, its own still coming)
+                label.set_attributes(widgets.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark()))
 
     def open_process(self, row):
         """row's command and output filling the page, opening out of its row (out of them under it, if they're open

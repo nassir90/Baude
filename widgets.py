@@ -6852,7 +6852,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .side-panel .baude-inside .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
                                     mix(@baude_inside, @view_fg_color, 0.06) 14px); }
-.side-panel list.nested .codeblock .code-corner, .side-panel .process-body.in-row .codeblock .code-corner {
+.side-panel list.nested .codeblock .code-corner, .side-panel .process-row .process-body .codeblock .code-corner {
   background-image: linear-gradient(to right, alpha(@baude_raised, 0), @baude_raised 14px),
     linear-gradient(to right, transparent, color-mix(in srgb, var(--card-shade-color) 50%, transparent) 14px),
     linear-gradient(to right, alpha(@card_bg_color, 0), @card_bg_color 14px),
@@ -6933,8 +6933,8 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
    row's), a rule over them; filling the page, on the panel's own */
 .side-panel .process-row { padding: 0; }
 .side-panel .process-row > box > row { margin: 2px; }
-.side-panel .process-body.in-row { background-color: color-mix(in srgb, var(--card-shade-color) 50%, transparent);
-  border-top: 1px solid var(--border-color); }
+.side-panel .process-row .process-body { background-color: color-mix(in srgb, var(--card-shade-color) 50%, transparent);
+  box-shadow: inset 0 1px var(--border-color); }
 .composer-box.slim .composer-actions button { min-width: 28px; min-height: 28px; }
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */

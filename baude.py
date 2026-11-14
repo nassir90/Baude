@@ -12780,7 +12780,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
                 return None, False
         if r is None or (r.info.get("version") or 1) < 2:
-            self.note(f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
+            self.note("Daemon is older than client: restart it to ask a side question" if r is not None and r.mine else
+                      f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
         params = {"op": "start", "ephemeral": True, "mode": "plan", "model": self.model, "prompt": ""}
         # (the chat's, forked, if it's the host's: a fresh, context-free one, if nothing's written in it yet, the host
@@ -15942,7 +15943,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             def gone():  # (the old one gone: a new one, started as any is: local_server)
                 if r.state == "alive" and time.monotonic() < end:
                     return True
-                self.local_server(lambda _r: toast(self.sidebar, "Daemon restarted"))
+                self.local_server(lambda _r: toast(self.sidebar, "Daemon restarted"), quiet=True)
                 return False
             GLib.timeout_add(250, gone)
         if busy:

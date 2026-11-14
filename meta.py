@@ -165,9 +165,9 @@ def listed_models(offered=None):
     entry = model_entry(model(), offered)
     if entry and all(m[0] != entry[0] for m in out):
         mine = providerslib.kind(described(entry, known))
-        same = next((i for i, m in enumerate(out)
-                     if m[3] is not None and providerslib.kind(described(m, known)) == mine), None) \
-            if entry[3] is not None else None
+        same = next((i for i, m in enumerate(out) if m[3] is not None and providerslib.kind(described(m, known)) == mine
+                     and providerslib.where(m[3])[0] != providerslib.where(entry[3])[0]), None) \
+            if entry[3] is not None and entry[0] in known else None
         if same is not None:  # (Meta's own, the same one as the provider's: listed once, as Meta's)
             out[same] = entry
         else:
@@ -725,7 +725,7 @@ def provider_picked(chat, pid):
     widgets.save_settings(meta_provider=pid)
     offered = models()
     entry = model_entry(model(), offered)
-    if entry and providerslib.has_runtime(entry[3]) and entry[3] != pid:
+    if entry and providerslib.has_runtime(entry[3]) and providerslib.where(entry[3])[0] != providerslib.where(pid)[0]:
         known = providerslib.entries()
         mine = providerslib.kind(described(entry, known))
         there = next((m for m in offered if m[3] == pid and providerslib.kind(described(m, known)) == mine), None)

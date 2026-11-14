@@ -13440,10 +13440,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                           (" (the only one there is)" if one else ""))
         self.provider_models = {k: ms for k, _h, _l, ms in found}
         chosen = list(self.provider_models.get(key, []))
-        mine = (self.models_info.get(shown) or {"value": shown}) if shown and not apple and pid is not None else None
+        mine = (self.models_info.get(shown) or {"value": shown}) if shown and not apple and pid is not None and \
+            self.provider_index.get(shown, "|").split("|", 1)[0] not in ("", (key or "|").split("|", 1)[0]) else None
         same = next((i for i, m in enumerate(chosen) if mine and m["value"] != shown and
                      providerslib.kind(m) == providerslib.kind(mine)), None)
-        if same is not None:  # (the chat's own model, the same one as this provider's: listed once, as the chat's)
+        if same is not None:  # (the chat's own model, the same one as this provider's on another host, there still:
+            # listed once, as the chat's)
             chosen[same] = mine
         lead = {m["value"]: first for first, ms in kinds for m in ms}
         listed = []
@@ -13475,6 +13477,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.provider_key = key
         save_settings(provider=key)
         mine = self.models_info.get(self.model) if self.model else None
+        if (self.provider_key_of(self.model) or "|").split("|", 1)[0] == key.split("|", 1)[0]:
+            mine = None  # (the same host's: picking its other provider only lists that one's)
         there = next((m for m in getattr(self, "provider_models", {}).get(key, []) if mine and
                       m["value"] != self.model and providerslib.kind(m) == providerslib.kind(mine)), None)
         if there is not None and providerslib.has_runtime(mine.get("provider") or providerslib.provider_of(self.model)):

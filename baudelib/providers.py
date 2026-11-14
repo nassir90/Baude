@@ -110,15 +110,11 @@ def entries():
     return out
 
 
-def entry(value):
-    """A model's entry as this machine knows it (entries'), or {}."""
-    return entries().get(value) or {}
-
-
 def kind(m):
     """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
-    server; else its name), its window and its version, where they're said."""
-    served = m.get("resolvedModel") or m.get("id") or m.get("displayName") or m["value"]
+    server; else its name; Apple's, with no runtime, by its name), its window and its version, where they're said."""
+    served = (None if not has_runtime(m.get("provider") or provider_of(m["value"])) else
+              m.get("resolvedModel") or m.get("id")) or m.get("displayName") or m["value"]
     return served, m.get("window"), m.get("version")
 
 

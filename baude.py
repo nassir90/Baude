@@ -8901,7 +8901,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.toggle.add_css_class("flat")
         self.toggle.connect("clicked", lambda *_: self.set_expanded(not self.expanded()))
         head.append(self.toggle)
-        self.full = Gtk.Button(icon_name="view-fullscreen-symbolic", valign=Gtk.Align.CENTER,
+        self.full = Gtk.Button(icon_name="window-maximize-symbolic", valign=Gtk.Align.CENTER,
                                tooltip_text="Open this side question in the whole panel")
         self.full.add_css_class("flat")
         self.full.add_css_class("side-question-full")

@@ -6435,7 +6435,6 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
-.side-question-full image { -gtk-icon-size: 12px; }  /* (smaller than the ⌄ beside it: it's a square) */
 .composer-box.slim .composer-actions button { min-width: 28px; min-height: 28px; }
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */

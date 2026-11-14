@@ -1092,9 +1092,14 @@ class Server:
             if sub == "get_settings":
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             return answer({})
+        try:
+            proc = self.ensure_proc(s)
+        except OSError as e:  # (its claude couldn't be started: a revert's said so, not left waiting)
+            return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
+                "subtype": "error", "request_id": rid, "error": str(e)}}})
         on = f"srv_{next(self.rids)}"
         s.routes[on] = (conn, rid, undo)
-        self.ensure_proc(s).send({**msg, "request_id": on})
+        proc.send({**msg, "request_id": on})
         self.changed()
 
     def from_claude(self, s, proc, msg):

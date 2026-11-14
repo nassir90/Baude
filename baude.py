@@ -13920,7 +13920,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             took = self.take_up()
             if took is False:  # (This Mac's host process isn't there yet: started, and reverted once it is)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
-                self.local_server(lambda _r: turn.get_parent() is not None and self.revert_to(turn))
+                self.local_server(lambda _r: turn.is_ancestor(self.transcript) and self.revert_to(turn))
                 return
             if took is None:
                 return
@@ -13940,7 +13940,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             why = next((v for k, v in response.items() if k != "rewound" and isinstance(v, str)), None)
             self.note(f"Couldn't revert: {why or 'claude said no'}")
             return
-        if turn.get_parent() is None:  # (gone already: another chat opened meanwhile)
+        if not turn.is_ancestor(self.transcript):  # (gone already: another chat opened meanwhile)
             return
         self.drop_from(turn)
         self.blocks, self.streamed_ids = {}, set()  # (a turn it stopped: what was half drawn is gone)
@@ -13959,11 +13959,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             while after is not None:
                 nxt = after.get_next_sibling()
                 parent.remove(after)
+                discard(after)
                 after = nxt
             w = parent
         widget.get_parent().remove(widget)
+        discard(widget)
         if self.chunk_slots:
+            gone = [slot for slot in self.chunk_slots if slot.get_parent() is None]
             self.chunk_slots = [slot for slot in self.chunk_slots if slot.get_parent() is not None]
+            for slot in gone:  # (the chunks after it not drawn yet: their items counted as drawn, never to be)
+                self.history.take(*slot.span)
+            if gone:
+                self.update_earlier_btn()
         kept = [job for job in self.fill_jobs if job.slot.get_parent() is not None]
         self.fill_jobs.clear()
         self.fill_jobs.extend(kept)

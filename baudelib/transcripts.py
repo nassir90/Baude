@@ -342,8 +342,8 @@ def line_of_uuid(path, uuid, before):
                 begin = max(0, end - span)
                 f.seek(begin)
                 block = f.read(end - begin + 200)  # (a needle across the block's end: read a little past it)
-                found = max(block.rfind(n) for n in needles)
-                if found >= 0 and begin + found < before:
+                found = max(block.rfind(n, 0, before - begin) for n in needles)  # (one starting before before)
+                if found >= 0:
                     return begin + block.rfind(b"\n", 0, found) + 1
                 end = begin
     except OSError:
@@ -491,9 +491,11 @@ class HistoryIndex:
                         at += len(raw)
             except OSError:
                 return []
-            if len(newest) == keep or not begin:
+            if len(starts) >= keep or not begin:  # (a revert's cut items: enough indexed, those it popped read below)
                 break
             span *= 4
+        if len(newest) < min(keep, len(starts)):  # (a cut popped the newest: the ones before them, from where they are)
+            newest = self._read_at(starts[-keep:], sums[-keep:]) or []
         undrawn = len(starts) - len(newest)
         self.oldest = sums[undrawn] if newest else None
         del starts[undrawn:], sums[undrawn:], replies[undrawn:]
@@ -559,6 +561,21 @@ class HistoryIndex:
             return None
         self.cuts.append((kept, at))
         return cut_after(starts, kept, *others)
+
+    def _read_at(self, starts, sums):
+        """The items whose lines start at starts, parsed (the newest, after a cut: _tail); None if one isn't there."""
+        items = []
+        try:
+            with open(self.path, "rb") as f:
+                for start, line_sum in zip(starts, sums):
+                    f.seek(start)
+                    raw = f.readline()
+                    if _line_sum(raw) != line_sum or (item := history_item(raw.decode("utf-8", "replace"))) is None:
+                        return None
+                    items.append(item)
+        except OSError:
+            return None
+        return items
 
     def dropped(self, at):
         """Whether the item whose line starts at at was taken back by a revert (cuts)."""

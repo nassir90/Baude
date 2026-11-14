@@ -7405,6 +7405,32 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 """
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
+/* (a dialog's sheet over the window: its fill, its edge, its shadow and the dimming under it are libadwaita's, and a
+   theme doesn't draw them (some fill only a window); without them the sheet runs into the window, or the window
+   shows through it. The fill the window's, the edge in the theme's border colour) */
+floating-sheet > dimming, bottom-sheet > dimming { background-color: rgb(0 0 6 / 14%); }
+floating-sheet > sheet, bottom-sheet > sheet { background-color: @window_bg_color;
+  box-shadow: 0 0 0 1px @borders, 0 0 14px 2px rgb(0 0 6 / 3%), 0 0 5px 2px rgb(0 0 6 / 10%); }
+"""
+# Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
+# theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), so what's drawn in an unnamed
+# colour isn't drawn: the Kubernetes and database views' bar and sidebar let the window show through. Below everything,
+# each of libadwaita's names as the theme's colour it stands for: a theme that names it itself is above, and its own.
+THEME_COLOURS_CSS = """
+@define-color window_bg_color @theme_bg_color;
+@define-color window_fg_color @theme_fg_color;
+@define-color view_bg_color @theme_base_color;
+@define-color view_fg_color @theme_text_color;
+@define-color sidebar_bg_color @window_bg_color;
+@define-color sidebar_fg_color @window_fg_color;
+@define-color card_bg_color @view_bg_color;
+@define-color card_fg_color @view_fg_color;
+@define-color popover_bg_color @window_bg_color;
+@define-color popover_fg_color @window_fg_color;
+@define-color accent_bg_color @theme_selected_bg_color;
+@define-color accent_fg_color @theme_selected_fg_color;
+@define-color accent_color @accent_bg_color;
+@define-color borders alpha(@window_fg_color, 0.15);
 """
 
 
@@ -7421,6 +7447,10 @@ def theme_css(*app_css):
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     display.baude_theme_css = css
     if themed:
+        colours = Gtk.CssProvider()
+        colours.load_from_string(THEME_COLOURS_CSS)
+        Gtk.StyleContext.add_provider_for_display(display, colours, Gtk.STYLE_PROVIDER_PRIORITY_FALLBACK)
+        display.baude_theme_colours = colours
         display.baude_rounded_sheets = (CSS, *app_css)
         _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
 

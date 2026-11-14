@@ -8885,6 +8885,7 @@ class SideQuestion(Gtk.ListBoxRow):
         super().__init__(activatable=False)
         self.add_css_class("side-question")
         self.win, self.busy, self.answer, self.proc, self.answers = win, False, None, None, {}
+        self.stopped = None  # (the answer stopped: Esc, or the box's stop button)
         rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_child(rows)
         head = Gtk.Box(spacing=12, margin_start=12, margin_end=6, margin_top=8, margin_bottom=8)
@@ -8910,13 +8911,13 @@ class SideQuestion(Gtk.ListBoxRow):
         # its thread, and the box it's asked in, on the darker inside: under its line, or the page's whole
         self.inside = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL))  # (set into the row)
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
-                            margin_top=12, margin_bottom=10)
+                            margin_top=12)
         self.body.add_css_class("zoomable")
         self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                         visible=bool(question))  # (one from + has nothing over its box till asked)
+                                         visible=False)  # (nothing over its box till something's asked)
         self.inside.append(self.scroll)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
-                       margin_bottom=10)
+                       margin_top=10, margin_bottom=10)
         self.writing = widgets.Composer()
         self.composer = self.writing.input
         keys = Gtk.EventControllerKey()
@@ -9018,9 +9019,19 @@ class SideQuestion(Gtk.ListBoxRow):
         if self.ask(self.text()) is not False:
             self.composer.get_buffer().set_text("")
 
+    STOP_WAIT = 3000  # ms for a stopped answer to end (as Meta's), before it's shown stopped anyway
+
     def stop(self):
+        """The answer stopped: shown stopped, not failed, as its result comes (or after STOP_WAIT, if it doesn't)."""
         if self.busy and self.proc is not None:
+            self.stopped = answer = self.answer
             self.proc.control({"subtype": "interrupt"})
+            GLib.timeout_add(self.STOP_WAIT, lambda: self.busy and self.answer is answer and self._stopped() and False)
+
+    def _stopped(self):
+        self._busy(False)
+        self.status.set_state("interrupted")
+        self.status.set_visible(True)
 
     def start(self, question):
         """Its claude, and the first question to it: False if it couldn't be had (said)."""
@@ -9089,8 +9100,9 @@ class SideQuestion(Gtk.ListBoxRow):
             for c in msg.get("message", {}).get("content", []):
                 if c.get("type") == "text":
                     self.answer.append(c["text"])
-            self.refresh_context_soon()
-        elif t == "control_request" and msg.get("request", {}).get("subtype") == "can_use_tool":
+        if t == "assistant" and not msg.get("parent_tool_use_id"):
+            self.refresh_context_soon()  # (each step of the answer)
+        if t == "control_request" and msg.get("request", {}).get("subtype") == "can_use_tool":
             self.proc.respond(msg["request_id"], {"behavior": "deny",
                                                   "message": "Side questions can't run tools that need permission."})
         elif t == "control_response":
@@ -9099,8 +9111,11 @@ class SideQuestion(Gtk.ListBoxRow):
             if then is not None and r.get("subtype") == "success":
                 then(r.get("response") or {})
         elif t == "result":
+            stopped, self.stopped = self.stopped is not None and self.stopped is self.answer, None
             self._busy(False)
-            if msg.get("is_error"):
+            if stopped:
+                self._stopped()
+            elif msg.get("is_error"):
                 self.status.set_state("error")
                 self.status.set_visible(True)
                 if self.answer is not None and not self.answer.text:
@@ -12024,7 +12039,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         restart_state), a dialog or a capture open, and you at it (the window you're in, something typed, clicked or
         scrolled in it in the last minute). Not the model writing: a turn cut short there is resumed (show_cut)."""
         why = [f"running: {w}" for w in self.own_commands()]
-        if any(sq.text().strip() for sq in self.panel.side_questions()):
+        if any(sq.text().strip() and sq.writing.get_sensitive() for sq in self.panel.side_questions()):
             why.append("a side question's reply being written")
         bar = getattr(self, "capture_bar", None)
         if self.get_visible_dialog() is not None or (bar is not None and bar.get_reveal_child()):

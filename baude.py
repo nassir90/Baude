@@ -10148,7 +10148,7 @@ class SidePanel(Gtk.Box):
         self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
-        # (none asked: no placeholder and no list, its outline a line under the box, which fills the page)
+        # (none asked: no placeholder, and the list hidden: empty, its outline would draw a line under the box)
         self.btw_list.set_visible(False)
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's

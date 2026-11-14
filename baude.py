@@ -6193,6 +6193,22 @@ def macos_dock_icon():
               types=(ctypes.c_void_p,))
 
 
+def logo_icon():
+    """Elsewhere, windows take the logo (ICON_SVG) from the icon theme by name (APP_ID): it's put in an icon folder of
+    Baude's own, as Record's is. The user's theme has it only once Baude's in the application menu, and without it a
+    title bar that shows the window's icon (KDE's, at the start of the header bar) had the theme's missing-image icon."""
+    root = os.path.join(_data_home(), "baude", "icons")
+    path = os.path.join(root, "hicolor", "scalable", "apps", f"{APP_ID}.svg")
+    try:
+        if not os.path.exists(path) or open(path).read() != ICON_SVG:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(ICON_SVG)
+    except OSError:
+        return
+    Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
+
+
 def launch_command(*args):
     """argv that starts baude: imported as a module, so Python uses its cached bytecode instead of
     compiling all of baude.py on every start (~150 ms; a script run directly is never cached)."""
@@ -17364,6 +17380,8 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
+        else:
+            logo_icon()
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)

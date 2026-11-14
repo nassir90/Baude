@@ -11443,8 +11443,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sidebar_btn = Gtk.ToggleButton(icon_name="sidebar-show-symbolic",
                                             tooltip_text="Sessions sidebar (Ctrl+B)")
         header.pack_start(self.sidebar_btn)
-        # (the chat's name in the text's own weight: a .heading's bold was the one bold thing up here)
+        # (the chat's name in the text's own weight: a .heading's bold was the one bold thing up here. .title, a header
+        # bar's title, for a GTK theme's title bar (widgets.theme_css): over libadwaita, still the text's own weight)
         self.title_label = Gtk.Label(label="New session", max_width_chars=48, ellipsize=Pango.EllipsizeMode.END,
+                                     css_classes=["title", "baude-title"],
                                      tooltip_text="Rename: right-click the session in the sidebar, or F2")
         header.set_title_widget(self.title_label)
         self.panel_btn = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic",
@@ -16496,6 +16498,7 @@ class BaudeApp(Adw.Application):
         pointers.start()
         install_debug_hooks(self)
         widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
+        widgets.theme_css()  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
 
     def do_activate(self):
         trace("activate")

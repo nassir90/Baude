@@ -3340,12 +3340,19 @@ class DiaryEditor(Gtk.Box, FindInText):
                 e[k] = None
             e["anchor"] = e["controls"] = None
 
-    def _control_px(self):
+    def _control_px(self, anchor=None):
         """How tall an edit's Accept and Reject are: (up, down), the text's font's ascent and, under its baseline, its
         descent, as its green is (a widget in a line stands on its baseline: EditControls asks the line for the ascent
-        only, so that keeps the line as it is)."""
+        only, so that keeps the line as it is). On a line of their own (anchor: one that takes a paragraph out, say),
+        no green to match and no text's descent under them: the ascent only, clear of the line below."""
         m = self.view.get_pango_context().get_metrics(None, None)
         up = max(10, round(m.get_ascent() / Pango.SCALE))
+        if anchor is not None:
+            at = self.buf.get_iter_at_child_anchor(anchor)
+            after = at.copy()
+            after.forward_char()
+            if at.starts_line() and after.ends_line():
+                return up, 0
         return up, max(0, round((m.get_ascent() + m.get_descent()) / Pango.SCALE) - up)
 
     def _mark_proposals(self):
@@ -3367,7 +3374,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
             tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
-            e["controls"].size(self._control_px())
+            e["controls"].size(self._control_px(e["anchor"]))
 
     def _proposal_at(self, offset):
         """The change shown a place in the buffer is in (Tab and Esc's): the one whose green it's inside, else the

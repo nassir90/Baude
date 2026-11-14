@@ -97,6 +97,8 @@ def run(state, args):
         return 0 if os.environ.get("FAKE_GH_SIGNED_IN", "1") == "1" else 1
     if args[:1] == ["api"] and "-i" in args:
         return rest(state, args)
+    if args[:1] == ["api"] and "--silent" in args and args[1].startswith("repos/"):  # (feedback.issues_repo's look)
+        return 0 if os.environ.get("FAKE_GH_SIGNED_IN", "1") == "1" else 1
     if what == ["repo", "view"]:
         name = args[2] if len(args) > 2 else ""
         if name.endswith("Internal") and name not in state.get("issues_on", {}):  # (fixes.PRIVATE_FEEDBACK's)

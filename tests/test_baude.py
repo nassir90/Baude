@@ -13652,7 +13652,7 @@ def test_saved_notes_file_themselves(app):
     created, online, signed_in = [], [True], [True]
 
     def gh(*args, body=None, timeout=60):
-        if args[:2] == ("auth", "status"):
+        if args[:1] == ("api",):  # (issues_repo's look at the repository)
             return signed_in[0] and online[0], ""
         if not online[0]:
             return False, "could not connect"

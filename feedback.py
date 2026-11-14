@@ -504,7 +504,9 @@ def issues_repo():
     if seen is not None and now - seen < GH_CHECKED_S:
         return _gh_seen["repo"]
     repo = submit_issue_target() if gh_path() else None
-    if repo is not None and not gh("auth", "status", "--hostname", "github.com", timeout=20)[0]:
+    # (gh's active account can read the repository: not gh auth status, which fails for any account it has that's
+    # signed out, the one it'd file with or not)
+    if repo is not None and not gh("api", f"repos/{repo}", "--silent", timeout=20)[0]:
         repo = None
     _gh_seen.update(at=now, repo=repo)
     return repo

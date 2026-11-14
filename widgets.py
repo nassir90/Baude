@@ -1619,8 +1619,9 @@ def set_markup_safe(label, markup):
 
 
 class UpdateBar(Gtk.Box):
-    """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's
-    waiting to be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now; asked only if that stops something)."""
+    """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's waiting to
+    be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now; asked only if that
+    stops something)."""
 
     def __init__(self, on_click):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)

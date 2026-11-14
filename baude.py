@@ -13323,8 +13323,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def provider_key_of(self, value):
         """The provider key (host|provider) of a model this chat's host runs (another member's, through the mesh: its),
         None for Claude's."""
-        if value in getattr(self, "provider_index", {}):
-            return self.provider_index[value]
+        if value in getattr(self, "provider_index", {}):  # (another host's Apple model: none, as this one's)
+            k = self.provider_index[value]
+            return k if providerslib.has_runtime(k.split("|", 1)[1]) else None
         entry = self.models_info.get(value) or {}
         pid = entry.get("provider") or providerslib.provider_of(value)
         return f"{self.chat_host()}|{pid}" if providerslib.has_runtime(pid) else None

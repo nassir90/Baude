@@ -7797,7 +7797,7 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner()
+        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
         self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
@@ -17028,8 +17028,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
         if kind == "gone":
             name = remote_name(self.remote)
-            text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
-                f"Looking for {name} on the network…"
+            text = ("Can't connect to daemon" if self.remote.mine else f"Can't connect to {name} at the moment") \
+                if self.remote.state == "dead" else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
         elif kind == "drop":

@@ -1000,6 +1000,8 @@ class Server:
                 extra += ["--no-session-persistence"]
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
+        if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
+            agentproxy.PiSession.release(agentproxy.pi_sessions(), s.meta.get("cli_id") or s.id)  # elsewhere no more)
         s.proc = kind(
             lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
             s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,

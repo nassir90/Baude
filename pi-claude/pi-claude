@@ -517,7 +517,8 @@ class Engine:
         self.pi = subprocess.Popen(args, cwd=os.getcwd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
                                    env=os.environ | {"PI_CODING_AGENT_DIR": self.agent_dir, "PI_OFFLINE": "1",
                                                      "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
-        threading.Thread(target=self._read_pi, daemon=True).start()
+        self.reader = threading.Thread(target=self._read_pi, daemon=True)
+        self.reader.start()
 
     def stop(self):
         leave_server()
@@ -529,6 +530,8 @@ class Engine:
                 self.pi.wait(3)
             except subprocess.TimeoutExpired:
                 self.pi.kill()
+        if getattr(self, "reader", None) is not None:  # (what pi said as it ended, read and said on: session.ts's
+            self.reader.join(3)                          # last notice, for the chat's host)
         if self.agent_dir:
             shutil.rmtree(self.agent_dir, ignore_errors=True)
 

@@ -419,7 +419,7 @@ class Store:
         self.markup = "line"  # (the notes' formatting shown: "line", the caret's; "none"; "all", all but links')
         self.books_width = None  # (the notebooks' column, dragged; None: as it comes)
         self.zoom = self.zoom_default = 1.0  # (Ctrl/⌘ + − 0: the notes', the chat's and the conversation's text)
-        self.meta = {"messages": []}  # (Meta's conversation while no notebook's open: RecordChat.conv)
+        self.meta = {"messages": []}  # (Meta's conversation, the window's, whichever notebook's open: RecordChat)
         try:
             with open(self.path) as f:
                 saved = json.load(f)
@@ -881,18 +881,20 @@ def paned_grip(paned):
 
 
 # ---------------------------------------------------------------- Meta, in Record
-# Record's helper is Meta (meta.py, Baude's too), in the right bar: its conversation is the notebook open's
-# (RecordChat, a meta.MetaChat), one session kept while it's open, and a new one (a notebook gone back to, Record started
-# again, another model) told what was said before. It reads (Read, Grep, Glob) the notebook's pages, as their files
-# (Store.mirror_pages), and its folders. A change to a page's text it proposes with propose_edit (RecordChat.propose),
+# Record's helper is Meta (meta.py, Baude's too), in the right bar: its conversation is the window's (RecordChat, a
+# meta.MetaChat), whichever notebook's open, one session kept for it, and a new one (other folders open, Record started
+# again, another model) told what was said before; told too when another notebook's opened. It reads (Read, Grep, Glob)
+# the notebook open's pages, as their files (Store.mirror_pages), and its folders. A change to a page's text it proposes with propose_edit (RecordChat.propose),
 # which the page shows as a diff, to accept or reject (DiaryEditor.show_proposal); the pages themselves it adds,
 # deletes and moves at once, as actions, marked in the pages' list till they're kept or undone (PagesList.fill).
 
 RECORD_PROMPT = """The user keeps notebooks of pages in Markdown ([[Page]] links a page to another; a page's name is \
 its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file, a chat or anything else their \
 folders have). You see the notebook they have open: its pages, the folders attached to it, and what they @-reference \
-or select; with none open, the notebooks there are, and only add_notebook and move_pages (naming its notebooks) \
-change anything. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and its folders.
+or select; with none open, the notebooks there are, and only add_notebook, add_page and move_pages (naming its \
+notebooks) change anything. The conversation stays as they open another notebook: you're told when they do, and \
+your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, read-only) and \
+its folders.
 
 You never write a page's text yourself. To change it (fill a passage in, rewrite one, add to it), call propose_edit \
 with the page, the exact text it replaces and what replaces it: the user sees the edit on the page, and accepts or \
@@ -965,10 +967,10 @@ RECORD_TOOLS = [
      "description": "Take back one of your pending edits (list_edits): it goes from the page, the page as it is.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
     {"name": "add_page",
-     "description": "Add a page to the notebook open, with its text (Markdown). A sub-page's name is its parent's "
-     "and its own: Work:Plans.",
+     "description": "Add a page to a notebook, with its text (Markdown). A sub-page's name is its parent's "
+     "and its own: Work:Plans. notebook: the one it goes in (left out: the one open).",
      "inputSchema": {"type": "object", "required": ["page"], "properties": {
-         "page": {"type": "string"}, "text": {"type": "string"}}}},
+         "page": {"type": "string"}, "text": {"type": "string"}, "notebook": {"type": "string"}}}},
     {"name": "delete_page",
      "description": "Delete a page of the notebook open (not Home); its sub-pages stay.",
      "inputSchema": {"type": "object", "required": ["page"], "properties": {"page": {"type": "string"}}}},
@@ -980,7 +982,8 @@ RECORD_TOOLS = [
          "pages": {"type": "array", "items": {"type": "string"}}, "under": {"type": "string"},
          "from_notebook": {"type": "string"}, "to_notebook": {"type": "string"}}}},
     {"name": "add_notebook",
-     "description": "Make a notebook, empty but for Home, at once (not opened): move_pages to_notebook fills it.",
+     "description": "Make a notebook, empty but for Home, at once (not opened): add_page notebook and move_pages "
+     "to_notebook fill it.",
      "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}},
     {"name": "edit_page",
      "description": "Change a page's text at once, as part of the change you're making to the pages this turn "
@@ -1162,13 +1165,16 @@ def page_named(notebook, name, store):
                  file.endswith(os.sep + name.lstrip(os.sep))), None)
 
 
-def pending_edits(notebook, agent=None):
+def pending_edits(notebook, store, agent=None):
     """The edits the agent's proposed to a notebook's pages that wait for you, in the order it made them (the reply
-    still coming's, agent's, last)."""
-    live = agent.turn["proposals"] if agent is not None and agent.turn is not None and agent.notebook is notebook \
-        else ()
-    props = [p for m in notebook.get("messages") or () for p in m.get("proposals") or ()]
-    return [p for p in props + [p for p in live if p not in props] if p.get("status") == "pending"]
+    still coming's, agent's, last): each one's notebook its "notebook" (one in a notebook's own conversation, from
+    when each had one: that notebook)."""
+    book_id = notebook.get("id")
+    said = [*(notebook.get("messages") or ()), *(store.meta["messages"] if store is not None else ())]
+    live = agent.turn["proposals"] if agent is not None and agent.turn is not None else ()
+    props = [p for m in said for p in m.get("proposals") or () if p.get("notebook", book_id) == book_id]
+    return [p for p in props + [p for p in live if p not in props and p.get("notebook") == book_id]
+            if p.get("status") == "pending"]
 
 
 def staged(text, edits):
@@ -3184,7 +3190,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         self._drop_all()
         if self.notebook is None:
             return
-        for p in pending_edits(self.notebook, getattr(getattr(self.win, "chat", None), "agent", None)):
+        for p in pending_edits(self.notebook, self.win.store, getattr(getattr(self.win, "chat", None), "agent", None)):
             if p.get("page") == self.page:
                 self.show_proposal(p, draw=False)
         self._highlight()
@@ -5323,7 +5329,8 @@ def page_name(text):
 
 
 class RecordChat(meta.MetaChat):
-    """Meta in Record (meta.MetaChat), the notebook open's conversation: a passage picked in a chat read, or selected
+    """Meta in Record (meta.MetaChat), the window's conversation, whichever notebook's open: a passage picked in a
+    chat read, or selected
     on a page, quoted with what's asked; what's referenced goes with the message (ref_said); a change it proposes to a
     page's text is shown on the page, to accept or reject, and the pages it adds, deletes and moves are marked in the
     pages' list (PagesList.fill)."""
@@ -5358,25 +5365,21 @@ class RecordChat(meta.MetaChat):
         self.settings = self.make_settings()
 
     def show(self, notebook):
-        self.close_agent()
+        """Another notebook open (or none): the conversation and its session go on, what the tools work on is that
+        one, and Meta's told so with the next message (context). A passage selected on the page of a notebook left
+        goes."""
+        if self.selection is not None and self.selection["notebook"] != (notebook or {}).get("id"):
+            self.set_quote("")
         self.notebook = notebook
-        self.set_quote("")
         self.render()
-        self.win.mark_books()  # (the notebooks' list as this conversation's marks have it)
+        self.marks_changed()  # (the notebooks' list, and the pages' and the pages open, as Meta's marks have them)
 
     # ---- what Meta.MetaChat asks of Record
-    OPEN = object()  # (conv's notebook, not said: the one open)
-
-    def conv(self, notebook=OPEN):
-        """Where a conversation's kept: the notebook open's (or notebook's), else Record's own, with none."""
-        notebook = self.notebook if notebook is self.OPEN else notebook
-        return notebook if notebook is not None else self.win.store.meta
-
     def messages(self):
-        return self.conv()["messages"]
+        return self.win.store.meta["messages"]
 
     def actions(self):
-        return self.conv().setdefault("meta_actions", [])
+        return self.win.store.meta.setdefault("meta_actions", [])
 
     def save(self, now=False):
         (self.win.store.save_now if now else self.win.store.save)()
@@ -5388,14 +5391,11 @@ class RecordChat(meta.MetaChat):
         return notes_first(items)
 
     def scope(self):
-        return self.notebook.get("id") if self.notebook else None, tuple(self.win.read_folders())
+        return tuple(self.win.read_folders())
 
     def agent_setup(self):
         return {"cwd": pages_root(), "roots": [pages_root(), *self.win.read_folders()], "exe": claude_exe(),
                 "env_of": child_env}
-
-    def agent_made(self, agent):
-        agent.notebook = self.notebook
 
     def app_prompt(self):
         return RECORD_PROMPT.format(name=meta.NAME, to_learn=TO_LEARN)
@@ -5405,17 +5405,17 @@ class RecordChat(meta.MetaChat):
 
     def app_handlers(self):
         on_open = {"propose_edit": self.propose, "list_edits": self.list_edits, "revise_edit": self.revise_edit,
-                   "withdraw_edit": self.withdraw_edit, "add_page": self.add_page, "delete_page": self.delete_page,
-                   "edit_page": self.edit_page, "highlight_pages": self.highlight_pages}
+                   "withdraw_edit": self.withdraw_edit, "delete_page": self.delete_page, "edit_page": self.edit_page,
+                   "highlight_pages": self.highlight_pages}
         return {**{name: self._on_open(fn) for name, fn in on_open.items()},
-                "move_pages": self.move_pages, "add_notebook": self.add_notebook}
+                "add_page": self.add_page, "move_pages": self.move_pages, "add_notebook": self.add_notebook}
 
     def _on_open(self, fn):
         """A tool that works on the notebook open: with none open, why it can't."""
         def run(turn, args):
             if self.notebook is None:
-                raise ValueError(f"No {book().lower()} is open: move_pages takes from_notebook and to_notebook, and "
-                                 "add_notebook makes one.")
+                raise ValueError(f"No {book().lower()} is open: add_page takes notebook, move_pages from_notebook "
+                                 "and to_notebook, and add_notebook makes one.")
             return fn(turn, args)
         return run
 
@@ -5433,26 +5433,15 @@ class RecordChat(meta.MetaChat):
                                             "win.backupall"), bool)
         return out
 
-    def _guard(self, agent):
-        if getattr(agent, "notebook", None) is not self.notebook:
-            return {"error": "That notebook isn't open any more: nothing was done."}
-        return super()._guard(agent)
-
     def told(self):
-        return self.conv().setdefault("meta_told", [])
+        return self.win.store.meta.setdefault("meta_told", [])
 
     def unkept(self):
-        """The changes to the left bars not kept yet, whichever conversation made them (a notebook Meta made while
-        none was open, opened: its pages marked as they came), oldest first: marked, and kept or undone together."""
+        """The changes to the left bars not kept yet, oldest first: marked, and kept or undone together (and those
+        made in a notebook's own conversation, from when each had one)."""
         convs = [self.win.store.meta, *self.win.store.notebooks]
         return sorted((a for c in convs for a in c.get("meta_actions") or ()
                        if a["state"] == "done" and not a.get("kept")), key=lambda a: a.get("t") or 0)
-
-    def showing(self, agent):
-        return getattr(agent, "notebook", None) is self.notebook
-
-    def store_reply(self, agent, m):
-        self.conv(getattr(agent, "notebook", self.notebook))["messages"].append(m)
 
     def marks_changed(self):
         """What Meta's marked changed: the notebooks' list, the pages' list, the pages open (tint), and a deleted one's
@@ -5668,18 +5657,27 @@ class RecordChat(meta.MetaChat):
         return {"proposals": [], "selection": msg.get("selection")}
 
     def context(self, agent, msg):
-        """A new session's notebook; what's become of the changes proposed; what's referenced (ref_said, of
-        Window.space), the passage quoted from a chat (its names, the chat's) or selected on a page."""
+        """The notebook open, with a new session's first message and once another's opened; what's become of the
+        changes proposed; what's referenced (ref_said, of Window.space), the passage quoted from a chat (its names,
+        the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
-        if agent.fresh:
+        if agent.fresh or getattr(agent, "seen", notebook) is not notebook:
+            if not agent.fresh:
+                parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
+                             if notebook is not None else f"(The user closed the {book().lower()} since: none is "
+                             "open now.)")
             parts.append(notebook_said(notebook, store, space) if notebook is not None else none_open_said(store))
-        for m in notebook["messages"] if notebook is not None else ():
+        agent.seen = notebook
+        books = {t.get("id"): t for t in store.notebooks}
+        for m in [*self.messages(), *(notebook["messages"] if notebook is not None else ())]:
             for p in m.get("proposals") or ():
                 if p.get("status") in ("accepted", "rejected") and not p.get("told"):
                     if not agent.fresh:
-                        parts.append(f"(The change you proposed to {p['page']} was {p['status']} by the user.)")
+                        nb = books.get(p.get("notebook")) or notebook
+                        where = f" in {full_name(nb)}" if nb is not None and nb is not notebook else ""
+                        parts.append(f"(The change you proposed to {p['page']}{where} was {p['status']} by the user.)")
                     p["told"] = True
-        if notebook is not None and (waiting := pending_edits(notebook)):
+        if notebook is not None and (waiting := self.pending(notebook)):
             pages = list(dict.fromkeys(p["page"] for p in waiting))
             parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
                          "shows them.)")
@@ -5771,7 +5769,7 @@ class RecordChat(meta.MetaChat):
                 m[key] = turn[key]
 
     def pending(self, notebook):
-        return pending_edits(notebook, self.agent)
+        return pending_edits(notebook, self.win.store, self.agent)
 
     def _pending_bar(self):
         """Over the box asked in, while there are edits waiting: how many, and Previous and Next, each to one on its
@@ -5852,7 +5850,7 @@ class RecordChat(meta.MetaChat):
                          (", ".join(short_dir(f) for f in folders) or "none"))
             lines.append("its pages: " + ", ".join(pages[:40]) +
                          (f" (+{len(pages) - 40}: app_index pages)" if len(pages) > 40 else ""))
-            if waiting := pending_edits(nb, self.agent):
+            if waiting := self.pending(nb):
                 lines.append(f"your edits waiting: {len(waiting)} (list_edits)")
         else:
             lines.append("no notebook open")
@@ -6025,7 +6023,7 @@ class RecordChat(meta.MetaChat):
         self.win.open_note(page)
 
     def buttons(self):
-        return {"delete_notebook": f"Delete the {book().lower()} open, its pages and conversation with it (asks first; "
+        return {"delete_notebook": f"Delete the {book().lower()} open and its pages (asks first; "
                                    "can't be undone)"}
 
     def button(self, action, items):
@@ -6098,7 +6096,7 @@ class RecordChat(meta.MetaChat):
         """The notebook open's pages changed under its tabs: those moved go with their pages (Window.note_renamed),
         and so do the edits waiting on them; those gone are closed; the rest shown again; the list again."""
         win, nb = self.win, self.notebook
-        for p in pending_edits(nb, self.agent) if nb is not None else ():
+        for p in self.pending(nb) if nb is not None else ():
             if p["page"] in moved:
                 p["page"] = moved[p["page"]]
         win.store.save()
@@ -6120,17 +6118,20 @@ class RecordChat(meta.MetaChat):
         return page
 
     def add_page(self, turn, args):
-        nb, name = self.notebook, page_name(args.get("page"))
+        nb, name = self._notebook_named(args.get("notebook"), True, "notebook"), page_name(args.get("page"))
         if not name:
             raise ValueError("A page's name is needed.")
         if nb["pages"].get(name, "").strip():
-            raise ValueError(f"There's a page {name} already: propose_edit changes its text.")
+            raise ValueError(f"There's a page {name} in {full_name(nb)} already: propose_edit changes its text.")
         before = {nb["id"]: {name: nb["pages"].get(name)}}
         nb["pages"][name] = str(args.get("text") or "")
-        a = self._pages_act(turn, f"Added {short_page(name)}", before, marks=[("page", page_key(nb, name), "added")])
-        self.win.open_note(name, select=False)
+        here = nb is self.notebook
+        a = self._pages_act(turn, f"Added {short_page(name)}" + ("" if here else f" to {full_name(nb)}"), before,
+                            marks=[("page", page_key(nb, name), "added")], moved_in=nb)
+        if here:
+            self.win.open_note(name, select=False)
         self.pages_changed({})
-        return {"text": f"Added {name} (action {a['id']})."}
+        return {"text": f"Added {name} to {full_name(nb)} (action {a['id']})."}
 
     def delete_page(self, turn, args):
         nb = self.notebook
@@ -6144,13 +6145,13 @@ class RecordChat(meta.MetaChat):
         self.pages_changed({})
         return {"text": f"Deleted {page} (action {a['id']}); undo puts it back."}
 
-    def _notebook_named(self, name, open_one):
+    def _notebook_named(self, name, open_one, said="from_notebook, to_notebook"):
         """The notebook a tool's call names (its name, any case); not named, the one open, if open_one."""
         name = base_name(str(name or ""))
         if not name:
             if open_one and self.notebook is not None:
                 return self.notebook
-            raise ValueError(f"No {book().lower()} is open: say which (from_notebook, to_notebook).")
+            raise ValueError(f"No {book().lower()} is open: say which ({said}).")
         nb = next((t for t in self.win.store.notebooks if full_name(t).lower() == name.lower()), None)
         if nb is None:
             raise ValueError(f"There's no {book().lower()} {name!r}: app_index notebooks lists them.")
@@ -6175,7 +6176,7 @@ class RecordChat(meta.MetaChat):
         moved = {k: v for k, v in moved.items() if k != v or src is not nb}
         if not moved:
             return {"text": "They're there already."}
-        if src is not nb and (waiting := [p["page"] for p in pending_edits(src, self.agent) if p["page"] in moved]):
+        if src is not nb and (waiting := [p["page"] for p in self.pending(src) if p["page"] in moved]):
             raise ValueError(f"{short_page(waiting[0])} has edits of yours waiting: they're accepted or rejected (or "
                              "withdrawn) before it moves to another notebook.")
         if clash := [to for to in moved.values() if to in nb["pages"] and (src is not nb or to not in moved)]:
@@ -6211,7 +6212,7 @@ class RecordChat(meta.MetaChat):
 
     def add_notebook(self, turn, args):
         """add_notebook: a notebook made at once, as a page is (add_page), marked in the notebooks' list, part of the
-        turn's change and undone with it; not opened (this conversation stays the one shown)."""
+        turn's change and undone with it; not opened."""
         store, name = self.win.store, base_name(str(args.get("name") or ""))
         if not name:
             raise ValueError(f"A {book().lower()}'s name is needed.")
@@ -6223,8 +6224,8 @@ class RecordChat(meta.MetaChat):
         a = self.act(turn, f"Made {name}", "notebook", {"drop": made["id"], "expect": copy.deepcopy(made["pages"])},
                      {"add": copy.deepcopy(made)}, [("notebook", made["id"], "added")])
         self.win.books_changed()
-        return {"text": f"Made the {book().lower()} {name} (action {a['id']}); move_pages to_notebook puts pages in "
-                        "it, add_page can't (it adds to the one open)."}
+        return {"text": f"Made the {book().lower()} {name} (action {a['id']}); add_page notebook and move_pages "
+                        "to_notebook put pages in it."}
 
     def edit_page(self, turn, args):
         """edit_page: a page's text changed at once, part of the turn's change to the pages (Meta.act), undone with
@@ -6266,7 +6267,7 @@ class RecordChat(meta.MetaChat):
         notebook, editor = self.notebook, self.win.tabs.get(("note", page))
         text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
         out = []
-        for p in pending_edits(notebook, self.agent):
+        for p in self.pending(notebook):
             if p["page"] != page:
                 continue
             at = editor.edit_start(p) if editor is not None else None
@@ -6346,8 +6347,8 @@ class RecordChat(meta.MetaChat):
         return self._merged(turn, [piece[4] for piece in hit], k0, text[k0:k1], view[s0:at] + new + view[end:s1])
 
     def _new_edit(self, turn, page, start, old, new):
-        p = {"id": uuid.uuid4().hex[:10], "page": page, "old": old, "new": new, "start": start, "status": "pending",
-             "t": time.time()}
+        p = {"id": uuid.uuid4().hex[:10], "notebook": self.notebook.get("id"), "page": page, "old": old, "new": new,
+             "start": start, "status": "pending", "t": time.time()}
         turn["proposals"].append(p)
         self._edited(turn, p)
         return {"text": f"Edit {p['id']} shown on the page {page} for the user to accept or reject. Nothing is written "
@@ -6368,7 +6369,7 @@ class RecordChat(meta.MetaChat):
 
     def list_edits(self, turn, args):
         """list_edits: the agent's edits waiting for the user, page by page, each as the page has its passage now."""
-        pages = sorted({p["page"] for p in pending_edits(self.notebook, self.agent)})
+        pages = sorted({p["page"] for p in self.pending(self.notebook)})
         if args.get("page"):
             page, error = self._page(args)
             if error:
@@ -6382,14 +6383,14 @@ class RecordChat(meta.MetaChat):
             placed = {id(x[3]) for x in spans}
             listed += [{"id": p["id"], "page": page, "old_text": p["old"], "new_text": p["new"],
                         "note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
-                       for p in pending_edits(self.notebook, self.agent) if p["page"] == page and id(p) not in placed]
+                       for p in self.pending(self.notebook) if p["page"] == page and id(p) not in placed]
         if not listed:
             return {"text": "No edits of yours are waiting" + (f" on {pages[0] if pages else args['page']}."
                                                                if args.get("page") else ".")}
         return {"text": json.dumps(listed, ensure_ascii=False, indent=1)}
 
     def _pending_named(self, args):
-        p = next((p for p in pending_edits(self.notebook, self.agent) if p["id"] == str(args.get("id") or "")), None)
+        p = next((p for p in self.pending(self.notebook) if p["id"] == str(args.get("id") or "")), None)
         return p, None if p is not None else {"error": f"No edit of yours with the id {args.get('id')!r} is waiting: "
                                                          "list_edits shows those that are."}
 
@@ -6739,7 +6740,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.notebook_list.select_row(first)
         else:
             self._show(None)
-            self.chat.show(None)  # (Meta's own conversation, as it was left)
+            self.chat.show(None)  # (Meta's conversation, as it was left)
         for chat in chats:  # (the chats open when it last closed, back in their tabs)
             if os.path.exists(chat.get("path") or ""):
                 self.open_chat(chat["path"], select=False, present=False)
@@ -7213,7 +7214,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.content_stack.set_visible_child_name("none")
             self.folders_page.fill()
             if changed:
-                self.chat.show(None)  # (Meta's own conversation, not the notebook left's)
+                self.chat.show(None)  # (Meta's tools on no notebook)
             return
         self.folders_page.fill()
         self.pages.show(notebook)
@@ -7334,7 +7335,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return
         notebook = self.current
         d = Adw.AlertDialog(heading=f"Delete {full_name(notebook)}?",
-                            body=f"Its notes ({len(notebook['pages'])} pages) and conversation go with it. "
+                            body=f"Its notes ({len(notebook['pages'])} pages) go with it. "
                                  "The folders it's attached to aren't touched.")
         d.add_response("cancel", "Cancel")
         d.add_response("delete", "Delete")

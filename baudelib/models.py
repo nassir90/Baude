@@ -311,11 +311,19 @@ def runs_on(value):
     return (proxied(value) or (None,))[0]
 
 
+CODEX_DEFAULT = {"value": "codex/default", "displayName": "Codex (default model)"}
+
+
+def codex_exe():
+    return shutil.which(os.environ.get("BAUDE_CODEX", "codex"))
+
+
 def model_program(value):
-    """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude". A
-    model run on another host as an agent: what runs it there."""
+    """The program a model runs on: Claude Code, Codex, apple-claude, or pi-claude."""
     if (agent := proxied(value)) is not None:  # (only a model with no API is run so: Apple's, else MLX's)
         return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
+    if isinstance(value, str) and value.startswith("codex/"):
+        return "codex"
     if value == APPLE_MODEL["value"]:
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
@@ -335,6 +343,8 @@ def pi_exe():
 # conversation on (apple-claude remembers nothing). transcript: whether it keeps a Claude Code transcript of it (only
 # claude: the others' are kept for them where they're needed, as the headless server does)
 PROGRAMS = {
+    "codex": {"exe": "codex_exe", "modes": False, "effort": True, "first": None, "resumes": True,
+              "transcript": False},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,
                "transcript": True},
     "apple": {"exe": "apple_exe", "modes": False, "effort": False, "first": "--resume", "resumes": False,
@@ -380,7 +390,7 @@ def launch(model, mode, effort, session_id=None, resumed=False):
     resume, extra = None, ()
     if session_id and (resumed and p["resumes"] or p["first"] == "--resume"):
         resume = session_id
-    elif session_id:
+    elif session_id and p["first"]:
         extra = (p["first"], session_id)
     if p["name"] == "claude" and os.environ.get("BAUDE_CHROME", "1") != "0":  # (Claude in Chrome, as claude --chrome:
         from baudelib.claude import claude_exe, has_flag  # browser use, in the browser you're signed in to; off with

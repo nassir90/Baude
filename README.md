@@ -55,6 +55,25 @@ the window's, till a model with a bigger window is picked or the chat's cleared;
 has it act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too),
 from anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
 
+## Codex backend (draft)
+
+Install and sign into the Codex CLI on the machine hosting the session. Baude looks for
+`codex` on the host process's PATH. Set `BAUDE_CODEX` to the executable path if needed,
+then restart the Baude host process. Start a new chat with **Codex (default model)**,
+or use the headless entry point:
+
+```bash
+python3 baude_oneshot.py --model codex/default --cwd . "Describe this repository"
+```
+
+The headless entry point also accepts `codex/<model-id>`. Codex App Server runs the
+turns using Codex's configured sandbox and approval policy. Baude stores a display
+history for chats started through Baude, and resumes the native Codex thread by ID.
+Existing standalone Codex threads are outside the draft's scope. The draft supports
+streaming text, command and file-change results, MCP tool results, basic approval
+prompts, and interruption. Claude slash commands, conversation forks and rewinds,
+and Codex-specific approval requests without a Baude UI are outside its scope.
+
 ## Local models
 
 Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model

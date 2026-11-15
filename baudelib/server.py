@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, mesh, models, notes, providers, selfupdate, transcripts, wire
+from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -443,7 +443,8 @@ class Server:
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
-        return (claudes or self.me.get("claude_models") or []) + models.runnable_models()
+        codex_models = [models.CODEX_DEFAULT] if models.codex_exe() else []
+        return (claudes or self.me.get("claude_models") or []) + codex_models + models.runnable_models()
 
     def init(self, said, fresh=False):
         """What a session's program said to initialize (fresh: just now, not kept from before), with every model this
@@ -456,7 +457,7 @@ class Server:
         MLX's, the model itself here)?"""
         if (agent := models.proxied(model)) is not None:  # (another member's, run there: while it's in the mesh)
             return any(m.get("id") == agent[0] for m in self.mesh.view()["members"])
-        if models.model_program(model) == "claude":
+        if models.model_program(model) in ("claude", "codex"):
             return not models.launch(model, None, None)["missing"]
         if isinstance(model, str) and model.startswith(models.SERVED):
             return providers.pi_installed()
@@ -1022,12 +1023,21 @@ class Server:
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
             agentproxy.PiSession.release(agentproxy.pi_sessions(), s.meta.get("cli_id") or s.id)  # elsewhere no more)
-        s.proc = kind(
-            lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
-            s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,
-            env={**s.env, **(self.env or {})} or None,  # (a head's, as it gave it; the host's own extras over it)
-            exe=run["exe"] if run["program"] != "claude" else self.exe,
-            **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
+        if run["program"] == "codex":
+            # The server keeps the display history. Codex resumes its own thread using its native ID.
+            s.proc = codex.CodexProc(
+                lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
+                s.meta["cwd"], s.meta["model"],
+                resume=None if s.meta.get("ephemeral") else s.meta.get("cli_id"),
+                effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
+                env={**s.env, **(self.env or {})})
+        else:
+            s.proc = kind(
+                lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
+                s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,
+                env={**s.env, **(self.env or {})} or None,  # (a head's, as it gave it; the host's own extras over it)
+                exe=run["exe"] if run["program"] != "claude" else self.exe,
+                **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.used = time.time()
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
@@ -1044,6 +1054,8 @@ class Server:
         """(lock held) What a client sends its claude."""
         kind = msg.get("type")
         if kind == "user":
+            if models.model_program(s.meta.get("model")) == "codex":
+                codex.user_input((msg.get("message") or {}).get("content", ""))
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)

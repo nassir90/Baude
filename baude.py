@@ -5628,6 +5628,11 @@ def tool_input_view(name, inp):
         shell = "bash" if base != "PowerShell" else "powershell"
         add(CodeBlock(inp["command"], shell, syntax=shell))
         rest = _kv_rows(inp, skip=("command", "description"))
+    elif base == "Codex file changes":
+        for change in inp.get("changes", []):
+            add(_path_label(change["path"], ""))
+            add(CodeBlock(change.get("diff") or "", "diff"))
+        rest = _kv_rows(inp, skip=("changes",))
     elif base == "Edit" and "file_path" in inp:
         add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
         add(diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
@@ -14008,7 +14013,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def program_name(self):
         """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
-        return {"pi": "pi", "apple": "Apple's model"}.get(model_program(self.model), "claude")
+        return {"pi": "pi", "apple": "Apple's model", "codex": "Codex"}.get(model_program(self.model), "claude")
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till

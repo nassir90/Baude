@@ -333,9 +333,15 @@ def codex_choices(entries):
         seen.add(model_id)
         levels = [opt["reasoningEffort"] for opt in entry.get("supportedReasoningEfforts") or []
                   if opt.get("reasoningEffort")]
+        name = entry.get("displayName") or model_id
+        if name.upper().startswith("GPT-"):
+            name = "GPT " + name[4:].replace("-", " ")
+            prefix, sep, variant = name.rpartition(" ")
+            if variant.lower() in ("sol", "astra", "terra", "luna"):
+                name = prefix + sep + variant.title()
         choices.append({
             "value": f"codex/{model_id}", "resolvedModel": model_id,
-            "displayName": entry.get("displayName") or model_id,
+            "displayName": name,
             "description": entry.get("description") or "",
             "supportsEffort": bool(levels), "supportedEffortLevels": levels,
             "defaultEffort": entry.get("defaultReasoningEffort"), "isDefault": bool(entry.get("isDefault")),

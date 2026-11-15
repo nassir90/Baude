@@ -14468,6 +14468,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         shown = (pending[1] if pending and pending[0] is self.proc else None) or shown or self.model or \
             getattr(self, "model_shown", None)
 
+        if shown == "codex/default":
+            default = self.models_info.get(shown, {}).get("resolvedModel")
+            shown = f"codex/{default}" if default else None
+
         def pid_of(m):
             return m.get("provider") or providerslib.provider_of(m["value"])
 
@@ -14485,7 +14489,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if pid is not None and shown not in seen:
             offered.append(info(shown))
         kinds = providerslib.alike(offered, [shown] if shown else [])
-        listed = [m for m in self.models_info.values() if m["value"] != "default" and m["value"] not in seen and
+        listed = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and m["value"] not in seen and
                   pid_of(m) is None] + [lead for lead, _ms in kinds]
         if shown and not any(m["value"] == shown for m in listed):  # (Claude's, by a name claude didn't list)
             listed.append(info(shown))
@@ -16587,6 +16591,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.check_host_version()
         if (app := self.get_application()) is not None:
             app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)
+        if (host := local_host()) is not None and "models" in host.info:
+            meta.set_codex_catalog(host.info["models"])
         codex_changed = self.merge_codex_models()
         if codex_changed or self.providers_listed() != getattr(self, "providers_seen", None):
             self.sync_providers()
@@ -16752,7 +16758,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         def offered(r):
             host = r or local_host()
             return [(m["value"], m.get("displayName") or m["value"])
-                    for m in (host.info.get("models", []) if host is not None else [])] or MODELS
+                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
         servers_dd = agent_dd = None
         if said:  # (the host it's to be on: said, not picked)
             field("Host", Gtk.Label(label=named(servers[0]), xalign=0))

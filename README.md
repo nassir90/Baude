@@ -61,8 +61,9 @@ Install and sign into the Codex CLI on the machine hosting the session. Baude lo
 `codex` on the host process's PATH. Set `BAUDE_CODEX` to the executable path if needed,
 then restart the Baude host process. The model picker lists the GPT-6, GPT-6.1,
 and GPT-5.6 variants that Codex offers on that host, with each model's reasoning
-effort options. **Codex (default model)** follows the host's default. You can also
-choose a specific model from the headless entry point:
+effort options. Meta's Intelligence picker uses the local host's Codex catalog
+and gives Codex access to Meta's app tools. You can also choose a model from the
+headless entry point:
 
 ```bash
 python3 baude_oneshot.py --model codex/gpt-6.1-sol --cwd . "Describe this repository"

@@ -188,8 +188,12 @@ class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
-                 catalog=(), mode="default"):
+                 catalog=(), mode="default", meta_system=None, meta_relay=None, dispatch=None):
         self.on_msg = on_msg
+        self.dispatch = dispatch or (lambda fn, *args: fn(*args))
+        self.req_ids = itertools.count(1)
+        self.context_usage = {}
+        self.meta_only = meta_system is not None
         self.model, self.catalog = model, catalog
         self.mode = codex_mode(mode)
         self.effort = codex_effort(catalog, model, effort)
@@ -201,7 +205,8 @@ class CodexProc(AppServer):
         self.thread = self.turn = None
         self.last_text = ""
         self.starting = self.interrupting = False
-        super().__init__(exe, cwd, env, on_exit, lambda line: self.emit("_stderr", text=line))
+        super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
+                         lambda line: self.emit("_stderr", text=line))
         params = {"cwd": cwd, **permission_params(self.mode)}
         if model != "codex/default":
             params["model"] = model.removeprefix("codex/")
@@ -222,11 +227,27 @@ class CodexProc(AppServer):
             self.result(error)
             self.kill()
 
-        self.initialize(lambda: self.rpc("thread/resume" if resume else "thread/start", params, opened, failed),
+        def start():
+            self.rpc("thread/resume" if resume else "thread/start", params, opened, failed)
+
+        def start_meta(result):
+            servers = (result.get("config") or {}).get("mcp_servers") or {}
+            params.update(baseInstructions=meta_system, sandbox="read-only", approvalPolicy="never",
+                          config={
+                              "mcp_servers": {**{name: {"enabled": False} for name in servers}, "meta": meta_relay},
+                              "features": {name: False for name in (
+                                  "apps", "plugins", "shell_tool", "unified_exec", "multi_agent", "multi_agent_v2",
+                                  "code_mode", "skill_search", "skill_mcp_dependency_install",
+                              )},
+                              "web_search": "disabled",
+                          })
+            start()
+
+        self.initialize(lambda: self.rpc("config/read", {"cwd": cwd}, start_meta, failed) if self.meta_only else start(),
                         failed)
 
     def emit(self, kind, **fields):
-        self.on_msg(self, {"type": kind, **fields})
+        self.dispatch(self.on_msg, self, {"type": kind, **fields})
 
     def reply(self, rid, result=None, error=None):
         fields = {"subtype": "error", "error": error} if error else {"subtype": "success", "response": result or {}}
@@ -254,9 +275,10 @@ class CodexProc(AppServer):
             usage = params.get("tokenUsage") or {}
             used = (usage.get("last") or {}).get("totalTokens")
             if isinstance(used, int):
-                self.emit("system", subtype="codex_context",
-                          usage={"totalTokens": used, "maxTokens": usage.get("modelContextWindow"),
-                                 "showWithoutLimit": True})
+                with self.lock:
+                    self.context_usage = {"totalTokens": used, "maxTokens": usage.get("modelContextWindow"),
+                                          "showWithoutLimit": True}
+                self.emit("system", subtype="codex_context", usage=self.context_usage)
         elif method == "item/agentMessage/delta":
             self.delta(params["itemId"], params["delta"])
         elif method in ("item/started", "item/completed"):
@@ -306,7 +328,8 @@ class CodexProc(AppServer):
                             params["model"] = default["resolvedModel"]
                     if self.effort:
                         params["effort"] = self.effort
-                    params.update(permission_params(self.mode, turn=True))
+                    if not self.meta_only:
+                        params.update(permission_params(self.mode, turn=True))
                     self.starting = True
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return
@@ -404,6 +427,8 @@ class CodexProc(AppServer):
         with self.lock:
             if subtype == "interrupt":
                 self.interrupt()
+            elif subtype == "get_context_usage":
+                result = self.context_usage
             elif subtype == "get_settings":
                 result = {"applied": {"model": self.model, "effort": self.effort}}
             elif subtype == "set_model" and str(request.get("model")).startswith("codex/"):

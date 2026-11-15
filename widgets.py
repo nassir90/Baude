@@ -1720,8 +1720,15 @@ class ContextUsage(Gtk.Box):
 
     def set_usage(self, usage):
         used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
+        if not total and usage.get("showWithoutLimit"):
+            self.bar.set_visible(False)
+            self.over = False
+            self.label.set_text(f"context: {fmt_tokens(used)}" if usage.get("totalTokens") is not None else "context —")
+            self.set_tooltip_text("Context window usage")
+            return
         if not total:
             return
+        self.bar.set_visible(True)
         self.over = used > total
         self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {used / total:.0%}")
         self.bar.set_value(min(1.0, used / total))
@@ -1733,6 +1740,7 @@ class ContextUsage(Gtk.Box):
         """No session's: nothing used yet."""
         self.over = False
         self.label.set_text("context —")
+        self.bar.set_visible(True)
         self.bar.set_value(0)
         self.set_tooltip_text("Context window usage")
 

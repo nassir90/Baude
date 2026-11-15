@@ -13272,7 +13272,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.outgrown:
             self.ctx_box.bar.set_value(1)
         # (a turn's stop button kept: asked again as it ends)
-        self.exhausted.set((self.ctx_box.over or self.outgrown) and not self.busy)
+        # Codex can compact the thread before its next turn.
+        over = self.ctx_box.over and model_program(self.model) != "codex"
+        self.exhausted.set((over or self.outgrown) and not self.busy)
 
     def refresh_effort(self):
         self.request({"subtype": "get_settings"},
@@ -14335,15 +14337,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sync_local()
 
     def sync_local(self):
-        """Apple's model and those on this Mac: Manual their only mode, and no effort but the thinking levels of one
-        that thinks; the pickers for them gone while one of them is the one."""
-        local = model_program(self.model) != "claude"
-        self.effort_dd.set_visible(not local or self.effort_dd.get_sensitive())  # (a local model that thinks: its levels)
-        self.mode_dd.set_visible(not local)
-        if local and self.mode != "default":
-            self.mode = "default"
-            if "default" in self.mode_dd.values:
-                self.mode_dd.select("default")
+        """Show the permission and effort controls available for this backend."""
+        program = model_program(self.model)
+        self.effort_dd.set_visible(program == "claude" or self.effort_dd.get_sensitive())
+        self.mode_dd.set_visible(program in ("claude", "codex"))
+        self.sync_mode(self.mode)
 
     def sync_models(self, models):
         """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and the models this
@@ -14554,15 +14552,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.sync_providers()
 
     def default_mode(self):
-        """Every chat opened (a new one, or one picked in the sidebar) starts in Auto, whatever mode the chat before
-        was left in."""
-        self.mode = "auto"
-        if self.mode_dd.values:
-            self.mode_dd.select("auto")
+        """Pick the backend's starting mode without inheriting the previous chat's mode."""
+        self.sync_mode("default" if model_program(self.model) == "codex" else "auto")
 
     def sync_mode(self, mode):
-        if not self.mode_dd.values:
-            self.mode_dd.set_choices(MODES)
+        program = model_program(self.model)
+        choices = modelslib.CODEX_MODES if program == "codex" else MODES
+        values = [value for value, _label in choices]
+        if self.mode_dd.values != values:
+            self.mode_dd.set_choices(choices)
+        if mode and program == "codex":
+            mode = modelslib.codex_mode(mode)
+        elif mode and program != "claude":
+            mode = "default"
         if mode:
             self.mode = mode
             self.mode_dd.select(mode)  # (quietly: not asked of claude again)
@@ -14697,6 +14699,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+        elif st == "codex_context":
+            self.show_context(msg["usage"])
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)
         elif st == "compact_boundary":
@@ -16797,7 +16801,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             r = server()
             model = offered(r)[agent_dd.get_selected()][0] if agent_dd is not None else self.model
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
-                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(), "mode": self.mode,
+                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(),
+                      "mode": "default" if model_program(model) == "codex" else self.mode,
                       "group": group_entry.get_text().strip() or None}
             save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), place(r): params["cwd"]})
             start = lambda r: r.request(params, lambda reply: self.remote_started(r, reply))  # noqa: E731
@@ -16940,9 +16945,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         conversation, but on the same server, in the same folder and group, opened to be written in."""
         r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
         effort = self.local_effort if model_program(model) == "pi" else self.effort
+        mode = "default" if "codex" in (model_program(model), model_program(self.model)) else self.mode
         self.note(f"model → {label}: a new conversation on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
-                   "mode": self.mode, "group": listed.get("group"), "draft": True,
+                   "mode": mode, "group": listed.get("group"), "draft": True,
                    **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))
 

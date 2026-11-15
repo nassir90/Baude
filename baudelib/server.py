@@ -1062,7 +1062,7 @@ class Server:
                 s.meta["cwd"], s.meta["model"],
                 resume=None if s.meta.get("ephemeral") else s.meta.get("cli_id"),
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
-                env={**s.env, **(self.env or {})}, catalog=self.codex_models())
+                env={**s.env, **(self.env or {})}, catalog=self.codex_models(), mode=run["mode"])
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -1116,6 +1116,8 @@ class Server:
         sub, undo = request.get("subtype"), None
         answer = lambda response: conn.send({"op": "claude", "session": s.id, "msg": {  # noqa: E731
             "type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": response}}})
+        if sub == "get_context_usage" and models.model_program(s.meta.get("model")) == "codex":
+            return answer(s.meta.get("context_usage") or {"showWithoutLimit": True})
         if sub == "initialize":
             if s.meta.get("init") is not None and (s.proc is None or s.proc.init_rid is None):
                 return answer(self.init({**s.meta["init"], "current_permission_mode": s.meta.get("mode") or "default"}))
@@ -1132,6 +1134,10 @@ class Server:
                  models.runs_on(request.get("model")) != models.runs_on(s.meta.get("model"))):
             s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model, and one on another host runs
             s.proc.kill()  # there: the next message starts it on this one, pi's session going on: nothing's gone)
+        if sub == "set_permission_mode" and models.model_program(s.meta.get("model")) == "codex" and \
+                models.codex_mode(request.get("mode")) != request.get("mode"):
+            return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
+                "subtype": "error", "request_id": rid, "error": "Unsupported Codex permission mode"}}})
         if sub in SETTINGS:
             key, field = SETTINGS[sub]
             undo = (key, s.meta.get(key), request.get(field) or s.meta.get(key))  # (put back if claude says no)
@@ -1233,6 +1239,8 @@ class Server:
                     conn.send({"op": "claude", "session": s.id, "msg": msg})
                 self.changed()
                 return
+            if kind == "system" and msg.get("subtype") == "codex_context":
+                s.meta["context_usage"] = msg["usage"]
             if kind == "system" and msg.get("subtype") == "status" and msg.get("permissionMode") \
                     and msg["permissionMode"] != s.meta.get("mode") \
                     and not any(u and u[0] == "mode" for _c, _r, u in s.routes.values()):
@@ -1265,6 +1273,8 @@ class Server:
                 s.queued = []
                 s.busy, s.used = False, time.time()
                 s.asks.clear()
+                if s.meta.get("context_usage") is not None:
+                    self.save(s)
                 self.changed()
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),

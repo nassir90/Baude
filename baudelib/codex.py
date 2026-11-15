@@ -7,7 +7,34 @@ import threading
 from collections import deque
 
 from baudelib.claude import ClaudeProc
-from baudelib.models import codex_effort
+from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
+
+
+def permission_params(mode, *, turn=False):
+    """Manual and automatic review use the same workspace sandbox."""
+    full = mode == "bypassPermissions"
+    params = {"approvalPolicy": "never" if full else "on-request",
+              "approvalsReviewer": "auto_review" if mode == "auto" else "user"}
+    if not turn:
+        params["sandbox"] = "danger-full-access" if full else "workspace-write"
+    elif full:
+        params["sandboxPolicy"] = {"type": "dangerFullAccess"}
+    else:
+        params["sandboxPolicy"] = {"type": "workspaceWrite", "writableRoots": [],
+                                   "networkAccess": False, "excludeTmpdirEnvVar": False, "excludeSlashTmp": False}
+    return params
+
+
+def visible_stderr(line):
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return True
+    if not isinstance(record, dict) or record.get("target") != "codex_skills::interface":
+        return True
+    fields = record.get("fields")
+    message = str(fields.get("message", "")) if isinstance(fields, dict) else ""
+    return not message.startswith(("ignoring interface.icon_small:", "ignoring interface.icon_large:"))
 
 
 def user_input(content):
@@ -73,7 +100,8 @@ class AppServer(ClaudeProc):
 
     def read_stderr(self):
         for line in self.p.stderr:
-            self.stderr(line.rstrip())
+            if visible_stderr(line):
+                self.stderr(line.rstrip())
 
     def rpc(self, method, params, done, failed):
         with self.lock:
@@ -160,9 +188,10 @@ class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
-                 catalog=()):
+                 catalog=(), mode="default"):
         self.on_msg = on_msg
         self.model, self.catalog = model, catalog
+        self.mode = codex_mode(mode)
         self.effort = codex_effort(catalog, model, effort)
         self.init_rid = "codex-initialize"
         self.asks, self.streams, self.patches = {}, {}, {}
@@ -173,7 +202,7 @@ class CodexProc(AppServer):
         self.last_text = ""
         self.starting = self.interrupting = False
         super().__init__(exe, cwd, env, on_exit, lambda line: self.emit("_stderr", text=line))
-        params = {"cwd": cwd}
+        params = {"cwd": cwd, **permission_params(self.mode)}
         if model != "codex/default":
             params["model"] = model.removeprefix("codex/")
         if resume:
@@ -184,7 +213,7 @@ class CodexProc(AppServer):
         def opened(result):
             self.thread = result["thread"]["id"]
             self.emit("system", subtype="init", session_id=self.thread, model=result.get("model") or self.model)
-            self.reply(self.init_rid, {"current_permission_mode": "default", "commands": [],
+            self.reply(self.init_rid, {"current_permission_mode": self.mode, "commands": [],
                                        "applied": {"model": self.model, "effort": self.effort}})
             self.advance()
 
@@ -221,6 +250,13 @@ class CodexProc(AppServer):
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
             self.finish(error, turn.get("durationMs"))
+        elif method == "thread/tokenUsage/updated":
+            usage = params.get("tokenUsage") or {}
+            used = (usage.get("last") or {}).get("totalTokens")
+            if isinstance(used, int):
+                self.emit("system", subtype="codex_context",
+                          usage={"totalTokens": used, "maxTokens": usage.get("modelContextWindow"),
+                                 "showWithoutLimit": True})
         elif method == "item/agentMessage/delta":
             self.delta(params["itemId"], params["delta"])
         elif method in ("item/started", "item/completed"):
@@ -270,6 +306,7 @@ class CodexProc(AppServer):
                             params["model"] = default["resolvedModel"]
                     if self.effort:
                         params["effort"] = self.effort
+                    params.update(permission_params(self.mode, turn=True))
                     self.starting = True
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return
@@ -372,6 +409,9 @@ class CodexProc(AppServer):
             elif subtype == "set_model" and str(request.get("model")).startswith("codex/"):
                 self.model = request["model"]
                 self.effort = codex_effort(self.catalog, self.model, self.effort)
+            elif subtype == "set_permission_mode" and isinstance(request.get("mode"), str) \
+                    and request["mode"] in CODEX_MODE_VALUES:
+                self.mode = request["mode"]
             elif subtype == "apply_flag_settings":
                 effort = (request.get("settings") or {}).get("effortLevel")
                 self.effort = codex_effort(self.catalog, self.model, effort)

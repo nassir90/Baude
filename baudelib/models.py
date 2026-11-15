@@ -311,6 +311,14 @@ def runs_on(value):
     return (proxied(value) or (None,))[0]
 
 
+CODEX_MODES = [("default", "Ask for approval"), ("auto", "Approve for me"), ("bypassPermissions", "Full access")]
+CODEX_MODE_VALUES = frozenset(value for value, _label in CODEX_MODES)
+
+
+def codex_mode(mode):
+    return mode if isinstance(mode, str) and mode in CODEX_MODE_VALUES else "default"
+
+
 CODEX_DEFAULT = {"value": "codex/default", "displayName": "Codex (default model)"}
 
 
@@ -377,7 +385,7 @@ def pi_exe():
 # conversation on (apple-claude remembers nothing). transcript: whether it keeps a Claude Code transcript of it (only
 # claude: the others' are kept for them where they're needed, as the headless server does)
 PROGRAMS = {
-    "codex": {"exe": "codex_exe", "modes": False, "effort": True, "first": None, "resumes": True,
+    "codex": {"exe": "codex_exe", "modes": True, "effort": True, "first": None, "resumes": True,
               "transcript": False},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,
                "transcript": True},
@@ -430,6 +438,8 @@ def launch(model, mode, effort, session_id=None, resumed=False):
         from baudelib.claude import claude_exe, has_flag  # browser use, in the browser you're signed in to; off with
         if has_flag(claude_exe(), "--chrome"):             # BAUDE_CHROME=0, and for a claude too old to know it)
             extra = (*extra, "--chrome")
+    if p["name"] == "codex":
+        mode = codex_mode(mode)
     return {"program": p["name"], "exe": exe, "missing": bool(p["exe"]) and exe is None,
             "mode": mode if p["modes"] else "default",
             "effort": effort if p["effort"] else None, "resume": resume, "extra": extra}

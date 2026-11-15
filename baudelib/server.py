@@ -342,6 +342,9 @@ class Server:
         os.write(self.lock_file, str(os.getpid()).encode())
         self.lock = threading.RLock()
         self.rids = itertools.count(1)
+        self.codex_catalog = ()
+        self.codex_refresh_at = 0.0
+        self.codex_refreshing = False
         me = os.path.join(self.state_dir, "server.json")
         try:
             with open(me, encoding="utf-8") as f:
@@ -443,8 +446,36 @@ class Server:
         if claudes and claudes != self.me.get("claude_models"):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
-        codex_models = [models.CODEX_DEFAULT] if models.codex_exe() else []
+        codex_models = self.codex_models()
         return (claudes or self.me.get("claude_models") or []) + codex_models + models.runnable_models()
+
+    def codex_models(self):
+        exe = models.codex_exe()
+        if not exe:
+            return []
+        with self.lock:
+            if not self.codex_refreshing and time.monotonic() >= self.codex_refresh_at:
+                self.codex_refreshing = True
+                threading.Thread(target=self.refresh_codex_models, args=(exe,), daemon=True).start()
+            return self.codex_catalog or [models.CODEX_DEFAULT]
+
+    def refresh_codex_models(self, exe):
+        choices, retry = None, 60
+        try:
+            choices = models.codex_choices(codex.list_models(exe, self.env))
+            retry = 300
+        except (OSError, RuntimeError) as exc:
+            self.log(f"Codex model discovery: {exc}")
+        finally:
+            with self.lock:
+                self.codex_refresh_at = time.monotonic() + retry
+                self.codex_refreshing = False
+                if choices is not None and choices != self.codex_catalog:
+                    self.codex_catalog = choices
+                    for session in self.sessions.values():
+                        if isinstance(session.proc, codex.CodexProc):
+                            session.proc.update_catalog(choices)
+                    self.changed()
 
     def init(self, said, fresh=False):
         """What a session's program said to initialize (fresh: just now, not kept from before), with every model this
@@ -465,7 +496,8 @@ class Server:
 
     def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
-                "models": [{"value": m["value"], "displayName": m.get("displayName") or m["value"]}
+                "models": [m if models.model_program(m["value"]) == "codex" else
+                           {"value": m["value"], "displayName": m.get("displayName") or m["value"]}
                            for m in self.models()],
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
@@ -1030,7 +1062,7 @@ class Server:
                 s.meta["cwd"], s.meta["model"],
                 resume=None if s.meta.get("ephemeral") else s.meta.get("cli_id"),
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
-                env={**s.env, **(self.env or {})})
+                env={**s.env, **(self.env or {})}, catalog=self.codex_models())
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -1106,6 +1138,8 @@ class Server:
             s.meta[key] = undo[2]
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
+        if models.model_program(s.meta.get("model")) == "codex":
+            s.meta["effort"] = models.codex_effort(self.codex_models(), s.meta["model"], s.meta.get("effort"))
         self.save(s)
         if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
             self.changed()  # (stopped: answered from what's kept, for when it runs; only a message starts it, and a

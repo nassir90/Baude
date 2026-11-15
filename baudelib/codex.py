@@ -7,6 +7,7 @@ import threading
 from collections import deque
 
 from baudelib.claude import ClaudeProc
+from baudelib.models import codex_effort
 
 
 def user_input(content):
@@ -46,25 +47,132 @@ def tool(item):
     return None
 
 
-class CodexProc(ClaudeProc):
-    """Own one stdio App Server process per session, using Codex's approval and sandbox settings."""
+class AppServer(ClaudeProc):
+    """A stdio JSON-RPC connection to one Codex App Server subprocess."""
 
-    def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False):
-        self.on_msg, self.on_exit = on_msg, on_exit
-        self.model, self.effort = model, effort
-        self.init_rid = "codex-initialize"
-        self.asks, self.requests, self.streams = {}, {}, {}
-        self.tools = set()
-        self.patches = {}
-        self.inputs = deque()
-        self.ids, self.indices = itertools.count(1), itertools.count()
-        self.thread = self.turn = None
-        self.last_text = ""
-        self.starting = self.interrupting = False
+    def __init__(self, exe, cwd, env, on_exit, stderr):
+        self.on_exit, self.stderr = on_exit, stderr
         self.lock = threading.RLock()
+        self.ids, self.requests = itertools.count(1), {}
         self.p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   text=True, bufsize=1, env=os.environ | (env or {}))
+
+    def initialize(self, done, failed):
+        def initialized(_):
+            self.write({"method": "initialized"})
+            done()
+
+        self.rpc("initialize", {"clientInfo": {"name": "baude", "version": "0.1"}}, initialized, failed)
+        threading.Thread(target=self.read_stdout, daemon=True).start()
+        threading.Thread(target=self.read_stderr, daemon=True).start()
+
+    def write(self, obj):
+        with self.lock:
+            ClaudeProc.send(self, obj)
+
+    def read_stderr(self):
+        for line in self.p.stderr:
+            self.stderr(line.rstrip())
+
+    def rpc(self, method, params, done, failed):
+        with self.lock:
+            rid = next(self.ids)
+            self.requests[rid] = done, failed
+            self.write({"id": rid, "method": method, "params": params})
+
+    def read_stdout(self):
+        try:
+            for line in self.p.stdout:
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    self.stderr(line.rstrip())
+                    continue
+                self.receive(msg)
+        finally:
+            self.close_stdin()
+            self.on_exit(self.p.wait())
+
+    def receive(self, msg):
+        method, rid = msg.get("method"), msg.get("id")
+        if method:
+            self.event(method, rid, msg.get("params") or {})
+            return
+        with self.lock:
+            callbacks = self.requests.pop(rid, None)
+        if callbacks:
+            done, failed = callbacks
+            if "error" in msg:
+                failed(msg["error"].get("message") or "Codex request failed")
+            else:
+                done(msg.get("result") or {})
+
+    def event(self, method, rid, params):
+        if rid is not None:
+            self.reject(rid, f"Unsupported Codex request: {method}")
+
+    def reject(self, rid, message):
+        self.write({"id": rid, "error": {"code": -32601, "message": message}})
+
+
+def list_models(exe, env=None, timeout=15):
+    """Get the visible model catalog without creating a Codex thread."""
+    from queue import Empty, Queue
+
+    outcome = Queue()
+    entries, cursors = [], set()
+
+    def failed(error):
+        outcome.put(RuntimeError(error))
+
+    def page(result):
+        entries.extend(result.get("data") or [])
+        cursor = result.get("nextCursor")
+        if not cursor:
+            outcome.put(entries)
+        elif cursor in cursors:
+            failed("Codex model list returned a repeated cursor")
+        else:
+            cursors.add(cursor)
+            app.rpc("model/list", {"cursor": cursor}, page, failed)
+
+    app = AppServer(exe, None, env, lambda code: failed(f"App Server exited ({code})"), lambda _: None)
+    try:
+        app.initialize(lambda: app.rpc("model/list", {}, page, failed), failed)
+        try:
+            result = outcome.get(timeout=timeout)
+        except Empty:
+            raise RuntimeError("Codex model list timed out") from None
+        if isinstance(result, Exception):
+            raise result
+        return result
+    finally:
+        app.kill()
+        try:
+            app.p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            app.p.kill()
+            app.p.wait()
+
+
+class CodexProc(AppServer):
+    """Translate one Codex thread to Baude's host event interface."""
+
+    def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
+                 catalog=()):
+        self.on_msg = on_msg
+        self.model, self.catalog = model, catalog
+        self.effort = codex_effort(catalog, model, effort)
+        self.init_rid = "codex-initialize"
+        self.asks, self.streams, self.patches = {}, {}, {}
+        self.tools = set()
+        self.inputs = deque()
+        self.indices = itertools.count()
+        self.thread = self.turn = None
+        self.last_text = ""
+        self.starting = self.interrupting = False
+        super().__init__(exe, cwd, env, on_exit, lambda line: self.emit("_stderr", text=line))
         params = {"cwd": cwd}
         if model != "codex/default":
             params["model"] = model.removeprefix("codex/")
@@ -76,7 +184,8 @@ class CodexProc(ClaudeProc):
         def opened(result):
             self.thread = result["thread"]["id"]
             self.emit("system", subtype="init", session_id=self.thread, model=result.get("model") or self.model)
-            self.reply(self.init_rid, {"current_permission_mode": "default", "commands": []})
+            self.reply(self.init_rid, {"current_permission_mode": "default", "commands": [],
+                                       "applied": {"model": self.model, "effort": self.effort}})
             self.advance()
 
         def failed(error):
@@ -84,14 +193,8 @@ class CodexProc(ClaudeProc):
             self.result(error)
             self.kill()
 
-        def initialized(_):
-            with self.lock:
-                super(CodexProc, self).send({"method": "initialized"})
-                self.rpc("thread/resume" if resume else "thread/start", params, opened, failed)
-
-        self.rpc("initialize", {"clientInfo": {"name": "baude", "version": "0.1"}}, initialized, failed)
-        threading.Thread(target=self.read_stdout, daemon=True).start()
-        threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
+        self.initialize(lambda: self.rpc("thread/resume" if resume else "thread/start", params, opened, failed),
+                        failed)
 
     def emit(self, kind, **fields):
         self.on_msg(self, {"type": kind, **fields})
@@ -100,38 +203,7 @@ class CodexProc(ClaudeProc):
         fields = {"subtype": "error", "error": error} if error else {"subtype": "success", "response": result or {}}
         self.emit("control_response", response={"request_id": rid, **fields})
 
-    def rpc(self, method, params, done, failed):
-        with self.lock:
-            rid = next(self.ids)
-            self.requests[rid] = done, failed
-            super().send({"id": rid, "method": method, "params": params})
-
-    def read_stdout(self):
-        try:
-            for line in self.p.stdout:
-                try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    self.emit("_stderr", text=line.rstrip())
-                    continue
-                self.receive(msg)
-        finally:
-            self.close_stdin()
-            self.on_exit(self.p.wait())
-
-    def receive(self, msg):
-        method, rid = msg.get("method"), msg.get("id")
-        if not method:
-            with self.lock:
-                callbacks = self.requests.pop(rid, None)
-            if callbacks:
-                done, failed = callbacks
-                if "error" in msg:
-                    failed(msg["error"].get("message") or "Codex request failed")
-                else:
-                    done(msg.get("result") or {})
-            return
-        params = msg.get("params") or {}
+    def event(self, method, rid, params):
         if params.get("threadId") not in (None, self.thread):
             if rid is not None:
                 self.reject(rid, "Request is for a different Codex thread")
@@ -192,6 +264,10 @@ class CodexProc(ClaudeProc):
                         params["clientUserMessageId"] = msg["uuid"]
                     if self.model != "codex/default":
                         params["model"] = self.model.removeprefix("codex/")
+                    else:
+                        default = next((m for m in self.catalog if m["value"] == self.model), {})
+                        if default.get("resolvedModel"):
+                            params["model"] = default["resolvedModel"]
                     if self.effort:
                         params["effort"] = self.effort
                     self.starting = True
@@ -240,10 +316,6 @@ class CodexProc(ClaudeProc):
                     "is_error": item.get("status") in ("failed", "declined") or bool(item.get("exitCode")),
                 }]})
 
-    def reject(self, rid, message):
-        with self.lock:
-            super().send({"id": rid, "error": {"code": -32601, "message": message}})
-
     def approval(self, method, rid, params):
         if method == "item/commandExecution/requestApproval" and params.get("networkApprovalContext"):
             name, inp = "Codex network access", params["networkApprovalContext"]
@@ -280,9 +352,14 @@ class CodexProc(ClaudeProc):
                     decision = "accept" if allow else "decline"
                     if params.get("availableDecisions") and decision not in params["availableDecisions"]:
                         decision = "cancel"
-                    super().send({"id": rid, "result": {"decision": decision}})
+                    self.write({"id": rid, "result": {"decision": decision}})
         elif kind == "control_request":
             self.request(msg["request_id"], msg.get("request") or {})
+
+    def update_catalog(self, catalog):
+        with self.lock:
+            self.catalog = catalog
+            self.effort = codex_effort(catalog, self.model, self.effort)
 
     def request(self, rid, request):
         subtype = request.get("subtype")
@@ -294,6 +371,10 @@ class CodexProc(ClaudeProc):
                 result = {"applied": {"model": self.model, "effort": self.effort}}
             elif subtype == "set_model" and str(request.get("model")).startswith("codex/"):
                 self.model = request["model"]
+                self.effort = codex_effort(self.catalog, self.model, self.effort)
+            elif subtype == "apply_flag_settings":
+                effort = (request.get("settings") or {}).get("effortLevel")
+                self.effort = codex_effort(self.catalog, self.model, effort)
             else:
                 error = f"Codex backend does not support {subtype}"
         self.reply(rid, result, error)

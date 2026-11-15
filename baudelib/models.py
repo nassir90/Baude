@@ -314,6 +314,40 @@ def runs_on(value):
 CODEX_DEFAULT = {"value": "codex/default", "displayName": "Codex (default model)"}
 
 
+def codex_choices(entries):
+    """Adapt the visible Codex catalog to Baude's model picker."""
+    choices = []
+    seen = set()
+    for entry in entries:
+        model_id = entry.get("model") or entry.get("id")
+        if not model_id or model_id == "default" or model_id in seen or entry.get("hidden"):
+            continue
+        seen.add(model_id)
+        levels = [opt["reasoningEffort"] for opt in entry.get("supportedReasoningEfforts") or []
+                  if opt.get("reasoningEffort")]
+        choices.append({
+            "value": f"codex/{model_id}", "resolvedModel": model_id,
+            "displayName": entry.get("displayName") or model_id,
+            "description": entry.get("description") or "",
+            "supportsEffort": bool(levels), "supportedEffortLevels": levels,
+            "defaultEffort": entry.get("defaultReasoningEffort"), "isDefault": bool(entry.get("isDefault")),
+        })
+    default = next((choice for choice in choices if choice["isDefault"]), None)
+    alias = CODEX_DEFAULT if default is None else {**default, **CODEX_DEFAULT}
+    return [alias, *choices]
+
+
+def codex_effort(catalog, value, effort):
+    """Use the selected model's own effort default when a prior setting does not apply."""
+    choice = next((m for m in catalog if m["value"] == value), None)
+    if choice is None or not choice.get("resolvedModel"):
+        return effort
+    levels = choice["supportedEffortLevels"]
+    if effort in levels:
+        return effort
+    return choice.get("defaultEffort") if levels else None
+
+
 def codex_exe():
     return shutil.which(os.environ.get("BAUDE_CODEX", "codex"))
 

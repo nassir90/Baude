@@ -59,11 +59,13 @@ from anywhere in the window, shows it and puts the focus in its box; pressed aga
 
 Install and sign into the Codex CLI on the machine hosting the session. Baude looks for
 `codex` on the host process's PATH. Set `BAUDE_CODEX` to the executable path if needed,
-then restart the Baude host process. Start a new chat with **Codex (default model)**,
-or use the headless entry point:
+then restart the Baude host process. The model picker lists the GPT-6, GPT-6.1,
+and GPT-5.6 variants that Codex offers on that host, with each model's reasoning
+effort options. **Codex (default model)** follows the host's default. You can also
+choose a specific model from the headless entry point:
 
 ```bash
-python3 baude_oneshot.py --model codex/default --cwd . "Describe this repository"
+python3 baude_oneshot.py --model codex/gpt-6.1-sol --cwd . "Describe this repository"
 ```
 
 The headless entry point also accepts `codex/<model-id>`. Codex App Server runs the

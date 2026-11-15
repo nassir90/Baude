@@ -14257,6 +14257,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             want = self.local_effort if model_program(self.model) == "pi" else self.effort
             if want in levels:
                 self.effort_dd.select(want)
+            elif info.get("defaultEffort") in levels:
+                self.effort_dd.select(info["defaultEffort"])
             self.effort_dd.set_tooltip_text("Thinking effort")
         else:
             self.effort_dd.set_choices([("", "Effort")])
@@ -14365,6 +14367,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             models = [m for m in models if model_program(m["value"]) == "claude"] + \
                 modelslib.runnable_models(wait=self.PROVIDERS_WAIT)
         self.models_info = {m["value"]: m for m in models}
+        self.merge_codex_models()
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
         want = self.model or default.get("resolvedModel")
@@ -14426,6 +14429,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             out.append((f"{host['id']}|{p['id']}", hname, pname,
                         [m | {"providerName": f"{hname} / {pname}"} for m in models]))
         return out
+
+    def merge_codex_models(self):
+        """Use the chat host's current Codex model catalog, independent of Claude initialization."""
+        host = self.remote or local_host()
+        if host is None or "models" not in host.info:
+            return False
+        catalog = {m["value"]: m for m in host.info["models"] if model_program(m["value"]) == "codex"}
+        old = {v: m for v, m in self.models_info.items() if model_program(v) == "codex"}
+        if catalog == old:
+            return False
+        for value in old:
+            del self.models_info[value]
+        self.models_info.update(catalog)
+        return True
 
     def providers_listed(self, found=None):
         """What the provider picker lists (found: provider_choices'), to tell whether it's changed."""
@@ -16566,8 +16583,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.check_host_version()
         if (app := self.get_application()) is not None:
             app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)
-        if self.providers_listed() != getattr(self, "providers_seen", None):  # (a host came or went: its providers)
+        codex_changed = self.merge_codex_models()
+        if codex_changed or self.providers_listed() != getattr(self, "providers_seen", None):
             self.sync_providers()
+        if codex_changed:
+            self.sync_effort_choices()
+            self.sync_local()
         if self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
@@ -16724,8 +16745,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             rows.append(widget)
         named = lambda r: THIS_MACHINE if r is None or host_key(r) == HERE_HOST else \
             f"{remote_name(r)} ({r.host})"  # noqa: E731
-        offered = lambda r: [(m["value"], m.get("displayName") or m["value"])  # noqa: E731
-                             for m in (r.info.get("models") or [] if r is not None else [])] or MODELS
+        def offered(r):
+            host = r or local_host()
+            return [(m["value"], m.get("displayName") or m["value"])
+                    for m in (host.info.get("models", []) if host is not None else [])] or MODELS
         servers_dd = agent_dd = None
         if said:  # (the host it's to be on: said, not picked)
             field("Host", Gtk.Label(label=named(servers[0]), xalign=0))

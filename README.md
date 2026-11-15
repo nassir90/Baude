@@ -55,6 +55,34 @@ the window's, till a model with a bigger window is picked or the chat's cleared;
 has it act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too),
 from anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
 
+## Codex backend (draft)
+
+Install and sign into the Codex CLI on the machine hosting the session. Baude looks for
+`codex` on the host process's PATH. Set `BAUDE_CODEX` to the executable path if needed,
+then restart the Baude host process. The model picker lists the GPT-6, GPT-6.1,
+and GPT-5.6 variants that Codex offers on that host, with each model's reasoning
+effort options. Meta's Intelligence picker uses the local host's Codex catalog
+and gives Codex access to Meta's app tools. You can also choose a model from the
+headless entry point:
+
+```bash
+python3 baude_oneshot.py --model codex/gpt-6.1-sol --cwd . "Describe this repository"
+```
+
+Codex chats start in **Manual** (Codex's Ask for Approval). **Auto** routes
+requests to Codex's automatic reviewer with the same workspace sandbox.
+**Bypass Permissions** runs without the sandbox or approval prompts. Changes apply on the next turn. The
+headless equivalents are `--mode default`, `--mode auto`, and `--mode bypassPermissions`.
+
+The headless entry point also accepts `codex/<model-id>`. Codex App Server runs the
+turns using the selected permission mode. Baude stores a display
+history for chats started through Baude, and resumes the native Codex thread by ID.
+Move to Trash moves Baude's transcript and leaves Codex's own copy in Codex.
+Existing standalone Codex threads are outside the draft's scope. The draft supports
+streaming text, command and file-change results, MCP tool results, basic approval
+prompts, and interruption. Claude slash commands, conversation forks and rewinds,
+and Codex-specific approval requests without a Baude UI are outside its scope.
+
 ## Local models
 
 Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model

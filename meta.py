@@ -46,7 +46,7 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
-from baudelib import agentproxy  # noqa: E402
+from baudelib import agentproxy, codex, wire  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
@@ -71,7 +71,7 @@ REF_LIMIT = 20000  # characters of a referenced page's, file's or chat's text pu
 EARLIER_LIMIT = 16000  # of what was said before a session started, with its first message
 # how many tokens a session's window holds, by what runs its model, till the session says (get_context_usage): claude's
 # (1M for a [1m] model's), pi-claude's (its CONTEXT), and the least Apple's on-device model has had
-WINDOWS = {"claude": 200_000, "pi": 32_768, "apple": 4_096}
+WINDOWS = {"claude": 200_000, "codex": 200_000, "pi": 32_768, "apple": 4_096}
 CHARS_PER_TOKEN = 3  # (a token's characters, at the fewest, in ASCII; a character beyond it, a token: weight)
 # a turn's error that says the session's window was outgrown: claude's ("Prompt is too long"), Apple's model's, those
 # MLX serves (pi-claude's, from the server), and others' wordings of it
@@ -85,6 +85,45 @@ MARK_HOWS = ("added", "removed", "moved", "highlight")
 UNAVAILABLE = "This model is unavailable"  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
 HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
+
+
+_codex_catalog = None
+_codex_discovery_at = 0.0
+
+
+def set_codex_catalog(catalog):
+    """Use the local Baude host's chat catalog for Meta as well."""
+    global _codex_catalog
+    catalog = [m for m in catalog if model_program(m["value"]) == "codex"]
+    if catalog != _codex_catalog:
+        _codex_catalog = catalog
+        sync_rows()
+    return False
+
+
+def codex_catalog():
+    """Discover models in standalone Record too, where Baude's network isn't running."""
+    global _codex_discovery_at
+    if _codex_catalog is None and time.monotonic() >= _codex_discovery_at and (exe := modelslib.codex_exe()):
+        _codex_discovery_at = time.monotonic() + 60
+
+        def discover():
+            try:
+                channel, info = wire.connect_local(timeout=0.5)
+            except OSError:
+                info = {}
+            else:
+                channel.close()
+            catalog = [m for m in info.get("models", []) if model_program(m["value"]) == "codex"]
+            if not any(m["value"] != "codex/default" for m in catalog):
+                try:
+                    catalog = modelslib.codex_choices(codex.list_models(exe))
+                except (OSError, RuntimeError):
+                    return
+            GLib.idle_add(lambda: set_codex_catalog(catalog) if _codex_catalog is None else False)
+
+        threading.Thread(target=discover, daemon=True, name="meta-codex-catalog").start()
+    return _codex_catalog or []
 
 
 def models(live=False):
@@ -101,6 +140,8 @@ def models(live=False):
     out = [(m["value"], m.get("displayName") or m["value"],
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
+    out += [(m["value"], m["displayName"], m.get("supportedEffortLevels") or None, None)
+            for m in codex_catalog() if m["value"] != "codex/default"]
     out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None,
              m.get("provider") or providerslib.provider_of(m["value"]))
             for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
@@ -1310,7 +1351,7 @@ class Agent:
             raise OSError("apple-claude isn't built yet: swift build -c release, in apple-claude/"
                           if run["program"] == "apple" else f"{run['program']}-claude isn't here")
         self.program = run["program"]
-        self.runs = "claude" if self.program == "claude" else f"{self.program}-claude"  # (what runs it: runtime info)
+        self.runs = self.program if self.program in ("claude", "codex") else f"{self.program}-claude"  # (what runs it: runtime info)
         exe, effort = (exe, effort) if self.program == "claude" else (run["exe"], run["effort"])
         self.chat, self.key, self.model, self.effort, self.commands = chat, key, model, effort, commands
         self.window = window(model)  # (tokens its session holds: what it says, once it's asked: first)
@@ -1337,7 +1378,17 @@ class Agent:
         if self.protect:  # (Claude Code's own rule, so an edit Auto mode would let by unasked is refused too: //, from /)
             args += ["--settings", json.dumps({"permissions": {"deny": [
                 f"{t}(/{r}/**)" for r in self.protect for t in EDIT_TOOLS]}})]
-        if modelslib.proxied(model) is not None:  # (another host's: run there, Meta's tools here, relayed)
+        if self.program == "codex":
+            try:
+                self.proc = codex.CodexProc(
+                    self.on_msg, self.on_exit, cwd, model, effort=effort, exe=exe, ephemeral=True,
+                    catalog=codex_catalog(), dispatch=GLib.idle_add, meta_system=system,
+                    meta_relay=relay["mcpServers"]["meta"],
+                )
+            except OSError:
+                sock.drop(self.token)
+                raise
+        elif modelslib.proxied(model) is not None:  # (another host's: run there, Meta's tools here, relayed)
             self.proc = MetaProxiedProc(self.on_msg, self.on_exit, cwd, model, "default", effort=effort, extra=args)
         else:
             self.proc = MetaProc(self.on_msg, self.on_exit, cwd, model, run["mode"], effort=effort, extra=args,
@@ -2140,7 +2191,7 @@ class MetaChat(Gtk.Box):
         (its next session's). Past it, or the session's said it is (outgrew), the chat's exhausted, once any turn's
         done (the box's stop button kept till then)."""
         agent = self.agent
-        if usage.get("maxTokens"):
+        if usage.get("maxTokens") or usage.get("showWithoutLimit"):
             self.used = usage.get("totalTokens") or 0
             if agent is None or agent.model != model():
                 usage = {"totalTokens": self.used, "maxTokens": window(model())}

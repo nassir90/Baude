@@ -311,11 +311,67 @@ def runs_on(value):
     return (proxied(value) or (None,))[0]
 
 
+CODEX_MODES = [("default", "Manual"), ("auto", "Auto"), ("bypassPermissions", "Bypass Permissions")]
+CODEX_MODE_VALUES = frozenset(value for value, _label in CODEX_MODES)
+
+
+def codex_mode(mode):
+    return mode if isinstance(mode, str) and mode in CODEX_MODE_VALUES else "default"
+
+
+CODEX_DEFAULT = {"value": "codex/default", "displayName": "Codex (default model)"}
+
+
+def codex_choices(entries):
+    """Adapt the visible Codex catalog to Baude's model picker."""
+    choices = []
+    seen = set()
+    for entry in entries:
+        model_id = entry.get("model") or entry.get("id")
+        if not model_id or model_id == "default" or model_id in seen or entry.get("hidden"):
+            continue
+        seen.add(model_id)
+        levels = [opt["reasoningEffort"] for opt in entry.get("supportedReasoningEfforts") or []
+                  if opt.get("reasoningEffort")]
+        name = entry.get("displayName") or model_id
+        if name.upper().startswith("GPT-"):
+            name = "GPT " + name[4:].replace("-", " ")
+            prefix, sep, variant = name.rpartition(" ")
+            if variant.lower() in ("sol", "astra", "terra", "luna"):
+                name = prefix + sep + variant.title()
+        choices.append({
+            "value": f"codex/{model_id}", "resolvedModel": model_id,
+            "displayName": name,
+            "description": entry.get("description") or "",
+            "supportsEffort": bool(levels), "supportedEffortLevels": levels,
+            "defaultEffort": entry.get("defaultReasoningEffort"), "isDefault": bool(entry.get("isDefault")),
+        })
+    default = next((choice for choice in choices if choice["isDefault"]), None)
+    alias = CODEX_DEFAULT if default is None else {**default, **CODEX_DEFAULT}
+    return [alias, *choices]
+
+
+def codex_effort(catalog, value, effort):
+    """Use the selected model's own effort default when a prior setting does not apply."""
+    choice = next((m for m in catalog if m["value"] == value), None)
+    if choice is None or not choice.get("resolvedModel"):
+        return effort
+    levels = choice["supportedEffortLevels"]
+    if effort in levels:
+        return effort
+    return choice.get("defaultEffort") if levels else None
+
+
+def codex_exe():
+    return shutil.which(os.environ.get("BAUDE_CODEX", "codex"))
+
+
 def model_program(value):
-    """What runs a model: "apple" (apple-claude), "pi" (pi-claude: MLX's, Ollama's, an endpoint's), or "claude". A
-    model run on another host as an agent: what runs it there."""
+    """The program a model runs on: Claude Code, Codex, apple-claude, or pi-claude."""
     if (agent := proxied(value)) is not None:  # (only a model with no API is run so: Apple's, else MLX's)
         return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
+    if isinstance(value, str) and value.startswith("codex/"):
+        return "codex"
     if value == APPLE_MODEL["value"]:
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
@@ -335,6 +391,8 @@ def pi_exe():
 # conversation on (apple-claude remembers nothing). transcript: whether it keeps a Claude Code transcript of it (only
 # claude: the others' are kept for them where they're needed, as the headless server does)
 PROGRAMS = {
+    "codex": {"exe": "codex_exe", "modes": True, "effort": True, "first": None, "resumes": True,
+              "transcript": False},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,
                "transcript": True},
     "apple": {"exe": "apple_exe", "modes": False, "effort": False, "first": "--resume", "resumes": False,
@@ -380,12 +438,14 @@ def launch(model, mode, effort, session_id=None, resumed=False):
     resume, extra = None, ()
     if session_id and (resumed and p["resumes"] or p["first"] == "--resume"):
         resume = session_id
-    elif session_id:
+    elif session_id and p["first"]:
         extra = (p["first"], session_id)
     if p["name"] == "claude" and os.environ.get("BAUDE_CHROME", "1") != "0":  # (Claude in Chrome, as claude --chrome:
         from baudelib.claude import claude_exe, has_flag  # browser use, in the browser you're signed in to; off with
         if has_flag(claude_exe(), "--chrome"):             # BAUDE_CHROME=0, and for a claude too old to know it)
             extra = (*extra, "--chrome")
+    if p["name"] == "codex":
+        mode = codex_mode(mode)
     return {"program": p["name"], "exe": exe, "missing": bool(p["exe"]) and exe is None,
             "mode": mode if p["modes"] else "default",
             "effort": effort if p["effort"] else None, "resume": resume, "extra": extra}

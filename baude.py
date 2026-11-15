@@ -5628,6 +5628,11 @@ def tool_input_view(name, inp):
         shell = "bash" if base != "PowerShell" else "powershell"
         add(CodeBlock(inp["command"], shell, syntax=shell))
         rest = _kv_rows(inp, skip=("command", "description"))
+    elif base == "Codex file changes":
+        for change in inp.get("changes", []):
+            add(_path_label(change["path"], ""))
+            add(CodeBlock(change.get("diff") or "", "diff"))
+        rest = _kv_rows(inp, skip=("changes",))
     elif base == "Edit" and "file_path" in inp:
         add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
         add(diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
@@ -8620,10 +8625,11 @@ class SessionSidebar(Gtk.Box):
         n = info.get("copies", 0)
         r = info.get("remote")
         where = "your trash" if r is None or host_key(r) == HERE_HOST else f"the trash on {remote_name(r)}"
-        dlg = Adw.AlertDialog(heading=f"Move “{info.get('title') or 'this session'}” to the trash?",
-                              body="Its transcript" + (f" and its {n} earlier cop{'y' if n == 1 else 'ies'}"
-                                                       if n else "") +
-                                   f" will be moved to {where}, where you can restore it.",
+        body = "Its transcript" + (f" and its {n} earlier cop{'y' if n == 1 else 'ies'}" if n else "")
+        body += f" will be moved to {where}, where you can restore it."
+        if model_program(info.get("model")) == "codex":
+            body += " Codex keeps its own copy of this session."
+        dlg = Adw.AlertDialog(heading=f"Move “{info.get('title') or 'this session'}” to the trash?", body=body,
                               default_response="cancel", close_response="cancel")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("trash", "Move to Trash")
@@ -13267,7 +13273,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.outgrown:
             self.ctx_box.bar.set_value(1)
         # (a turn's stop button kept: asked again as it ends)
-        self.exhausted.set((self.ctx_box.over or self.outgrown) and not self.busy)
+        # Codex can compact the thread before its next turn.
+        over = self.ctx_box.over and model_program(self.model) != "codex"
+        self.exhausted.set((over or self.outgrown) and not self.busy)
 
     def refresh_effort(self):
         self.request({"subtype": "get_settings"},
@@ -13500,7 +13508,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.note("Daemon is older than client: restart it to ask a side question" if r is not None and r.mine else
                       f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
-        params = {"op": "start", "ephemeral": True, "mode": "plan", "model": self.model, "prompt": ""}
+        mode = "default" if model_program(self.model) == "codex" else "plan"
+        params = {"op": "start", "ephemeral": True, "mode": mode, "model": self.model, "prompt": ""}
         # (the chat's, forked, if it's the host's: a fresh, context-free one, if nothing's written in it yet, the host
         # says: started's forked)
         params.update({"fork_from": self.session_id} if self.session_id and (self.remote is not None or
@@ -14008,7 +14017,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def program_name(self):
         """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
-        return {"pi": "pi", "apple": "Apple's model"}.get(model_program(self.model), "claude")
+        return {"pi": "pi", "apple": "Apple's model", "codex": "Codex"}.get(model_program(self.model), "claude")
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
@@ -14252,6 +14261,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             want = self.local_effort if model_program(self.model) == "pi" else self.effort
             if want in levels:
                 self.effort_dd.select(want)
+            elif info.get("defaultEffort") in levels:
+                self.effort_dd.select(info["defaultEffort"])
             self.effort_dd.set_tooltip_text("Thinking effort")
         else:
             self.effort_dd.set_choices([("", "Effort")])
@@ -14328,15 +14339,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.sync_local()
 
     def sync_local(self):
-        """Apple's model and those on this Mac: Manual their only mode, and no effort but the thinking levels of one
-        that thinks; the pickers for them gone while one of them is the one."""
-        local = model_program(self.model) != "claude"
-        self.effort_dd.set_visible(not local or self.effort_dd.get_sensitive())  # (a local model that thinks: its levels)
-        self.mode_dd.set_visible(not local)
-        if local and self.mode != "default":
-            self.mode = "default"
-            if "default" in self.mode_dd.values:
-                self.mode_dd.select("default")
+        """Show the permission and effort controls available for this backend."""
+        program = model_program(self.model)
+        self.effort_dd.set_visible(program == "claude" or self.effort_dd.get_sensitive())
+        self.mode_dd.set_visible(program in ("claude", "codex"))
+        self.sync_mode(self.mode)
 
     def sync_models(self, models):
         """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and the models this
@@ -14360,6 +14367,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             models = [m for m in models if model_program(m["value"]) == "claude"] + \
                 modelslib.runnable_models(wait=self.PROVIDERS_WAIT)
         self.models_info = {m["value"]: m for m in models}
+        self.merge_codex_models()
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
         want = self.model or default.get("resolvedModel")
@@ -14422,6 +14430,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                         [m | {"providerName": f"{hname} / {pname}"} for m in models]))
         return out
 
+    def merge_codex_models(self):
+        """Use the chat host's current Codex model catalog, independent of Claude initialization."""
+        host = self.remote or local_host()
+        if host is None or "models" not in host.info:
+            return False
+        catalog = {m["value"]: m for m in host.info["models"] if model_program(m["value"]) == "codex"}
+        old = {v: m for v, m in self.models_info.items() if model_program(v) == "codex"}
+        if catalog == old:
+            return False
+        for value in old:
+            del self.models_info[value]
+        self.models_info.update(catalog)
+        return True
+
     def providers_listed(self, found=None):
         """What the provider picker lists (found: provider_choices'), to tell whether it's changed."""
         return [(k, host, label, [m["value"] for m in ms]) for k, host, label, ms in
@@ -14448,6 +14470,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         shown = (pending[1] if pending and pending[0] is self.proc else None) or shown or self.model or \
             getattr(self, "model_shown", None)
 
+        if shown == "codex/default":
+            default = self.models_info.get(shown, {}).get("resolvedModel")
+            shown = f"codex/{default}" if default else None
+
         def pid_of(m):
             return m.get("provider") or providerslib.provider_of(m["value"])
 
@@ -14465,7 +14491,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if pid is not None and shown not in seen:
             offered.append(info(shown))
         kinds = providerslib.alike(offered, [shown] if shown else [])
-        listed = [m for m in self.models_info.values() if m["value"] != "default" and m["value"] not in seen and
+        listed = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and m["value"] not in seen and
                   pid_of(m) is None] + [lead for lead, _ms in kinds]
         if shown and not any(m["value"] == shown for m in listed):  # (Claude's, by a name claude didn't list)
             listed.append(info(shown))
@@ -14532,15 +14558,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.sync_providers()
 
     def default_mode(self):
-        """Every chat opened (a new one, or one picked in the sidebar) starts in Auto, whatever mode the chat before
-        was left in."""
-        self.mode = "auto"
-        if self.mode_dd.values:
-            self.mode_dd.select("auto")
+        """Pick the backend's starting mode without inheriting the previous chat's mode."""
+        self.sync_mode("default" if model_program(self.model) == "codex" else "auto")
 
     def sync_mode(self, mode):
-        if not self.mode_dd.values:
-            self.mode_dd.set_choices(MODES)
+        program = model_program(self.model)
+        choices = modelslib.CODEX_MODES if program == "codex" else MODES
+        values = [value for value, _label in choices]
+        if self.mode_dd.values != values:
+            self.mode_dd.set_choices(choices)
+        if mode and program == "codex":
+            mode = modelslib.codex_mode(mode)
+        elif mode and program != "claude":
+            mode = "default"
         if mode:
             self.mode = mode
             self.mode_dd.select(mode)  # (quietly: not asked of claude again)
@@ -14675,6 +14705,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+        elif st == "codex_turn_started":
+            if not self.busy:
+                self.set_busy(True)
+        elif st == "codex_context":
+            self.show_context(msg["usage"])
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)
         elif st == "compact_boundary":
@@ -16561,8 +16596,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.check_host_version()
         if (app := self.get_application()) is not None:
             app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)
-        if self.providers_listed() != getattr(self, "providers_seen", None):  # (a host came or went: its providers)
+        if (host := local_host()) is not None and "models" in host.info:
+            meta.set_codex_catalog(host.info["models"])
+        codex_changed = self.merge_codex_models()
+        if codex_changed or self.providers_listed() != getattr(self, "providers_seen", None):
             self.sync_providers()
+        if codex_changed:
+            self.sync_effort_choices()
+            self.sync_local()
         if self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)
@@ -16719,8 +16760,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             rows.append(widget)
         named = lambda r: THIS_MACHINE if r is None or host_key(r) == HERE_HOST else \
             f"{remote_name(r)} ({r.host})"  # noqa: E731
-        offered = lambda r: [(m["value"], m.get("displayName") or m["value"])  # noqa: E731
-                             for m in (r.info.get("models") or [] if r is not None else [])] or MODELS
+        def offered(r):
+            host = r or local_host()
+            return [(m["value"], m.get("displayName") or m["value"])
+                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
         servers_dd = agent_dd = None
         if said:  # (the host it's to be on: said, not picked)
             field("Host", Gtk.Label(label=named(servers[0]), xalign=0))
@@ -16769,7 +16812,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             r = server()
             model = offered(r)[agent_dd.get_selected()][0] if agent_dd is not None else self.model
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
-                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(), "mode": self.mode,
+                      "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(),
+                      "mode": "default" if model_program(model) == "codex" else self.mode,
                       "group": group_entry.get_text().strip() or None}
             save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), place(r): params["cwd"]})
             start = lambda r: r.request(params, lambda reply: self.remote_started(r, reply))  # noqa: E731
@@ -16912,9 +16956,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         conversation, but on the same server, in the same folder and group, opened to be written in."""
         r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
         effort = self.local_effort if model_program(model) == "pi" else self.effort
+        mode = "default" if "codex" in (model_program(model), model_program(self.model)) else self.mode
         self.note(f"model → {label}: a new conversation on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
-                   "mode": self.mode, "group": listed.get("group"), "draft": True,
+                   "mode": mode, "group": listed.get("group"), "draft": True,
                    **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))
 

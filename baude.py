@@ -8625,10 +8625,11 @@ class SessionSidebar(Gtk.Box):
         n = info.get("copies", 0)
         r = info.get("remote")
         where = "your trash" if r is None or host_key(r) == HERE_HOST else f"the trash on {remote_name(r)}"
-        dlg = Adw.AlertDialog(heading=f"Move “{info.get('title') or 'this session'}” to the trash?",
-                              body="Its transcript" + (f" and its {n} earlier cop{'y' if n == 1 else 'ies'}"
-                                                       if n else "") +
-                                   f" will be moved to {where}, where you can restore it.",
+        body = "Its transcript" + (f" and its {n} earlier cop{'y' if n == 1 else 'ies'}" if n else "")
+        body += f" will be moved to {where}, where you can restore it."
+        if model_program(info.get("model")) == "codex":
+            body += " Codex keeps its own copy of this session."
+        dlg = Adw.AlertDialog(heading=f"Move “{info.get('title') or 'this session'}” to the trash?", body=body,
                               default_response="cancel", close_response="cancel")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("trash", "Move to Trash")
@@ -13507,7 +13508,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.note("Daemon is older than client: restart it to ask a side question" if r is not None and r.mine else
                       f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
-        params = {"op": "start", "ephemeral": True, "mode": "plan", "model": self.model, "prompt": ""}
+        mode = "default" if model_program(self.model) == "codex" else "plan"
+        params = {"op": "start", "ephemeral": True, "mode": mode, "model": self.model, "prompt": ""}
         # (the chat's, forked, if it's the host's: a fresh, context-free one, if nothing's written in it yet, the host
         # says: started's forked)
         params.update({"fork_from": self.session_id} if self.session_id and (self.remote is not None or
@@ -14703,6 +14705,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+        elif st == "codex_turn_started":
+            if not self.busy:
+                self.set_busy(True)
         elif st == "codex_context":
             self.show_context(msg["usage"])
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)

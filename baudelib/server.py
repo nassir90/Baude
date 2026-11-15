@@ -180,6 +180,7 @@ class Session:
         self.busy = False         # at a turn
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
+        self.codex_queue = []     # Codex runs each follow-up as a separate turn.
         self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
         self.routes = {}          # request id sent on -> (conn, its own request id or the server's callback, undo)
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
@@ -923,7 +924,10 @@ class Server:
         if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
             raise ValueError(f"a fork runs in its session's folder: {src.meta['cwd']}")
         model = model or (src.meta.get("model") if src else None)
-        run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
+        mode = params.get("mode") or "default"
+        if params.get("ephemeral") and models.model_program(model) == "codex":
+            mode = "default"
+        run = models.launch(model, mode, params.get("effort") or None)
         if not self.can_run(model):
             raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
         options = {k: params[k] for k, _flag in CLAUDE_OPTIONS if params.get(k)}
@@ -1022,6 +1026,19 @@ class Server:
             self.changed()
         return s
 
+    def codex_empty_thread(self, s):
+        """Older Baude builds stored an ID even when Codex had no rollout yet."""
+        if s.meta.get("codex_started") or s.meta.get("context_usage"):
+            return False
+        path = s.transcript()
+        if path is None:
+            return True
+        try:
+            with open(path, encoding="utf-8") as transcript:
+                return not any(line.strip() and json.loads(line).get("type") == "assistant" for line in transcript)
+        except (OSError, ValueError):
+            return False
+
     def ensure_proc(self, s):
         """(lock held) The session's claude, started if it isn't running: with its id until it's written a transcript,
         resumed after. One being stopped is let go of first (what's sent now is the next one's)."""
@@ -1062,7 +1079,8 @@ class Server:
                 s.meta["cwd"], s.meta["model"],
                 resume=None if s.meta.get("ephemeral") else s.meta.get("cli_id"),
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
-                env={**s.env, **(self.env or {})}, catalog=self.codex_models(), mode=run["mode"])
+                env={**s.env, **(self.env or {})}, catalog=self.codex_models(), mode=run["mode"],
+                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s))
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -1086,8 +1104,12 @@ class Server:
         """(lock held) What a client sends its claude."""
         kind = msg.get("type")
         if kind == "user":
-            if models.model_program(s.meta.get("model")) == "codex":
+            is_codex = models.model_program(s.meta.get("model")) == "codex"
+            if is_codex:
                 codex.user_input((msg.get("message") or {}).get("content", ""))
+                if s.busy:
+                    s.codex_queue.append(msg)
+                    return
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
@@ -1134,8 +1156,10 @@ class Server:
                  models.runs_on(request.get("model")) != models.runs_on(s.meta.get("model"))):
             s.proc.stopping = s.proc.restarting = True  # (pi-claude runs one model, and one on another host runs
             s.proc.kill()  # there: the next message starts it on this one, pi's session going on: nothing's gone)
-        if sub == "set_permission_mode" and models.model_program(s.meta.get("model")) == "codex" and \
-                models.codex_mode(request.get("mode")) != request.get("mode"):
+        if sub == "set_permission_mode" and models.model_program(s.meta.get("model")) == "codex" and (
+            models.codex_mode(request.get("mode")) != request.get("mode")
+            or (s.meta.get("ephemeral") and request.get("mode") != "default")
+        ):
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid, "error": "Unsupported Codex permission mode"}}})
         if sub in SETTINGS:
@@ -1248,8 +1272,18 @@ class Server:
                 s.meta["mode"] = msg["permissionMode"]
                 self.save(s)
                 self.changed()
-            if kind == "system" and msg.get("subtype") == "init" and msg.get("session_id") \
-                    and msg["session_id"] != (s.meta.get("cli_id") or s.id):
+            subtype = msg.get("subtype")
+            if kind == "system" and subtype == "codex_discard_empty_thread":
+                s.meta.pop("cli_id", None)
+                self.save(s)
+                return
+            if kind == "system" and subtype == "codex_turn_started":
+                if not s.meta.get("ephemeral") and s.meta.get("cli_id") != msg["session_id"]:
+                    s.meta["cli_id"] = msg["session_id"]
+                    s.meta["codex_started"] = True
+                    self.save(s)
+            if kind == "system" and subtype == "init" and not isinstance(proc, codex.CodexProc) \
+                    and msg.get("session_id") and msg["session_id"] != (s.meta.get("cli_id") or s.id):
                 s.meta["cli_id"] = msg["session_id"]  # (claude went on in a transcript of another id)
                 s.meta.pop("path", None)
                 self.save(s)
@@ -1285,6 +1319,11 @@ class Server:
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+            if kind == "result" and s.codex_queue:
+                if self.stopped.is_set() or s.deleting or getattr(proc, "stopping", False):
+                    s.codex_queue.clear()
+                else:
+                    self.take_input(None, s, s.codex_queue.pop(0))
 
     def track(self, s, msg):
         """(lock held) What a session's claude runs (Session.commands), from what it says: a Bash or PowerShell call
@@ -1389,6 +1428,7 @@ class Server:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
             s.proc, s.busy = None, False
+            s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()

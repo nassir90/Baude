@@ -69,14 +69,15 @@ headless entry point:
 python3 baude_oneshot.py --model codex/gpt-6.1-sol --cwd . "Describe this repository"
 ```
 
-Codex chats start in **Ask for approval**. **Approve for me** routes requests to
-Codex's automatic reviewer with the same workspace sandbox. **Full access** runs
-without the sandbox or approval prompts. Changes apply on the next turn. The
+Codex chats start in **Manual** (Codex's Ask for Approval). **Auto** routes
+requests to Codex's automatic reviewer with the same workspace sandbox.
+**Bypass Permissions** runs without the sandbox or approval prompts. Changes apply on the next turn. The
 headless equivalents are `--mode default`, `--mode auto`, and `--mode bypassPermissions`.
 
 The headless entry point also accepts `codex/<model-id>`. Codex App Server runs the
 turns using the selected permission mode. Baude stores a display
 history for chats started through Baude, and resumes the native Codex thread by ID.
+Move to Trash moves Baude's transcript and leaves Codex's own copy in Codex.
 Existing standalone Codex threads are outside the draft's scope. The draft supports
 streaming text, command and file-change results, MCP tool results, basic approval
 prompts, and interruption. Claude slash commands, conversation forks and rewinds,

@@ -10,8 +10,12 @@ from baudelib.claude import ClaudeProc
 from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
 
 
-def permission_params(mode, *, turn=False):
+def permission_params(mode, *, turn=False, read_only=False):
     """Manual and automatic review use the same workspace sandbox."""
+    if read_only:
+        return {"approvalPolicy": "on-request", "approvalsReviewer": "user",
+                **({"sandboxPolicy": {"type": "readOnly", "networkAccess": False}} if turn
+                   else {"sandbox": "read-only"})}
     full = mode == "bypassPermissions"
     params = {"approvalPolicy": "never" if full else "on-request",
               "approvalsReviewer": "auto_review" if mode == "auto" else "user"}
@@ -188,14 +192,16 @@ class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
-                 catalog=(), mode="default", meta_system=None, meta_relay=None, dispatch=None):
+                 catalog=(), mode="default", meta_system=None, meta_relay=None, dispatch=None,
+                 recover_empty=False):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
         self.req_ids = itertools.count(1)
         self.context_usage = {}
         self.meta_only = meta_system is not None
         self.model, self.catalog = model, catalog
-        self.mode = codex_mode(mode)
+        self.read_only = ephemeral and not self.meta_only
+        self.mode = "default" if self.read_only else codex_mode(mode)
         self.effort = codex_effort(catalog, model, effort)
         self.init_rid = "codex-initialize"
         self.asks, self.streams, self.patches = {}, {}, {}
@@ -207,7 +213,7 @@ class CodexProc(AppServer):
         self.starting = self.interrupting = False
         super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
                          lambda line: self.emit("_stderr", text=line))
-        params = {"cwd": cwd, **permission_params(self.mode)}
+        params = {"cwd": cwd, **permission_params(self.mode, read_only=self.read_only)}
         if model != "codex/default":
             params["model"] = model.removeprefix("codex/")
         if resume:
@@ -223,12 +229,25 @@ class CodexProc(AppServer):
             self.advance()
 
         def failed(error):
+            self.stopping = True
             self.reply(self.init_rid, error=error)
             self.result(error)
             self.kill()
 
+        def resume_failed(error):
+            if recover_empty and "no rollout found" in error.lower():
+                params.pop("threadId")
+                params.pop("excludeTurns")
+                self.emit("system", subtype="codex_discard_empty_thread")
+                self.rpc("thread/start", params, opened, failed)
+            else:
+                failed(error)
+
         def start():
-            self.rpc("thread/resume" if resume else "thread/start", params, opened, failed)
+            if resume:
+                self.rpc("thread/resume", params, opened, resume_failed)
+            else:
+                self.rpc("thread/start", params, opened, failed)
 
         def start_meta(result):
             servers = (result.get("config") or {}).get("mcp_servers") or {}
@@ -266,6 +285,7 @@ class CodexProc(AppServer):
                 self.starting = False
                 if self.interrupting:
                     self.interrupt()
+            self.emit("system", subtype="codex_turn_started", session_id=self.thread)
         elif method == "turn/completed":
             turn = params["turn"]
             status = turn.get("status")
@@ -329,7 +349,7 @@ class CodexProc(AppServer):
                     if self.effort:
                         params["effort"] = self.effort
                     if not self.meta_only:
-                        params.update(permission_params(self.mode, turn=True))
+                        params.update(permission_params(self.mode, turn=True, read_only=self.read_only))
                     self.starting = True
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return

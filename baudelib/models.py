@@ -311,7 +311,7 @@ def runs_on(value):
     return (proxied(value) or (None,))[0]
 
 
-CODEX_MODES = [("default", "Ask for approval"), ("auto", "Approve for me"), ("bypassPermissions", "Full access")]
+CODEX_MODES = [("default", "Manual"), ("auto", "Auto"), ("bypassPermissions", "Bypass Permissions")]
 CODEX_MODE_VALUES = frozenset(value for value, _label in CODEX_MODES)
 
 

@@ -1763,8 +1763,8 @@ class Names:
 
 
 # ---------------------------------------------------------------- GitHub's pull requests and issues
-# With the gh CLI signed in, the pull requests and issues of the GitHub repositories in a folder are names too: its
-# checkout's and those of the checkouts under it, the latest few and the open ones, in ⌘K and @, and # in Record's notes
+# With the gh CLI signed in, the pull requests and issues of the GitHub repositories a folder's checkout came from are
+# names too (its origin's and its upstream's): the latest few and the open ones, in ⌘K and @, and # in Record's notes
 # (items, SearchSpace.issues). GITHUB reads them on a thread of its own, keeps a copy of each on disk for the next start,
 # and only ever asks with GET. Nothing at all happens without gh, signed out (gh api says so before it asks GitHub
 # anything), or in a folder with no remote on GitHub.
@@ -1775,8 +1775,7 @@ class Names:
 # change changes. Only when that's changed is the list of open ones asked for too: two requests a change. An answer with
 # no ETag (no free lunch on offer) is asked again every 5 minutes.
 #
-# Only a folder attached to a notebook has the checkouts under it read too. A chat's folder, which no one attached, has
-# the repository it's in: a vendored checkout under it isn't what the chat's about.
+# A folder has the repository it's in, not those of checkouts under it: a vendored checkout isn't what a chat's about.
 
 GITHUB_LOOK_S = 60  # a repository in use is looked at this often
 GITHUB_PLAIN_S = 300  # (or, with no ETag to ask with, this often)
@@ -1787,9 +1786,7 @@ GITHUB_KEEP = 100  # (under this many requests left this hour, it waits for the 
 GITHUB_OUT_S, GITHUB_GONE_S = 600, 3600  # how long till it asks again: signed out; a repository GitHub won't show
 GITHUB_TIMEOUT_S = 30
 GITHUB_BACKOFF_S = 1800  # (offline, or GitHub in trouble: 2, 4, 8… minutes between tries, up to this)
-GITHUB_WALK_DEPTH, GITHUB_WALK_DIRS = 3, 3000  # how far under a folder checkouts are looked for
-GITHUB_SCAN_S = 300  # (and how often again)
-GITHUB_SKIP = frozenset(("node_modules", "__pycache__", "venv", "vendor", "dist", "build", "target", "Library"))
+GITHUB_SCAN_S = 300  # how often the checkout a folder's in is found again
 _GITHUB_REMOTE = re.compile(r"(?:^|[/@])(?:www\.)?github\.com[:/]([\w-][\w.-]*/[\w-][\w.-]*?)(?:\.git)?/?$")
 GITHUB_NAME = re.compile(r"(?<![\w./-])([\w.-]+/[\w.-]+)#(\d+)\b")  # (a pull request's or an issue's: owner/name#12)
 
@@ -1806,26 +1803,9 @@ def github_remotes(checkout):
     return list(dict.fromkeys(wanted))
 
 
-def github_checkouts(folder, under=True):
-    """A folder's git checkouts: the one it's in, then (under) those under it, the nearest first, not far
-    (GITHUB_WALK_*). (top, [checkout])."""
-    top = (_git(folder, "rev-parse", "--show-toplevel", timeout=5) or "").strip()
-    start = os.path.realpath(top or folder)
-    found, todo, seen = [start] * bool(top), collections.deque([(start, 0)] * under), 0
-    while todo and seen < GITHUB_WALK_DIRS and len(found) < GITHUB_REPOS:
-        at, depth = todo.popleft()
-        seen += 1
-        try:
-            with os.scandir(at) as it:
-                entries = list(it)
-            if at != start and any(e.name == ".git" for e in entries):
-                found.append(at)
-            if depth < GITHUB_WALK_DEPTH:
-                todo.extend((e.path, depth + 1) for e in entries if not e.name.startswith(".") and
-                            e.name not in GITHUB_SKIP and e.is_dir(follow_symlinks=False))
-        except OSError:
-            continue
-    return top or None, found
+def github_checkout(folder):
+    """The git checkout a folder's in (its top), or None."""
+    return (_git(folder, "rev-parse", "--show-toplevel", timeout=5) or "").strip() or None
 
 
 def _gh_get(path, etag=None):
@@ -1932,14 +1912,13 @@ class GitHub:
         """Whether a repository's been read: here, or on another day (what's kept of it)."""
         return bool((self._repos.get(repo) or {}).get("etags")) or os.path.exists(self._path(repo))
 
-    def look(self, attached=(), tops=()):
-        """Look at the repositories in use, if it's time to: at once, not waiting for it. Nothing without gh. attached:
-        the folders a notebook has (the repository each is in, and those of the checkouts under it). tops: a chat's
-        folder, which no one attached (the repository it's in, alone)."""
-        tops = [f for f in tops if f]
-        if not (attached or tops) or gh_path() is None:
+    def look(self, folders=()):
+        """Look at the repositories in use, if it's time to: at once, not waiting for it. Nothing without gh. folders:
+        those in use (a chat's: the repository each is in)."""
+        folders = [f for f in folders if f]
+        if not folders or gh_path() is None:
             return
-        self._todo.put((list(attached), tops))
+        self._todo.put(folders)
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, daemon=True, name="lookup-github")
             self._thread.start()
@@ -1947,25 +1926,24 @@ class GitHub:
     # ---- its thread
     def _run(self):
         while True:
-            attached, tops = self._todo.get()
+            folders = self._todo.get()
             try:
                 while True:
-                    more = self._todo.get_nowait()
-                    attached, tops = attached + more[0], tops + more[1]
+                    folders = folders + self._todo.get_nowait()
             except queue.Empty:
                 pass
             try:
-                self.round(attached, tops)
+                self.round(folders)
             except Exception as e:  # noqa: BLE001 (whatever it was: asked again at the next look)
                 print(f"lookup: reading GitHub failed: {e!r}", file=sys.stderr)
 
-    def round(self, attached=(), tops=()):
+    def round(self, folders=()):
         """A look at the repositories in use (look): each once it's due, while GitHub can be asked. What's kept on disk
         of one not seen before is listed at once."""
         if gh_path() is None:
             return
         with self._one:
-            repos = self._in_use(attached, tops)
+            repos = self._in_use(folders)
             for repo in repos:
                 if repo not in self._repos:
                     self._repos[repo] = self._load(repo)
@@ -1979,26 +1957,24 @@ class GitHub:
                     self._read(repo, r)
                     self._publish()
 
-    def _in_use(self, attached, tops):
-        """The repositories in use, as many as are looked at, shared out so that a folder with many checkouts can't
-        crowd out the others: each attached folder's own, then the chat's, then one each of the rest in turn."""
-        tops = [self._in_folder(f, False)["repos"] for f in dict.fromkeys(tops) if f not in attached]
-        attached = [self._in_folder(f, True)["repos"] for f in dict.fromkeys(attached)]
-        order = [repos[0] for repos in attached + tops if repos]
-        for turn in itertools.zip_longest(*(repos[1:] for repos in attached + tops)):
+    def _in_use(self, folders):
+        """The repositories in use, as many as are looked at, shared out: each folder's own first, then the rest of
+        each's (an upstream) in turn."""
+        each = [self._in_folder(f)["repos"] for f in dict.fromkeys(folders)]
+        order = [repos[0] for repos in each if repos]
+        for turn in itertools.zip_longest(*(repos[1:] for repos in each)):
             order += [r for r in turn if r]
         return list(dict.fromkeys(order))[:GITHUB_REPOS]
 
-    def _in_folder(self, folder, under):
-        """The repositories of a folder, found again every so often (what's published of it, kept: nothing's changed
-        unless they have). under: and those of the checkouts under it."""
+    def _in_folder(self, folder):
+        """The repositories of the checkout a folder's in, found again every so often (what's published of it, kept:
+        nothing's changed unless they have)."""
         known = self._folders.get(folder)
-        if known is None or known["under"] != under or time.time() - known["at"] > GITHUB_SCAN_S:
-            top, checkouts = github_checkouts(folder, under)
-            own = github_remotes(checkouts[0]) if top else []
-            repos = [r for c in checkouts for r in github_remotes(c)]
-            known = self._folders[folder] = {**(known or {}), "repos": list(dict.fromkeys(repos))[:GITHUB_REPOS],
-                                             "under": under, "own": own[0] if own else None, "at": time.time(),
+        if known is None or time.time() - known["at"] > GITHUB_SCAN_S:
+            top = github_checkout(folder)
+            repos = github_remotes(top) if top else []
+            known = self._folders[folder] = {**(known or {}), "repos": repos[:GITHUB_REPOS],
+                                             "own": repos[0] if repos else None, "at": time.time(),
                                              "keys": {folder, top} - {None}}  # (top: a Names' root)
         return known
 

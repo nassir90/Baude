@@ -137,7 +137,7 @@ def build(tmp, size):
                                                 "content": [{"type": "text", "text": reply_text(i, size)}]}}) + "\n")
         chats.append({"path": path, "title": f"Chat {c}", "cwd": repo})
     pages = {"Home": page_text(0, size), **{f"Page {n}": page_text(n, size) for n in range(1, size["pages"])}}
-    notebook = {"id": "a", "name": "Systems", "created": 0, "folders": [repo], "pages": pages, "page": "Home",
+    notebook = {"id": "a", "name": "Systems", "created": 0, "pages": pages, "page": "Home",
                 "open": ["Home"] + [f"Page {n}" for n in range(1, size["notes"])],
                 "messages": [{"role": "record" if i % 2 else "user", "text": reply_text(i, size)}
                              for i in range(size["asked"])]}

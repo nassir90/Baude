@@ -16108,7 +16108,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def github_folders(self):
         """What GitHub's lists are read for (lookup.GitHub.look): the repository this chat's folder is in."""
-        return [], [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
+        return [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
 
     @staticmethod
     def _github_changed(win):

@@ -12952,12 +12952,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
         row.add_css_class("cut-note")
-        said = Gtk.Label(label="Cut short by a restart", xalign=0)
+        going = getattr(self, "cut_continuing", False)  # (Continue pressed, the turn not started yet: said, not asked)
+        said = Gtk.Label(label="Continuing…" if going else "Cut short by a restart", xalign=0)
         said.add_css_class("dim-label")
-        go = Gtk.Button(label="Continue", tooltip_text=f"Send “{CUT_CONTINUE}”")
-        go.connect("clicked", lambda *_: self.continue_cut())
-        row.append(said)
-        row.append(go)
+        if going:
+            row.append(Gtk.Spinner(spinning=True))
+            row.append(said)
+        else:
+            go = Gtk.Button(label="Continue", tooltip_text=f"Send “{CUT_CONTINUE}”")
+            go.connect("clicked", lambda *_: self.continue_cut())
+            row.append(said)
+            row.append(go)
         self.transcript.append(row)
         self.cut_row = row
 
@@ -12965,12 +12970,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""
         if self.composer_box.gates:
             return
+        cut = self.cut_state()
         self.cut_pending = None
-        self.show_cut(None)
         atts, self.attachments = self.attachments, []
         if self.resume_pending:
             self.begin_resume()
+        self.cut_continuing = True
         self.send_text(CUT_CONTINUE)
+        if not self.busy:  # (not sent yet: its host still starting, said as Continuing…; or it couldn't be: Continue back)
+            self.show_cut(cut or time.time())
         self.attachments = atts + self.attachments
         self.refresh_attach_strip()
 
@@ -14650,31 +14658,46 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
         by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's)."""
         self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
+        going = getattr(self, "cut_continuing", False) and text == CUT_CONTINUE  # (Continue's: not the box's to keep)
+        if not going:
+            self.cut_continuing = False
         self.show_cut(None)
         buf = self.input.get_buffer()
         if self.proc is None and self.remote is None and not self.runs_here():
             took = self.take_up()
             if took is False:  # (This Mac's host process isn't there yet: started, and this sent once it is, from the
-                buf.set_text(text)  # box it's kept in meanwhile, if it's still this chat's and still what's written)
+                if not going:  # box it's kept in meanwhile, if it's still this chat's and still what's written)
+                    buf.set_text(text)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
                 sid = self.session_id
 
                 def ready(_r):
-                    if self.session_id == sid and self.remote is None and widgets.typed_text(self.input).strip() == text:
+                    if self.session_id != sid or self.remote is not None:
+                        return
+                    if going and getattr(self, "cut_continuing", False):
+                        self.send_text(text)
+                    elif not going and widgets.typed_text(self.input).strip() == text:
                         buf.set_text("")
                         self.send_text(text)
                 self.local_server(ready)
                 return
             if took is None:
-                buf.set_text(text)
+                if going:
+                    self.cut_continuing = False  # (Continue back, to press again)
+                else:
+                    buf.set_text(text)
                 return
         if self.proc is None:
             self.start_proc()
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
-            buf.set_text(text)
+            if going:
+                self.cut_continuing = False
+            else:
+                buf.set_text(text)
             if self.remote is not None:
                 self.remote_view()
             return
+        self.cut_continuing = False
         atts, self.attachments = self.attachments, []
         self.refresh_attach_strip()
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)

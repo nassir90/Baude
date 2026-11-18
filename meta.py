@@ -84,6 +84,8 @@ MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
 UNAVAILABLE = "This model is unavailable"  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
+TOO_SMALL = f"Window too small for {NAME}: pick a larger model"  # (its instructions alone, as it counts
+# them, more than it holds: no clearing helps)
 HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
 
@@ -1547,14 +1549,22 @@ class Agent:
     def first(self, text, usage, turn):
         """A session's first message, sent if its window holds it: its instructions' and tools' tokens (usage;
         pi-claude's says none till it's started: overhead, then) and the message's, at most (weight). If not, it isn't
-        sent, and the chat's exhausted with what it would take (MetaChat._done)."""
+        sent, and the chat's exhausted with what it would take (MetaChat._done). A conversation that's empty (cleared,
+        or new: nothing earlier it carries) starts from empty: what the user brought (turn's brought: what they wrote,
+        referenced, quoted) is counted, with the instructions and tools only as the session counts them, not Meta's
+        own words (the app's index, the notebook) nor overhead's guess, as Clear's the way out of Context Exhausted,
+        which those would leave it in on a small window. Where the session's own count of its instructions and tools
+        is more than the window alone, it's too small for Meta (small): no clearing helps."""
         if self.closed or self.turn is not turn or turn.get("stopped"):
             return
         self.window = usage.get("maxTokens") or self.window
-        need = (usage.get("totalTokens") or self.overhead) + -(-weight(text) // CHARS_PER_TOKEN)
-        if need > self.window:
+        counted = usage.get("totalTokens") or 0  # (none: pi-claude's, till it's started)
+        carried = turn.get("carried", True)
+        need = (counted or (self.overhead if carried else 0)) + \
+            -(-weight(text if carried else turn.get("brought", text)) // CHARS_PER_TOKEN)
+        if counted > self.window or need > self.window:
             self.turn = None
-            self.chat._done(self, "", None, turn, need=need)
+            self.chat._done(self, "", None, turn, need=need, small=counted > self.window)
             return
         self.fresh = False
         self.proc.user(text)
@@ -2161,10 +2171,13 @@ class MetaChat(Gtk.Box):
                             margin_start=12, margin_end=12)
         self.forms_open = {}  # (each form's id: {spec, form, widget (its card), slot (its place in its reply)})
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
+        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F in Meta: its bar over the
+        over.add_overlay(self.chat_find.marks)                              # conversation, its matches under the forms)
         over.add_overlay(self.pins)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
             self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_soon())
         self._pin_after, self._pin_waits = None, 0  # (the after-paint handler waiting to look again: _pin_soon)
+        talk.append(self.chat_find.bar)
         talk.append(over)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10)
@@ -2184,6 +2197,7 @@ class MetaChat(Gtk.Box):
         # window's picked or it's cleared; used: the tokens it takes, as its session last said)
         self.exhausted, self.used = widgets.Exhausted(self.scroll, self.writing), None
         self.outgrew = None  # (the session that said the conversation's more than its window holds)
+        self.too_small = None  # (the model whose window's too small for Meta's own instructions: Agent.first)
         foot = Gtk.Box(spacing=12)
         foot.add_css_class("meta-foot")
         clear = Gtk.Button(label="Clear", tooltip_text="Clear the conversation (or ask clear, /clear)")
@@ -2354,7 +2368,8 @@ class MetaChat(Gtk.Box):
         if outgrown:
             self.ctx.bar.set_value(1)
         if available():
-            self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
+            self.exhausted.set((self.ctx.over or outgrown) and self.ask is None,
+                               TOO_SMALL if self.too_small == model() else "Context Exhausted")
 
     def report_head(self):
         """The lines over a copied conversation (report_text): the app, Meta's model and what runs it, its effort, its
@@ -2404,7 +2419,7 @@ class MetaChat(Gtk.Box):
         was said."""
         if self.agent is not None:
             self.agent.close()
-        self.agent = self.ask = self.used = self.outgrew = None
+        self.agent = self.ask = self.used = self.outgrew = self.too_small = None
         self.ctx.reset()
         self.exhausted.set(False)
 
@@ -3133,9 +3148,14 @@ class MetaChat(Gtk.Box):
             hover.connect("enter", lambda *_: self.light(batch, True))
             hover.connect("leave", lambda *_: self.light(batch, False))
             card.add_controller(hover)
+        self.card_extra(it, line, hunks)
         if (status := widgets._card_status(it.get("state") or "done")) is not None:
             line.append(status)
         return card
+
+    def card_extra(self, it, line, hunks):
+        """What an app adds to a call's card, on its line (hunks: what hunks shows under it, or None): Record's, an
+        edit it proposed, its Accept and Reject while it waits."""
 
     @staticmethod
     def _disclosure(toggles, grid, row, label_, text, lang):
@@ -3310,8 +3330,10 @@ class MetaChat(Gtk.Box):
                                    protect=setup.get("protect") or ())
                 self.agent_made(self.agent)
             turn = {"text": [], "items": [], "actions": [], "shown": [], "code": [], "streamed": False,
-                    "msg": msg, "told": list(self.told()), **self.turn_extra(msg)}  # (msg, told: kept, if not sent)
-            self.agent.ask(self.message_for(self.agent, msg), turn)
+                    "msg": msg, "told": list(self.told()), **self.turn_extra(msg),  # (msg, told: kept, if not sent)
+                    "carried": any(not m.get("error") for m in self.messages()[:-1])}  # (what came before: earlier_said)
+            said, turn["brought"] = self.message_for(self.agent, msg)
+            self.agent.ask(said, turn)
         except OSError as e:
             self.agent = None
             self.messages().append({"role": "meta", "text": f"Couldn't run {model_name()} ({e}).", "error": True,
@@ -3344,17 +3366,24 @@ class MetaChat(Gtk.Box):
         return {}
 
     def message_for(self, agent, msg):
-        """What's sent for a message: a new session's index and what was said before it; what the user's done since
-        (undone, redone, a row adjusted); the app's own (context); and what was written."""
-        parts = []
+        """What's sent for a message: a new session's index, what was said before it and the app's first words
+        (first_said); what the user's done since (undone, redone, a row adjusted); the app's own (context); and what
+        was written. And what of it the user brought (all but Meta's own words and what was said before: Agent.first
+        counts it)."""
+        own = []
         if agent.fresh:
-            parts.append(f"<app_index>\n{self.index_text()}\n</app_index>")
+            own.append(f"<app_index>\n{self.index_text()}\n</app_index>")
             if earlier := earlier_said(self.messages()[:-1], where=self.said_where):
-                parts.append(earlier)
-        parts += self.since()
-        parts += self.context(agent, msg)
-        parts.append(msg["text"])
-        return "\n\n".join(p.strip("\n") for p in parts if p)
+                own.append(earlier)
+            own += self.first_said(agent)
+        brought = [*self.since(), *self.context(agent, msg), msg["text"]]
+        said = lambda parts: "\n\n".join(p.strip("\n") for p in parts if p)  # noqa: E731
+        return said(own + brought), said(brought)
+
+    def first_said(self, agent):
+        """The app's own words with a new session's first message, before what the user brought (Record's: the notebook
+        open): [text, …]."""
+        return []
 
     def since(self):
         """What the user's done that Meta hasn't been told: its actions they undid or redid, and the settings they
@@ -3541,9 +3570,10 @@ class MetaChat(Gtk.Box):
     def worked(self, turn):
         return any(it["kind"] == "tool" for it in turn.get("items") or ())
 
-    def _done(self, agent, text, error, turn, outgrown=False, need=None):
+    def _done(self, agent, text, error, turn, outgrown=False, need=None, small=False):
         """A turn's end; outgrown: the session said the conversation's more than its window holds; need: a new
-        session's first message is (the tokens it'd take: Agent.first), and wasn't sent. Either way, exhausted."""
+        session's first message is (the tokens it'd take: Agent.first), and wasn't sent; small: as the session
+        counts its instructions and tools, they're more than its window alone (TOO_SMALL). Either way, exhausted."""
         if agent is self.ask:
             self.ask, self.live_widget = None, None
             self._busy(False)
@@ -3551,6 +3581,7 @@ class MetaChat(Gtk.Box):
         if need is not None:
             self._unsent(turn)
             if agent is self.agent:
+                self.too_small = agent.model if small else None
                 self.show_usage({"totalTokens": need, "maxTokens": agent.window})
         elif outgrown and agent is self.agent:
             self.outgrew = agent

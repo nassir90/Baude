@@ -64,6 +64,7 @@ import baudelib.client  # noqa: E402  (servers on the network and their sessions
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
+from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
 from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
 )
@@ -5724,6 +5725,18 @@ def track_commands(commands, msg):
             commands.pop(k)
 
 
+STOP_SAID_RE = re.compile(r"\W*(api error:\s*)?((the )?(request|operation) (was )?(aborted|interrupted|cancell?ed)"
+                          r"( by (the )?user)?|this operation was aborted|aborted|interrupted|cancell?ed"
+                          r"|\[request interrupted by user[^\]]*\])\W*", re.I)
+
+
+def ended_by_stop(msg):
+    """Whether a turn's end (its result), coming after Esc or the stop button, is what stopping it says: Claude Code's
+    error_during_execution, or its words (⚠ This operation was aborted, API Error: Request was aborted.), Codex's
+    too. Not another error that came meanwhile (a sign-in's, a full context's): that one's still said."""
+    return msg.get("subtype") == "error_during_execution" or bool(STOP_SAID_RE.fullmatch(msg.get("result") or ""))
+
+
 def api_error_label(text):
     """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
     colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: widgets.CSS), and
@@ -8992,7 +9005,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.body.add_css_class("zoomable")
         self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                         visible=False))  # (nothing over its box till something's asked)
-        self.inside.append(self.scroll)
+        self.chat_find = widgets.ChatFind(self.body, self.scroll, pane=self.inside)  # (⌘F / Ctrl+F in it)
+        self.inside.append(self.chat_find.wrap())
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
         self.writing = widgets.Composer()
@@ -10281,9 +10295,14 @@ class SidePanel(Gtk.Box):
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
-        self.detail_holder = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
-            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, margin_top=6)), start=False)
-        detail.append(self.detail_holder)
+        # (and ⌘F / Ctrl+F in the subagent shown, its find bar inside it: its box, the holder's child)
+        self.detail_holder = natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
+            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.agent_find = widgets.ChatFind(lambda: getattr(self.detail_holder.get_child(), "get_child", lambda: None)(),
+                                           self.detail_holder)
+        self.detail_inside = widgets.inside(self.agent_find.wrap(), start=False)
+        self.detail_inside.set_margin_top(6)
+        detail.append(self.detail_inside)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
         page.set_icon_name("system-users-symbolic")
@@ -10674,8 +10693,9 @@ class SidePanel(Gtk.Box):
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
+        self.agent_find.refresh()
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
-            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+            self.agent_expand.open("detail", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                    across=self.agent_list)
         else:
             self.agent_stack.set_visible_child_name("detail")
@@ -10709,7 +10729,7 @@ class SidePanel(Gtk.Box):
         if row is None:
             self.agent_stack.set_visible_child_name("list")
             return
-        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+        self.agent_expand.close("list", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                 across=self.agent_list)
 
     # ---- background processes
@@ -11458,17 +11478,19 @@ def ref_place_items(win, ref, on_open=None):
     return items
 
 
-class SignalPage(Gtk.Stack):
+class SignalPage(widgets.ExpandStack):
     """The side panel's Signal page: the names this chat's replies mention, by kind, with how far
-    each lookup got; a name opens its card (locations, a commit's PRs, ...)."""
+    each lookup got; a name opens its card (locations, a commit's PRs, ...), sliding in; the reader's row opens its
+    chat out of the row, as a subagent's does (ExpandStack)."""
 
     ICONS = {"resolved": ("object-select-symbolic", "success"), "ambiguous": ("view-more-symbolic", None),
              "pending": ("content-loading-symbolic", "dim-label"), "not_found": ("dialog-question-symbolic", "dim-label"),
              "stale": ("dialog-warning-symbolic", "warning")}
 
     def __init__(self, win):
-        super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
+        super().__init__(vexpand=True)
         self.win, self.current, self.soon, self.status_soon = win, None, None, None
+        self.reader_to_end = False  # (opened: at its chat's end once it's laid out)
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         bar = Gtk.Box(spacing=6)
         self.search = Gtk.SearchEntry(placeholder_text="Filter names", hexpand=True)
@@ -11522,22 +11544,33 @@ class SignalPage(Gtk.Stack):
         self.now.add_css_class("ref-now")
         now.append(self.now)
         top.append(now)
-        # the reader's chat: the parts it's given, what it says, the searches and lookups it runs, what it adds
-        self.reader = Gtk.Expander(expanded=True)
-        self.reader_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4)
-        self.reader_scroll = natural_height(Gtk.ScrolledWindow(child=self.reader_box, max_content_height=420,
-                                                               propagate_natural_height=True,
-                                                               hscrollbar_policy=Gtk.PolicyType.NEVER))
-        self.reader.set_child(self.reader_scroll)
-        self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
+        # the reader, an agent as a subagent is: its row (its model, what it's doing), opening its chat on a page of its
+        # own, set into the panel as Meta's and a subagent's are (the inside: widgets.inside)
+        self.reader = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, visible=False)
+        self.reader.add_css_class("boxed-list")
+        self.reader_row = Adw.ActionRow(activatable=True, title="Reader", subtitle_lines=2)
+        self.reader_status = StatusSlot("done")
+        self.reader_row.add_prefix(self.reader_status)
+        self.reader_chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        self.reader_row.add_suffix(self.reader_chevron)
+        self.reader.append(self.reader_row)
+        self.reader.connect("row-activated", lambda *_: self.show_reader_page())
         top.append(self.reader)
+        # its chat: the parts it's given, what it says, the searches and lookups it runs, what it adds
+        self.reader_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
+                                  margin_top=12, margin_bottom=12)  # (as far in as a subagent's chat is in its own)
+        self.reader_box.add_css_class("zoomable")
+        self.reader_scroll = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (its code unsquashed)
+            child=self.reader_box, vexpand=True, margin_top=6, hscrollbar_policy=Gtk.PolicyType.NEVER)), start=False)
+        self.reader_scroll.get_vadjustment().connect("changed", self.reader_laid_out)
+        self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
         self.empty = empty_label("")
         self.empty.set_wrap(True)
         self.empty.set_justify(Gtk.Justification.CENTER)
         top.append(self.empty)
         self.groups = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         top.append(self.groups)
-        page = SidePanel._scrolled(top)  # (at its natural height: the reader's chat isn't squashed to a line or two)
+        page = self.list_scroll = SidePanel._scrolled(top)
         self.add_named(page, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
@@ -11552,7 +11585,75 @@ class SignalPage(Gtk.Stack):
         self.detail_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         detail.append(SidePanel._scrolled(self.detail_body))
         self.add_named(detail, "detail")
+        # the reader's page: its row as its header (status, its model, what it's doing; back where the row's › is),
+        # its chat under that
+        reading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        head = Gtk.Box(spacing=6, margin_start=15, margin_end=12, margin_top=6, margin_bottom=6)
+        self.reader_page_status = StatusSlot("done")
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
+                         margin_start=6)
+        self.reader_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.reader_title.add_css_class("heading")
+        self.reader_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2,
+                                     ellipsize=Pango.EllipsizeMode.END)  # (two lines, as its row's)
+        self.reader_info.add_css_class("dim-label")
+        self.reader_info.add_css_class("caption")
+        titles.append(self.reader_title)
+        titles.append(self.reader_info)
+        back = self.reader_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names",
+                                             valign=Gtk.Align.CENTER)
+        back.add_css_class("flat")
+        back.connect("clicked", lambda *_: self.close_reader_page())
+        head.append(self.reader_page_status)
+        head.append(titles)
+        head.append(back)
+        reading.append(head)
+        reading.append(self.reader_scroll)
+        self.add_named(reading, "reader")
         self.rebuild()
+
+    # (its pages as a stack's: a name's card slides in; the reader's page opens out of its row: show_reader_page)
+    def add_named(self, child, name):
+        self.stack.add_named(child, name)
+
+    def get_visible_child_name(self):
+        return self.stack.get_visible_child_name()
+
+    def set_visible_child_name(self, name):
+        self.finish()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_visible_child_name(name)
+
+    def reader_parts(self):
+        """How the reader's row turns into its page's header (ExpandStack): its title, its line and its status each
+        into the header's, and its › into back (flipped: ‹)."""
+        labels = {cls: next((w for w in walk(self.reader_row) if isinstance(w, Gtk.Label) and w.has_css_class(cls)),
+                            None) for cls in ("title", "subtitle")}
+        pairs = [(labels["title"], self.reader_title), (labels["subtitle"], self.reader_info),
+                 (self.reader_status, self.reader_page_status), (self.reader_chevron, self.reader_back.get_child(), True)]
+        return {"pairs": [pair for pair in pairs if pair[0] is not None], "within": self.list_scroll,
+                "across": self.reader}
+
+    def show_reader_page(self):
+        """The reader's chat on its own page, opening out of its row, at its end."""
+        self.reader_to_end = True
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        if self.get_visible_child_name() == "list":
+            self.open("reader", self.reader_row, self.reader_scroll, **self.reader_parts())
+        else:
+            self.stack.set_visible_child_name("reader")
+        self.reader_laid_out(self.reader_scroll.get_vadjustment())
+
+    def close_reader_page(self):
+        """Back to the names, the reader's page closing into its row."""
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.close("list", self.reader_row, self.reader_scroll, **self.reader_parts())
+
+    def reader_laid_out(self, adj):
+        """The reader's chat laid out (again): just opened, at its end."""
+        if self.reader_to_end and adj.get_upper() > adj.get_page_size() > 0:
+            self.reader_to_end = False
+            adj.set_value(adj.get_upper() - adj.get_page_size())
 
     def status_changed(self):
         """What Signal is doing changed: update the status, the log and the skipped names (once a frame)."""
@@ -11565,11 +11666,19 @@ class SignalPage(Gtk.Stack):
         for w in (self.spinner, self.now):
             w.set_visible(ref is not None)
         self.reader.set_visible(ref is not None and bool(ref.reader_chat))
+        if (ref is None or not ref.reader_chat) and self.get_visible_child_name() == "reader":
+            self.show_list()  # (another folder's, whose reader hasn't read: nothing to show)
         if ref is None:
             return False
         busy = ref_busy(ref) and self.win in ref.runners  # (this chat's: another window's chat may run it)
         self.spinner.set_visible(busy)
         self.now.set_label(ref.status_text())
+        for slot in (self.reader_status, self.reader_page_status):
+            slot.set_state(self.reader_state(ref, busy))
+        line = self.reader_line_text(ref)
+        self.reader_row.set_subtitle(html.escape(line))
+        self.reader_info.set_text(line)
+        self.reader_info.set_visible(bool(line))
         self.show_reader(ref)
         return False
 
@@ -11577,7 +11686,8 @@ class SignalPage(Gtk.Stack):
         """The reader's chat, the lines it's added since it was last drawn (kept at the bottom if it was there)."""
         chat, box = ref.reader_chat, self.reader_box
         name = ref.agent.model.capitalize() if ref.agent is not None else "Reader"
-        self.reader.set_label(name)
+        self.reader_row.set_title(name)
+        self.reader_title.set_text(name)
         drawn = self.reader_shown
         if drawn is None or drawn[0] is not chat or drawn[1] > len(chat) or \
                 (drawn[1] and chat[drawn[1] - 1][0] != drawn[2]):  # (another chat, or older lines dropped)
@@ -11606,6 +11716,34 @@ class SignalPage(Gtk.Stack):
             discard(first)
         if at_end:
             GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) and False)
+
+    @staticmethod
+    def reader_state(ref, busy):
+        """The reader's mark, as a subagent's is: reading (a spinner); its last call refused (✗); stopped partway, by
+        Activate Signal or its spending cap, with replies left to read (stopped); else done (✓)."""
+        ai, last = ref.agent, (ref.reader_chat[-1][1] if ref.reader_chat else None)
+        if busy and ai is not None and ai.busy():
+            return "running"
+        if last == "refused":
+            return "error"
+        if last not in ("done", None) or ref.waiting or (ai is not None and ai.cost >= ai.budget and ai.part):
+            return "interrupted"
+        return "done"
+
+    @staticmethod
+    def reader_line_text(ref):
+        """What the reader's row says under its name: the part it's on, else the last thing it did or said."""
+        ai = ref.agent
+        if ai is not None and ai.busy() and ai.part:
+            return f"Reading replies {ai.part['a']} to {ai.part['b']}"
+        for _when, kind, text in reversed(ref.reader_chat):
+            if kind in ("part", "done", "refused") and isinstance(text, str):
+                return text
+            if kind == "assistant":
+                said = " ".join(c.get("text", "") for c in text if isinstance(c, dict) and c.get("type") == "text")
+                if said.strip():
+                    return " ".join(said.split())
+        return ""
 
     def reader_message(self, content):
         """A message of the reader's, drawn as a subagent's is in its side-panel view: its words as a reply, its tool
@@ -12325,6 +12463,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
+        self.input.connect("paste-clipboard", self.on_paste)  # (⌘V, Ctrl+V, Shift+Insert, the menu's Paste)
         self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
                               else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
         self.attach_row = Gtk.Box(spacing=6)
@@ -12359,6 +12498,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tasks_btn.add_css_class("tasks-indicator")
         self.tasks_btn.connect("clicked", lambda *_: self.show_panel(True))
         statusbar.append(self.tasks_btn)
+        # (what the chat's spent, a label of its own, never cut short: the folder and the turn's figures give way,
+        # however narrow the chat or long another host's path; beside the context count, the other running total)
+        self.cost_label = Gtk.Label(xalign=1, tooltip_text="What this chat has spent")
+        statusbar.append(self.cost_label)
         statusbar.append(ctx)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -12381,7 +12524,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.banner.connect("button-clicked", lambda *_: self.new_chat_on_host() if self.banner_kind == "missing" else
                             self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
-        root.append(self.scroller)
+        self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
@@ -12483,10 +12627,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # Ctrl+B the sessions on the left, as an editor's sidebar. Ctrl+F: the find bar of the code the focus is in
         # (the Kubernetes view's YAML or logs), else the Kubernetes view's filter while it's open (it covers the
         # window, so not the find bar of a Code page under it), else the Code page's find bar if that's showing. Both
-        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward
+        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward. ⌘F on a Mac
+        # too; and past those, the chat the focus is in (Meta, a side question, a subagent), else the main chat
         widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
-                                  ("<Control>f", lambda: find_in_focus(self) or self.kube.find() or
-                                                         self.schema.start_find() or self.find_in_code())))
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS),
+                                   lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
+                                   self.find_in_chat())))
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)
@@ -13530,28 +13676,68 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.input.grab_focus()
         return True
 
+    def on_paste(self, view):
+        """A paste, however it's asked for (⌘V, Ctrl+V, Shift+Insert, the menu): copied files or a copied image
+        attached (paste_attachment); text pasted as text."""
+        if self.paste_attachment():
+            view.stop_emission_by_name("paste-clipboard")
+
+    IMAGE_NAME = re.compile(r"\S+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp|svg)|[a-z][\w+.-]*://\S+", re.I)
+
     def paste_attachment(self):
-        """Ctrl+V: attach copied files or a copied image; returns False to let text paste happen."""
+        """Copied files, or a copied image, attached. An image copied with text beside it: the image, if the text's
+        only its name or address (a browser's, Finder's: IMAGE_NAME), else the text (a spreadsheet's cells, copied
+        with a picture of them). Returns False to let text paste."""
         clip = self.input.get_clipboard()
         formats = clip.get_formats()
+        image = clipboard_has(formats, Gdk.Texture, ("image/",))
+
+        def got_texture(c, res):
+            try:
+                self.attach_texture(c.read_texture_finish(res))
+            except GLib.Error as e:
+                self.note(f"paste failed: {e.message}")
+
+        def got_text(c, res):
+            try:
+                text = c.read_text_finish(res) or ""
+            except GLib.Error as e:
+                text = None
+                if not image:
+                    self.note(f"paste failed: {e.message}")
+            if image and (not text or self.IMAGE_NAME.fullmatch(text.strip())):
+                c.read_texture_async(None, got_texture)  # (the image's own name or address: the image's meant)
+            elif text:
+                buf = self.input.get_buffer()
+                buf.begin_user_action()  # (one step to undo, as GTK's own paste)
+                buf.delete_selection(True, True)
+                buf.insert_at_cursor(text)
+                buf.end_user_action()
+                self.input.scroll_mark_onscreen(buf.get_insert())
+
+        def image_or_text():
+            if clipboard_has(formats, GObject.TYPE_STRING, ("text/plain", "text/uri-list")):
+                clip.read_text_async(None, got_text)
+            elif image:
+                clip.read_texture_async(None, got_texture)
+
         if clipboard_has(formats, Gdk.FileList, ("text/uri-list", "x-special/gnome-copied-files")):
             def got_files(c, res):
                 try:
-                    self.attach_paths([f.get_path() for f in c.read_value_finish(res).get_files()])
+                    paths = [f.get_path() for f in c.read_value_finish(res).get_files()]
                 except GLib.Error as e:
                     self.note(f"paste failed: {e.message}")
+                    return
+                if paths and all(paths):
+                    self.attach_paths(paths)
+                else:  # (web addresses, not files here: the image beside them, else the text they are)
+                    image_or_text()
             clip.read_value_async(Gdk.FileList, GLib.PRIORITY_DEFAULT, None, got_files)
             return True
-        has_text = clipboard_has(formats, GObject.TYPE_STRING, ("text/plain",))
-        if clipboard_has(formats, Gdk.Texture, ("image/",)) and not has_text:
-            def got_texture(c, res):
-                try:
-                    self.attach_texture(c.read_texture_finish(res))
-                except GLib.Error as e:
-                    self.note(f"paste failed: {e.message}")
-            clip.read_texture_async(None, got_texture)
-            return True
-        return False
+        if not image:
+            return False
+        image_or_text()
+        return True
 
     def update_status(self, extra=None):
         if extra is not None:
@@ -13560,11 +13746,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         here = self.chat_host() == HERE_HOST
         there = None if here else self.remote_folder()
         self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
-                             f"   ${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
+                             f"   {getattr(self, 'status_extra', '')}")
+        self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
         self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
                                          ("" if here else f" ({self.remote.host})"))
+
+    def cost_said(self):
+        """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own
+        machines (providers.runs_free), which a turn adds nothing to, $0.00 (local) while it's spent nothing, so it
+        reads as a price and not as one missing."""
+        if not self.total_cost and providerslib.runs_free(self.model):
+            return "$0.00 (local)"
+        return f"${self.total_cost:.4f}"
 
     def remote_folder(self):
         """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it
@@ -13722,7 +13917,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (an older host process: said)."""
         r = self.remote or local_host()
         if self.remote is None and r is not None and self.session_id and find_session(self.session_id):
-            reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.run_cwd, "model": self.model,
+            reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.recorded_cwd(), "model": self.model,
                             "mode": self.mode, "group": "", "env": claudelib.claude_env()}, timeout=10)
             if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
@@ -13800,7 +13995,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         params = {"op": "start", "cwd": self.run_cwd, "model": self.model, "effort": effort, "mode": self.mode,
                   "env": claudelib.claude_env(), "group": ""}  # (Baude's own chats: in no group)
         if self.session_id and find_session(self.session_id):
-            params["adopt"] = self.session_id
+            params["adopt"], params["cwd"] = self.session_id, self.recorded_cwd()
         else:  # (a new chat: in the group it was started in, its draft not made: start_draft)
             params["prompt"], params["group"] = "", getattr(self, "draft_group", "")
         reply = r.call(params, timeout=10)  # (on the main loop: this machine's socket, an answer in a moment)
@@ -13810,7 +14005,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         listed = reply["session"]
         r.sessions[listed["id"]] = listed  # (listed before it next says what it has)
         self.remote, self.session_id, self.desktop_chat = r, listed["id"], False
-        self.resume_pending, self.view_path = False, None
+        self.resume_pending, self.view_path, self.gone_tree = False, None, None
         self.tail.stop()
         self.start_remote_proc()
         self.sidebar.fill()
@@ -14079,8 +14274,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
                 widgets.wrap_selection(self.input.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
-        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK:
-            return self.paste_attachment()
+        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and sys.platform == "darwin":
+            self.input.emit("paste-clipboard")  # (GTK binds only ⌘V on a Mac: Ctrl+V pastes there as well)
+            return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
                 return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
@@ -14125,6 +14321,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 except ValueError as e:  # (a quote left open)
                     self.note(f"/login: {e}")
             return
+        if (typed or self.attachments) and not self.busy and not (typed in ("/clear", "/new", "/cd") or
+                                                                  typed.startswith("/cd ")) and self.remake_tree():
+            return  # (its worktree being made again: sent once it is, from the box)
         if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
             if (typed or self.attachments) and not self.revert_asked():
                 self.commit_revert()  # (sent: the revert made, then this sent, reverted)
@@ -14153,6 +14352,46 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.change_cwd(text[3:].strip() or "~")
             return
         self.send_text(text)
+
+    def recorded_cwd(self):
+        """Where the open chat ran, for the host process to take it up in: its worktree even if it's gone (made again
+        there with its first message: the host process's restore_folder), else where claude runs here."""
+        gone = getattr(self, "gone_tree", None)
+        return gone[1] if gone and gone[0] == self.session_id else self.run_cwd
+
+    def remake_tree(self):
+        """Written in a chat Baude runs itself (a Claude Desktop chat) whose worktree is gone (gone_tree): made again
+        from its branch on a thread (baudelib.worktree: git), then what's in the box sent, in it; or, if it can't be,
+        said, and sent in its repository, where claude finds the conversation by its id. True while that's under way.
+        A chat the host process takes up has it made again there (recorded_cwd)."""
+        if getattr(self, "remaking", None) is not None:
+            return True
+        gone = getattr(self, "gone_tree", None)
+        if gone is None or gone[0] != self.session_id or self.remote is not None or not self.runs_here():
+            return False
+        self.gone_tree, self.remaking = None, gone[0]
+
+        def work():
+            try:
+                result = worktreelib.restore(gone[1], gone[2])
+            except worktreelib.Gone as e:
+                result = e
+            on_main(lambda: done(result))
+
+        def done(result):
+            self.remaking = None
+            if self.session_id != gone[0] or self.remote is not None:
+                return
+            if isinstance(result, worktreelib.Gone):
+                self.note(f"{result.why}; resuming in {self.short_cwd()}")
+            else:
+                if result:
+                    self.note(f"worktree {os.path.basename(main_folder(gone[1])[1] or gone[1])} was removed: "
+                              f"made again from its branch {result}")
+                self.set_cwd(gone[1])
+            self.on_send()
+        threading.Thread(target=work, daemon=True, name="worktree").start()
+        return True
 
     def send_text(self, text):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
@@ -14188,6 +14427,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
+        self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)
         self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
 
@@ -14349,6 +14589,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         finally:
             if rev["turn"].is_ancestor(self.transcript):
                 self.reverting = rev
+        if self.busy:  # (the turn it stops ends as a stopped one: not an error, h_result)
+            self.proc.stop_asked = True
         rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid,
                                  "interrupt_if_running": True})
         self.pending[rid] = (lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
@@ -14356,6 +14598,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def revert_refused(self, rev, why):
         """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
+        if rev["asked"] is not None:
+            rev["asked"][0].stop_asked = False  # (its turn not stopped by it: an error that ends it is said, h_result)
         rev["asked"] = None
         if self.reverting is rev:
             self.say_now(f"Couldn't revert: {why}")
@@ -14420,15 +14664,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def interrupt(self):
         """The turn interrupted (Esc, the stop button): asked of its claude once (pressed again meanwhile: nothing
         more). Not over within INTERRUPT_WAIT, whatever runs the model, its claude's stopped (stop_stuck), so the chat's
-        usable again; at once if its host says nothing's running there to interrupt."""
+        usable again; at once if its host says nothing's running there to interrupt. Nothing said yet: the turn's end
+        says it, once (h_result; stop_stuck)."""
         if not self.proc:
             return
         if self.interrupting is not None and self.interrupting[0] is self.proc:
             return  # (asked already: stopped outright if it doesn't end soon)
         self.drop_interrupting()
         proc = self.proc
+        proc.stop_asked = True
         self.pending[proc.control({"subtype": "interrupt"})] = (lambda r: self.interrupt_answered(proc, r), None)
-        self.note("interrupt requested")
         self.interrupting = (proc, GLib.timeout_add(self.INTERRUPT_WAIT, lambda: self.stop_stuck(proc)))
 
     def interrupt_answered(self, proc, response):
@@ -14452,6 +14697,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.interrupting = None
         if proc is not self.proc or not self.busy:
             return False
+        proc.stop_asked = "said"  # (its end said here: not again if its result comes after all, h_result)
         self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it" if ran else
                   f"{self.program_name()} wasn't running: turn ended")
         self.cut_short()
@@ -14926,8 +15172,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.busy:
             self.note("wait for the current turn to finish (or Stop it) before changing folder")
             return
-        if path == self.run_cwd:
-            return
+        if path == self.run_cwd and (self.remote is None or self.remote_folder() in (None, path)):
+            return  # (a host's chat whose folder there isn't this window's, a worktree that's gone, say: moved still)
         if self.remote is not None and not self.remote.mine:  # (another machine's folders: not this one's to pick)
             self.note(f"/cd is this machine's: a session on {remote_name(self.remote)} stays in its folder there")
             return
@@ -14956,6 +15202,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if handler:
             handler(msg)
         return False
+
+    def h_note(self, msg):  # (the host process's word on the chat: its worktree made again, say)
+        self.note(msg.get("text") or "")
 
     def h_stderr(self, msg):
         own = model_program(self.model) != "claude"  # (apple-claude and pi-claude say things there for the chat)
@@ -15194,8 +15443,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
         if msg.get("is_api_error_message") or m.get("model") == "<synthetic>":
+            stopped = parent is None and getattr(self.proc, "stop_asked", False)
             for c in m.get("content", []):
-                if c.get("type") == "text":
+                if c.get("type") == "text" and not (stopped and STOP_SAID_RE.fullmatch(c["text"])):  # (a stop's
+                    # words, aborted: said once, as the turn ends, h_result)
                     self.add(api_error_label(c["text"]), parent)
             return
         self.render_assistant(m.get("content", []), parent, streamed=m.get("id") in self.streamed_ids)
@@ -15876,6 +16127,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         current = self.tabs.current()
         return current if current in pages else pages[-1] if pages else None
 
+    def find_in_chat(self):
+        """⌘F / Ctrl+F: find in the chat the focus is in (Meta's, a side question's, a subagent's: widgets.ChatFind),
+        else in the code tab shown, else in the main chat."""
+        find = widgets.ChatFind.for_focus(self)
+        if find is not None:
+            return find.open()
+        if self.find_in_code():
+            return True
+        return self.chat_find.open() if self.tabs.current() is self.tabs.get("chat") else False
+
     def find_in_code(self):
         """Ctrl+F: find in the code tab shown, if one is; False (not handled) if not."""
         page = self.tabs.current()
@@ -16000,7 +16261,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def github_folders(self):
         """What GitHub's lists are read for (lookup.GitHub.look): the repository this chat's folder is in."""
-        return [], [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
+        return [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
 
     @staticmethod
     def _github_changed(win):
@@ -16708,8 +16969,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
+        turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
         for kind, content, *rest in items:
-            if kind == "tool_results":
+            if kind in ("user", "start_prompt"):
+                turn_calls, stop_said = [], False
+            elif kind == "assistant":
+                before = len(self.tool_cards)
+            stopped = kind == "stopped" or kind == "assistant" and rest and rest[0] and \
+                STOP_SAID_RE.fullmatch(_first_text(content) or "")  # (aborted: as the live chat's, h_assistant)
+            if stopped:  # (stopped: said once, as the live chat says it, h_result; not if a call it stopped says so)
+                if not stop_said and not any(self.tool_cards[t].state in ("running", "interrupted")
+                                             and t not in self.orphan_results for t in turn_calls):
+                    self.note("interrupted")
+                stop_said = True
+            elif kind == "tool_results":
                 self.render_tool_results(content, from_file=True)
             elif kind == "artifact":
                 if content["url"] not in self.artifacts:  # not already shown by its tool call
@@ -16733,6 +17006,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":
                 self.render_assistant(content, written_at=ref_epoch(rest[1]) if len(rest) > 1 else None)
+                turn_calls += list(self.tool_cards)[before:]
             else:
                 text = "\n\n".join(clean_prompt(t) for t in _prompt_texts(content))
                 atts = [Attachment("image", "image", c["source"].get("media_type"),
@@ -17301,12 +17575,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         cwd = info.get("cwd")
         self.clear_transcript()
         self.switching_chat = True  # (its own switches come below: not the chat before's, in its folder)
+        self.gone_tree = None
         if cwd and os.path.isdir(cwd):  # (where it was recorded, a worktree too: --resume finds it in that folder's
             self.set_cwd(cwd)           # project, so claude runs there; the window's folder is its repository's)
         elif cwd:
             if (folder := main_folder(cwd)[0]) != cwd and os.path.isdir(folder):
-                self.set_cwd(folder)  # (a worktree that's gone: its repository)
-            self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
+                self.set_cwd(folder)  # (a worktree that's gone: its repository, till it's made again)
+            if worktreelib.restorable(cwd):  # (removed, as Claude Desktop does as it archives a chat: made again from
+                self.gone_tree = (info["id"], cwd, info.get("path"))  # its branch as it's written in, as Desktop does)
+                self.note(f"worktree {os.path.basename(main_folder(cwd)[1] or cwd)} was removed: "
+                          "it's made again from its branch when you write")
+            else:
+                self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
         self.reset_stream_state()
         self.session_id = info["id"]  # (before the history: Signal files its replies under it)
         self.apply_chat_model(info)  # (the model it was on, not the chat before's)
@@ -17520,14 +17800,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
         self.blocks.clear()
-        self.cut_short()
+        cut = self.cut_short()
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
         said, self.said_last = getattr(self, "said_last", None), None
-        if msg.get("is_error"):
-            if (msg.get("result") or "").strip() != said:
-                self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
+        stop_asked = getattr(self.proc, "stop_asked", False)
+        if self.proc is not None:
+            self.proc.stop_asked = False
+        if msg.get("is_error") and stop_asked and ended_by_stop(msg):
+            if stop_asked is True and self.send_after_result is None and not cut:  # (said already, stop_stuck; one
+                self.note("interrupted")  # a revert stopped: gone from the chat; a call it stopped: its card says so)
+        elif msg.get("is_error"):
+            shown = msg.get("result")
+            if (gone := msg.get("gone")) and self.remote is not None and not self.remote.mine:  # (no /cd there)
+                shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
+                    + f"on {remote_name(self.remote)} to carry on"
+            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said:
+                self.note(f"turn ended with error: {shown or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
             if needs_login(msg.get("result")):
@@ -17553,7 +17843,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning
-        for ever. A background subagent's calls go on after the turn: left running."""
+        for ever. A background subagent's calls go on after the turn: left running. Whether any was."""
+        cut = False
         for tid, card in list(self.tool_cards.items()):
             if card.state != "running":
                 continue
@@ -17563,6 +17854,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if parent is None:
                 card.answered()  # (asked whether to allow it: nothing to answer now)
                 card.set_state("interrupted")
+                cut = True
+        return cut
 
     def goes_on(self, tool_id):
         """Whether a subagent's call goes on after its turn: run in the background (its card says so, or, its card

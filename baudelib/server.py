@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire
+from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -771,6 +771,9 @@ class Server:
                     break
                 try:
                     self.handle(conn, msg)
+                except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True,
+                               "gone": {"why": e.why, "folder": e.folder}})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
@@ -868,6 +871,8 @@ class Server:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        if op == "input" and self.makes_folder(msg.get("msg") or {}):  # (its worktree removed: made again first, not
+            self.restore_folder(conn, msg.get("session"))               # under the lock, which git would hold up)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")
@@ -941,6 +946,31 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
         return reply("error", error=f"unknown op {op!r}")
 
+    @staticmethod
+    def makes_folder(msg):
+        """Is it what a session's folder is made again for, if it's gone: a message, or a revert (both run claude)?"""
+        return msg.get("type") == "user" or (msg.get("type") == "control_request" and
+                                             (msg.get("request") or {}).get("subtype") == "rewind_conversation")
+
+    def restore_folder(self, conn, sid):
+        """(not under the lock) A session's worktree that's gone (Claude Desktop removes a chat's as it archives it)
+        made again from its branch (baudelib.worktree), before its claude starts there; those watching it, and conn,
+        told so. Gone if it can't be."""
+        with self.lock:
+            s = self.sessions.get(sid)
+            if s is None or s.deleting or not s.meta.get("cwd") or os.path.isdir(s.meta["cwd"]):
+                return
+            cwd, transcript = s.meta["cwd"], s.transcript()
+        branch = worktree.restore(cwd, transcript)
+        if branch is None:
+            return
+        self.log(f"made {cwd} again, on {branch}, for {sid}")
+        name = (worktree.split(os.path.realpath(cwd)) or ("", os.path.basename(cwd)))[1]
+        note = {"type": "_note", "text": f"worktree {name} was removed: made again from its branch {branch}"}
+        with self.lock:
+            for c in s.live | {conn}:
+                c.send({"op": "claude", "session": sid, "msg": note})
+
     # ---- sessions
     def start(self, params, conn=None, req=None):
         """A new session, as start asks (wire.py): conn attached live to it first if it asks to be (attach), and told
@@ -951,12 +981,15 @@ class Server:
             return self.adopt(params, conn, req)
         with self.lock:
             src = self.sessions.get(params["fork_from"]) if params.get("fork_from") else None
+        origin = src  # (the chat forked, or asked a side question of: its folder made again if it's gone)
         if params.get("fork_from") and params.get("ephemeral") and src is not None and src.transcript() is None:
             params = {**params, "cwd": params.get("cwd") or src.meta["cwd"]}  # (a side question in a chat with
             src = None                                                         # nothing written yet: a fresh one, there)
         elif params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
             raise ValueError(f"no conversation here to fork: {params['fork_from']}")
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or (src.meta["cwd"] if src else "~")))
+        if origin is not None and not os.path.isdir(cwd) and cwd == os.path.realpath(origin.meta["cwd"]):
+            worktree.restore(cwd, origin.transcript())  # (not under the lock: git; Gone if it can't be)
         if not os.path.isdir(cwd):
             raise ValueError(f"not a folder here: {cwd}")
         if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
@@ -1044,8 +1077,8 @@ class Server:
                 if not path:
                     raise ValueError(f"no conversation {sid} here to take up")
                 cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
-                if not os.path.isdir(cwd):
-                    raise ValueError(f"not a folder here: {cwd}")
+                if not os.path.isdir(cwd) and not worktree.restorable(cwd):  # (a worktree that's gone: made again
+                    raise ValueError(f"not a folder here: {cwd}")             # with its first message)
                 model = params.get("model") or None
                 if not self.can_run(model):
                     raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
@@ -1091,6 +1124,8 @@ class Server:
             self.drop_routes(s)
         if s.proc is not None:
             return s.proc
+        if not os.path.isdir(s.meta["cwd"]):  # (gone, and not made again before this: restore_folder's)
+            raise worktree.missing(s.meta["cwd"])
         resumed = s.transcript() is not None
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=resumed)
@@ -1179,6 +1214,9 @@ class Server:
         if sub == "get_context_usage" and models.model_program(s.meta.get("model")) == "codex":
             return answer(s.meta.get("context_usage") or {"showWithoutLimit": True})
         if sub == "initialize":
+            if s.proc is None and not os.path.isdir(s.meta["cwd"]):  # (its folder gone: nothing started for this, a
+                return answer(self.init({**(s.meta.get("init") or {}),  # message makes it again: restore_folder)
+                                         "current_permission_mode": s.meta.get("mode") or "default"}))
             if s.meta.get("init") is not None and (s.proc is None or s.proc.init_rid is None):
                 return answer(self.init({**s.meta["init"], "current_permission_mode": s.meta.get("mode") or "default"}))
             s.waiting_init.append((conn, rid))
@@ -1754,7 +1792,7 @@ class Server:
             folder = lookup.Folder.for_folder(real)
             folder.catalogue_soon()
             first = self.catalogue_asked.setdefault(folder.root, time.monotonic())
-        lookup.GITHUB.look(tops=[folder.root])
+        lookup.GITHUB.look([folder.root])
 
         def busy():
             github = lookup.gh_path() is not None and lookup.GITHUB.listed(folder.root) is lookup.GITHUB.NOTHING and \
@@ -1772,7 +1810,7 @@ class Server:
                     continue
             entry = it.get("entry")
             if entry is not None:  # (what a list shows of it: its first source, and GitHub's)
-                entry = {k: entry[k] for k in ("kind", "hint", "github") if k in entry} | \
+                entry = {k: entry[k] for k in ("kind", "hint", "github", "at") if k in entry} | \
                     {"sources": list(entry.get("sources") or ())[:1]}
             item = {**it, "entry": entry}
             try:

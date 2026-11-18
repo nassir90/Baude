@@ -12,6 +12,7 @@ name is. Nothing here needs GTK: it reads files and runs git, kubectl, docker (a
 and gh, to read.
 """
 import collections
+import datetime
 import hashlib
 import itertools
 import json
@@ -893,15 +894,54 @@ def ref_palette_word(name, canon, extra, w):
     return None
 
 
+def item_when(item):
+    """When an item was last touched, as epoch seconds, or None: a chat's last use (its "at"), a file's or a branch's
+    last change (as the catalogue found it: its entry's "at"), a pull request's or issue's last update, a looked-up
+    name's file's last change (stat once, kept on the item: those are few)."""
+    if "_when" in item:
+        return item["_when"]
+    entry = item.get("entry") or {}
+    when = next((t for t in (item.get("at"), entry.get("at")) if isinstance(t, (int, float))), None)
+    listed = entry.get("github")
+    if when is None and listed and listed.get("updated"):
+        try:
+            when = datetime.datetime.fromisoformat(listed["updated"].replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    if when is None and item.get("path") and not item.get("entry"):
+        try:
+            when = os.stat(item["path"]).st_mtime
+        except (OSError, ValueError, TypeError):
+            pass
+    item["_when"] = when
+    return when
+
+
+RECENT_STEPS = (3600, 86400, 7 * 86400, 30 * 86400)  # (s: within the hour, the day, the week, the month)
+
+
+def recency(item, now=None):
+    """How lately an item was touched, in steps (RECENT_STEPS: 0 within the hour … 4 longer ago, or not known: a name
+    with no time isn't put below an old one for it)."""
+    when = item_when(item)
+    if when is None:
+        return len(RECENT_STEPS)
+    age = (now or time.time()) - when
+    return next((i for i, step in enumerate(RECENT_STEPS) if age < step), len(RECENT_STEPS))
+
+
 def ref_palette_rank(item, q):
-    """How well a name matches what's typed (lower is better), or None. Each word typed must match (in any order:
-    "relay job" finds relay_gen_job), the worst-matching word decides, then all of them together, then the typed words
-    being in the name's order, then the shorter name. (A pull request or an issue goes by its number, its label: its
-    repository's name is in every one of them, and any letters typed would find them all.)"""
+    """How well a name matches what's typed (lower is better), or None. Nothing typed: what was touched this month,
+    the latest first (item_when), then the rest (older, or with no time) shorter name first. Typed: each word must
+    match (in any order: "relay job" finds relay_gen_job), the worst-matching word decides, then all of them together,
+    then the whole name being what's typed, then the typed words being in the name's order, then how lately it was
+    touched (recency, in steps: a close match isn't passed by a looser one for being newer), then the shorter name. (A pull request or an issue goes by its number, its
+    label: its repository's name is in every one of them, and any letters typed would find them all.)"""
     name = (item.get("label") or item["surface"]).lower()
     words = q.split()
     if not words:
-        return (0, 0, 0, len(name))
+        step = recency(item)
+        return (0, 0, 0, step, -item_when(item) if step < len(RECENT_STEPS) else 0, len(name))
     # (a chat's summary says how long ago too, which isn't what it's searched by: its "where", its folder)
     canon, extra = item["canonical"].lower(), f"{item.get('where', item['summary'])} {item['what']}".lower()
     ranks = []
@@ -912,7 +952,7 @@ def ref_palette_rank(item, q):
         ranks.append(r)
     at = [name.find(w) for w in words]
     in_order = all(x >= 0 for x in at) and at == sorted(at)
-    return (max(ranks), sum(ranks), 0 if in_order else 1, len(name))
+    return (max(ranks), sum(ranks), 0 if name == " ".join(words) else 1, 0 if in_order else 1, recency(item), len(name))
 
 
 def find_spans(text, words, letters=False):
@@ -1481,12 +1521,14 @@ class Names:
         do."""
         cat = {}
 
-        def add(name, kind, what, where="", hint=None, db=None):
+        def add(name, kind, what, where="", hint=None, db=None, at=None):
             if not name or len(name) < 2 or kind != "file" and (len(name) > 120 or "{" in name or name.startswith("_")):
                 return  # (a file's name or path is one, whatever it's like)
             e = cat.setdefault(name, {"kind": kind, "hint": hint, "sources": []})
             if db is not None:  # (a running database's: where, as _live_db_name says it)
                 e.setdefault("db", []).append(db)
+            if at is not None and at > (e.get("at") or 0):  # (when it was last changed: ⌘K's order, item_when)
+                e["at"] = at
             if CATALOGUE_KINDS.index(kind) < CATALOGUE_KINDS.index(e["kind"]):
                 e["kind"], e["hint"] = kind, hint
             elif kind == e["kind"] and hint is None:
@@ -1494,18 +1536,28 @@ class Names:
             if (what, where) not in e["sources"] and len(e["sources"]) < 8:
                 e["sources"].append((what, where))
         _files, _dirs, by_name = self._files(st)
+        top = self.top or self.root
+
+        def changed(path):
+            try:
+                return os.stat(os.path.join(top, path)).st_mtime
+            except (OSError, ValueError):
+                return None
         for base, paths in by_name.items():
             named = "." in base.strip(".") and len(paths) <= 3  # (README.md, __init__.py: everyone's)
+            times = [changed(p) for p in paths]
             if named:
-                add(base, "file", "File", paths[0] if len(paths) == 1 else f"{len(paths)} files")
+                add(base, "file", "File", paths[0] if len(paths) == 1 else f"{len(paths)} files",
+                    at=max((t for t in times if t is not None), default=None))
             if not named or len(paths) > 1:  # the rest by their paths: twelve compose.yaml, a Dockerfile
-                for p in paths:
-                    add(p, "file", "File", p)
+                for p, t in zip(paths, times):
+                    add(p, "file", "File", p, at=t)
         if self.top:
-            for b in (_git(self.top, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes") or
-                      "").split():
-                if b != "HEAD" and not b.endswith("/HEAD"):
-                    add(b, "branch", "Branch")
+            for line in (_git(self.top, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads",
+                              "refs/remotes") or "").splitlines():
+                b, _, when = line.rpartition(" ")
+                if b and b != "HEAD" and not b.endswith("/HEAD"):
+                    add(b, "branch", "Branch", at=float(when) if when.isdigit() else None)
         for o in self._kube_index(st)["objects"]:
             for n, _how in o["names"]:
                 if re.fullmatch(_KUBE_NAME, n):
@@ -1763,8 +1815,8 @@ class Names:
 
 
 # ---------------------------------------------------------------- GitHub's pull requests and issues
-# With the gh CLI signed in, the pull requests and issues of the GitHub repositories in a folder are names too: its
-# checkout's and those of the checkouts under it, the latest few and the open ones, in ⌘K and @, and # in Record's notes
+# With the gh CLI signed in, the pull requests and issues of the GitHub repositories a folder's checkout came from are
+# names too (its origin's and its upstream's): the latest few and the open ones, in ⌘K and @, and # in Record's notes
 # (items, SearchSpace.issues). GITHUB reads them on a thread of its own, keeps a copy of each on disk for the next start,
 # and only ever asks with GET. Nothing at all happens without gh, signed out (gh api says so before it asks GitHub
 # anything), or in a folder with no remote on GitHub.
@@ -1775,8 +1827,7 @@ class Names:
 # change changes. Only when that's changed is the list of open ones asked for too: two requests a change. An answer with
 # no ETag (no free lunch on offer) is asked again every 5 minutes.
 #
-# Only a folder attached to a notebook has the checkouts under it read too. A chat's folder, which no one attached, has
-# the repository it's in: a vendored checkout under it isn't what the chat's about.
+# A folder has the repository it's in, not those of checkouts under it: a vendored checkout isn't what a chat's about.
 
 GITHUB_LOOK_S = 60  # a repository in use is looked at this often
 GITHUB_PLAIN_S = 300  # (or, with no ETag to ask with, this often)
@@ -1787,9 +1838,7 @@ GITHUB_KEEP = 100  # (under this many requests left this hour, it waits for the 
 GITHUB_OUT_S, GITHUB_GONE_S = 600, 3600  # how long till it asks again: signed out; a repository GitHub won't show
 GITHUB_TIMEOUT_S = 30
 GITHUB_BACKOFF_S = 1800  # (offline, or GitHub in trouble: 2, 4, 8… minutes between tries, up to this)
-GITHUB_WALK_DEPTH, GITHUB_WALK_DIRS = 3, 3000  # how far under a folder checkouts are looked for
-GITHUB_SCAN_S = 300  # (and how often again)
-GITHUB_SKIP = frozenset(("node_modules", "__pycache__", "venv", "vendor", "dist", "build", "target", "Library"))
+GITHUB_SCAN_S = 300  # how often the checkout a folder's in is found again
 _GITHUB_REMOTE = re.compile(r"(?:^|[/@])(?:www\.)?github\.com[:/]([\w-][\w.-]*/[\w-][\w.-]*?)(?:\.git)?/?$")
 GITHUB_NAME = re.compile(r"(?<![\w./-])([\w.-]+/[\w.-]+)#(\d+)\b")  # (a pull request's or an issue's: owner/name#12)
 
@@ -1806,26 +1855,9 @@ def github_remotes(checkout):
     return list(dict.fromkeys(wanted))
 
 
-def github_checkouts(folder, under=True):
-    """A folder's git checkouts: the one it's in, then (under) those under it, the nearest first, not far
-    (GITHUB_WALK_*). (top, [checkout])."""
-    top = (_git(folder, "rev-parse", "--show-toplevel", timeout=5) or "").strip()
-    start = os.path.realpath(top or folder)
-    found, todo, seen = [start] * bool(top), collections.deque([(start, 0)] * under), 0
-    while todo and seen < GITHUB_WALK_DIRS and len(found) < GITHUB_REPOS:
-        at, depth = todo.popleft()
-        seen += 1
-        try:
-            with os.scandir(at) as it:
-                entries = list(it)
-            if at != start and any(e.name == ".git" for e in entries):
-                found.append(at)
-            if depth < GITHUB_WALK_DEPTH:
-                todo.extend((e.path, depth + 1) for e in entries if not e.name.startswith(".") and
-                            e.name not in GITHUB_SKIP and e.is_dir(follow_symlinks=False))
-        except OSError:
-            continue
-    return top or None, found
+def github_checkout(folder):
+    """The git checkout a folder's in (its top), or None."""
+    return (_git(folder, "rev-parse", "--show-toplevel", timeout=5) or "").strip() or None
 
 
 def _gh_get(path, etag=None):
@@ -1932,14 +1964,13 @@ class GitHub:
         """Whether a repository's been read: here, or on another day (what's kept of it)."""
         return bool((self._repos.get(repo) or {}).get("etags")) or os.path.exists(self._path(repo))
 
-    def look(self, attached=(), tops=()):
-        """Look at the repositories in use, if it's time to: at once, not waiting for it. Nothing without gh. attached:
-        the folders a notebook has (the repository each is in, and those of the checkouts under it). tops: a chat's
-        folder, which no one attached (the repository it's in, alone)."""
-        tops = [f for f in tops if f]
-        if not (attached or tops) or gh_path() is None:
+    def look(self, folders=()):
+        """Look at the repositories in use, if it's time to: at once, not waiting for it. Nothing without gh. folders:
+        those in use (a chat's: the repository each is in)."""
+        folders = [f for f in folders if f]
+        if not folders or gh_path() is None:
             return
-        self._todo.put((list(attached), tops))
+        self._todo.put(folders)
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, daemon=True, name="lookup-github")
             self._thread.start()
@@ -1947,25 +1978,24 @@ class GitHub:
     # ---- its thread
     def _run(self):
         while True:
-            attached, tops = self._todo.get()
+            folders = self._todo.get()
             try:
                 while True:
-                    more = self._todo.get_nowait()
-                    attached, tops = attached + more[0], tops + more[1]
+                    folders = folders + self._todo.get_nowait()
             except queue.Empty:
                 pass
             try:
-                self.round(attached, tops)
+                self.round(folders)
             except Exception as e:  # noqa: BLE001 (whatever it was: asked again at the next look)
                 print(f"lookup: reading GitHub failed: {e!r}", file=sys.stderr)
 
-    def round(self, attached=(), tops=()):
+    def round(self, folders=()):
         """A look at the repositories in use (look): each once it's due, while GitHub can be asked. What's kept on disk
         of one not seen before is listed at once."""
         if gh_path() is None:
             return
         with self._one:
-            repos = self._in_use(attached, tops)
+            repos = self._in_use(folders)
             for repo in repos:
                 if repo not in self._repos:
                     self._repos[repo] = self._load(repo)
@@ -1979,26 +2009,24 @@ class GitHub:
                     self._read(repo, r)
                     self._publish()
 
-    def _in_use(self, attached, tops):
-        """The repositories in use, as many as are looked at, shared out so that a folder with many checkouts can't
-        crowd out the others: each attached folder's own, then the chat's, then one each of the rest in turn."""
-        tops = [self._in_folder(f, False)["repos"] for f in dict.fromkeys(tops) if f not in attached]
-        attached = [self._in_folder(f, True)["repos"] for f in dict.fromkeys(attached)]
-        order = [repos[0] for repos in attached + tops if repos]
-        for turn in itertools.zip_longest(*(repos[1:] for repos in attached + tops)):
+    def _in_use(self, folders):
+        """The repositories in use, as many as are looked at, shared out: each folder's own first, then the rest of
+        each's (an upstream) in turn."""
+        each = [self._in_folder(f)["repos"] for f in dict.fromkeys(folders)]
+        order = [repos[0] for repos in each if repos]
+        for turn in itertools.zip_longest(*(repos[1:] for repos in each)):
             order += [r for r in turn if r]
         return list(dict.fromkeys(order))[:GITHUB_REPOS]
 
-    def _in_folder(self, folder, under):
-        """The repositories of a folder, found again every so often (what's published of it, kept: nothing's changed
-        unless they have). under: and those of the checkouts under it."""
+    def _in_folder(self, folder):
+        """The repositories of the checkout a folder's in, found again every so often (what's published of it, kept:
+        nothing's changed unless they have)."""
         known = self._folders.get(folder)
-        if known is None or known["under"] != under or time.time() - known["at"] > GITHUB_SCAN_S:
-            top, checkouts = github_checkouts(folder, under)
-            own = github_remotes(checkouts[0]) if top else []
-            repos = [r for c in checkouts for r in github_remotes(c)]
-            known = self._folders[folder] = {**(known or {}), "repos": list(dict.fromkeys(repos))[:GITHUB_REPOS],
-                                             "under": under, "own": own[0] if own else None, "at": time.time(),
+        if known is None or time.time() - known["at"] > GITHUB_SCAN_S:
+            top = github_checkout(folder)
+            repos = github_remotes(top) if top else []
+            known = self._folders[folder] = {**(known or {}), "repos": repos[:GITHUB_REPOS],
+                                             "own": repos[0] if repos else None, "at": time.time(),
                                              "keys": {folder, top} - {None}}  # (top: a Names' root)
         return known
 

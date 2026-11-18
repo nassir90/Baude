@@ -22,8 +22,10 @@ def ref_epoch(iso):
         return None
 
 
+STOPPED = "[Request interrupted by user"  # (what Claude Code keeps as a message of yours when a turn's stopped; "… for
+# tool use]" when a call was)
 _UNTYPED_STARTS = ("<task-notification>", "<ci-monitor-event>", "<side-sessions-event>", "<local-command-stdout>",
-              "<local-command-stderr>")
+              "<local-command-stderr>", STOPPED)
 
 
 def typed_at(rec):
@@ -64,7 +66,7 @@ def projects_dir():
 _INJECTED = ("<system-reminder", "<local-command", "Caveat:", "<ide_", "<pasted_content")
 
 
-_NOT_TYPED = _INJECTED[:3] + ("<task-notification", "<ci-monitor-event")
+_NOT_TYPED = _INJECTED[:3] + ("<task-notification", "<ci-monitor-event", STOPPED)
 
 
 _LEADING_REMINDERS = re.compile(r"\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*", re.S)
@@ -342,9 +344,9 @@ def find_session(session_id):
 
 def history_items(lines, sidechain=False, first=None):
     """Visible items from transcript lines: ('user'|'assistant', content, is_error, timestamp, uuid),
-    ('tool_results', content) or ('artifact', info). Sidechain records are skipped unless
-    sidechain (a subagent's own transcript is nothing but); meta records always are. first: the uuid of the
-    transcript's first user record (first_user_uuid), whose prompt, if it came from outside, is a 'start_prompt'."""
+    ('tool_results', content), ('stopped', None) (a turn stopped) or ('artifact', info). Sidechain records are
+    skipped unless sidechain (a subagent's own transcript is nothing but); meta records always are. first: the uuid of
+    the transcript's first user record (first_user_uuid), whose prompt, if it came from outside, is a 'start_prompt'."""
     return [item for line in lines if (item := history_item(line, sidechain, first)) is not None]
 
 
@@ -437,6 +439,15 @@ def cut_after(starts, at, *others):
     return gone
 
 
+def _stopped_mark(content):
+    """Whether a user message is only Claude Code's note of a turn stopped (STOPPED)."""
+    if isinstance(content, list) and any(not isinstance(c, dict) or c.get("type") != "text" for c in content):
+        return False
+    texts = [content] if isinstance(content, str) else [c.get("text") or "" for c in content or ()]
+    texts = [t for t in texts if t.strip()]
+    return bool(texts) and all(t.lstrip().startswith(STOPPED) for t in texts)
+
+
 def history_item(line, sidechain=False, first=None):
     """The visible item one transcript line makes (see history_items), or None: a line makes one at most."""
     if '"frame-link"' in line:  # Claude Desktop's record of an artifact it published
@@ -467,6 +478,8 @@ def history_item(line, sidechain=False, first=None):
     if rec["type"] == "user" and (event := ci_event(content if isinstance(content, str) else next(
             (c.get("text") for c in content or () if isinstance(c, dict) and c.get("type") == "text"), ""))):
         return "ci_event", event
+    if rec["type"] == "user" and _stopped_mark(content):
+        return "stopped", None
     if rec["type"] == "user" and not _is_prompt(rec):
         if isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "tool_result"
                                              for c in content):

@@ -370,7 +370,7 @@ class CodexProc(AppServer):
             turn = params["turn"]
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
-            self.finish(error, turn.get("durationMs"))
+            self.finish(error, turn.get("durationMs"), interrupted=status == "interrupted")
         elif method == "thread/tokenUsage/updated":
             usage = params.get("tokenUsage") or {}
             used = (usage.get("last") or {}).get("totalTokens")
@@ -387,11 +387,13 @@ class CodexProc(AppServer):
             with self.lock:
                 self.asks.pop(params.get("requestId"), None)
 
-    def result(self, error=None, duration=None):
-        self.emit("result", subtype="error" if error else "success", result=error or self.last_text,
+    def result(self, error=None, duration=None, interrupted=False):
+        # (a turn stopped ends as Claude Code's does: error_during_execution, Baude's chat says it stopped, not failed)
+        subtype = "error_during_execution" if interrupted else "error" if error else "success"
+        self.emit("result", subtype=subtype, result=error or self.last_text,
                   is_error=bool(error), duration_ms=duration or 0, num_turns=1)
 
-    def finish(self, error, duration=None):
+    def finish(self, error, duration=None, interrupted=False):
         # Keep advance() blocked while the host accounts for this turn's result.
         with self.lock:
             self.turn = None
@@ -401,7 +403,7 @@ class CodexProc(AppServer):
             self.tools.clear()
             self.patches.clear()
             self.asks.clear()
-        self.result(error, duration)
+        self.result(error, duration, interrupted)
         self.last_text = ""
         with self.lock:
             self.starting = False

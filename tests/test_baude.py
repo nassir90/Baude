@@ -351,7 +351,7 @@ def test_turn_allow(app):
         card = find(win.transcript, baude.ToolCard)[0]
         assert card.decision == "allowed" and "allowed" not in card.header.get_text(), "allowed: nothing to say"
         assert card.state == "done"
-        assert "$0.0125" in win.status.get_text(), win.status.get_text()
+        assert win.cost_label.get_text() == "$0.0125", win.cost_label.get_text()
         perm = [json.loads(l) for l in fake_log() if '"perm1"' in l and "control_response" in l]
         assert perm and perm[0]["response"]["response"]["behavior"] == "allow"
         assert perm[0]["response"]["response"]["updatedInput"] == {"command": "ls -la"}
@@ -8850,7 +8850,7 @@ def test_status_bar_has_no_session_id(app):
         win.update_status()
         said = win.status.get_text()
         assert "session" not in said and "abcdef12" not in said, said
-        assert said.startswith(win.short_cwd()) and "$" in said, said
+        assert said.startswith(win.short_cwd()) and win.cost_label.get_text().startswith("$"), said
     finally:
         close(win)
 
@@ -14496,8 +14496,8 @@ def test_github_in_the_glossary_search(app):
         ref = baude.Ref("#9", "pr", "resolved", "acme/shop#9", data={"number": 9, "repo": "acme/shop"})
         win.signal = types.SimpleNamespace(refs={"#9": ref}, catalogue={}, catalogue_busy=False, root=folder,
                                            catalogue_soon=lambda: None, github_changed=lambda: None)
-        assert win.github_folders() == ([], [folder]), "the repository the chat's folder is in, alone"
-        lookup.GITHUB.round([], [folder])
+        assert win.github_folders() == [folder], "the repository the chat's folder is in, alone"
+        lookup.GITHUB.round([folder])
         pal = baude.RefPalette(win)
         pal.present(win)
         wait_for(lambda: win.get_visible_dialog() is pal, "the palette")
@@ -14542,7 +14542,7 @@ def test_github_in_the_glossary_search(app):
         with open(state, "w") as f:
             json.dump(saved, f)
         lookup.GITHUB._repos["acme/shop"]["looked"] = 0.0
-        lookup.GITHUB.round([], [folder])
+        lookup.GITHUB.round([folder])
         sig.github_changed()
         assert told == [["acme/shop#7"]], told
         assert baude.ref_icon(sig.refs["acme/shop#7"].kind, sig.refs["acme/shop#7"].data) == "issue_closed"
@@ -14568,7 +14568,7 @@ def test_github_in_the_glossary_search(app):
             os.makedirs(checkout, exist_ok=True)
             subprocess.run(git + ["init", "-q"], cwd=checkout, check=True, capture_output=True)
             subprocess.run(git + ["remote", "add", "origin", f"https://github.com/{own}.git"], cwd=checkout, check=True)
-            lookup.GITHUB.round([], [checkout])
+            lookup.GITHUB.round([checkout])
             listed = {it["surface"]: it["entry"]["github"] for it in lookup.GITHUB.listed(checkout)}
             opened.clear()
             baude.ref_palette_open(win, f"{own}#3", {"github": listed[f"{own}#3"], "kind": "issue"}, checkout)

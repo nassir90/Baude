@@ -33,6 +33,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
+import widgets  # noqa: E402
 from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
     _git, git_exe,
 )
@@ -148,8 +149,7 @@ class FindInText:
 
     def find_tints(self):
         """The (red, green, blue, alpha) of a match and of the current one, for the light or dark theme."""
-        return ((255, 214, 102, 0.28), (255, 170, 40, 0.75)) if Adw.StyleManager.get_default().get_dark() else \
-            ((255, 200, 0, 0.35), (255, 150, 0, 0.70))
+        return widgets.find_tints()
 
     def find_colours(self):
         """The matches' colours, as the theme changes."""

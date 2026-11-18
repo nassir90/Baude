@@ -1916,7 +1916,8 @@ class Exhausted:
 
     def __init__(self, chat, box):
         self.box, self.on = box, False
-        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
+        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False, wrap=True,
+                               max_width_chars=1)  # (a longer reason wrapped in the column, not widening it)
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 
@@ -3524,18 +3525,91 @@ def _image_ext(data):
     return ".png"
 
 
+def same_picture(small, data, w, h):
+    """Whether data, scaled down to w×h, is the picture small is (its pixels within a little of small's, on a grid
+    across it: a file rewritten since with another picture of the same size isn't)."""
+    a = _pixbuf(small)
+    b = _pixbuf(data, w, h)
+    if b.get_width() != w or b.get_height() != h:
+        b = b.scale_simple(w, h, GdkPixbuf.InterpType.BILINEAR)
+    pa, pb = a.get_pixels(), b.get_pixels()
+    na, nb, ra, rb = a.get_n_channels(), b.get_n_channels(), a.get_rowstride(), b.get_rowstride()
+    total = count = 0
+    for gy in range(24):
+        y = min(h - 1, int((gy + 0.5) * h / 24))
+        for gx in range(24):
+            x = min(w - 1, int((gx + 0.5) * w / 24))
+            ia, ib = y * ra + x * na, y * rb + x * nb
+            total += sum(abs(pa[ia + c] - pb[ib + c]) for c in range(3))
+            count += 3
+    return total / count < 14
+
+
+def _pixbuf(data, w=None, h=None):
+    loader = GdkPixbuf.PixbufLoader()
+    if w:
+        loader.connect("size-prepared", lambda ld, _w, _h: ld.set_size(w, h))
+    loader.write(data)
+    loader.close()
+    return loader.get_pixbuf()
+
+
 class ImageActions:
     """What the image click / right-click menu does. One per image widget."""
 
     def __init__(self, widget, data, path=None, name=None, url=None):
         self.widget, self.data, self.name, self.url = widget, data, name, url
         self.path = path if path and os.path.isfile(path) else None
+        self.full, self.no_original, self.looking = None, False, False  # (the lightbox's: Lightbox.show_current)
 
     def file(self):
         return Gio.File.new_for_path(self.path or image_cache_path(self.data))
 
     def texture(self):
         return Gdk.Texture.new_from_bytes(GLib.Bytes.new(self.data))
+
+    def original(self):
+        """The image from the file it came from, if that's a better copy of it than the bytes here (a Read's image and
+        an attachment are scaled down, or recompressed, for the model): more pixels, or as many in more bytes, and
+        still the same picture (scaled down to this one's size, it matches it). (bytes, texture), or None. Read and
+        decoded here: call it off the main thread."""
+        if not self.path or not image_dims(self.data):
+            return None
+        try:
+            with open(self.path, "rb") as f:
+                head = f.read(65536)
+            sw, sh = image_dims(self.data)
+            dims = image_dims(head)
+            kind = Gio.content_type_get_mime_type(Gio.content_type_guess(self.path, None)[0]) or ""
+            if dims is None and not kind.startswith("image/"):
+                return None  # (a notebook's or a PDF's picture: the file isn't it)
+            with open(self.path, "rb") as f:
+                data = f.read()
+            if data == self.data:
+                return None
+            dims = dims or image_dims(data)
+            if dims and (dims[0] < sw or (dims[0] == sw and len(data) <= len(self.data))):
+                return None
+            if not same_picture(self.data, data, sw, sh):
+                return None
+            tex = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+        except (OSError, GLib.Error, ValueError, ZeroDivisionError):
+            return None
+        if tex.get_width() < sw or abs(tex.get_width() / tex.get_height() - sw / sh) > 0.02 * sw / sh:
+            return None
+        return data, tex
+
+    def best(self, then):
+        """then(texture): the original if there's a better one (ImageActions.original), else these bytes' own.
+        Looked for once, off the main thread; kept only while the lightbox shows it (full)."""
+        if self.full:
+            then(self.full[1])
+            return
+
+        def done(found):
+            then(found[1] if found else self.texture())
+            return GLib.SOURCE_REMOVE
+        IMAGE_POOL.submit(lambda: GLib.idle_add(done, None if self.no_original else self.original()))
 
     def view(self):
         root = self.widget.get_root()
@@ -3545,8 +3619,10 @@ class ImageActions:
             self.open()
 
     def copy(self):
-        self.widget.get_clipboard().set(self.texture())
-        toast(self.widget, "Image copied")
+        def put(tex):
+            self.widget.get_clipboard().set(tex)
+            toast(self.widget, "Image copied")
+        self.best(put)
 
     def open(self):
         Gtk.FileLauncher(file=self.file()).launch(self.widget.get_root(), None, None)
@@ -4246,8 +4322,8 @@ class MainTabs(Gtk.Box):
         return True  # (handled: finished here)
 
 
-def image_description(acts, tex):
-    kb = len(acts.data) / 1024
+def image_description(data, tex):
+    kb = len(data) / 1024
     size = f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB"
     return f"{tex.get_width()}×{tex.get_height()} · {size}"
 
@@ -4259,6 +4335,7 @@ class ZoomPicture(Gtk.Picture):
     frame, nothing decoded or rescaled for it."""
 
     FROM_MIDDLE = 0.08  # (with nowhere to come from: this much smaller, as it starts to show)
+    PIXELS_FROM = 3  # (zoomed in this far, screen pixels to one of the image's: its pixels shown sharp, not blurred)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -4308,10 +4385,16 @@ class ZoomPicture(Gtk.Picture):
         if room is not None:
             snap.push_clip(Graphene.Rect().init(*room))
             snap.push_opacity(opacity)
-        snap.save()
-        snap.translate(Graphene.Point().init(x, y))
-        tex.snapshot(snap, w, h)
-        snap.restore()
+        if isinstance(tex, Gdk.Texture):  # (filtered for how far it's scaled, as a viewer does)
+            k = w / tex.get_width() * screen_scale(self)
+            how = (Gsk.ScalingFilter.TRILINEAR if k < 1 else Gsk.ScalingFilter.NEAREST if k >= self.PIXELS_FROM
+                   else Gsk.ScalingFilter.LINEAR)
+            snap.append_scaled_texture(tex, how, Graphene.Rect().init(x, y, w, h))
+        else:
+            snap.save()
+            snap.translate(Graphene.Point().init(x, y))
+            tex.snapshot(snap, w, h)
+            snap.restore()
         if room is not None:
             snap.pop()
             snap.pop()
@@ -4511,19 +4594,57 @@ class Lightbox(Gtk.Box):
                 self.anim.pause()
                 self.anim = None
             self.picture.set_paintable(None)  # (a full-size image: let it go)
+            self.let_go()
             self.items = []
 
     def current(self):
         return self.items[self.index].image_actions
 
     def show_current(self):
+        """The image as it is here at once, then its original at full size if there is one (ImageActions.original),
+        read off the main thread and put in its place: the same picture, so it stays where it is, only sharper."""
         acts = self.current()
-        tex = acts.texture()
+        self.let_go(acts)
+        tex = acts.full[1] if acts.full else acts.texture()
         self.picture.set_paintable(tex)
         self.move_to(1.0, 0.0, 0.0, animate=False)  # (each image from fitted)
+        self.fit(tex)
+        if acts.full is None and acts.path and not acts.no_original and not acts.looking:
+            acts.looking = True
+
+            def done(found, acts=acts):
+                acts.looking = False
+                acts.no_original = found is None
+                if found and self.get_visible() and self.items and self.current() is acts:
+                    acts.full = found
+                    self.sharpen(found[1])
+                return GLib.SOURCE_REMOVE
+            IMAGE_POOL.submit(lambda: GLib.idle_add(done, acts.original()))
+        self.show_title(acts)
+
+    def let_go(self, keep=None):
+        """The originals read for the images not shown (each tens of megabytes decoded): read again if shown again."""
+        for widget in self.items:
+            if widget.image_actions is not keep:
+                widget.image_actions.full = None
+
+    def fit(self, tex):
         # big images fill the window; small ones aren't blown up into a blur
         big = max(tex.get_width(), tex.get_height()) >= 400
         self.picture.set_content_fit(Gtk.ContentFit.CONTAIN if big else Gtk.ContentFit.SCALE_DOWN)
+
+    def sharpen(self, tex):
+        """tex, the original, where the smaller one was: zoomed and moved as that was (a small one that was shown at its
+        own size, now big, is fitted)."""
+        fitted = self.picture.get_width() and self.picture.fitted()
+        self.picture.set_paintable(tex)
+        self.fit(tex)
+        if fitted and self.picture.fitted() != fitted:
+            self.move_to(1.0, 0.0, 0.0, animate=False)
+        self.picture.queue_draw()
+        self.zoom_shown()
+
+    def show_title(self, acts):
         self.title.set_text(os.path.basename(acts.path) if acts.path else (acts.name or acts.url or "Image"))
         self.buttons["browser"].set_visible(bool(acts.url))
         self.zoom_shown()
@@ -4532,7 +4653,8 @@ class Lightbox(Gtk.Box):
         """What says how far it's zoomed: the size in the bar, the arrows (they step between images, so not while it's
         zoomed in) and the pointer."""
         n, zoom = len(self.items), self.target[0]
-        self.info.set_text(image_description(self.current(), self.picture.get_paintable()) +  # (not decoded again)
+        acts = self.current()
+        self.info.set_text(image_description(acts.full[0] if acts.full else acts.data, self.picture.get_paintable()) +  # (not decoded again)
                            (f"  ·  {self.index + 1} / {n}" if n > 1 else "") +
                            (f"  ·  {round(zoom * 100)}%" if self.zoomed() else ""))
         self.prev_btn.set_visible(n > 1 and not self.zoomed())
@@ -6090,6 +6212,308 @@ class ChatSelection:
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         pop.popup()
         return True
+
+
+def find_tints():
+    """The (red, green, blue, alpha) of a match found and of the current one, for the light or dark theme: a code tab's
+    and a page's (codeview.FindInText), a chat's (ChatFind)."""
+    return ((255, 214, 102, 0.28), (255, 170, 40, 0.75)) if Adw.StyleManager.get_default().get_dark() else \
+        ((255, 200, 0, 0.35), (255, 150, 0, 0.70))
+
+
+class FindMarks(Gtk.Widget):
+    """A ChatFind's matches, drawn over the chat's scroller."""
+
+    def __init__(self, find):
+        super().__init__(can_target=False, hexpand=True, vexpand=True, overflow=Gtk.Overflow.HIDDEN)
+        self.find = find
+
+    def do_snapshot(self, snapshot):
+        self.find.draw(snapshot, self)
+
+
+class ChatFind:
+    """⌘F / Ctrl+F in a chat (Baude's, Meta's, a side question's, a subagent's, Record's Read): its find bar at the top
+    of what's read (a bar over the chat, the text moved down for it, as a code tab's), every match in its text shaded,
+    the current one more (find_tints, as a code tab's), "3 of 12" beside the box, Enter / ⌘G for the next, Shift+Enter /
+    ⇧⌘G for the one before, Esc or × to close, the focus back where it was. A chat's text is many labels
+    (MarkdownView): each label's matches are found, in order, and drawn over them; a part of a long chat set aside far
+    from the view (BaudeWindow.cull_chunks) is in what's found, a closed tool card's or revealer's isn't. The current
+    one's brought into view, in a code block's own scroller too. What's selected (one line) is what it looks for. A reply
+    still coming in: its matches found again as Enter's pressed, from where the current one was.
+
+    root: what holds the labels, or a function giving it (a subagent's, whichever's shown). scroller: what they're read
+    in (or, its own not scrolling, as a side question's in its row, the one it's in). pane: what the focus is in when
+    this is the one ⌘F is for (the chat and its box: for_focus)."""
+
+    MATCH_LIMIT = 2000
+    live = weakref.WeakSet()  # (each made: for_focus)
+
+    def __init__(self, root, scroller, pane=None):
+        self._root, self.scroller, self.pane = root, scroller, pane or scroller
+        self.matches, self.index, self.text, self.back_to = [], -1, "", None
+        self.by_label, self.texts = {}, {}  # (each label's matches' places in matches, and its text as it was found)
+        self.marks = FindMarks(self)
+        self.entry = Gtk.SearchEntry(placeholder_text="Find in chat", hexpand=True)
+        self.count = Gtk.Label(width_chars=9, xalign=1, css_classes=["dim-label", "caption"])
+        bar = Gtk.Box(spacing=4)
+        bar.append(self.entry)
+        bar.append(self.count)
+        for icon, tip, step in (("go-up-symbolic", "Previous match (Shift+Enter)", -1),
+                                ("go-down-symbolic", "Next match (Enter)", 1)):
+            btn = Gtk.Button(icon_name=icon, tooltip_text=tip, css_classes=["flat"])
+            btn.connect("clicked", lambda *_, step=step: self.step(step))
+            bar.append(btn)
+        self.bar = FindBar(child=bar, show_close_button=True)
+        self.bar.add_css_class("chat-find")
+        self.bar.connect_entry(self.entry)
+        self.bar.connect("notify::search-mode-enabled", lambda *_: self.bar.get_search_mode() or self._closed())
+        self.entry.connect("stop-search", lambda *_: self.bar.set_search_mode(False))
+        self.entry.connect("search-changed", lambda e: self.find(e.get_text()))
+        self.entry.connect("activate", lambda *_: self.step(1))
+        self.entry.connect("next-match", lambda *_: self.step(1))
+        self.entry.connect("previous-match", lambda *_: self.step(-1))
+        keys = Gtk.EventControllerKey()  # (Shift+Enter: the match before)
+        keys.connect("key-pressed", lambda _c, kv, _k, state: (self.step(-1), True)[1]
+                     if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.SHIFT_MASK else False)
+        self.entry.add_controller(keys)
+        marks = weakref.ref(self.marks)  # (the theme's for the app's life: not keeping this one)
+        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: (m := marks()) is not None and m.queue_draw())
+        self.heard = []  # (the adjustments a scroll's heard on, to draw again: the chat's, and the one it's in: open)
+        self._hear(scroller)
+        ChatFind.live.add(self)
+
+    def _hear(self, scroller):
+        adj = scroller.get_vadjustment()
+        if not any(a is adj for a in self.heard):
+            self.heard.append(adj)
+            adj.connect("value-changed", lambda *_: self.matches and self.marks.queue_draw())
+
+    def wrap(self):
+        """The bar over the scroller, the shading laid over that, for its pane to show in the scroller's place."""
+        over = Gtk.Overlay(child=self.scroller, vexpand=True)
+        over.add_overlay(self.marks)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(self.bar)
+        box.append(over)
+        return box
+
+    def root(self):
+        return self._root() if callable(self._root) else self._root
+
+    def scrolling(self):
+        """What scrolls the chat: its scroller, or, that one never scrolling up or down, the one it's in."""
+        scroller = self.scroller
+        while scroller.get_policy()[1] == Gtk.PolicyType.NEVER and \
+                (outer := scroller.get_parent() and scroller.get_parent().get_ancestor(Gtk.ScrolledWindow)) is not None:
+            scroller = outer
+        return scroller
+
+    @classmethod
+    def for_focus(cls, window):
+        """The chat's find of window's that the focus is in (its pane), or None."""
+        focus = window.get_focus()
+        if focus is None:
+            return None
+        for find in cls.live:
+            if find.pane.get_mapped() and (focus is find.pane or focus.is_ancestor(find.pane)):
+                return find
+        return None
+
+    def open(self):
+        """The bar shown, what's selected in the chat (a line of it) in it, and the focus in it."""
+        window = self.pane.get_root()
+        focus = window.get_focus() if isinstance(window, Gtk.Window) else None
+        if focus is not None and not focus.is_ancestor(self.bar):
+            self.back_to = weakref.ref(focus)
+        self._hear(self.scrolling())  # (a side question's in its row: the list's)
+        picked = self._picked()
+        if picked:
+            self.entry.set_text(picked)
+        self.bar.set_search_mode(True)
+        self.entry.grab_focus()
+        self.entry.select_region(0, -1)
+        if self.entry.get_text() and not self.matches:
+            self.find(self.entry.get_text())
+        return True
+
+    def refresh(self):
+        """What's shown changed under it (another subagent's): found again, if the bar's open."""
+        if self.bar.get_search_mode():
+            self.find(self.entry.get_text())
+
+    def _picked(self):
+        for w in self._labels():
+            ok, a, b = w.get_selection_bounds()
+            if ok and b > a and "\n" not in (text := w.get_text()[a:b]):
+                return text
+        return None
+
+    def close(self):
+        self.bar.set_search_mode(False)
+
+    def _closed(self):
+        """The bar closed (Esc, ×, close): the matches gone, and the focus, if it was in the bar, back where it was
+        (a label's selection as it was: GTK selects all of one given the focus)."""
+        self.matches, self.index, self.text, self.by_label, self.texts = [], -1, "", {}, {}
+        self.count.set_label("")
+        self.marks.queue_draw()
+        window = self.bar.get_root()
+        focus = window.get_focus() if isinstance(window, Gtk.Window) else None
+        back = self.back_to() if self.back_to is not None else None
+        if back is None or not back.get_mapped() or (focus is not None and not focus.is_ancestor(self.bar)):
+            return
+        if isinstance(back, Gtk.Label):
+            ok, a, b = back.get_selection_bounds()
+            back.grab_focus()
+            back.select_region(a, b) if ok else back.select_region(0, 0)
+        else:
+            focus_shown(back)
+
+    def _labels(self):
+        """The chat's text, in order: its selectable labels shown, or set aside (cull_chunks), not in what's hidden
+        (a closed revealer, a closed expander's child)."""
+        out = []
+
+        def visit(w):
+            if not w.get_visible():
+                return
+            if isinstance(w, Gtk.Label):
+                if w.get_selectable():
+                    out.append(w)
+                return
+            if isinstance(w, Gtk.Revealer) and not w.get_child_revealed():
+                return
+            closed = w.get_child() if isinstance(w, Gtk.Expander) and not w.get_expanded() else None
+            child = w.get_first_child()
+            while child is not None:
+                if child is not closed:
+                    visit(child)
+                child = child.get_next_sibling()
+
+        if (root := self.root()) is not None:
+            visit(root)
+        return out
+
+    def find(self, text, after=None):
+        """Every match of text in the chat's labels (case ignored), in order; the current one the first at or below
+        after (a height in what's scrolled), else the first in view, else the first."""
+        self.text, self.matches, self.index, self.by_label, self.texts = text, [], -1, {}, {}
+        self.marks.queue_draw()
+        if not text:
+            self.count.set_label("")
+            return
+        pattern = re.compile(re.escape(text), re.IGNORECASE)
+        for label in self._labels():
+            said = label.get_text()
+            for m in pattern.finditer(said):
+                if m.end() > m.start() and len(self.matches) < self.MATCH_LIMIT:
+                    self.by_label.setdefault(label, []).append(len(self.matches))
+                    self.matches.append((label, m.start(), m.end()))
+            if label in self.by_label:
+                self.texts[label] = said
+            if len(self.matches) >= self.MATCH_LIMIT:
+                break
+        if not self.matches:
+            self.count.set_label("No matches")
+            return
+        if after is None:
+            after = self.scrolling().get_vadjustment().get_value()
+        self.show(self._first_below(after))
+
+    def _first_below(self, y):
+        """The first match whose label reaches below y (in what's scrolled), else the first."""
+        content = self._content(self.scrolling())
+        for label, idxs in self.by_label.items():
+            ok, b = label.compute_bounds(content) if content is not None else (False, None)
+            if ok and b.get_y() + b.get_height() > y:
+                for i in idxs:
+                    if (r := self._rect(i, content)) is not None and r.get_y() + r.get_height() > y:
+                        return i
+        return 0
+
+    def _stale(self):
+        root = self.root()
+        return any(root is None or not label.is_ancestor(root) or label.get_text() != said
+                   for label, said in self.texts.items())
+
+    def step(self, by):
+        """The next match (by 1) or the one before (-1): found again first, from where the current one was, if the
+        chat's changed under them."""
+        if self.matches and self._stale():
+            r = self._rect(self.index, self._content(self.scrolling())) if self.index >= 0 else None
+            was = r.get_y() if r is not None else None
+            self.find(self.text, after=None if was is None else was + (1 if by > 0 else 0))
+            if by > 0 or not self.matches:
+                return
+        if not self.matches:
+            if self.entry.get_text():
+                self.find(self.entry.get_text())
+            return
+        self.show((self.index + by) % len(self.matches))
+
+    def show(self, i):
+        """The i'th match the current one, brought into view: in its code block's scroller, then in the chat's."""
+        self.index = i
+        more = "+" if len(self.matches) >= self.MATCH_LIMIT else ""
+        self.count.set_label(f"{i + 1} of {len(self.matches)}{more}")
+        self.marks.queue_draw()
+        label = self.matches[i][0]
+        root = self.root()
+        inner = inner_scroller(label, root) if root is not None else None
+        if inner is not None:
+            self._bring(inner, i, sideways=True)
+        self._bring(self.scrolling(), i)
+
+    def _bring(self, scroller, i, sideways=False):
+        r = self._rect(i, self._content(scroller), last=True)
+        if r is None:
+            return
+        top, bottom, x0, x1 = r
+        adj = scroller.get_vadjustment()
+        if top < adj.get_value() or bottom > adj.get_value() + adj.get_page_size():  # (else a third of the way down)
+            adj.set_value(max(0, top - adj.get_page_size() / 3))
+        if sideways and scroller.get_policy()[0] != Gtk.PolicyType.NEVER:
+            h = scroller.get_hadjustment()
+            if x0 < h.get_value() or x1 > h.get_value() + h.get_page_size():
+                h.set_value(max(0, x0 - h.get_page_size() / 3))
+
+    @staticmethod
+    def _content(scroller):
+        child = scroller.get_child()
+        return child.get_child() if isinstance(child, Gtk.Viewport) else child
+
+    def _rect(self, i, content, last=False):
+        """Where the i'th match is in content (what a scroller scrolls): its first line's rectangle; last: (top, bottom,
+        left, right) of all its lines."""
+        label, start, end = self.matches[i]
+        rects = passage_rects(label, start, end, content) if content is not None else []
+        if not rects:
+            return None
+        if last:
+            return (rects[0].get_y(), rects[-1].get_y() + rects[-1].get_height(),
+                    min(r.get_x() for r in rects), max(r.get_x() + r.get_width() for r in rects))
+        return rects[0]
+
+    def draw(self, snapshot, target):
+        """The matches in view shaded: each label looked at once, not each match."""
+        if not self.matches:
+            return
+        height = target.get_height()
+        match, current = (Gdk.RGBA() for _ in range(2))
+        for rgba, (r, g, b, a) in zip((match, current), find_tints()):
+            rgba.red, rgba.green, rgba.blue, rgba.alpha = r / 255, g / 255, b / 255, a
+        root, origin = self.root(), Graphene.Point().init(0, 0)
+        for label, idxs in self.by_label.items():
+            if not label.get_mapped() or label.get_text() != self.texts[label]:
+                continue
+            ok, at = label.compute_point(target, origin)
+            if not ok or at.y > height or at.y + label.get_height() < 0:
+                continue  # (off the view)
+            for i in idxs:
+                _label, start, end = self.matches[i]
+                shade_passage(snapshot, current if i == self.index else match, label,
+                              passage_rects(label, start, end, target), target, root)
 
 
 class MarkdownView(Gtk.Box):
@@ -8881,7 +9305,7 @@ def window_shown(win):
 
 
 def watch_github(win, folders, changed=None):
-    """While win's shown: GitHub's lists of the folders in use (folders(win): (attached, tops), lookup.GitHub.look)
+    """While win's shown: GitHub's lists of the folders in use (folders(win): a list, lookup.GitHub.look)
     looked at when it's time, or the folders are others, and once they've changed, what's on show drawn afresh: ⌘K if
     it's open and its first row is what's picked (changed(win), the rest). Where the pull requests of those folders'
     repositories stand (lookup.PULLS, once something's shown them) likewise. folders and changed are plain functions,
@@ -8898,8 +9322,8 @@ def watch_github(win, folders, changed=None):
         now, in_use = time.monotonic(), folders(win)
         if now - looked[0] >= lookup.GITHUB_LOOK_S or in_use != asked[0]:
             looked[0], asked[0] = now, in_use
-            lookup.GITHUB.look(*in_use)
-        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in (*in_use[0], *in_use[1]))
+            lookup.GITHUB.look(in_use)
+        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in in_use)
         if seen[0] != lookup.GITHUB.generation or pulls[0] != lookup.PULLS.generation:
             seen[0], pulls[0] = lookup.GITHUB.generation, lookup.PULLS.generation
             dialog = win.get_visible_dialog()

@@ -14499,7 +14499,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         kept = (load_settings().get("chat_models") or {}).get(info["id"])
         want = (kept if kept != "default" else None) or transcript_model(info["path"])
         models = {v: m for v, m in getattr(self, "models_info", {}).items() if v != "default"}  # (an alias, not a model)
-        model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) if want else None
+        model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) or \
+            (modelslib.claude_match(want, list(models.values())) or {}).get("value") if want else None
         if model is None and want and model_program(want) == "claude":  # ("claude-opus-5-5" for the picker's "opus")
             model = next((v for v in models if model_program(v) == "claude" and v in want), None)
         if model is None and model_program(self.model) != "claude":
@@ -14544,7 +14545,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
         want = self.model or default.get("resolvedModel")
-        hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), want) if want else None
+        hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), None) or \
+            (modelslib.claude_match(want, models) or {}).get("value", want) if want else None
         self.model_shown = hit  # (what the picker shows while claude's own default's the model: self.model None)
         self.sync_providers(hit)
         self.sync_effort_choices()
@@ -14664,17 +14666,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if pid is not None and shown not in seen:
             offered.append(info(shown))
         kinds = providerslib.alike(offered, [shown] if shown else [])
-        listed = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and m["value"] not in seen and
-                  pid_of(m) is None] + [lead for lead, _ms in kinds]
-        if shown and not any(m["value"] == shown for m in listed):  # (Claude's, by a name claude didn't list)
-            listed.append(info(shown))
+        own = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and
+               m["value"] not in seen and pid_of(m) is None]
+        if shown and pid is None and not any(m["value"] == shown for m in own):  # (Claude's, by a name claude didn't
+            own.append(info(shown))  # list: claude-opus-5-5, its server's say, for opus; the same one as it, or its own)
+        claudes = modelslib.claude_alike(own)  # (Claude's, one of each: opus, Opus 5.5, is claude-opus-5-5 too)
+        listed = [lead for lead, _ms in claudes] + [lead for lead, _ms in kinds]
+        pick = next((lead["value"] for lead, ms in claudes if any(m["value"] == shown for m in ms)), shown)
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
-        names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
-                  m.get("displayName") or m["value"]) for m in listed]
-        self.model_names = dict(names)
+        said = {lead["value"]: modelslib.claude_label(ms) for lead, ms in claudes}
+        names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else said[m["value"]])
+                 for m in listed]
+        self.model_names = {m["value"]: said[lead["value"]] for lead, ms in claudes for m in ms} | dict(names)
         self.model_dd.set_choices(names or MODELS)
-        if shown:
-            self.model_dd.select(shown)
+        if pick:
+            self.model_dd.select(pick)
 
         here = THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(self.remote)
         copies = next((ms for _lead, ms in kinds if any(m["value"] == shown for m in ms)), []) if pid else []
@@ -16927,8 +16933,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             f"{remote_name(r)} ({r.host})"  # noqa: E731
         def offered(r):
             host = r or local_host()
-            return [(m["value"], m.get("displayName") or m["value"])
-                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
+            return [(lead["value"], modelslib.claude_label(ms)) for lead, ms in modelslib.claude_alike(  # (one of each)
+                [m for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"])] \
+                or MODELS
         servers_dd = agent_dd = None
         if said:  # (the host it's to be on: said, not picked)
             field("Host", Gtk.Label(label=named(servers[0]), xalign=0))

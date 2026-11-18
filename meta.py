@@ -55,7 +55,8 @@ from baudelib.models import model_program  # noqa: E402
 NAME = "Meta"
 MODEL = "haiku"  # its model, unless Settings → Meta → Intelligence says another (settings.json meta_model)
 MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers till claude's listed its own)
-MODEL_KEYS = ("value", "displayName", "supportsEffort", "supportedEffortLevels")  # (what's kept of each: models)
+MODEL_KEYS = ("value", "displayName", "resolvedModel", "description", "supportsEffort",
+              "supportedEffortLevels")  # (what's kept of each: models; what it resolves to, to tell it's the same one)
 CODE_LINES = 10  # the most lines of Python run_python runs
 READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # Claude Code's own that act, given on Claude's models (runs_commands), in its Auto mode: what its classifier holds back
@@ -179,12 +180,25 @@ def listed_models(offered=None):
     gone and no other has it. Where two of a name aren't the same, each is told apart (providers.told_apart)."""
     offered = models() if offered is None else offered
     known = providerslib.entries()
-    by_value = {m[0]: m for m in offered}
-    out = [m for m in offered if m[3] is None] + \
+    by_value = {}
+    for m in offered:
+        by_value.setdefault(m[0], m)
+    claudes = modelslib.claude_alike(claude_described([m for m in by_value.values() if m[3] is None]))
+    out = [(lead["value"], modelslib.claude_label(ms), *by_value[lead["value"]][2:]) for lead, ms in claudes] + \
         [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
     others = [described(m, known) for m in out if m[3] is not None]
     return [(m[0], providerslib.told_apart(described(m, known), others), *m[2:]) if m[3] is not None else m
             for m in out]
+
+
+def claude_described(offered):
+    """Entries of models() without a provider (Claude's, codex's) as claude listed them: {value, displayName}, and what
+    each resolves to and its description where claude said them (settings.json's claude_models): to tell two said
+    differently (opus, Opus 5.5, and claude-opus-5-5) are one (models.claude_same)."""
+    said = {m["value"]: m for m in widgets.load_settings().get("claude_models") or []
+            if isinstance(m, dict) and isinstance(m.get("value"), str)}
+    return [{k: v for k, v in (said.get(m[0]) or {}).items() if k in ("resolvedModel", "description")} |
+            {"value": m[0], "displayName": m[1]} for m in offered]
 
 
 def described(m, known=None):
@@ -216,11 +230,15 @@ def listed(found, seed=False):
 
 
 def model_entry(value, offered=None):
-    """The entry of offered (models()) for a model value: its own, else, for an alias (haiku), the first listed model
-    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if neither."""
+    """The entry of offered (models()) for a model value: its own; else Claude's that's the same one said another way
+    (models.claude_match: Opus 5.5, opus, for claude-opus-5-5); else, for an alias (haiku), the first listed model
+    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if none."""
     offered = models() if offered is None else offered
     family = re.compile(rf"(^|-){re.escape(value)}(-|\[|$)")
-    return next((m for m in offered if m[0] == value), None) or \
+    if hit := next((m for m in offered if m[0] == value), None):
+        return hit
+    same = modelslib.claude_match(value, claude_described([m for m in offered if m[3] is None]))
+    return next((m for m in offered if same and m[0] == same["value"]), None) or \
         (next((m for m in offered if family.search(m[0])), None) if value in dict(MODELS) else None)
 
 

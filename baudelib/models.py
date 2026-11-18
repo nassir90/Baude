@@ -381,6 +381,70 @@ def model_program(value):
         any(m["value"] == value for m in mlx_models()) else "claude"
 
 
+_LONG = re.compile(r"\[1m\]|\b1m\b")  # (a 1M-context variant: its own model, opus[1m] beside opus)
+_HEAD = re.compile(r"[a-z]+ \d+(?:\.\d+)*(?: \(1m context\))?")  # (a description that starts with the name: "Opus 5.5 · …")
+
+
+def _folded(name):
+    """A Claude model's name as it's compared: "Opus 5.5", "claude-opus-5-5" and "claude-opus-5-5-20261001" are
+    "opus55"; a 1M-context one's ends "[1m]". None for none."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    s = name.casefold().strip()
+    long = bool(_LONG.search(s))
+    s = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", s)
+    s = re.sub(r"^(?:[a-z]+\.)?(?:anthropic[./])?claude[-_ ]?", "", s.strip())  # (us.anthropic.claude-…, claude-…)
+    s = re.sub(r"[-_@ ]\d{8}$", "", re.sub(r"-v\d+(?::\d+)?$", "", s.strip()))  # (a snapshot's date; Bedrock's -v1:0)
+    s = re.sub(r"[^a-z0-9]", "", s)
+    return s + ("[1m]" if long else "") if s else None
+
+
+def claude_names(m):
+    """The names a model of Claude's goes by, as they're compared (_folded): its value (an alias, opus; or its id), what
+    it resolves to, its name ("Opus 5.5"), and the name its description starts with."""
+    head = (m.get("description") or "").split("·", 1)[0].strip().casefold() if isinstance(m.get("description"), str) else ""
+    said = (m.get("value"), m.get("resolvedModel"), m.get("displayName"), head if _HEAD.fullmatch(head) else None)
+    return {f for f in map(_folded, said) if f}
+
+
+def claude_same(a, b):
+    """Whether two of Claude's models are the same one, however each is said: opus (Opus 5.5) and claude-opus-5-5, or
+    two of a name in another case."""
+    return a.get("value") == b.get("value") or bool(claude_names(a) & claude_names(b))
+
+
+def claude_alike(models):
+    """Claude's models (initialize's entries, and any said another way: a chat's own) as one of each (claude_same):
+    [(the one listed, every one that's the same)], in models' order. The one listed is the first, as claude lists it;
+    others (codex's) are each their own."""
+    groups = []
+    for m in models:
+        ms = next((ms for ms in groups if model_program(m["value"]) == "claude" == model_program(ms[0]["value"]) and
+                   any(claude_same(m, x) for x in ms)), None)
+        if ms is None:
+            groups.append([m])
+        elif all(x["value"] != m["value"] for x in ms):
+            ms.append(m)
+    return [(ms[0], ms) for ms in groups]
+
+
+def claude_label(ms):
+    """The name of one of Claude's models said several ways (claude_alike's): the first's, unless that's only its id
+    (claude-opus-5-5), then the first that's a name (Opus 5.5)."""
+    names = [m.get("displayName") or m["value"] for m in ms]
+    return next((n for m, n in zip(ms, names) if n.casefold() != m["value"].casefold()), names[0])
+
+
+def claude_match(value, models):
+    """The entry of models (Claude's, as listed) a model value is: its own, else the one that's the same
+    (claude_same: claude-opus-5-5 for opus, listed as Opus 5.5); None if neither."""
+    if not value:
+        return None
+    return next((m for m in models if m["value"] == value), None) or \
+        (next((m for m in models if model_program(m["value"]) == "claude" and claude_same({"value": value}, m)), None)
+         if model_program(value) == "claude" else None)
+
+
 def pi_exe():
     return os.environ.get("BAUDE_PI_CLAUDE") or os.path.join(PI_CLAUDE, "pi-claude")
 

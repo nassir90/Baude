@@ -1498,6 +1498,7 @@ button.edit-accept { background: #2ec27e; }
 button.edit-accept:hover { background: #26a269; }
 button.edit-reject { background: #e01b24; }
 button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reject, on its page: EditControls) */
+button.edit-card-control { min-width: 22px; min-height: 18px; }  /* (and on its card: RecordChat.card_extra) */
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
 .pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
 .quote-in-bubble { border-left: 3px solid alpha(@view_fg_color, 0.25); padding-left: 8px; font-size: 0.92em;
@@ -3040,6 +3041,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         renamed = relinked_pages(pages, moved)
         pages.clear()  # (the same dict: the notebook keeps it)
         pages.update(renamed)
+        self.win.chat.follow_moves(self.notebook, moved)  # (the edits waiting on them go with them, as Meta's moves')
         self.win.store.save()
         self.win.pages.typed(self.notebook, old, None)  # (kept: listed by its new name, in its place)
         self.win.note_renamed(moved)
@@ -3279,7 +3281,8 @@ class DiaryEditor(Gtk.Box, FindInText):
                     tag("hidden", m.start() + 1, m.start() + 2)
                     tag("hidden", m.end() - 1, m.end())
         pos, item = 0, None  # (item: the list item the lines after it may go on with: its text's margin)
-        spans = widgets.fence_spans(text.split("\n"), typing=shown)
+        # (an edit's Accept and Reject, U+FFFC, after a ``` its green ends with: still a bare fence, closing its block)
+        spans = widgets.fence_spans(text.replace("\ufffc", "").split("\n"), typing=shown)
         blocks = [[first, last] for first, last, _closed in spans]  # (each code block's lines, for its card: NotesView)
         in_block = {n for first, last, _closed in spans for n in range(first, last + 1)}
         fences = {first for first, _last, _closed in spans} | {last for _first, last, closed in spans if closed}
@@ -3583,6 +3586,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         if not self.proposals:
             return
         buf = self.buf
+        hidden = buf.get_tag_table().lookup("hidden")
 
         def tag(name, x, y):
             if y > x:
@@ -3595,6 +3599,24 @@ class DiaryEditor(Gtk.Box, FindInText):
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
             tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
+            # (its Accept and Reject's anchor never in markup hidden off the caret's line, a fence's ``` or a link's
+            # target: GTK puts a widget in hidden text at its line's start, over the text there; nor its red or green,
+            # if all of either is: a link's target changed)
+            at = g0 + e["lead"] + e["body"]
+            start = buf.get_iter_at_offset(at)  # (and what's hidden just before it in its line, a fence's ```: seen)
+            if at > g0 and buf.get_iter_at_offset(at - 1).has_tag(hidden):
+                start.backward_to_tag_toggle(hidden)
+                start = max(start, buf.get_iter_at_offset(max(g0, at - buf.get_iter_at_offset(at).get_line_offset())),
+                            key=lambda i: i.get_offset())
+            buf.remove_tag(hidden, start, buf.get_iter_at_offset(at + 1))
+            for x, y in [(g0 + e["lead"], at), *self._kept_pieces(*(buf.get_iter_at_mark(e[k]).get_offset()
+                                                                      for k in ("a", "b")))]:
+                start = buf.get_iter_at_offset(x)
+                if y > x and start.has_tag(hidden):
+                    end = start.copy()
+                    end.forward_to_tag_toggle(hidden)
+                    if end.get_offset() >= y:
+                        buf.remove_tag(hidden, start, buf.get_iter_at_offset(y))
             e["controls"].size(self._control_px(e["anchor"]))
 
     def _proposal_at(self, offset):
@@ -5739,6 +5761,7 @@ class RecordChat(meta.MetaChat):
             self.drawn = True
             self.render()
         self.show_pending_bar()
+        self.edit_cards_changed()  # (an edit's Accept and Reject on its card: only while its notebook's open)
         self.marks_changed()  # (the notebooks' list, and the pages' and the pages open, as Meta's marks have them)
 
     # ---- what Meta.MetaChat asks of Record
@@ -5982,6 +6005,90 @@ class RecordChat(meta.MetaChat):
         live = self.agent.turn["proposals"] if self.agent is not None and self.agent.turn is not None else ()
         return next((p for m in self.messages() for p in m.get("proposals") or () if p["id"] == pid),
                     next((p for p in live if p["id"] == pid), None))
+
+    # ---- an edit's card: its Accept and Reject while it waits, as its page has them, so a hunk drawn anywhere has
+    # them in reach (its page not open, or not the tab shown, or the edit's somewhere off the page's screen)
+    EDIT_ID_RE = re.compile(r"\b[Ee]dit ([0-9a-f]{10})\b")
+    EDIT_SAID = {"accepted": "accepted", "rejected": "rejected", "withdrawn": "taken back"}
+
+    def card_edit_id(self, it):
+        """The id of the edit a call's card is of: propose_edit's (kept with its card as it ran, or said in its
+        answer), revise_edit's (its input's); or None."""
+        short = (it.get("name") or "").removeprefix("mcp__meta__")
+        if short == "revise_edit":
+            return str((it.get("input") or {}).get("id") or "") or None
+        if short != "propose_edit":
+            return None
+        if it.get("edit"):
+            return it["edit"]
+        m = self.EDIT_ID_RE.search(str(it.get("result") or ""))
+        return m.group(1) if m else None
+
+    def _last_edit_card(self, pid):
+        """Which card has an edit as it is now, the last call that made or changed it: its (call id, input)."""
+        live = self.agent.turn["items"] if self.agent is not None and self.agent.turn is not None else ()
+        last = None
+        for it in [it for m in self.messages() for it in m.get("items") or ()] + list(live):
+            if it.get("kind") == "tool" and self.card_edit_id(it) == pid and self.call_hunks(it) and \
+                    it.get("state") != "error":
+                last = it
+        return (last.get("id"), last.get("input")) if last is not None else None
+
+    def card_extra(self, it, line, hunks):
+        if hunks is None or (pid := self.card_edit_id(it)) is None:
+            return
+        slot = Gtk.Box(spacing=3, valign=Gtk.Align.CENTER)
+        line.append(slot)
+        slots = self.__dict__.setdefault("edit_slots", [])
+        slots[:] = [s for s in slots if s[0].get_root() is not None]  # (cards drawn again since: gone)
+        slots.append((slot, pid, (it.get("id"), it.get("input")), hunks))
+        self._fill_edit_slot(*slots[-1])
+
+    def _fill_edit_slot(self, slot, pid, key, hunks):
+        """A card's edit as it is now: Accept and Reject while it waits (and is this card's), else what became of it,
+        its hunk faded unless it's in the page."""
+        while (c := slot.get_first_child()) is not None:
+            slot.remove(c)
+        p = self._proposal(pid)
+        if p is None:
+            return
+        status = p.get("status")
+        said = self.EDIT_SAID.get(status)
+        if status == "pending" and self._last_edit_card(pid) != key:
+            said = "revised"  # (a later call changed it: that one's card has it as it is)
+        elif status == "pending" and (self.notebook is None or p.get("notebook") != self.notebook.get("id")):
+            said = "waiting in another notebook"
+        elif status == "pending" and p["page"] not in self.notebook["pages"]:
+            said = "its page is gone"
+        if said is None and status == "pending":
+            for icon, tip, css, accept in (("object-select-symbolic", "Accept", "edit-accept", True),
+                                           ("window-close-symbolic", "Reject", "edit-reject", False)):
+                btn = Gtk.Button(tooltip_text=tip, valign=Gtk.Align.CENTER)
+                btn.set_child(Gtk.Image(icon_name=icon, pixel_size=12))
+                for c in ("edit-control", "edit-card-control", css):
+                    btn.add_css_class(c)
+                pointers.hand(btn)
+                btn.connect("clicked", lambda *_, accept=accept: self.decide_from_card(p, accept))
+                slot.append(btn)
+        elif said:
+            slot.append(label(said, css=("dim-label", "caption")))
+        (hunks.add_css_class if said and status != "accepted" else hunks.remove_css_class)("dim-label")
+
+    def edit_cards_changed(self):
+        """Every edit's card shown, as its edit is now (one decided, revised, taken back; another notebook open)."""
+        slots = self.__dict__.setdefault("edit_slots", [])
+        slots[:] = [s for s in slots if s[0].get_root() is not None]
+        for s in slots:
+            self._fill_edit_slot(*s)
+
+    def decide_from_card(self, p, accept):
+        """An edit's Accept or Reject on its card: done on its page, as its own are (the page opened, the edit shown
+        there and decided: DiaryEditor.decide)."""
+        if p.get("status") != "pending" or self.notebook is None or p["page"] not in self.notebook["pages"]:
+            return self.edit_cards_changed()
+        if (editor := self.win.open_note(p["page"])) is not None:
+            editor.show_proposal(p, scroll=True)
+            editor.decide(p, accept)
 
     # ---- what's asked
     def set_quote(self, text):
@@ -6236,6 +6343,7 @@ class RecordChat(meta.MetaChat):
         """A proposed edit accepted or rejected on its page: kept so, and told the agent with the next message."""
         self.win.store.save()
         self.show_pending_bar()
+        self.edit_cards_changed()
 
     def _unknown_chips(self, m):
         flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=6, row_spacing=4,
@@ -6847,6 +6955,7 @@ class RecordChat(meta.MetaChat):
         if p["status"] == "pending" and (editor := self.win.open_note(p["page"])) is not None:
             editor.show_proposal(p, scroll=True)
         self.show_pending_bar()
+        self.edit_cards_changed()
 
     def _restage(self, turn, p, **fields):
         """A pending edit changed (old, new, start) or taken back (status): off its page, changed, and shown again."""
@@ -6905,14 +7014,22 @@ class RecordChat(meta.MetaChat):
         p = {"id": uuid.uuid4().hex[:10], "notebook": self.notebook.get("id"), "page": page, "old": old, "new": new,
              "start": start, "status": "pending", "t": time.time()}
         turn["proposals"].append(p)
+        self._on_card(turn, p)
         self._edited(turn, p)
         return {"text": f"Edit {p['id']} shown on the page {page} for the user to accept or reject. Nothing is written "
                         "until they accept; you'll be told which."}
+
+    @staticmethod
+    def _on_card(turn, p):
+        """The edit a propose_edit made or revised, kept with its card (its Accept and Reject there: card_extra)."""
+        if (item := turn.get("at")) is not None and item is not turn.get("nested"):
+            item["edit"] = p["id"]
 
     def _merged(self, turn, edits, start, old, new):
         """Pending edits a change reaches into, as one: the first revised to replace old with new, the others taken
         back."""
         first = edits[0]
+        self._on_card(turn, first)
         for p in edits[1:]:
             self._restage(turn, p, status="withdrawn")
         self._restage(turn, first, old=old, new=new, start=start)
@@ -8820,8 +8937,13 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if r == "delete" and name in notebook["pages"]:
                 self.tabs.close(("note", name))
                 notebook["pages"].pop(name, None)
+                for p in self.chat.pending(notebook):  # (Meta's edits waiting on it: gone with it, said so)
+                    if p["page"] == name:
+                        p["status"] = "rejected"
                 self.store.save()
                 self.pages.fill()
+                self.chat.show_pending_bar()
+                self.chat.edit_cards_changed()
         d.connect("response", done)
         d.present(self)
 

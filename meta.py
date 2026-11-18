@@ -3148,9 +3148,14 @@ class MetaChat(Gtk.Box):
             hover.connect("enter", lambda *_: self.light(batch, True))
             hover.connect("leave", lambda *_: self.light(batch, False))
             card.add_controller(hover)
+        self.card_extra(it, line, hunks)
         if (status := widgets._card_status(it.get("state") or "done")) is not None:
             line.append(status)
         return card
+
+    def card_extra(self, it, line, hunks):
+        """What an app adds to a call's card, on its line (hunks: what hunks shows under it, or None): Record's, an
+        edit it proposed, its Accept and Reject while it waits."""
 
     @staticmethod
     def _disclosure(toggles, grid, row, label_, text, lang):

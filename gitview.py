@@ -122,7 +122,7 @@ GIT_CHAT = "#7f77dd"     # a commit this chat made: its dot
 GIT_CHIP_CHARS = 24      # a branch's name in a log row's chip, at most (longer: its start … its end)
 
 
-GIT_PULLS_SHOWN = 8      # the pull requests this chat touches listed at most (the rest: how many more)
+GIT_PULLS_SHOWN = 8      # the pull requests this chat touches shown at once (the rest: scrolled to)
 
 
 GIT_ROW_GAP = 6          # px between a log row's lane, its author's picture and its text (the list at the top's too)
@@ -972,6 +972,28 @@ def git_pull_markup(p, repo):
     return f'<span allow_breaks="false" size="{round(LinkLabel.CHIP_SCALE * 100)}%">{pill}</span>'
 
 
+class GitPullsScroll(Gtk.ScrolledWindow):
+    """The list at the top (a ListBox), as tall as its first GIT_PULLS_SHOWN rows are at the width it's given; the
+    rest scrolled to, the log keeping the room below."""
+
+    def __init__(self, box):
+        super().__init__(child=box, visible=False, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                         propagate_natural_height=True)
+
+    def do_measure(self, orientation, for_size):
+        least, natural, _, _ = Gtk.ScrolledWindow.do_measure(self, orientation, for_size)
+        if orientation == Gtk.Orientation.VERTICAL:
+            rows, row = 0, self.get_child().get_child().get_first_child()  # (the viewport's list's rows)
+            for _ in range(GIT_PULLS_SHOWN):
+                if row is None:
+                    break
+                if row.get_visible():
+                    rows += row.measure(orientation, for_size)[1]
+                row = row.get_next_sibling()
+            natural = max(least, min(natural, rows))
+        return least, natural, -1, -1
+
+
 class GitGutter(Gtk.Widget):
     """The start of a row of the list at the top: as wide as a log row's lane and its author's picture are (width),
     its child (a pull request's pill) at its end, so what follows starts where a log row's text does. A child wider
@@ -1137,10 +1159,10 @@ class GitPage(Gtk.Stack):
         # (each row as a log row is: its text where theirs starts, after the graph's lanes, as many as it has, and the
         # author's picture; its pill before that)
         self.lane_cols = 1  # (the graph's lanes, as the log was last drawn)
-        self.pulls_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, visible=False,
-                                     css_classes=["git-log", "git-pulls"])
+        self.pulls_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["git-log", "git-pulls"])
         self.pulls_box.connect("row-activated", lambda _l, row: open_url(row, row.url) if row.url else None)
-        top.append(self.pulls_box)
+        self.pulls_scroll = GitPullsScroll(self.pulls_box)
+        top.append(self.pulls_scroll)
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.add_css_class("git-log")
         self.list.connect("row-activated", lambda _l, row: self.show_commit(row.commit["sha"]))
@@ -1445,7 +1467,7 @@ class GitPage(Gtk.Stack):
         if not self.top:
             self.where.set_label(pretty_path(res["folder"] or ""))
             self.info.set_label("Not in a git repository.")
-            self.pulls_box.set_visible(False)
+            self.pulls_scroll.set_visible(False)
             self.picker.set_visible(False)
             self.more.set_visible(False)
             self.view_wanted = self.scroll_wanted = None
@@ -1600,14 +1622,14 @@ class GitPage(Gtk.Stack):
 
     def show_pulls(self):
         """The list at the top: the pull requests this chat touches (git_touched_pulls; Record's, those of the folder's
-        checkout's branches), at most GIT_PULLS_SHOWN, each a link to its page."""
+        checkout's branches), each a link to its page: GIT_PULLS_SHOWN of them at once, the rest scrolled to."""
         box, res, prs = self.pulls_box, self.state, self.pulls
         while (c := box.get_first_child()) is not None:
             box.remove(c)
             discard(c)
         repo = res.get("repo")
         if not (self.top and repo and prs):
-            box.set_visible(False)
+            self.pulls_scroll.set_visible(False)
             return
         if getattr(self.win, "has_chat", True):
             # (the chat's checkout's branch and those its commands committed on or pushed to, not the ones they came
@@ -1619,27 +1641,24 @@ class GitPage(Gtk.Stack):
             shown = git_touched_pulls(prs, repo, heads, opened, res.get("links") or ())
         else:  # (Record: no chat, the folder's checkout's branches)
             shown = git_touched_pulls(prs, repo, [e["name"] for e in res.get("checkouts") or () if e.get("name")])
-        more = len(shown) - GIT_PULLS_SHOWN
-        for p in shown[:GIT_PULLS_SHOWN] + [None] * (more > 0):
-            row = Gtk.ListBoxRow(activatable=p is not None)
-            row.url = p and p["url"]
+        for p in shown:
+            row = Gtk.ListBoxRow()
+            row.url = p["url"]
             line = Gtk.Box(spacing=GIT_ROW_GAP)
-            gutter = GitGutter(git_pull_pill(p) if p else Gtk.Box(), self.gutter_px())
+            gutter = GitGutter(git_pull_pill(p), self.gutter_px())
             line.append(gutter)
             # (two lines, then …, as a commit's subject; its natural width a character's: a long name never widens the
             # panel, it wraps in what the panel has)
-            title = Gtk.Label(label=p["title"] if p else f"{more} more", xalign=0, hexpand=True, wrap=True,
+            title = Gtk.Label(label=p["title"], xalign=0, hexpand=True, wrap=True,
                               wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2, ellipsize=Pango.EllipsizeMode.END,
                               max_width_chars=1, valign=Gtk.Align.START)
             gutter.beside = title  # (its pill centred on the name's first line)
             line.append(title)
             row.set_child(line)
-            if p:
-                pointers.hand(row).set_tooltip_text(f"{pr_title(p, repo, p['number'])}\n{p['url']}")
-            else:
-                title.add_css_class("dim-label")
+            pointers.hand(row).set_tooltip_text(f"{pr_title(p, repo, p['number'])}\n{p['url']}")
             box.append(row)
-        box.set_visible(bool(shown))
+        self.pulls_scroll.get_vadjustment().set_value(0)
+        self.pulls_scroll.set_visible(bool(shown))
 
     def gutter_px(self):
         """Where a log row's text starts, after its lane and its author's picture (the list at the top's gutter)."""

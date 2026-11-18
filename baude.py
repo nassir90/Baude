@@ -13213,8 +13213,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def set_busy(self, busy):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
-            if self.proc is not None:
-                self.proc.stop_asked = False  # (nor a stop asked of the last)
         self.busy = busy
         if not busy:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
@@ -14310,6 +14308,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
+        self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)
         self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
 
@@ -14480,6 +14479,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def revert_refused(self, rev, why):
         """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
+        if rev["asked"] is not None:
+            rev["asked"][0].stop_asked = False  # (its turn not stopped by it: an error that ends it is said, h_result)
         rev["asked"] = None
         if self.reverting is rev:
             self.say_now(f"Couldn't revert: {why}")
@@ -16836,8 +16837,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
+        turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
         for kind, content, *rest in items:
-            if kind == "tool_results":
+            if kind in ("user", "start_prompt"):
+                turn_calls, stop_said = [], False
+            elif kind == "assistant":
+                before = len(self.tool_cards)
+            stopped = kind == "stopped" or kind == "assistant" and rest and rest[0] and \
+                STOP_SAID_RE.fullmatch(_first_text(content) or "")  # (aborted: as the live chat's, h_assistant)
+            if stopped:  # (stopped: said once, as the live chat says it, h_result; not if a call it stopped says so)
+                if not stop_said and not any(self.tool_cards[t].state in ("running", "interrupted")
+                                             and t not in self.orphan_results for t in turn_calls):
+                    self.note("interrupted")
+                stop_said = True
+            elif kind == "tool_results":
                 self.render_tool_results(content, from_file=True)
             elif kind == "artifact":
                 if content["url"] not in self.artifacts:  # not already shown by its tool call
@@ -16861,6 +16874,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":
                 self.render_assistant(content, written_at=ref_epoch(rest[1]) if len(rest) > 1 else None)
+                turn_calls += list(self.tool_cards)[before:]
             else:
                 text = "\n\n".join(clean_prompt(t) for t in _prompt_texts(content))
                 atts = [Attachment("image", "image", c["source"].get("media_type"),

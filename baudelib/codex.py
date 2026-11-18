@@ -391,7 +391,7 @@ class CodexProc(AppServer):
         # (a turn stopped ends as Claude Code's does: error_during_execution, Baude's chat says it stopped, not failed)
         subtype = "error_during_execution" if interrupted else "error" if error else "success"
         self.emit("result", subtype=subtype, result=error or self.last_text,
-                  is_error=bool(error) or interrupted, duration_ms=duration or 0, num_turns=1)
+                  is_error=bool(error), duration_ms=duration or 0, num_turns=1)
 
     def finish(self, error, duration=None, interrupted=False):
         # Keep advance() blocked while the host accounts for this turn's result.

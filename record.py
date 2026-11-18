@@ -1501,8 +1501,7 @@ dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
 .diary { font-size: 1.05em; background: transparent; }
-/* a page's selection is NotesView's own, drawn to its text (GTK's fills each line's space above it, and on to the
-   right edge) */
+/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
 textview.own-selection > text > selection { background-color: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
@@ -2585,12 +2584,13 @@ class NotesView(Gtk.TextView):
 
     def do_snapshot_layer(self, layer, snapshot):
         if layer == Gtk.TextViewLayer.BELOW_TEXT:
-            view = self.in_view()
             if self.blocks:
-                self._snapshot_blocks(snapshot, view)
-            self._snapshot_selection(snapshot, view)
+                self._snapshot_blocks(snapshot, self.in_view())
             return
-        if layer != Gtk.TextViewLayer.ABOVE_TEXT or not (self.logos or self.marks):
+        if layer != Gtk.TextViewLayer.ABOVE_TEXT:
+            return
+        self._snapshot_selection(snapshot, self.in_view())
+        if not (self.logos or self.marks):
             return
         buf = self.get_buffer()
         first, last, _l1, _l2 = self.in_view()
@@ -2629,14 +2629,15 @@ class NotesView(Gtk.TextView):
             snapshot.append_layout(layout, color)
             snapshot.restore()
 
-    SELECTION_CAP = 1.5  # (a line's selection no taller than this many of the text's lines: a heading's, about)
+    SELECTION_CAP = 1.5  # (a line's selection no taller than this many of the text's lines)
     SELECTION_END = 0.35  # (a line's end inside a selection, its newline: this many of the text's line high, wide)
 
     def _snapshot_selection(self, snapshot, view):
-        """What's selected, in view, a rectangle a line shrunk to its text: as wide as what's selected of the line, its
-        height the line's text's (the caret's) and no more than SELECTION_CAP text lines, at the bottom of the line;
-        none of the space a heading has above it, or between paragraphs. A line's end that's selected, a little more:
-        a blank line in the selection shows."""
+        """What's selected, in view, a rectangle a line shrunk to its text: as wide as what's selected of the line; as
+        tall as a line of its style's text (the text's, or a heading's at its scale: the same for every line of it,
+        whatever's in it), no more than SELECTION_CAP text lines, at the bottom of the line. None of the space a
+        heading has above it, or between paragraphs. A line's end that's selected, a little more: a blank line in the
+        selection shows. Over the text, as a chat's selection is, so a code span's or a highlight's colour is under it."""
         buf = self.get_buffer()
         bounds = buf.get_selection_bounds()
         if not bounds:
@@ -2649,31 +2650,32 @@ class NotesView(Gtk.TextView):
         fill.alpha = 0.3  # (as ChatSelection shades a chat's)
         text_h = self.create_pango_layout("Ag").get_pixel_size()[1]
         cap, nub = text_h * self.SELECTION_CAP, round(text_h * self.SELECTION_END)
+        table = buf.get_tag_table()
+        headings = [(tag, tag.get_property("scale") if tag.get_property("scale-set") else 1)
+                    for n in range(1, 7) if (tag := table.lookup(f"h{n}")) is not None]
         it = buf.get_iter_at_offset(first)
         while it.get_offset() < last:
             here = self.get_cursor_locations(it)[0]
-            stop = it.copy()
-            self.forward_display_line_end(stop)
-            wrapped = not stop.ends_line()  # (a line wrapped here: the caret's place is on the next)
-            if stop.get_offset() > last or (not wrapped and stop.get_offset() == last):
-                stop, wrapped = buf.get_iter_at_offset(last), False
-            if wrapped:
-                ink = stop.copy()
-                ink.backward_char()
-                x = self.char_rect(ink).x + self.get_iter_location(ink).width
+            nxt = it.copy()  # (the next display line's start: a wrapped line's or the next paragraph's)
+            if not self.forward_display_line(nxt) or nxt.get_offset() <= it.get_offset():
+                nxt = buf.get_end_iter()
+            extra = 0
+            if last < nxt.get_offset() or nxt.is_end():  # (the selection ends on this line)
+                x = self.get_cursor_locations(buf.get_iter_at_offset(last))[0].x
             else:
-                x = self.get_cursor_locations(stop)[0].x
-            width = max(0, x - here.x)
-            if stop.get_offset() < last and stop.ends_line():
-                width += nub  # (its newline selected too)
-            height = min(here.height, cap)
+                ink = nxt.copy()
+                ink.backward_char()
+                if ink.get_char() == "\n":  # (its newline selected too)
+                    x, extra = self.get_cursor_locations(ink)[0].x, nub
+                else:  # (wrapped: to the end of its last character, whose caret's place is on the next line)
+                    x = self.char_rect(ink).x + self.get_iter_location(ink).width
+            line = buf.get_iter_at_line(it.get_line())[1]
+            scale = next((k for tag, k in headings if line.has_tag(tag)), 1)
+            height = min(text_h * scale, cap)
+            left, width = min(x, here.x), abs(x - here.x) + extra  # (a line right to left too)
             if width:
-                snapshot.append_color(fill, Graphene.Rect().init(here.x, here.y + here.height - height, width, height))
-            if not wrapped and not stop.forward_char():
-                break
-            if stop.get_offset() <= it.get_offset():
-                break
-            it = stop
+                snapshot.append_color(fill, Graphene.Rect().init(left, here.y + here.height - height, width, height))
+            it = nxt
 
     def _snapshot_blocks(self, snapshot, view):
         """Each code block's card in view (in_view): Baude's raised fill and one rule round it, the width of the text."""

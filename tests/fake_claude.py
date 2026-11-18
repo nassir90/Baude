@@ -239,6 +239,43 @@ def turn(n):
 TASKS = {}  # task_id -> {"timer": Timer, "tool_use_id": ...}
 
 
+QUESTIONS = [
+    {"question": "Where should each app's category be stored?", "header": "Store", "multiSelect": False, "options": [
+        {"label": "Org setting (Recommended)", "description": "Next to the org's default dock; admins assign them."},
+        {"label": "Client only", "description": "A constant for built-in apps; everything else under Other."},
+        {"label": "Inferred at install", "description": "A model call picks one from the name and description."}]},
+    {"question": "Which sections should fold?", "header": "Folding", "multiSelect": True, "options": [
+        {"label": "Docked", "description": "The apps pinned to the dock."},
+        {"label": "Uncategorised", "description": "Apps with no category."}]}]
+
+
+def ask_question(n):
+    """QUESTION: claude's AskUserQuestion, asked as a permission; the answers it's sent back, said."""
+    tid, rid = f"ask{n}", f"perm{n}"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION,
+         "message": {"id": f"msg{n}", "model": "fake", "role": "assistant", "content": [
+             {"type": "tool_use", "id": tid, "name": "AskUserQuestion", "input": {"questions": QUESTIONS}}]}})
+    out({"type": "control_request", "request_id": rid, "request": {
+        "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": {"questions": QUESTIONS},
+        "tool_use_id": tid}})
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            sys.exit(0)
+        record(line)
+        msg = json.loads(line)
+        if msg.get("type") == "control_response" and msg["response"].get("request_id") == rid:
+            break
+    r = msg["response"]["response"]
+    answers = (r.get("updatedInput") or {}).get("answers") or {}
+    said = "User has answered your questions: " + ", ".join(f'"{q}"="{a}"' for q, a in answers.items()) + \
+        ". You can now continue with the user's answers in mind." if r.get("behavior") == "allow" else r.get("message")
+    out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "is_error": r.get("behavior") != "allow", "content": said}]}})
+    say("Going with " + "; ".join(answers.values()) + "." if answers else "Carrying on without answers.", f"msg{n}b")
+    result("asked")
+
+
 def system(subtype, **kw):
     out({"type": "system", "subtype": subtype, "session_id": SESSION, **kw})
 
@@ -559,6 +596,8 @@ def main():
                 continue
             if "BACKGROUND" in text:
                 background_command(turns, delay)
+            elif "QUESTION" in text or "QUESTION" in json.dumps(msg["message"]["content"]):
+                ask_question(turns)
             elif "NESTED" in text:
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:

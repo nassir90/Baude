@@ -1674,6 +1674,9 @@ class Agent:
                                     "your tools."})
         elif name in READ_TOOLS or self.commands and name in COMMAND_TOOLS:
             self.chat.ask_permission(self, rid, name, inp)
+        elif name == "AskUserQuestion":  # (Meta's a conversation: a question is asked in its reply)
+            self.proc.respond(rid, {"behavior": "deny", "message": "Ask the user in your reply instead; they answer "
+                                    "there."})
         elif name in COMMAND_TOOLS:
             self.proc.respond(rid, {"behavior": "deny", "message": f"{NAME} doesn't run commands or edit files here "
                                     "(Settings → Meta → Run commands, on Claude's models): say what the user would run."})

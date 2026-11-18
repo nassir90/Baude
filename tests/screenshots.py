@@ -1380,7 +1380,7 @@ def _(app):
     win = network_window(app, None)
     win.connect("unrealize", lambda *_: baude.network().deactivate(NET["lab"][1], False))  # (as it was, for the next)
     win.sidebar.deactivate_host(baude.host_key(NET["lab"][1]), True)
-    T.wait_for(lambda: win.sidebar.host_banner.get_revealed(), "the banner")
+    T.wait_for(lambda: win.sidebar.host_note.get_revealed(), "the host note")
     T.pump(0.3)
     host_right_click(win)
     return win

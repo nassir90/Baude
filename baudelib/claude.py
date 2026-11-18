@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -130,7 +131,8 @@ class ClaudeProc:
             args += ["--effort", effort]
         args += list(extra)
         self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1,
+                                  stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True,  # (a
+                                  # group of its own: what it runs, killed with it, kill_hard)
                                   env=(self.env_of() if self.env_of is not None else claude_env()) | (env or {}))
         threading.Thread(target=self._read, args=(self.p.stdout, False), daemon=True).start()
         threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
@@ -186,7 +188,24 @@ class ClaudeProc:
         self.send({"type": "control_response",
                    "response": {"subtype": "success", "request_id": request_id, "response": response}})
 
+    KILL_WAIT = 3  # s for a claude told to end (SIGTERM) to go, before it's killed outright: one stuck won't
+
     def kill(self):
         if self.p.poll() is None:
             self.p.terminate()
+            timer = threading.Timer(self.KILL_WAIT, self.kill_hard)
+            timer.daemon = True
+            timer.start()
         self.close_stdin()
+
+    def kill_hard(self):
+        """One told to end that hasn't (kill): killed outright, with what it runs (a hung command, its MCP servers) if
+        it leads a group of its own, as it's started in one; else it alone."""
+        if self.p.poll() is not None:
+            return
+        try:
+            if os.getpgid(self.p.pid) == self.p.pid:
+                return os.killpg(self.p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        self.p.kill()

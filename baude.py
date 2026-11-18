@@ -12322,9 +12322,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.sidebar.new_chat()), ("<Control>o", self.show_sessions),
-                             # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
-                             # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
-                             ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                             # (Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar; Ctrl+B: first_keys)
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
                              (widgets.META_KEY, self.toggle_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
@@ -12345,12 +12343,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             for t in triggers.split():
                 sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
                                                  Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
-        # Ctrl+F: the Kubernetes view's filter while it's open (it covers the window, so not the find bar of a Code
-        # page under it), else the Code page's find bar if that's showing
-        sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Control>f"),
-                                         Gtk.CallbackAction.new(lambda *_: self.kube.find() or self.schema.start_find() or
-                                                                                self.find_in_code())))
         self.add_controller(sc)
+        # Ctrl+B the sessions on the left, as an editor's sidebar. Ctrl+F: the Kubernetes view's filter while it's open
+        # (it covers the window, so not the find bar of a Code page under it), else the Code page's find bar if that's
+        # showing. Both before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                                  ("<Control>f", lambda: self.kube.find() or self.schema.start_find() or
+                                                         self.find_in_code())))
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)

@@ -7925,6 +7925,17 @@ FEEDBACK_KEY = "<Meta>period" if sys.platform == "darwin" else "<Control>period"
 META_KEY = "<Control>m"  # (Meta shown and focused, or closed if open; Control on macOS too: ⌘M is Minimize)
 
 
+def first_keys(window, keys):
+    """Window shortcuts (triggers, fn) taken in the capture phase, before the focused widget sees the key: for keys
+    macOS's text boxes bind themselves (Ctrl+B / Ctrl+F, Emacs's back / forward a character)."""
+    sc = Gtk.ShortcutController(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    for triggers, fn in keys:
+        for t in triggers.split():
+            sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
+                                             Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
+    window.add_controller(sc)
+
+
 def zoom_keys(*keys):
     """The zoom's triggers for these keys, with each of ZOOM_MODS."""
     return " ".join(mod + key for mod in ZOOM_MODS for key in keys)

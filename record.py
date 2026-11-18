@@ -7121,8 +7121,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.add_action(launcher)
         self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
-        for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
-                             ("<Control><Alt>b", lambda: self.right_slide.toggle()),
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),  # (as Baude's: before the
+                                  ("<Control>f", lambda: self.kube.find() or self.schema.start_find() or  # text boxes'
+                                                         self.find_in_code())))  # Emacs Ctrl+B / Ctrl+F on macOS)
+        for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
                              (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
@@ -7130,7 +7132,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                              (widgets.NAV_KEYS["up"], lambda: self.go_up()),
                              (widgets.SETTINGS_KEY, lambda: Settings(self).present(self)),
                              (widgets.PALETTE_KEY, lambda: self.open_palette()),
-                             (" ".join(m + "f" for m in widgets.ZOOM_MODS),  # (as Baude's: what's over it first)
+                             (" ".join(m + "f" for m in widgets.ZOOM_MODS[1:]),  # (⌘F; Ctrl+F: first_keys)
                               lambda: self.kube.find() or self.schema.start_find() or self.find_in_code()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
                               lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),

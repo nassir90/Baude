@@ -973,8 +973,8 @@ def git_pull_markup(p, repo):
 
 
 class GitPullsScroll(Gtk.ScrolledWindow):
-    """The list at the top (a ListBox), as tall as its first GIT_PULLS_SHOWN rows are at the width it's given; the
-    rest scrolled to, the log keeping the room below."""
+    """The list at the top (a ListBox), as tall as its rows, up to GIT_PULLS_SHOWN of them; with more, half the last
+    of those shows, so it's plain there's more to scroll to. The log keeps the room below."""
 
     def __init__(self, box):
         super().__init__(child=box, visible=False, hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -983,13 +983,16 @@ class GitPullsScroll(Gtk.ScrolledWindow):
     def do_measure(self, orientation, for_size):
         least, natural, _, _ = Gtk.ScrolledWindow.do_measure(self, orientation, for_size)
         if orientation == Gtk.Orientation.VERTICAL:
-            rows, row = 0, self.get_child().get_child().get_first_child()  # (the viewport's list's rows)
-            for _ in range(GIT_PULLS_SHOWN):
-                if row is None:
-                    break
+            if for_size > 0 and not self.get_overlay_scrolling():  # (a scrollbar beside the rows: they're narrower)
+                for_size = max(1, for_size - self.get_vscrollbar().measure(Gtk.Orientation.HORIZONTAL, -1)[1])
+            row = self.get_child().get_child().get_first_child()  # (the viewport's list's rows)
+            heights = []
+            while row is not None and len(heights) <= GIT_PULLS_SHOWN:
                 if row.get_visible():
-                    rows += row.measure(orientation, for_size)[1]
+                    heights.append(row.measure(orientation, for_size)[1])
                 row = row.get_next_sibling()
+            rows = sum(heights) if len(heights) <= GIT_PULLS_SHOWN else \
+                sum(heights[:GIT_PULLS_SHOWN - 1]) + heights[GIT_PULLS_SHOWN - 1] // 2
             natural = max(least, min(natural, rows))
         return least, natural, -1, -1
 
@@ -1622,7 +1625,8 @@ class GitPage(Gtk.Stack):
 
     def show_pulls(self):
         """The list at the top: the pull requests this chat touches (git_touched_pulls; Record's, those of the folder's
-        checkout's branches), each a link to its page: GIT_PULLS_SHOWN of them at once, the rest scrolled to."""
+        checkout's branches), each a link to its page: GIT_PULLS_SHOWN of them at once, the rest scrolled to (kept
+        where it was while it's the same chat's)."""
         box, res, prs = self.pulls_box, self.state, self.pulls
         while (c := box.get_first_child()) is not None:
             box.remove(c)
@@ -1657,7 +1661,10 @@ class GitPage(Gtk.Stack):
             row.set_child(line)
             pointers.hand(row).set_tooltip_text(f"{pr_title(p, repo, p['number'])}\n{p['url']}")
             box.append(row)
-        self.pulls_scroll.get_vadjustment().set_value(0)
+        shown_for = (repo, res.get("folder"), res.get("mine"))
+        if shown_for != getattr(self, "pulls_for", None):  # (another chat or checkout: from the top; else where it was)
+            self.pulls_for = shown_for
+            self.pulls_scroll.get_vadjustment().set_value(0)
         self.pulls_scroll.set_visible(bool(shown))
 
     def gutter_px(self):

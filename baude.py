@@ -13452,7 +13452,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.resumed = resume
             if self.resume_reason and self.resume_reason[0] == self.session_id:  # (its last claude here exited: on_exit)
                 if run["resume"]:  # (Apple's model starts afresh: nothing resumed)
-                    self.note(f"— Resumed from {self.resume_reason[1]} —")
+                    self.note(f"— resumed from {self.resume_reason[1]} —")
                 self.resume_reason = None
             self.pending.clear()
         except OSError as e:
@@ -17205,7 +17205,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
         if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
-            self.note(f"— Resumed from {reason} —")
+            self.note(f"— resumed from {reason} —")
         elif self.resumed_note:
             self.note("— resumed —")
         self.resumed_note, self.resume_reason = False, None

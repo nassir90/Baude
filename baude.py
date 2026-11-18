@@ -12475,6 +12475,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tasks_btn.add_css_class("tasks-indicator")
         self.tasks_btn.connect("clicked", lambda *_: self.show_panel(True))
         statusbar.append(self.tasks_btn)
+        # (what the chat's spent, a label of its own, never cut short: the folder and the turn's figures give way,
+        # however narrow the chat or long another host's path; beside the context count, the other running total)
+        self.cost_label = Gtk.Label(xalign=1, tooltip_text="What this chat has spent")
+        statusbar.append(self.cost_label)
         statusbar.append(ctx)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -13678,7 +13682,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         here = self.chat_host() == HERE_HOST
         there = None if here else self.remote_folder()
         self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
-                             f"   {self.cost_said()}   {getattr(self, 'status_extra', '')}")
+                             f"   {getattr(self, 'status_extra', '')}")
+        self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
         self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +

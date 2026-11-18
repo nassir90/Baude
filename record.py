@@ -22,7 +22,7 @@ Claude Code keeps, live ones included), whichever notebook's open: you select a 
     python3 record.py --chat TRANSCRIPT.jsonl   # reading that chat (Baude's menu → Open in Record does this)
     python3 record.py --install | --uninstall   # app-menu launcher with the logo (per user)
 
-Record is part of Baude: it lives beside baude.py and searches a notebook's folders with lookup.py, the engine behind
+Record is part of Baude: it lives beside baude.py and searches the chat read's folder with lookup.py, the engine behind
 Baude's ⌘K, for @ in the diary, for the names linked in the chat, and for what its questions say those names are.
 One Record runs at a time: started again, it hands what it was asked to the one running.
 
@@ -71,7 +71,7 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
-from baudelib.transcripts import rewind_mark, task_notification  # noqa: E402  (a background task's ending, as said;
+from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification, transcript_model  # noqa: E402  (a background task's ending, as said;
 # a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
@@ -81,7 +81,7 @@ import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
-from codeview import FindInText  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
+from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 
@@ -138,7 +138,7 @@ def child_env():
 
 # ---------------------------------------------------------------- the diary
 # Each one's glossary is its notes: a small wiki of pages in Markdown (as Self's editor draws it; Zim's before), its
-# linked with [[Page]], and @name for anything Baude's ⌘K can find (files, branches, tables… of the notebook's folders).
+# linked with [[Page]], and @name for anything Baude's ⌘K can find (files, branches, tables… of the chat's folder).
 
 HOME = "Home"
 TO_LEARN = "To learn"  # the heading words you've heard but don't understand yet go under
@@ -155,6 +155,7 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
 LIST_ITEM_RE = re.compile(r"(\s*)([-*+]|\d+[.)])(\s+)(?:\[([ xX])\]\s+)?")  # (an item: its marker, its box)
 MD_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s]+)\)")
 URL_RE = re.compile(r"\bhttps?://[^\s<>\"]+[^\s<>\".,;:!?)]")
+LINKING_RE = re.compile(r"(?:^|(?<=\s))\+([\w.\-:]*)$")  # +, and what's typed after it: +'s list of pages
 SUBPAGE_RE = re.compile(r"(?:^|(?<=\s))\+(\w[\w.\-]*(?::\w[\w.\-]*)*)$")  # +Ideas just typed, at the caret
 
 
@@ -489,7 +490,6 @@ class Store:
                 t["pages"] = {HOME: glossary_page(t.pop("glossary", []))}
             elif zim:
                 t["pages"] = {n: zim_to_markdown(text) for n, text in t["pages"].items()}
-            t.setdefault("folders", [])
         chats = self._without_chats()
         self._pending = None
         self.on_saved = []  # (fn(saving): told when a save is coming, and when it's done)
@@ -525,7 +525,7 @@ class Store:
                     now[i] = was
                 continue
             if t is None:
-                t = {"id": b["id"], "name": b["name"], "pages": dict(b["pages"]), "folders": [], "messages": []}
+                t = {"id": b["id"], "name": b["name"], "pages": dict(b["pages"]), "messages": []}
             else:
                 if was is None or t["name"] == was["name"]:  # (renamed here, and not sent yet: kept)
                     t["name"] = b["name"]
@@ -637,9 +637,9 @@ class Store:
 
     def _without_chats(self):
         """Notebooks from when each was attached to a chat, made as they are now (a notebook has no chat: Read shows
-        the one last opened, whichever notebook's open), once, the file kept first: a chat's folder one of its
-        notebook's (@ knows its names, as it did), the first one's chat the one Read shows, and a notebook made only
-        for its chat (blank: nothing written, asked or attached) gone. True if there were any."""
+        the one last opened, whichever notebook's open), once, the file kept first: the first one's chat the one Read
+        shows (its folder the one @ knows the names of), and a notebook made only for its chat (blank: nothing written
+        or asked) gone. True if there were any."""
         had = [t for t in self.notebooks if "chat" in t]
         if not any(t.get("chat") for t in had):
             for t in had:
@@ -650,12 +650,9 @@ class Store:
             chat = t.pop("chat") or {}
             if chat.get("path") and self.reading is None:
                 self.reading = {k: chat.get(k) for k in ("path", "title", "cwd")}
-            blank = not any(text.strip() for text in t["pages"].values()) and not t.get("folders") and \
-                not t.get("messages")
+            blank = not any(text.strip() for text in t["pages"].values()) and not t.get("messages")
             if chat.get("path") and blank and t.get("fresh"):  # (one from before "fresh": kept)
                 self.notebooks.remove(t)
-            elif chat.get("cwd") and chat["cwd"] not in t["folders"]:
-                t["folders"].insert(0, chat["cwd"])
         if self.reading and not self.chats:  # (that chat open, in a tab of its own)
             self.chats = [self.reading]
         return True
@@ -668,7 +665,7 @@ class Store:
         shown (or host, by its key, and name)."""
         host = host or self.host
         t = {"id": uuid.uuid4().hex[:12], "name": name, "created": time.time(), "pages": {HOME: ""},
-             "folders": [], "messages": [], "fresh": True}
+             "messages": [], "fresh": True}
         if host != HERE_HOST:
             t["host"] = host_name or self.host_name  # (its pages' files with that host's: page_paths)
         self.books_of(host).insert(0, t)
@@ -677,10 +674,10 @@ class Store:
 
     @staticmethod
     def is_blank(t):
-        """Made with New and nothing done with it since: not named, nothing written, attached or asked. (One from
-        before "fresh" never is: what's kept stays.)"""
+        """Made with New and nothing done with it since: not named, nothing written or asked. (One from before "fresh"
+        never is: what's kept stays.)"""
         return bool(t.get("fresh")) and not any(text.strip() for text in t["pages"].values()) and \
-            not t.get("folders") and not t.get("messages")
+            not t.get("messages")
 
     def delete(self, notebook):
         """A notebook gone, from whichever host's it is (that one, not one of the same id: the host shown may have
@@ -803,10 +800,12 @@ class Store:
 # ---------------------------------------------------------------- transcripts
 
 def _text_of(content):
+    """A message's text, without the reminders a client put before what was typed (strip_reminders)."""
     if isinstance(content, str):
-        return content
+        return strip_reminders(content)
     if isinstance(content, list):
-        return "\n\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        return "\n\n".join(t for b in content if isinstance(b, dict) and b.get("type") == "text"
+                           and (t := strip_reminders(b.get("text", ""))).strip())
     return ""
 
 
@@ -820,7 +819,8 @@ def parse_records(lines, items, seen=None):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. A revert (rewind_mark) takes back the items after the record it
+    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
+    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
     keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
@@ -843,6 +843,11 @@ def parse_records(lines, items, seen=None):
         msg = d.get("message") or {}
         text = _text_of(msg.get("content")).strip()
         if kind == "user":
+            first = "\0first user" not in seen  # (kept with seen: the file's first user record is read once)
+            seen["\0first user"] = True
+            if first and started_outside(d) and not _is_noise(text):
+                items.append({"role": "start", "text": text, "id": d.get("uuid")})
+                continue
             if _is_noise(text) or d.get("toolUseResult") is not None:
                 continue
             if (note := task_notification(text)) is not None:
@@ -1089,19 +1094,21 @@ def paned_grip(paned):
 
 # ---------------------------------------------------------------- Meta, in Record
 # Record's helper is Meta (meta.py, Baude's too), in the right bar: its conversation is the window's (RecordChat, a
-# meta.MetaChat), whichever notebook's open, one session kept for it, and a new one (other folders open, Record started
-# again, another model) told what was said before; told too when another notebook's opened. It reads (Read, Grep, Glob)
-# the notebook open's pages, as their files (Store.mirror_pages), and its folders. A change to a page's text it proposes with propose_edit (RecordChat.propose),
+# meta.MetaChat), whichever notebook's open, one session kept for it, and a new one (another chat's folder, Record
+# started again, another model) told what was said before; told too when another notebook's opened. It reads (Read,
+# Grep, Glob) the notebook open's pages, as their files (Store.mirror_pages), and the folder of the chat read
+# (read_folders). A change to a page's text it proposes with propose_edit (RecordChat.propose),
 # which the page shows as a diff, to accept or reject (DiaryEditor.show_proposal); the pages themselves it adds,
 # deletes and moves at once, as actions, marked in the pages' list till they're kept or undone (PagesList.fill).
 
 RECORD_PROMPT = """The user keeps notebooks of pages in Markdown ([[Page]] links a page to another; a page's name is \
-its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file, a chat or anything else their \
-folders have). You see the notebook they have open: its pages, the folders attached to it, and what they @-reference \
-or select; with none open, the notebooks there are, and only add_notebook, add_page and move_pages (naming its \
-notebooks) change anything. The conversation stays as they open another notebook: you're told when they do, and \
-your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, read-only: a \
-page is changed with your tools, never with Edit, Write or a command, and nothing's added beside them) and its folders.
+its path, Work:Plans being Plans under Work; @name is a page, a notebook, a file, a chat or anything else the \
+folder of the chat they're reading has). You see the notebook they have open: its pages, that folder, and what they \
+@-reference or select; with none open, the notebooks there are, and only add_notebook, add_page and move_pages \
+(naming its notebooks) change anything. The conversation stays as they open another notebook: you're told when they \
+do, and your tools work on the one open then. Read, Grep and Glob read the notebook's pages (each one a file, \
+read-only: a page is changed with your tools, never with Edit, Write or a command, and nothing's added beside them) \
+and that folder.
 
 The notebooks are on hosts, the user's machines: local is this one. A place is host / notebook / page, and you're \
 told where the user is (Open: host / notebook / page) as it changes. The left bar lists the picked host's notebooks; \
@@ -1248,9 +1255,9 @@ def said_names(text, space):
 attr, trimmed = meta.attr, meta.trimmed
 
 
-def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
+def notebook_said(notebook, store, space, chat=None, limit=NOTES_LIMIT):
     """A session's first words: the notebook open, its pages (each one's file, and its text as far as limit, its
-    @names said) and its folders."""
+    @names said) and the folder it reads: the chat read's (Window.chat_read), or why there's none."""
     files = page_paths(store.notebooks)
     root = pages_root()
     pages = sorted(notebook["pages"], key=lambda p: (p != HOME, p.lower()))
@@ -1266,8 +1273,10 @@ def notebook_said(notebook, store, space, limit=NOTES_LIMIT):
             left -= len(text)
         else:
             parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>')
-    folders = attached_folders(notebook)
-    parts.append("Its folders: " + (", ".join(folders) if folders else "none attached"))
+    cwd = (chat or {}).get("cwd")
+    parts.append("The chat read's folder: " + (
+        "none (no chat read)" if not chat else "none (the chat read has none)" if not cwd else
+        os.path.realpath(cwd) if os.path.isdir(cwd) else f"none ({cwd}, the chat read's, isn't there any more)"))
     parts.append("</notebook>")
     return "\n".join(parts)
 
@@ -1501,6 +1510,8 @@ dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
 .diary { font-size: 1.05em; background: transparent; }
+/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
+textview.own-selection > text > selection { background-color: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
 entry.diary-title { background: none; }
@@ -1533,80 +1544,22 @@ def set_zoom_class(widget, name):
 
 label = meta.label  # (a label as Meta's column has them)
 
-def folder_attachment(folder):
-    """A folder picked to attach (AttachDialog): no transcript (path None), the folder's name, the folder. A Record
-    has it among its folders, whose names its @ and questions know."""
-    folder = os.path.realpath(os.path.expanduser(folder))
-    return {"path": None, "title": os.path.basename(folder.rstrip(os.sep)) or folder, "cwd": folder}
+class ChatDialog(Adw.Dialog):
+    """Open a Chat…: the Claude Code chats, the one picked (on_pick gets its session) read in a tab of its own."""
 
-
-class FoldersPage(Gtk.Box):
-    """The right bar's Folders page: the folders attached to the notebook shown, whose names @, ⌘K and the questions know
-    (attached_folders), each with × to let it go, and + to attach another (Window.attach)."""
-
-    def __init__(self, win):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12, margin_top=4,
-                         margin_bottom=12)
-        self.win = win
-        head = Gtk.Box(spacing=6)
-        title = label("Attached Folders", css=("heading",), wrap=False)
-        title.set_hexpand(True)
-        head.append(title)
-        self.add_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Attach a folder", css_classes=["flat"])
-        self.add_btn.connect("clicked", lambda *_: win.attach())
-        head.append(self.add_btn)
-        self.append(head)
-        self.rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"], valign=Gtk.Align.START)
-        self.none = label("None yet. @, ⌘K and the questions know the files, branches and the rest of the folders "
-                          "attached here.", css=("dim-label",))
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        inner.append(self.rows)
-        inner.append(self.none)
-        self.append(Gtk.ScrolledWindow(child=inner, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
-
-    def fill(self):
-        """The notebook shown's, as they are now."""
-        self.rows.remove_all()
-        folders = attached_folders(self.win.current) if self.win.current else []
-        for folder in folders:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(os.path.basename(folder) or folder),
-                                subtitle=GLib.markup_escape_text(short_dir(folder)))
-            row.add_prefix(Gtk.Image(icon_name="folder-symbolic"))
-            gone = Gtk.Button(icon_name="window-close-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"],
-                              tooltip_text="Detach this folder")
-            gone.connect("clicked", lambda _b, folder=folder: self.win.detach_folder(folder))
-            row.add_suffix(gone)
-            self.rows.append(row)
-        self.rows.set_visible(bool(folders))
-        self.none.set_visible(not folders)
-        self.add_btn.set_sensitive(self.win.current is not None)
-
-
-class AttachDialog(Adw.Dialog):
-    """Attach…: a folder to attach (any one, or one the chats ran in) whose names @, ⌘K and the questions know, one
-    more of them; on_pick gets a folder_attachment. chats: Open a Chat… instead: the Claude Code chats, the one picked
-    (on_pick gets its session) read on the Read tab."""
-
-    FOLDERS = 8  # the recent chats' folders listed before you search
-
-    def __init__(self, on_pick, chats=False):
-        super().__init__(title="Open a chat" if chats else "Attach folders", content_width=560, content_height=620)
-        self.on_pick, self.sessions, self.chats = on_pick, [], chats
+    def __init__(self, on_pick):
+        super().__init__(title="Open a chat", content_width=560, content_height=620)
+        self.on_pick, self.sessions = on_pick, []
         tv = Adw.ToolbarView()
         tv.add_top_bar(Adw.HeaderBar())
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12, margin_bottom=12)
-        self.search = Gtk.SearchEntry(placeholder_text="Search chats" if chats else "Search folders")
+        self.search = Gtk.SearchEntry(placeholder_text="Search chats")
         self.search.connect("search-changed", lambda *_: self.fill())
         box.append(self.search)
-        lists = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.folders = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.folders.add_css_class("boxed-list")
-        self.folders.connect("row-activated", self._activated)
-        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, valign=Gtk.Align.START)
         self.list.add_css_class("boxed-list")
         self.list.connect("row-activated", self._activated)
-        lists.append(self.list if chats else self.folders)
-        sc = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, child=lists)
+        sc = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, child=self.list)
         self.spinner = Adw.Spinner()
         self.stack = Gtk.Stack()
         self.stack.add_named(self.spinner, "loading")
@@ -1626,26 +1579,9 @@ class AttachDialog(Adw.Dialog):
         self.stack.set_visible_child_name("list")
 
     def fill(self):
-        for lb in (self.folders, self.list):
-            while (r := lb.get_row_at_index(0)) is not None:
-                lb.remove(r)
+        while (r := self.list.get_row_at_index(0)) is not None:
+            self.list.remove(r)
         q = self.search.get_text().lower().strip()
-        choose = Adw.ActionRow(title="Choose a folder…", activatable=True,
-                               subtitle="Any folder: its files, branches and the rest")
-        choose.add_prefix(Gtk.Image(icon_name="folder-open-symbolic"))
-        choose.session = None
-        self.folders.append(choose)
-        seen = {}  # the folders the chats ran in, the most recent first
-        for s in self.sessions:
-            if s["cwd"] and os.path.isdir(s["cwd"]) and s["cwd"] not in seen:
-                seen[s["cwd"]] = s["used"]
-        shown = [d for d in seen if not q or q in d.lower()]
-        for d in shown if q else shown[:self.FOLDERS]:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(os.path.basename(d.rstrip(os.sep)) or d), activatable=True)
-            widgets.subtitle_time(row, seen[d], f"{short_dir(d)} · ")
-            row.add_prefix(Gtk.Image(icon_name="folder-symbolic"))
-            row.session = folder_attachment(d)
-            self.folders.append(row)
         n = 0
         for s in self.sessions:
             if q and q not in s["title"].lower() and q not in (s["cwd"] or "").lower():
@@ -1663,21 +1599,8 @@ class AttachDialog(Adw.Dialog):
         self.list.set_visible(n > 0)
 
     def _activated(self, _lb, row):
-        if row.session is None:  # Choose a folder…
-            Gtk.FileDialog(title="Attach to a folder", modal=True).select_folder(
-                self.get_root(), None, self._chosen)
-            return
         self.on_pick(row.session)
         self.close()
-
-    def _chosen(self, dialog, result):
-        try:
-            folder = dialog.select_folder_finish(result)
-        except GLib.Error:  # (cancelled)
-            return
-        if folder is not None and folder.get_path():
-            self.on_pick(folder_attachment(folder.get_path()))
-            self.close()
 
 
 _SPACES = {}
@@ -1694,16 +1617,6 @@ def search_space(folder):
     return _SPACES[folder]
 
 
-def attached_folders(notebook):
-    """The folders a notebook knows the names of (Attach…), each once, as they are (realpath)."""
-    notebook, out = notebook or {}, []
-    for f in list(notebook.get("folders") or []):
-        f = os.path.realpath(os.path.expanduser(f))
-        if os.path.isdir(f) and f not in out:
-            out.append(f)
-    return out
-
-
 def backup_zip():
     """The rolling backup (Window.roll_backup), in a .local folder, on a Mac too."""
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "record", "notebooks-backup.zip")
@@ -1717,10 +1630,11 @@ def conversation_text(notebook):
                        for m in notebook.get("messages") or [])
 
 
-def glossary_text(notebook):
-    """What's been looked up in a notebook's folders (Signal's glossary), as Markdown: each name, and what it is."""
+def glossary_text(folders):
+    """What's been looked up in folders (Signal's glossary: a notebook's chats', zip_entries), as Markdown: each name,
+    and what it is."""
     parts = []
-    for folder in attached_folders(notebook):
+    for folder in folders:
         if refs := lookup.Folder.for_folder(folder).glossary():
             parts.append(f"# {folder}\n\n" + "\n".join(f"- **{ref.surface}**: {ref.summary()}" for ref in refs))
     return "\n\n".join(parts)
@@ -1732,23 +1646,19 @@ def chat_text(path, title, cwd):
     with open(path, encoding="utf-8", errors="replace") as f:
         parse_records(f, items)
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
-    return "\n\n".join([head] + [f"**{'You' if it['role'] == 'user' else 'Claude'}:**\n\n{it['text']}" for it in items
+    who = {"user": "You", "start": "Started with"}
+    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
                                   if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
 def chats_of(notebook, transcripts):
-    """Of transcripts [(path, title, cwd)], those a notebook has to do with: in a folder attached to it, or cited or named in
-    its notes (a notebook has no chat of its own)."""
-    folders = attached_folders(notebook)
+    """Of transcripts [(path, title, cwd)], those a notebook has to do with: cited or named in its notes (a notebook
+    has no chat of its own)."""
     notes = "\n".join(notebook["pages"].values())
     cited = set(re.findall(re.escape(CITE_SCHEME) + r"([\w-]+)", notes))
     named = {m.group(1)[1:].strip() for m in LINK_RE.finditer(notes) if m.group(1).lstrip().startswith("@")} | \
         {m.group(1) or m.group(2) for m in REF_RE.finditer(notes)}
-
-    def here(cwd):
-        cwd = os.path.realpath(cwd) if cwd else None
-        return cwd and any(cwd == f or cwd.startswith(f + os.sep) for f in folders)
-    return [t for t in transcripts if here(t[2]) or t[1] in named or os.path.basename(t[0])[:-len(".jsonl")] in cited]
+    return [t for t in transcripts if t[1] in named or os.path.basename(t[0])[:-len(".jsonl")] in cited]
 
 
 def zip_entries(notebooks, transcripts=None):
@@ -1761,8 +1671,10 @@ def zip_entries(notebooks, transcripts=None):
             yield os.path.join("notes", paths[notebook.get("id"), name]), text
         yield os.path.join("conversations", book + ".md"), conversation_text(notebook)
         if transcripts is not None:
-            yield os.path.join("glossary", book + ".md"), glossary_text(notebook)
-            for chat in chats_of(notebook, transcripts):
+            chats = chats_of(notebook, transcripts)
+            folders = dict.fromkeys(os.path.realpath(c[2]) for c in chats if c[2] and os.path.isdir(c[2]))
+            yield os.path.join("glossary", book + ".md"), glossary_text(folders)
+            for chat in chats:
                 session = os.path.basename(chat[0])[:-len(".jsonl")]
                 yield os.path.join("chats", book, f"{file_part(chat[1] or 'Untitled chat')} ({session[:8]}).md"), chat
 
@@ -1860,9 +1772,8 @@ def size_said(n):
 
 
 class Spaces(lookup.SearchSpace):
-    """⌘K's search over several folders (a Record attached to more than one): each folder's names, its folder's name
-    said with each; a name two have is the first folder's (the chat's, then as they were attached). An item keeps its
-    folder as root."""
+    """⌘K's search over several spaces (search_spaces: the chat read's folder, the chats, the notes): each folder's
+    names, its folder's name said with each; a name two have is the first's. An item keeps its folder as root."""
 
     def __init__(self, spaces):
         super().__init__(None, GLib.timeout_add)
@@ -1923,7 +1834,7 @@ _MANY = {}
 
 
 def search_spaces(folders, notes=None):
-    """What @ and ⌘K search: a Record's folders (attached_folders), each one's names (search_space), every Claude
+    """What @ and ⌘K search: the folders read (Window.read_folders), each one's names (search_space), every Claude
     Code chat by its title (chat_names), and with notes (NotesNames) the notebooks and their pages, in one (Spaces)."""
     key = (tuple(folders), id(notes))
     if key not in _MANY:
@@ -2037,6 +1948,14 @@ class NotesNames(lookup.SearchSpace):
         mine = self.current()
         return (mine or {}).get("id"), tuple((t.get("id"), t["name"], tuple(t["pages"])) for t in self.store.notebooks)
 
+    def changed(self, notebook, page):
+        """When a page's file was last written (⌘K's and @'s order: lookup.item_when), or None."""
+        path = self.store.page_files.get(("" if not notebook.get("host") else self.store.host, notebook.get("id"), page))
+        try:
+            return os.path.getmtime(path) if path else None
+        except OSError:
+            return None
+
     def make_items(self):
         mine, out = self.current(), []
         books = ([mine] if mine else []) + [t for t in self.store.notebooks if t is not mine]
@@ -2045,7 +1964,8 @@ class NotesNames(lookup.SearchSpace):
             for page in pages:
                 out.append({"surface": page if t is mine else f"{name}/{page}", "canonical": "", "icon": "page",
                             "what": "Page", "kind": "page", "summary": name, "where": name, "notebook": t.get("id"),
-                            "page": page, "mine": t is mine, "line": None, "entry": None, "faint": False})
+                            "page": page, "mine": t is mine, "line": None, "entry": None, "faint": False,
+                            "at": self.changed(t, page)})
             out.append({"surface": name, "canonical": "", "icon": "notebook", "what": "Notebook", "kind": "notebook",
                         "summary": f"{len(pages)} page{'s' if len(pages) != 1 else ''}", "where": "",
                         "notebook": t.get("id"), "mine": t is mine, "line": None, "entry": None, "faint": False})
@@ -2535,6 +2455,7 @@ class NotesView(Gtk.TextView):
         self.logos, self.marks, self.blocks = [], [], []
         self.restyled = None  # (told when its style's changed: the text's size or colour, DiaryEditor._heading_looks)
         self.resized, self.width_was = None, None  # (told when its width's changed)
+        self.add_css_class("own-selection")  # (GTK's selection unseen: _snapshot_selection draws it)
 
     def do_size_allocate(self, width, height, baseline):
         Gtk.TextView.do_size_allocate(self, width, height, baseline)
@@ -2584,7 +2505,10 @@ class NotesView(Gtk.TextView):
             if self.blocks:
                 self._snapshot_blocks(snapshot, self.in_view())
             return
-        if layer != Gtk.TextViewLayer.ABOVE_TEXT or not (self.logos or self.marks):
+        if layer != Gtk.TextViewLayer.ABOVE_TEXT:
+            return
+        self._snapshot_selection(snapshot, self.in_view())
+        if not (self.logos or self.marks):
             return
         buf = self.get_buffer()
         first, last, _l1, _l2 = self.in_view()
@@ -2622,6 +2546,54 @@ class NotesView(Gtk.TextView):
             snapshot.translate(Graphene.Point().init(x, r.y + (r.height - logical.height) / 2))
             snapshot.append_layout(layout, color)
             snapshot.restore()
+
+    SELECTION_CAP = 1.5  # (a line's selection no taller than this many of the text's lines)
+    SELECTION_END = 0.35  # (a line's end inside a selection, its newline: this many of the text's line high, wide)
+
+    def _snapshot_selection(self, snapshot, view):
+        """What's selected, in view, a rectangle a line shrunk to its text: as wide as what's selected of the line; as
+        tall as a line of its style's text (the text's, or a heading's at its scale: the same for every line of it,
+        whatever's in it), no more than SELECTION_CAP text lines, at the bottom of the line. None of the space a
+        heading has above it, or between paragraphs. A line's end that's selected, a little more: a blank line in the
+        selection shows. Over the text, as a chat's selection is, so a code span's or a highlight's colour is under it."""
+        buf = self.get_buffer()
+        bounds = buf.get_selection_bounds()
+        if not bounds:
+            return
+        start, end = bounds
+        first, last = max(start.get_offset(), view[0]), min(end.get_offset(), view[1])
+        if first >= last:
+            return
+        fill = widgets.accent_rgba()
+        fill.alpha = 0.3  # (as ChatSelection shades a chat's)
+        text_h = self.create_pango_layout("Ag").get_pixel_size()[1]
+        cap, nub = text_h * self.SELECTION_CAP, round(text_h * self.SELECTION_END)
+        table = buf.get_tag_table()
+        headings = [(tag, tag.get_property("scale") if tag.get_property("scale-set") else 1)
+                    for n in range(1, 7) if (tag := table.lookup(f"h{n}")) is not None]
+        it = buf.get_iter_at_offset(first)
+        while it.get_offset() < last:
+            here = self.get_cursor_locations(it)[0]
+            nxt = it.copy()  # (the next display line's start: a wrapped line's or the next paragraph's)
+            if not self.forward_display_line(nxt) or nxt.get_offset() <= it.get_offset():
+                nxt = buf.get_end_iter()
+            extra = 0
+            if last < nxt.get_offset() or nxt.is_end():  # (the selection ends on this line)
+                x = self.get_cursor_locations(buf.get_iter_at_offset(last))[0].x
+            else:
+                ink = nxt.copy()
+                ink.backward_char()
+                if ink.get_char() == "\n":  # (its newline selected too)
+                    x, extra = self.get_cursor_locations(ink)[0].x, nub
+                else:  # (wrapped: to the end of its last character, whose caret's place is on the next line)
+                    x = self.char_rect(ink).x + self.get_iter_location(ink).width
+            line = buf.get_iter_at_line(it.get_line())[1]
+            scale = next((k for tag, k in headings if line.has_tag(tag)), 1)
+            height = min(text_h * scale, cap)
+            left, width = min(x, here.x), abs(x - here.x) + extra  # (a line right to left too)
+            if width:
+                snapshot.append_color(fill, Graphene.Rect().init(left, here.y + here.height - height, width, height))
+            it = nxt
 
     def _snapshot_blocks(self, snapshot, view):
         """Each code block's card in view (in_view): Baude's raised fill and one rule round it, the width of the text."""
@@ -2816,7 +2788,7 @@ class DiaryEditor(Gtk.Box, FindInText):
     """A Record's glossary, its notes: pages of Markdown drawn as they read, as Self's editor draws them (headings,
     **bold**, *italic*, ==marked==, `code`, - lists, > quotes, [links](url)), the markup shown on the caret's line
     only; [[Page]] opens a page (made if there's
-    none yet); @ lists what Baude's ⌘K finds in the notebook's folders, and every chat by its title, as you type, and
+    none yet); @ lists what Baude's ⌘K finds in the chat read's folder, and every chat by its title, as you type, and
     @name opens it; ⌘F finds in it, as in a code tab (FindInText)."""
     WIDTH = 820  # its column, unless the text is full width
     # (⌘F finds what's seen, as it reads: bold words in some **bold** words, nothing in the markup hidden, so no match
@@ -2914,9 +2886,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         tags = self.buf.get_tag_table()  # (the @'s unseen, though "ref" colours the rest of its @name)
         tags.lookup("logo-at").set_priority(tags.get_size() - 1)
         self.buf.connect("changed", self._changed)
-        self.typed_at = None  # (where an @ or a # was just typed: their searches start only there, _token_changed)
-        self.buf.connect("insert-text", lambda _b, at, text, _n: ("@" in text or "#" in text) and len(text) <= 2 and
-                         setattr(self, "typed_at", at.get_offset() + max(text.rfind("@"), text.rfind("#"))))
+        self.typed_at = None  # (where an @, # or + was just typed: their searches start only there, _token_changed)
+        self.buf.connect("insert-text", lambda _b, at, text, _n: any(c in text for c in "@#+") and len(text) <= 2 and
+                         setattr(self, "typed_at", at.get_offset() + max(text.rfind(c) for c in "@#+")))
         self.caret_was = None  # (where the caret was: which way it went, _caret_in_marker)
         self.snapping = None  # (the caret's snap out of a list item's marker, waiting: _caret_moved)
         self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_moved(),
@@ -4273,17 +4245,24 @@ class DiaryEditor(Gtk.Box, FindInText):
             typed = self.buf.get_slice(self.buf.get_iter_at_offset(self.token[0]), ins, True)
             if typed.startswith("#") and "\n" not in typed:
                 return self._issue_search(before, self.token[0] - start, start)
+            if typed.startswith("+") and LINKING_RE.fullmatch(typed) and self.notebook is not None:
+                self.token = (self.token[0], typed[1:])
+                self.token_far = max(self.token_far or 0, offset)
+                self._mark_token()
+                return self._fill_pop()
             if typed.startswith("@") and "\n" not in typed:
                 self.token = (self.token[0], typed[1:].lstrip("{"))
                 self.token_far = max(self.token_far or 0, offset)
                 self._mark_token()
                 return self._fill_pop()
-        m = re.search(r"(?<![\w@])@(\{[^}\n]*|[\w./:\-]*)$", before) or re.search(r"#[\w./:\-]*$", before)
+        m = re.search(r"(?<![\w@])@(\{[^}\n]*|[\w./:\-]*)$", before) or re.search(r"#[\w./:\-]*$", before) or \
+            (plus if self.notebook is not None and (plus := LINKING_RE.search(before)) and
+             not (not plus.group(1) and not before[:plus.start()].strip()) and not self._in_code(offset) else None)
         if not m or offset - len(m.group(0)) != self.typed_at:  # (only an @ just typed: the caret come
             return self._hide_pop()  # back to an @name's end doesn't start its search again, to take in what's next)
         if m.group(0).startswith("#"):
             return self._issue_search(before, m.start(), start)
-        self.token = (offset - len(m.group(0)), m.group(1).lstrip("{"))
+        self.token = (offset - len(m.group(0)), m.group(1).lstrip("{") if m.group(0).startswith("@") else m.group(1))
         self.token_far = offset
         self._mark_token()
         self._fill_pop()
@@ -4341,35 +4320,70 @@ class DiaryEditor(Gtk.Box, FindInText):
         """Whether the list up is #'s."""
         return self.token is not None and self.buf.get_iter_at_offset(self.token[0]).get_char() == "#"
 
+    def _link_list(self):
+        """Whether the list up is +'s: the notebook's pages, to link to."""
+        return self.token is not None and self.buf.get_iter_at_offset(self.token[0]).get_char() == "+"
+
+    def link_items(self, query):
+        """What +'s list lists for what's typed after the +: this page's sub-pages first, then the notebook's other
+        pages, each word typed found in the name, in any order (the pages list's names: PagesList.names); last, a new
+        sub-page of that name while no page is named it, in any case. Each is written as a link from here is (page_link:
+        +Ideas for a sub-page)."""
+        pages = self.notebook["pages"]
+        names = set(self.win.pages.names()[0]) if self.notebook is self.win.current else \
+            {n for n, text in pages.items() if text.strip()} | {HOME}
+        names.discard(self.page)
+        words = query.lower().replace(":", " ").split()
+        found = [n for n in names if n and all(w in n.lower() for w in words)]
+        mine = self.page + ":"
+        found.sort(key=lambda n: (not n.startswith(mine), n.count(":"), n.lower()))
+        items = [{"surface": n, "label": page_link(self.page, n), "link": page_link(self.page, n), "icon": "page",
+                  "what": "Sub-page" if n.startswith(mine) else "Page",
+                  "summary": next((line.strip().lstrip("#>-*+ ").strip()[:60] for line in pages.get(n, "").split("\n")
+                                   if line.strip().lstrip("#>-*+ ").strip()), "nothing in it yet")}
+                 for n in found]
+        new = page_target(self.page, "+" + query) if re.fullmatch(r"\w[\w.\-]*(?::\w[\w.\-]*)*", query) else None
+        if new and new.lower() not in {n.lower() for n in names}:
+            items.append({"surface": new, "label": "+" + query, "link": "+" + query, "icon": "page",
+                             "what": "New sub-page", "summary": f"of {short_page(self.page)}"})
+        return items
+
     def _exact(self):
         """Whether #'s list's first is the number typed: what's been typed means that one (issues: it's first)."""
         return bool(self.pop_shown) and self.pop_shown[0].get("label") == self.token[1].strip()
 
     def _fill_pop(self):
         space = self.win.space()
-        issues = self._issue_list()
+        issues, linking = self._issue_list(), self._link_list()
         kept = self.pop_selected() if self.pop_moved and self.pop_query == self.token[1] else None
-        self.pop_shown, matched = ([], 0) if space is None else \
-            space.issues(self.token[1]) if issues else space.search(self.token[1])  # (all of them)
+        if linking:
+            self.pop_shown = self.link_items(self.token[1])
+            matched = sum(1 for it in self.pop_shown if it["what"] != "New sub-page")
+        else:
+            self.pop_shown, matched = ([], 0) if space is None else \
+                space.issues(self.token[1]) if issues else space.search(self.token[1])  # (all of them)
         if issues and not self.pop_shown:  # (a # is an ordinary thing to type: no list, and nothing said)
             return self._hide_pop()
         self.pop_query = self.token[1]
         at = next((i for i, it in enumerate(self.pop_shown) if kept and it["surface"] == kept["surface"]), None)
         self.pop_moved = at is not None  # (the same search, listed again: what's picked stays picked)
-        if at is None and (not issues or self._exact()):  # (# picks nothing it wasn't asked to: Enter's a new line)
-            at = 0
-        if space is None:
-            note = "Attach a folder to @ what's in it"
+        if at is None and (not issues or self._exact()) and not (linking and not self.token[1]):
+            at = 0  # (# picks nothing it wasn't asked to, nor a + with nothing after it yet: Enter's a new line)
+        if linking:
+            note = f"{matched} page{'s' if matched != 1 else ''}" if matched else "No page named that yet"
+        elif space is None:
+            note = "Nothing found"
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
                 self.waiting = space.refresh(self._catalogued)
-            note = f"{matched} found" if matched else "Nothing found"
+            note = f"{matched} found" if matched else "Nothing found" if self.win.read_folders() else \
+                "Nothing found · open a chat for its folder's names"
         it = self.buf.get_iter_at_offset(self.token[0])
         loc = self.view.char_rect(it)
         x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, loc.x, loc.y)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = x, y, 1, loc.height
-        self.picks.show(len(self.pop_shown), at, note, rect, coming=space is not None and space.busy)
+        self.picks.show(len(self.pop_shown), at, note, rect, coming=not linking and space is not None and space.busy)
 
     def _catalogued(self):
         space = self.win.space()  # (a folder's in, another's on its way: waited for in turn, the list up or not)
@@ -4407,7 +4421,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         if self._edits_green(keyval, state):
             return True  # (what's proposed isn't the page's: nothing typed into it)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab) and \
-                self.pop.get_visible() and self._issue_list() and not self.pop_moved and not self._exact():
+                self.pop.get_visible() and not self.pop_moved and (
+                    self._issue_list() and not self._exact() or self._link_list() and not self.token[1]):
             # (#'s list, and nothing asked of it: what was typed stays as typed. Enter's a new line, as it always is)
             self._hide_pop()
             if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -4428,7 +4443,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
             self._em_dash()  # (and the space or Enter goes in after it, as typed)
-        if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self._sub_page() and keyval == Gdk.KEY_space:
+        if (keyval == Gdk.KEY_space or keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not self.pop.get_visible()) and \
+                self._sub_page() and keyval == Gdk.KEY_space:
             return False  # (the space follows the link, as typed; Enter's the Enter it would have been: a list goes on)
         if keyval == Gdk.KEY_BackSpace and (self._unbullet() or self._unbreak()):
             return True
@@ -4466,6 +4482,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab) and self.pop_selected() is not None:
             if self._issue_list() and not self.pop_moved:
                 self.pop_sel.set_selected(0)  # (the number typed: not whatever the pointer's over)
+            if self._link_list() and keyval != Gdk.KEY_Tab:
+                self._insert_ref(after="")  # (+'s link, then the Enter it was: a list goes on)
+                return self._continue_item() if state & Gdk.ModifierType.SHIFT_MASK else self._list_enter()
             self._insert_ref()
             return True
         return False
@@ -4705,7 +4724,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.buf.place_cursor(self.buf.get_iter_at_offset(to))
                 return
 
-    def _insert_ref(self):
+    def _insert_ref(self, after=" "):
         item = self.pop_selected()
         if item is None or self.token is None:
             return
@@ -4714,7 +4733,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self._hide_pop()
         self.buf.begin_user_action()
         self.buf.delete(start, end)
-        self.buf.insert_at_cursor(ref_text(item["surface"], item.get("label")) + " ")
+        self.buf.insert_at_cursor((f"[[{item['link']}]]" if "link" in item else ref_text(item["surface"], item.get("label")))
+                                  + after)
         self.buf.end_user_action()
         self.view.grab_focus()
         self._hide_pop()
@@ -5195,9 +5215,9 @@ class Picks(Gtk.Widget):
 class Reader(Gtk.Box):
     """The chat last opened (an @chat in the notes, ⌘K, Open a chat…, Baude's Open in Record), its prose, live,
     whichever notebook's open: a notebook has no chat. Selecting a passage quotes it to the notebook's Record. The
-    names the notebook's folders and the chat's have (⌘K's: files, branches, Kubernetes objects, tables, what Signal
-    looked up) are links: one opens where it is. Ctrl (or ⌘) and a drag picks another passage, numbered, every one
-    quoted; a drag without it, or a click, lets them all go."""
+    names the chat's folder has (⌘K's: files, branches, Kubernetes objects, tables, what Signal looked up) are links:
+    one opens where it is. Ctrl (or ⌘) and a drag picks another passage, numbered, every one quoted; a drag without
+    it, or a click, lets them all go."""
 
     PICKING = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SUPER_MASK
 
@@ -5240,7 +5260,8 @@ class Reader(Gtk.Box):
                                                 on_own=self._took_selection)
         self.selection.menu_at = self._passage_menu
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.zoom_tab)
-        self.stack.add_named(self.scroll, "chat")
+        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F: Window.find_in_code)
+        self.stack.add_named(self.chat_find.wrap(), "chat")
         self.append(self.stack)
         self.follow = livefeed.FollowEnd(self.scroll)  # (the newest in view, once it's read to, as in Baude's chat)
         self.follow.attach()
@@ -5401,6 +5422,13 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "start":  # (what a session started from outside was asked: at its top, as Baude has it)
+            view = widgets.start_prompt_view(it["text"])
+            row.append(view)
+            row.prose, row.item = view, it
             self.rows.append(row)
             self.box.append(row)
             return
@@ -6015,20 +6043,45 @@ class RecordChat(meta.MetaChat):
     def taken(self, msg):
         self.set_quote("")
 
+    def held(self):
+        return self.quote, self.selection, self.quote_label.get_text()
+
+    def put_held(self, held):
+        if held is not None:
+            quote, selection, shown = held
+            self.set_quote(quote or "")
+            self.selection = selection
+            self.quote_label.set_text(shown)
+
+    def restored(self, msg):
+        sel, nb = msg.get("selection"), self.notebook
+        if sel and nb is not None and msg.get("notebook") == nb.get("id"):
+            self.set_selection(nb, sel["page"], sel.get("start"), sel.get("end"), msg.get("quote") or sel["text"])
+        else:
+            self.set_quote(msg.get("quote") or "")
+
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection"), "notebook": self.notebook}
 
+    def first_said(self, agent):
+        return [self.open_said()]
+
+    def open_said(self):
+        """The notebook open (notebook_said), or, with none, the notebooks there are."""
+        store = self.win.store
+        return notebook_said(self.notebook, store, self.space(), self.win.chat_read()) if self.notebook is not None \
+            else none_open_said(store)
+
     def context(self, agent, msg):
-        """The notebook open, with a new session's first message and once another's opened; what's become of the
+        """The notebook open, once another's opened (a new session's: first_said); what's become of the
         changes proposed; what's referenced (ref_said, of Window.space), the passage quoted from a chat (its names,
         the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
-        if agent.fresh or getattr(agent, "seen", notebook) is not notebook:
-            if not agent.fresh:
-                parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
-                             if notebook is not None else f"(The user closed the {book().lower()} since: none is "
-                             "open now.)")
-            parts.append(notebook_said(notebook, store, space) if notebook is not None else none_open_said(store))
+        if not agent.fresh and getattr(agent, "seen", notebook) is not notebook:  # (a new session's: first_said)
+            parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
+                         if notebook is not None else f"(The user closed the {book().lower()} since: none is "
+                         "open now.)")
+            parts.append(self.open_said())
         agent.seen = notebook
         if (place := self.win.place()) != getattr(agent, "seen_place", None):  # (host / notebook / page, as it changes)
             parts.append(f"(Open: {place})")
@@ -6068,6 +6121,9 @@ class RecordChat(meta.MetaChat):
 
     def _clear(self):
         super()._clear()
+        self.after_revert()
+
+    def after_revert(self):
         for child in self.win.tabs.children():  # (and what it proposed, from the pages open)
             if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
                 child.show_pending()
@@ -6219,9 +6275,9 @@ class RecordChat(meta.MetaChat):
             lines.append(f"{store.host_name}'s notebooks: being listed")
         if nb is not None:
             pages = sorted(nb["pages"], key=lambda p: (p != HOME, p.lower()))
-            folders = attached_folders(nb)
-            lines.append(f"notebook open: {json.dumps(full_name(nb))} · {len(pages)} pages · folders: " +
-                         (", ".join(short_dir(f) for f in folders) or "none"))
+            folders = self.win.read_folders()
+            lines.append(f"notebook open: {json.dumps(full_name(nb))} · {len(pages)} pages · "
+                         "the chat read's folder: " + (", ".join(short_dir(f) for f in folders) or "none"))
             lines.append("its pages: " + ", ".join(pages[:40]) +
                          (f" (+{len(pages) - 40}: app_index pages)" if len(pages) > 40 else ""))
             if waiting := self.pending(nb):
@@ -6253,8 +6309,8 @@ class RecordChat(meta.MetaChat):
     def sections(self):
         def notebooks(_f):
             store, names = self.win.store, dict(self.win.note_hosts())
-            return [{"host": names.get(k, k), "name": full_name(t), "pages": len(t["pages"]), "open": t is self.notebook,
-                     "folders": ", ".join(short_dir(f) for f in attached_folders(t))}
+            return [{"host": names.get(k, k), "name": full_name(t), "pages": len(t["pages"]),
+                     "open": t is self.notebook}
                     for k in [store.host, *[k for k in [HERE_HOST, *store.remote_base] if k != store.host]]
                     for t in store.books_of(k)]
 
@@ -6272,7 +6328,7 @@ class RecordChat(meta.MetaChat):
                      "ago": widgets.time_ago(c["used"]), "open": c["path"] in readers} for c in chat_names().chats]
         return {
             "notebooks": (notebooks, lambda r: f"{r['host']} / {json.dumps(r['name'])} · {r['pages']} pages" +
-                          (" · open" if r["open"] else "") + (f" · folders: {r['folders']}" if r["folders"] else "")),
+                          (" · open" if r["open"] else "")),
             "pages": (pages, lambda r: (r["page"] if r["mine"] else f"{r['notebook']}/{r['page']}") +
                       (f" · {r['chars']} characters" if r["chars"] else " · empty") + (" · tab open" if r["tab"] else "")),
             "chats": (chats, lambda r: f"{r['id']} {json.dumps(r['title'])} · {r['folder']} · {r['ago']}" +
@@ -6480,7 +6536,7 @@ class RecordChat(meta.MetaChat):
             nb = self._book(data["drop"])
             if nb is None:
                 return
-            if nb["pages"] != data["expect"] or nb.get("folders") or nb.get("messages"):
+            if nb["pages"] != data["expect"] or nb.get("messages"):
                 raise ValueError(f"{full_name(nb)} changed since; undo what came after first")
             if nb is self.win.current:
                 self.win.notebook_list.unselect_all()
@@ -7121,7 +7177,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
-        menu.append("Detach all", "win.detach")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         view = Gio.Menu()
         view.append("Full-width text", "win.fullwidth")
         menu.append_section(None, view)
@@ -7141,10 +7197,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         app_menu.append(f"Restart {noun()}", "win.restart")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
-        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("rename", self.rename),
+        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
+                         ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),
                          ("exportall", lambda: self.ask_export(self.store.notebooks, book(plural=True))),
-                         ("detach", self.detach),
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
@@ -7177,8 +7233,13 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.add_action(launcher)
         self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
-        for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
-                             ("<Control><Alt>b", lambda: self.right_slide.toggle()),
+        # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
+        # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
+        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or \
+            ((chat := widgets.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
+        for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
                              (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
@@ -7186,8 +7247,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                              (widgets.NAV_KEYS["up"], lambda: self.go_up()),
                              (widgets.SETTINGS_KEY, lambda: Settings(self).present(self)),
                              (widgets.PALETTE_KEY, lambda: self.open_palette()),
-                             (" ".join(m + "f" for m in widgets.ZOOM_MODS),  # (as Baude's: what's over it first)
-                              lambda: self.kube.find() or self.schema.start_find() or self.find_in_code()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
                               lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
                              (widgets.zoom_keys("minus", "underscore", "KP_Subtract"),
@@ -7205,14 +7264,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.zoom_wait = self.zoom_saving = None  # (the frame to zoom in; its saving: set_zoom)
         self.rolling, self.zipping = GLib.timeout_add_seconds(Store.BACKUP_EVERY, self.roll_backup), False  # (roll_backup)
         self.scale_wait, self.text_scaled = None, False  # (the sizes applied in a moment; the text's among them: set_scale)
-        # right: Meta (your conversation with it), its folders, Files and Git, as Baude's side panel has them
+        # right: Meta (your conversation with it), Files and Git, as Baude's side panel has them
         self.chat = RecordChat(self)
         self.apply_zoom()
         self.right_stack = Adw.ViewStack(vexpand=True)
         widgets.ensure_icons()  # (baude-meta-symbolic, baude-claude-symbolic: Baude's own icons)
         self.right_stack.add_titled_with_icon(self.chat, "meta", meta.NAME, "baude-meta-symbolic")
-        self.folders_page = FoldersPage(self)
-        self.right_stack.add_titled_with_icon(self.folders_page, "folders", "Folders", "folder-open-symbolic")
         self.add_viewer_pages(self.right_stack, code=False)  # (Files and Git; code opens in a tab: show_code)
         right = self.right = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT)
         right.add_css_class("baude-frame")
@@ -7234,9 +7291,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         b.add_css_class("suggested-action")
         b.connect("clicked", lambda *_: self.new_notebook())
         none.set_child(b)
-        self.content_stack.add_named(widgets.inside(none), "none")
-        self.content_stack.add_named(widgets.inside(Gtk.Box()), "empty")
-        self.content_stack.add_named(widgets.inside(self.tabs), "tabs")
+        self.content_stack.add_named(widgets.inside(none, under_bar=True), "none")
+        self.content_stack.add_named(widgets.inside(Gtk.Box(), under_bar=True), "empty")
+        self.content_stack.add_named(widgets.inside(self.tabs, under_bar=True), "tabs")
         beside = Gtk.Overlay(child=self.content_stack)  # (the left edge's grip goes on past the column: FixedWidth.grip_past)
         beside.add_overlay(column.grip_past(split))
         main.set_content(beside)
@@ -7356,8 +7413,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
         if state.get("right"):  # (the right bar's width, once the window's laid out)
             GLib.idle_add(lambda: self.paned.set_position(max(0, self.paned.get_width() - state["right"])) and False)
-        if state.get("right_page"):
-            self.right_stack.set_visible_child_name(state["right_page"])
+        if state.get("right_page") and self.right_stack.get_child_by_name(state["right_page"]) is not None:
+            self.right_stack.set_visible_child_name(state["right_page"])  # (a page there's no longer: Meta's left)
         if state.get("record") and any(t["id"] == state["record"] for t in self.store.notebooks):
             self.select(state["record"])
             if state.get("fixes"):
@@ -7551,13 +7608,31 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         return areas
 
     def feedback_context(self):
-        """What a note sent from Record says it came from (feedback.save_feedback): the notebook, the chat open, its
-        first folder (else the chat's), and Record."""
-        t, folders = self.current or {}, self.read_folders()
-        chat = (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
+        """What a note sent from Record says it came from (feedback.save_feedback): the notebook, the chat read, its
+        folder, and Record."""
+        t, folders, chat = self.current or {}, self.read_folders(), self.chat_read() or {}
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
-                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}"]
+                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}",
+                *feedback.report_lines([("the chat", self.report), ("Meta", self.chat.report)])]
+
+    def report(self, most=None):
+        """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
+        and folder, then its transcript, each tool call with its input and result (meta.transcript_report); None if no
+        chat's open."""
+        chat = (self.reader.chat if self.reader is not None else None) or {}
+        if not (path := chat.get("path")) or not os.path.exists(path):
+            return None
+        head = [("App", "Record"), ("Chat", f"{os.path.splitext(os.path.basename(path))[0]} ({chat.get('title') or '-'})"),
+                ("Model", transcript_model(path) or ""), ("Folder", chat.get("cwd") or ""),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        return meta.transcript_report(head, path, most=most)
+
+    def copy_report(self):
+        if (text := self.report()) is None:
+            return widgets.toast(self, "No chat open")
+        self.get_clipboard().set(text)
+        widgets.toast(self, "Transcript copied")
 
     def apply_full_width(self, on):
         """☰ → Full-width text, as Baude's: the chat read and the diary across the whole pane, not a column. (Adw.Clamp
@@ -7579,7 +7654,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         still there if either's cancelled."""
         d = Adw.AlertDialog(heading=f"Export {name}")
         extras = Gtk.CheckButton(label="Include glossary and chats", tooltip_text=(
-            "What's been looked up in its folders, and what's shown of the chats in them or named in its notes"))
+            "What's shown of the chats named in its notes, and what's been looked up in their folders"))
         d.set_extra_child(extras)
         d.add_response("cancel", "Cancel")
         d.add_response("ok", "Export…")
@@ -7652,10 +7727,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             win.store.flush()  # (gone to another window: what's typed is on the disk)
 
     def github_folders(self):
-        """What GitHub's lists are read for (lookup.GitHub.look): the notebook's folders, and the chat shown's own, which
-        nothing attached."""
-        attached = attached_folders(self.current)
-        return attached, [f for f in self.read_folders() if f not in attached]
+        """What GitHub's lists are read for (lookup.GitHub.look), as Baude's: the repository the chat read's folder is
+        in."""
+        return self.read_folders()
 
     @staticmethod
     def _github_changed(win):
@@ -7693,15 +7767,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         pop.popup()
 
-    @staticmethod
-    def attached_words(notebook):
-        """The folders a notebook's attached to, in a few words: the one's name, or how many."""
-        folders = attached_folders(notebook)
-        return (os.path.basename(folders[0]) if len(folders) == 1 else f"{len(folders)} folders") if folders else ""
-
     def _fill_row(self, row):
         row.name.set_text(full_name(row.notebook))
-        row.set_tooltip_text(self.attached_words(row.notebook) or None)  # (its folders, the pointer over it)
         row.name.set_attributes(None)
         chat = getattr(self, "chat", None)
         if chat is not None and (mark := chat.marks("notebook").get(row.notebook.get("id"))) is not None:
@@ -7763,8 +7830,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.current = notebook
         self.show_title()
         if changed:
-            self.viewer_at = None
-            self.viewer_folder_changed()  # (the viewers on this notebook's folder)
+            self.git_page.chat_changed()  # (the Git page's state is the notebook's, git_chat; its folder's the same)
         if changed:  # (the notebook left's pages' tabs closed: its own come in, as it had them open)
             self.switching = True
             try:
@@ -7775,17 +7841,15 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if not notebook:
             self.pages.show(None)
             self.content_stack.set_visible_child_name("none")
-            self.folders_page.fill()
             if changed:
                 self.chat.show(None)  # (Meta's tools on no notebook)
             return
-        self.folders_page.fill()
         self.pages.show(notebook)
         if changed:
             shown = notebook.get("page") if notebook.get("page") in notebook["pages"] else HOME
             for name in [n for n in notebook.get("open") or [] if n in notebook["pages"] and n != shown] + [shown]:
                 self.open_note(name, select=name == shown)
-        for child in self.tabs.children():  # (the chats open: their names the notebook's folders' too)
+        for child in self.tabs.children():  # (the chats open: their nouns marked again, by this notebook's notes)
             if isinstance(child, Reader) and child.chat:
                 child.show(child.chat, self.read_folders(child.chat))
         if self.reader is not None:
@@ -7883,6 +7947,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         r, name = self.host_remote(key), dict(self.note_hosts()).get(key, store.host_name)
         if r is None:
             return f"Looking for {name} on the network…"
+        if not r.deactivated and (said := r.said_stopping(name)) is not None:  # (stopping: said as it goes)
+            return said
         if self.reachable(r):
             return None
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
@@ -8137,45 +8203,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 i += 1
         return False
 
-    def attach(self):
-        """The Folders page's +: a folder picked, one more of the notebook's."""
-        if not self.current:
-            return
-        notebook = self.current
-
-        def pick(s):  # (a folder, folder_attachment: one more)
-            if s["cwd"] not in notebook.setdefault("folders", []):
-                notebook["folders"].append(s["cwd"])
-            self.attached_changed(notebook)
-        AttachDialog(pick).present(self)
-
-    def detach_folder(self, folder):
-        """The Folders page's ×: that folder let go."""
-        notebook = self.current
-        notebook["folders"] = [f for f in notebook.get("folders", []) if os.path.realpath(f) != folder]
-        self.attached_changed(notebook)
-
     def choose_chat(self):
         """☰ → Open a Chat… (or Read's button): a Claude Code chat picked, read on the Read tab (open_chat)."""
-        AttachDialog(lambda s: self.open_chat(s["path"]), chats=True).present(self)
-
-    def attached_changed(self, notebook):
-        """A folder attached or let go: shown, saved; the chat open's names the folders' now."""
-        self.store.save_now()
-        if notebook is self.current:
-            self.folders_page.fill()
-            for child in self.tabs.children():  # (the chats open: their names the folders' now)
-                if isinstance(child, Reader) and child.chat:
-                    child.show(child.chat, self.read_folders(child.chat))
-        self.refresh_sidebar_row(notebook)
-
-    def detach(self):
-        """☰ → Detach all: the folders let go."""
-        if self.current and self.current.get("folders"):
-            self.current["folders"] = []
-            self.store.save_now()
-            self._show(self.current)
-            self.refresh_sidebar_row(self.current)
+        ChatDialog(lambda s: self.open_chat(s["path"])).present(self)
 
     def rename(self, heading="Rename", doing="Rename"):
         if not self.current:
@@ -8206,8 +8236,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return
         notebook = self.current
         d = Adw.AlertDialog(heading=f"Delete {full_name(notebook)}?",
-                            body=f"Its notes ({len(notebook['pages'])} pages) go with it. "
-                                 "The folders it's attached to aren't touched.")
+                            body=f"Its notes ({len(notebook['pages'])} pages) go with it.")
         d.add_response("cancel", "Cancel")
         d.add_response("delete", "Delete")
         d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -8241,12 +8270,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self._toast(Adw.Toast(title=text, timeout=4))
 
     def space(self):
-        """⌘K's search of the notebook's folders, every chat by its title, and the notebooks and their pages (what @
-        lists, in the notes and in the Record's box)."""
-        return search_spaces(attached_folders(self.current), self.notes)
+        """⌘K's search of the chat read's folder (read_folders), every chat by its title, and the notebooks and their
+        pages (what @ lists, in the notes and in the Record's box)."""
+        return search_spaces(self.read_folders(), self.notes)
 
     def names_in(self, text):
-        """The names in a text that the notebook's folders have (to link): none until they're catalogued."""
+        """The names in a text that the chat read's folder has (to link): none until they're catalogued."""
         space = self.space()
         return {it["surface"] for it in space.mentions(text)} if space is not None and not space.busy else set()
 
@@ -8272,9 +8301,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if item is None and (url := lookup.github_url(name)) is not None:  # (not listed now: its page is still there)
             return fixview.web(self, url)
         if item is None:
-            where = ", ".join(short_dir(f) for f in attached_folders(self.current))
+            where = ", ".join(short_dir(f) for f in self.read_folders())
             return self.toast(f"@{name}: not found in {where}" if where
-                              else f"@{name}: attach a folder to look it up")
+                              else f"@{name}: open a chat to look it up in its folder")
         if item.get("kind") in ("branch", "k8s", "chat") or (item.get("entry") or {}).get("db") or \
                 (item.get("path") and os.path.exists(item["path"])) or item.get("label"):
             self.open_item(item)
@@ -8360,10 +8389,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         pop.popup()
 
     def viewer_folder(self):
-        """The folder the viewers show (viewers.ViewerHost): the one a name was last opened from (viewer_at), else
-        the notebook's first, else the chat open's; None without one."""
+        """The folder the viewers show (viewers.ViewerHost): the chat read's; None without one."""
         folders = self.read_folders()
-        return self.viewer_at if self.viewer_at in folders else folders[0] if folders else None
+        return folders[0] if folders else None
 
     def git_chat(self):
         """The chat the Git page keeps its state for (GitPage.chat_check): the notebook's."""
@@ -8374,7 +8402,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         wanted apart. None, said, if there's no folder."""
         folder = folder or self.viewer_folder()
         if not folder:
-            self.toast(f"Attach a folder to this {book()} first")
+            self.toast("Open a chat first: the viewers show its folder")
             return None
         return viewers.ViewerWindow.for_folder(folder, self.get_application())
 
@@ -8433,13 +8461,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.set_focus(None)  # (not left in Meta's box as it slides shut)
 
     def open_palette(self):
-        """⌘K / Ctrl+K, as Baude's: every name the notebook's folders have, and the notebooks and their pages, searched
+        """⌘K / Ctrl+K, as Baude's: every name the chat read's folder has, and the notebooks and their pages, searched
         as you type, a name opened where it is (open_item: its page, its file, the Git page, the Kubernetes view, the
         database diagram)."""
-        space = self.space()
-        if space is None:
-            return self.toast(f"Attach a folder to this {book()} first")
-        widgets.RefPalette(self, space, self.open_item).present(self)
+        widgets.RefPalette(self, self.space(), self.open_item).present(self)
 
     def open_notes_item(self, item):
         """A notebook (shown) or a page (open, in its notebook) from @ or ⌘K."""
@@ -8458,9 +8483,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return self.open_chat(item["path"])
         if (listed := (item.get("entry") or {}).get("github")) is not None:  # (a pull request or an issue)
             return fixview.open_github(self, listed)
-        if (root := item.get("root")) and root != self.viewer_folder():  # (one of the notebook's other folders)
-            self.viewer_at = root
-            self.viewer_folder_changed()
         if viewers.ViewerHost.open_item(self, item):
             return
         if item.get("path") and os.path.exists(item["path"]):
@@ -8482,14 +8504,40 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         editor.view.grab_focus()
         editor.follow_soon()
 
+    def chat_read(self):
+        """The chat read: the one shown, else the one shown last ({path, title, cwd}), or None."""
+        return (self.reader.chat if self.reader is not None else None) or self.store.reading
+
     def read_folders(self, chat=None):
-        """The folders a chat's names are from (chat: the one shown, or last shown): the notebook's, and its own (its
-        links, a name in it opened)."""
-        chat = chat or (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
-        folders, cwd = attached_folders(self.current), chat.get("cwd")
-        if cwd and os.path.isdir(cwd) and os.path.realpath(cwd) not in folders:
-            folders.append(os.path.realpath(cwd))
-        return folders
+        """The folder names are from (chat: else the one read, chat_read): the chat's own, [] without one. What @, ⌘K,
+        the viewers, GitHub's lists and Meta's Read know besides the notes."""
+        cwd = (chat or self.chat_read() or {}).get("cwd")
+        return [os.path.realpath(cwd)] if cwd and os.path.isdir(cwd) else []
+
+    def reading_changed(self):
+        """Another chat read (Store.reading): if its folder's another, the viewers, the names in the notes and
+        GitHub's lists are that one's now, the notes' @names drawn again once it's catalogued."""
+        folders = self.read_folders()
+        if folders != getattr(self, "read_from", None):
+            self.viewer_folder_changed()
+            Window._github_changed(self)
+            if (waiting := getattr(self, "names_wait", None)) is not None:
+                GLib.source_remove(waiting)
+            self.names_wait = self.space().refresh(self._names_in)
+            if self.names_wait is None:
+                self._names_in()
+        self.read_from = folders
+
+    def _names_in(self):
+        """The chat read's folder catalogued (reading_changed): the open pages' @names drawn with their logos, which
+        were left plain while it was being read (DiaryEditor._highlight)."""
+        self.names_wait = None
+        if (space := self.space()).busy:  # (one in, another on its way)
+            self.names_wait = space.refresh(self._names_in)
+            return
+        for child in self.tabs.children():
+            if isinstance(child, DiaryEditor):
+                child.github_changed()
 
     # ---- what's open: a tab each (a page of notes, a chat, a file's code)
     def open_pages(self):
@@ -8534,6 +8582,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         reader.show(chat, self.read_folders(chat))
         if select:
             self.store.reading = chat
+            self.reading_changed()
         self._keep_open()
         self.store.save_now()  # (open for the next start, whatever happens next)
         if present:
@@ -8665,6 +8714,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if isinstance(page, DiaryEditor):
             page.open_search()
             return True
+        if isinstance(page, Reader):
+            return page.chat_find.open()
         return False
 
     def zoom_code(self, steps):
@@ -8717,6 +8768,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             child.activate()
             if child.chat:
                 self.store.reading = child.chat
+                self.reading_changed()
         elif isinstance(child, DiaryEditor) and self.current is not None and child.notebook is self.current:
             self.current["page"] = child.page
             if self.pages.notebook is self.current:
@@ -8738,6 +8790,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if isinstance(child, DiaryEditor):
             self.pages.prune()
             self.pages.fill()
+        if isinstance(child, Reader) and (reader := self.reader) is not None and reader.chat:
+            self.store.reading = reader.chat  # (the chat read now: the one shown before it)
+            self.reading_changed()
         self._keep_open()
         self._tab_shown()
 

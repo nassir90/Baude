@@ -22,8 +22,10 @@ def ref_epoch(iso):
         return None
 
 
+STOPPED = "[Request interrupted by user"  # (what Claude Code keeps as a message of yours when a turn's stopped; "… for
+# tool use]" when a call was)
 _UNTYPED_STARTS = ("<task-notification>", "<ci-monitor-event>", "<side-sessions-event>", "<local-command-stdout>",
-              "<local-command-stderr>")
+              "<local-command-stderr>", STOPPED)
 
 
 def typed_at(rec):
@@ -64,7 +66,16 @@ def projects_dir():
 _INJECTED = ("<system-reminder", "<local-command", "Caveat:", "<ide_", "<pasted_content")
 
 
-_NOT_TYPED = _INJECTED[:3] + ("<task-notification", "<ci-monitor-event")
+_NOT_TYPED = _INJECTED[:3] + ("<task-notification", "<ci-monitor-event", STOPPED)
+
+
+_LEADING_REMINDERS = re.compile(r"\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*", re.S)
+
+
+def strip_reminders(text):
+    """Text without the <system-reminder> blocks a client put before it (the desktop app puts them before what you
+    type, and before the prompt a session is started with from outside)."""
+    return _LEADING_REMINDERS.sub("", text) if text.lstrip().startswith("<system-reminder>") else text
 
 
 def _prompt_texts(content):
@@ -72,7 +83,31 @@ def _prompt_texts(content):
     Claude Code sends task notifications as user messages)."""
     texts = [content] if isinstance(content, str) else [
         c.get("text", "") for c in content or [] if isinstance(c, dict) and c.get("type") == "text"]
+    texts = [strip_reminders(t) for t in texts]
     return [t for t in texts if t.strip() and not t.lstrip().startswith(_NOT_TYPED)]
+
+
+def started_outside(rec):
+    """Whether a user record (the transcript's first) is a prompt the session was started with from outside (another
+    session, the desktop app, a script): its turnOrigin says so ("human" is typed; older records have none)."""
+    return rec.get("turnOrigin") not in (None, "human")
+
+
+def first_user_uuid(path):
+    """The uuid of a transcript's first user record (None if it has none yet): what a session was started with."""
+    try:
+        with open(path, "rb") as f:
+            for raw in f:
+                if b'"user"' in raw:
+                    try:
+                        rec = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict) and rec.get("type") == "user" and not rec.get("isSidechain"):
+                        return rec.get("uuid")
+    except OSError:
+        pass
+    return None
 
 
 def task_notification(text):
@@ -307,11 +342,12 @@ def find_session(session_id):
     return read_session_info(path) if (path := session_file(session_id)) else None
 
 
-def history_items(lines, sidechain=False):
+def history_items(lines, sidechain=False, first=None):
     """Visible items from transcript lines: ('user'|'assistant', content, is_error, timestamp, uuid),
-    ('tool_results', content) or ('artifact', info). Sidechain records are skipped unless
-    sidechain (a subagent's own transcript is nothing but); meta records always are."""
-    return [item for line in lines if (item := history_item(line, sidechain)) is not None]
+    ('tool_results', content), ('stopped', None) (a turn stopped) or ('artifact', info). Sidechain records are
+    skipped unless sidechain (a subagent's own transcript is nothing but); meta records always are. first: the uuid of
+    the transcript's first user record (first_user_uuid), whose prompt, if it came from outside, is a 'start_prompt'."""
+    return [item for line in lines if (item := history_item(line, sidechain, first)) is not None]
 
 
 def rewind_mark(line):
@@ -403,7 +439,16 @@ def cut_after(starts, at, *others):
     return gone
 
 
-def history_item(line, sidechain=False):
+def _stopped_mark(content):
+    """Whether a user message is only Claude Code's note of a turn stopped (STOPPED)."""
+    if isinstance(content, list) and any(not isinstance(c, dict) or c.get("type") != "text" for c in content):
+        return False
+    texts = [content] if isinstance(content, str) else [c.get("text") or "" for c in content or ()]
+    texts = [t for t in texts if t.strip()]
+    return bool(texts) and all(t.lstrip().startswith(STOPPED) for t in texts)
+
+
+def history_item(line, sidechain=False, first=None):
     """The visible item one transcript line makes (see history_items), or None: a line makes one at most."""
     if '"frame-link"' in line:  # Claude Desktop's record of an artifact it published
         try:
@@ -426,11 +471,15 @@ def history_item(line, sidechain=False):
     content = rec.get("message", {}).get("content")
     if rec.get("isCompactSummary"):
         return "compact_summary", _first_text(content) or ""
+    if rec["type"] == "user" and isinstance(content, str):
+        content = strip_reminders(content)
     if rec["type"] == "user" and isinstance(content, str) and (note := task_notification(content)):
         return "task_note", note
     if rec["type"] == "user" and (event := ci_event(content if isinstance(content, str) else next(
             (c.get("text") for c in content or () if isinstance(c, dict) and c.get("type") == "text"), ""))):
         return "ci_event", event
+    if rec["type"] == "user" and _stopped_mark(content):
+        return "stopped", None
     if rec["type"] == "user" and not _is_prompt(rec):
         if isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "tool_result"
                                              for c in content):
@@ -438,6 +487,8 @@ def history_item(line, sidechain=False):
         return None
     if rec["type"] == "user" and isinstance(content, str):
         content = _command_text(content)
+    if rec["type"] == "user" and first is not None and rec.get("uuid") == first and started_outside(rec):
+        return "start_prompt", content
     return rec["type"], content, rec.get("isApiErrorMessage", False), rec.get("timestamp"), rec.get("uuid")
 
 
@@ -478,6 +529,14 @@ class HistoryIndex:
         self.taken = []                 # [begin, end) ranges drawn out of order (take), still numbered among them
         self.taken_count = 0            # items take has read in all
         self.cuts = []                  # (kept, mark): reverts, what's between the two lines dropped (rewind_mark)
+        self._first = None              # (the first user record's uuid, once there is one: first)
+
+    @property
+    def first(self):
+        """The uuid of the transcript's first user record (see history_items), looked for till there is one."""
+        if self._first is None:
+            self._first = first_user_uuid(self.path)
+        return self._first
 
     @property
     def unshown(self):
@@ -522,7 +581,7 @@ class HistoryIndex:
                     at = first = begin + (len(f.readline()) if begin else 0)  # (a line cut in two: the part before's)
                     for raw in f:
                         line = raw.decode("utf-8", "replace")
-                        if (item := history_item(line)) is not None:
+                        if (item := history_item(line, first=self.first)) is not None:
                             starts.append(at)
                             sums.append(_line_sum(raw))
                             replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
@@ -572,7 +631,7 @@ class HistoryIndex:
                         at = self.todo[1]
                         break
                     line = raw.decode("utf-8", "replace")
-                    if (item := history_item(line)) is not None:
+                    if (item := history_item(line, first=self.first)) is not None:
                         if not self.dropped(at):
                             self.starts.append(at)
                             self.sums.append(_line_sum(raw))
@@ -612,7 +671,7 @@ class HistoryIndex:
                 for start, line_sum in zip(starts, sums):
                     f.seek(start)
                     raw = f.readline()
-                    if _line_sum(raw) != line_sum or (item := history_item(raw.decode("utf-8", "replace"))) is None:
+                    if _line_sum(raw) != line_sum or (item := history_item(raw.decode("utf-8", "replace"), first=self.first)) is None:
                         return None
                     items.append(item)
         except OSError:
@@ -633,7 +692,7 @@ class HistoryIndex:
                 at = 0
                 for raw in f:  # (one line at a time: only the newest items stay parsed)
                     line = raw.decode("utf-8", "replace")
-                    if (item := history_item(line)) is not None:
+                    if (item := history_item(line, first=self.first)) is not None:
                         starts.append(at)
                         sums.append(_line_sum(raw))
                         replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
@@ -681,7 +740,7 @@ class HistoryIndex:
                     f.seek(self.starts[i])
                     raw = f.readline()
                     if _line_sum(raw) != self.sums[i] or \
-                            (item := history_item(raw.decode("utf-8", "replace"))) is None:
+                            (item := history_item(raw.decode("utf-8", "replace"), first=self.first)) is None:
                         return None
                     items.append(item)
         except OSError:
@@ -731,7 +790,7 @@ class HistoryIndex:
                 raw = f.readline()
         except OSError:
             return None
-        return history_item(raw.decode("utf-8", "replace")) if _line_sum(raw) == line_sum else None
+        return history_item(raw.decode("utf-8", "replace"), first=self.first) if _line_sum(raw) == line_sum else None
 
     def earlier_replies(self):
         """Claude's replies among the items not drawn yet, newest first, each parsed as it's needed."""
@@ -746,7 +805,7 @@ class HistoryIndex:
                         raw = f.readline()
                         if _line_sum(raw) != self.sums[i]:
                             return  # (rewritten: drawing finds where they went)
-                        yield history_item(raw.decode("utf-8", "replace"))
+                        yield history_item(raw.decode("utf-8", "replace"), first=self.first)
         except OSError:
             return
 
@@ -765,7 +824,7 @@ def read_history(path, limit=400):
     """The visible conversation of a transcript (see history_items). Returns (items, skipped)."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            items = history_items(f)
+            items = history_items(f, first=first_user_uuid(path))
     except OSError:
         return [], 0
     skipped = max(0, len(items) - limit) if limit else 0

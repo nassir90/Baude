@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
-from codeview import CODE_LIMIT, CodePage, CodeView, FilesPage, in_code  # noqa: E402
+from codeview import CODE_LIMIT, CodePage, CodeView, FilesPage, find_in_focus, in_code  # noqa: E402
 from gitview import GitPage  # noqa: E402
 from kubeview import KubeView  # noqa: E402
 from schemaview import SchemaView  # noqa: E402
@@ -84,7 +84,7 @@ class ViewerHost:
             self.git_page.ensure()
 
     def viewer_folder_changed(self):
-        """Another folder to show (Record's notebook changed): the Files page's tree and the Git page's history
+        """Another folder to show (Record's chat read changed): the Files page's tree and the Git page's history
         read again from it (as they're shown)."""
         self.files_page.root = None
         self.git_page.chat_changed()
@@ -210,9 +210,8 @@ class ViewerWindow(Adw.Window, ViewerHost):
         tv.add_top_bar(head)
         self.toasts = Adw.ToastOverlay(child=tv)
         self.set_content(self.viewer_overlays(self.toasts))
-        keys = Gtk.EventControllerKey()
-        keys.connect("key-pressed", self._key)
-        self.add_controller(keys)
+        # (⌘F / Ctrl+F before the focused widget, as Baude's: macOS's text boxes take Ctrl+F as Emacs's forward)
+        widgets.first_keys(self, ((widgets.zoom_keys("f"), lambda: find_in_focus(self) or self.find_in_code()),))
         sizes = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (the code's size: Baude's and Record's keys)
         for triggers, steps in ((widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"), +1),
                                 (widgets.zoom_keys("minus", "underscore", "KP_Subtract"), -1),
@@ -231,7 +230,3 @@ class ViewerWindow(Adw.Window, ViewerHost):
         ViewerWindow._windows.pop(win.folder, None)
         return False
 
-    def _key(self, _c, keyval, _code, state):
-        if keyval == Gdk.KEY_f and state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
-            return self.find_in_code()
-        return False

@@ -381,6 +381,53 @@ def model_program(value):
         any(m["value"] == value for m in mlx_models()) else "claude"
 
 
+_LONG = re.compile(r"\[1m\]|\b1m\b")  # (a 1M-context variant: its own model, opus[1m] beside opus)
+_HEAD = re.compile(r"[a-z]+ \d+(?:\.\d+)*(?: \(1m context\))?")  # (a description that starts with the name: "Opus 5.5 · …")
+ALIASES = ("opus", "sonnet", "haiku", "fable")  # (claude's own aliases, each a word of its models' ids)
+
+
+def _folded(name):
+    """A Claude model's name as it's compared, without what says it's a 1M-context one: "Opus 5.5", "claude-opus-5-5"
+    and "claude-opus-5-5-20261001" are "opus55". None for none."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    s = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", name.casefold()).strip()
+    s = re.sub(r"^(?:[a-z]+\.)?(?:anthropic[./])?claude[-_ ]?", "", s)  # (us.anthropic.claude-…, claude-…)
+    s = re.sub(r"[-_@ ]\d{8}$", "", re.sub(r"-v\d+(?::\d+)?$", "", s.strip()))  # (a snapshot's date; Bedrock's -v1:0)
+    return re.sub(r"[^a-z0-9]", "", s) or None
+
+
+def claude_names(m):
+    """The names a model of Claude's goes by, as they're compared (_folded): its value (an alias, opus; or its id), what
+    it resolves to, its name, and the name its description starts with ("Opus 5.5 · …"). A 1M-context one's (any of
+    them says [1m] or 1M) all end "[1m]": opus[1m] is never opus."""
+    head = m.get("description").split("·", 1)[0].strip().casefold() if isinstance(m.get("description"), str) else ""
+    said = [x for x in (m.get("value"), m.get("resolvedModel"), m.get("displayName"),
+                        head if _HEAD.fullmatch(head) else None) if isinstance(x, str)]
+    long = "[1m]" if any(_LONG.search(x.casefold()) for x in said) else ""
+    return {f + long for f in map(_folded, said) if f}
+
+
+def claude_match(value, listed, fallback=False):
+    """The row of listed (Claude's, as claude lists them: never two of them made one) a model said another way is:
+    its own; else the first that goes by one of its names (claude_names: opus, "Opus 5.5 · …" in its description, for
+    claude-opus-5-5); else, with fallback (a list that's only claude's aliases, no versions: none listed yet), the one
+    alias that's a word of its id. None if none."""
+    if not value:
+        return None
+    if hit := next((m for m in listed if m["value"] == value), None):
+        return hit
+    if model_program(value) != "claude":
+        return None
+    names = claude_names({"value": value})
+    if hit := next((m for m in listed if names & claude_names(m)), None):
+        return hit
+    words = re.split(r"[^a-z0-9\[\]]+", value.casefold())
+    if fallback and "[1m]" not in value and len(said := [a for a in ALIASES if a in words]) == 1:
+        return next((m for m in listed if m["value"] == said[0]), None)
+    return None
+
+
 def pi_exe():
     return os.environ.get("BAUDE_PI_CLAUDE") or os.path.join(PI_CLAUDE, "pi-claude")
 

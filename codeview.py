@@ -33,6 +33,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
+import widgets  # noqa: E402
 from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
     _git, git_exe,
 )
@@ -148,8 +149,7 @@ class FindInText:
 
     def find_tints(self):
         """The (red, green, blue, alpha) of a match and of the current one, for the light or dark theme."""
-        return ((255, 214, 102, 0.28), (255, 170, 40, 0.75)) if Adw.StyleManager.get_default().get_dark() else \
-            ((255, 200, 0, 0.35), (255, 150, 0, 0.70))
+        return widgets.find_tints()
 
     def find_colours(self):
         """The matches' colours, as the theme changes."""
@@ -601,6 +601,19 @@ def in_code(widget):
     while widget is not None and not isinstance(widget, (CodePage, CodeView)):
         widget = widget.get_parent()
     return widget is not None
+
+
+def find_in_focus(window):
+    """Ctrl+F / ⌘F with the focus in a text that finds in itself (FindInText: a CodeView, as the Kubernetes view's YAML
+    or logs, or a page of Record's notes): its find bar. The windows ask here first, as they take the key before the
+    focused widget does (widgets.first_keys). False if the focus isn't in one."""
+    widget = window.get_focus()
+    while widget is not None and not isinstance(widget, FindInText):
+        widget = widget.get_parent()
+    if widget is None:
+        return False
+    widget.open_search()
+    return True
 
 
 class FileNode(GObject.Object):

@@ -79,13 +79,13 @@ CHATS = os.path.join(TMP, "claude-config", "projects", "-shop")
 os.makedirs(CHATS)
 
 
-def transcript(name, replies):
+def transcript(name, replies, cwd=REPO):
     path = os.path.join(CHATS, f"{name}.jsonl")
     with open(path, "w") as f:
-        f.write(json.dumps({"type": "user", "cwd": REPO, "uuid": "u1",
+        f.write(json.dumps({"type": "user", "cwd": cwd, "uuid": "u1",
                             "message": {"role": "user", "content": "How do the jobs run?"}}) + "\n")
         for i, text in enumerate(replies):
-            f.write(json.dumps({"type": "assistant", "cwd": REPO, "uuid": f"a{i}",
+            f.write(json.dumps({"type": "assistant", "cwd": cwd, "uuid": f"a{i}",
                                 "message": {"id": f"m{i}", "role": "assistant",
                                             "content": [{"type": "text", "text": text}]}}) + "\n")
     return path
@@ -1668,19 +1668,16 @@ class Github:
 
 
 def test_github_lists(app):
-    """A folder's GitHub repositories (its checkout's, those of the checkouts under it, not far): their latest and open
-    pull requests and issues are names, with a logo for where each stands, in ⌘K's search and #'s; read with GET only;
+    """A folder's GitHub repositories (its checkout's origin and upstream, not checkouts under it): their latest and
+    open pull requests and issues are names, with a logo for where each stands, in ⌘K's search and #'s; read with GET only;
     a look at one that hasn't changed is one request GitHub doesn't count; a change, two. Kept on disk for the next start;
     nothing in the way of anything else while GitHub can't be asked."""
-    work = os.path.join(TMP, "gh-work")
-    checkout(os.path.join(work, "one"), "https://github.com/acme/one.git")
-    checkout(os.path.join(work, "deep", "er", "two"), "git@github.com:acme/two.git")
-    checkout(os.path.join(work, "three"), "https://gitlab.com/acme/three.git")
-    checkout(os.path.join(work, "node_modules", "dep"), "https://github.com/acme/dep.git")
-    checkout(os.path.join(work, "a", "b", "c", "d"), "https://github.com/acme/far.git")
-    fork = checkout(os.path.join(work, "fork"), "https://github.com/me/fork.git")
-    subprocess.run(GIT + ["remote", "add", "upstream", "https://github.com/acme/parent"], cwd=fork, check=True)
-    os.makedirs(os.path.join(work, "plain"), exist_ok=True)
+    work = checkout(os.path.join(TMP, "gh-work"), "https://github.com/acme/one.git")
+    subprocess.run(GIT + ["remote", "add", "upstream", "git@github.com:acme/two.git"], cwd=work, check=True)
+    checkout(os.path.join(work, "under"), "https://github.com/acme/under.git")
+    three = checkout(os.path.join(TMP, "gh-three"), "https://gitlab.com/acme/three.git")
+    plain = os.path.join(TMP, "gh-plain")
+    os.makedirs(plain, exist_ok=True)
     rest = {"acme/one": [rest_item(1, "Old open issue", ago=9e6),
                          rest_item(5, "Open pull request", pr=True, ago=50),
                          rest_item(6, "Merged pull request", pr=True, state="closed", merged=True, ago=40),
@@ -1689,16 +1686,15 @@ def test_github_lists(app):
                          rest_item(9, "Closed issue", state="closed", ago=10),
                          rest_item(10, "New issue wraps badly", ago=5),
                          *(rest_item(n, f"Closed long ago {n}", state="closed", ago=9e5) for n in range(100, 400))],
-            "acme/two": [rest_item(7, "The other seven")], "me/fork": [], "acme/parent": [rest_item(70, "In the parent")],
-            "acme/three": [rest_item(1, "Not on GitHub")], "acme/dep": [rest_item(1, "Not looked for")],
-            "acme/far": [rest_item(1, "Too far down")]}
+            "acme/two": [rest_item(7, "The other seven")], "acme/three": [rest_item(1, "Not on GitHub")],
+            "acme/under": [rest_item(1, "A checkout under it: not looked for")]}
     gh = lookup.GITHUB
     with Github(rest) as hub:
         gh.round([work])
         asked = hub.calls()
         looked_at = {c.split("/issues")[0][len("repos/"):] for c in asked}
-        assert looked_at == {"acme/one", "acme/two", "me/fork", "acme/parent"}, asked
-        assert len(asked) == 7, ("the latest and the open ones of each (me/fork has no latest: no open ones)", asked)
+        assert looked_at == {"acme/one", "acme/two"}, asked
+        assert len(asked) == 4, ("the latest and the open ones of each", asked)
         assert not hub.now().get("wrote")
         assert any("per_page=50" in c and "state=all" in c for c in asked) and \
             any("per_page=100" in c and "state=open" in c for c in asked), asked
@@ -1725,7 +1721,6 @@ def test_github_lists(app):
             issues.index("acme/one#5"), ("issues first, the open ones first, the latest first", issues[:9])
         assert [it["surface"] for it in space.issues("7")[0]][:2] in (["acme/one#7", "acme/two#7"],
                                                                       ["acme/two#7", "acme/one#7"]), "its number first"
-        assert space.issues("70")[0][0]["surface"] == "acme/parent#70", "and either kind"
         assert [it["surface"] for it in space.issues("the other")[0]] == ["acme/two#7"], "or a word of its title"
         assert not space.issues("no such thing")[0]
         assert not space.issues("acme")[0] and not space.issues("two")[0], "not its repository's name"
@@ -1745,7 +1740,7 @@ def test_github_lists(app):
         hub.due()
         gh.round([work])
         asked = hub.calls()
-        assert len(asked) == 4 and all("state=all" in c for c in asked), ("one request a repository", asked)
+        assert len(asked) == 2 and all("state=all" in c for c in asked), ("one request a repository", asked)
         assert hub.now()["left"] == left, "a 304 isn't counted"
         assert gh.generation == generation and gh.listed(work) is listing, "the same list"
         assert space.items() is space._items
@@ -1768,7 +1763,7 @@ def test_github_lists(app):
         hub.due()
         gh.round([work])
         asked = hub.calls()
-        assert len(asked) == 5 and sum("acme/one" in c for c in asked) == 2, asked
+        assert len(asked) == 3 and sum("acme/one" in c for c in asked) == 2, asked
         assert hub.now()["left"] == left - 2 and gh.generation != generation and gh.listed(work) is not listing
         assert space.find("acme/one#5")["icon"] == "pr_merged" and space.find("acme/one#11")["what"] == "Issue", \
             "the items made again"
@@ -1796,7 +1791,7 @@ def test_github_lists(app):
         hub.due(fresh)
         hub.calls()
         fresh.round([work])
-        assert len(hub.calls()) == 4 and hub.now()["left"] == left, "back: the ETags on disk are good"
+        assert len(hub.calls()) == 2 and hub.now()["left"] == left, "back: the ETags on disk are good"
         assert fresh._fails == 0
 
         # the rate limit: run out, it waits till it's back, and leaves some for your other work
@@ -1824,7 +1819,7 @@ def test_github_lists(app):
         hub.due(fresh)
         hub.calls()
         fresh.round([work])
-        assert len(hub.calls()) == 4 and not [it for it in fresh.listed(work) if it["surface"].startswith("acme/two#")]
+        assert len(hub.calls()) == 2 and not [it for it in fresh.listed(work) if it["surface"].startswith("acme/two#")]
         assert fresh._repos["acme/two"]["paused"] > time.time() + 3000 and fresh._fails == 0
         hub.due(fresh)
         fresh.round([work])
@@ -1851,14 +1846,14 @@ def test_github_lists(app):
         hub.state.update(no_etag=True)
         hub.write()
         hub.calls()
-        gh.round([os.path.join(work, "one")])
+        gh.round([work])
         assert gh._repos["acme/one"]["etags"].get("recent") == ""
         hub.calls()
         gh._repos["acme/one"]["looked"] = time.time() - 120
-        gh.round([os.path.join(work, "one")])
+        gh.round([work])
         assert hub.calls() == [], "not yet"
         gh._repos["acme/one"]["looked"] = time.time() - 301
-        gh.round([os.path.join(work, "one")])
+        gh.round([work])
         assert hub.calls(), "5 minutes"
         hub.state.update(no_etag=False)
         hub.write()
@@ -1875,62 +1870,54 @@ def test_github_lists(app):
         gh.round([work])
         assert gh.listed(work) and not gh._out, "signed in again"
 
-        # many repositories in use: only so many, each looked at less often, the folder's own first
-        many = os.path.join(TMP, "gh-many")
-        checkout(many, "https://github.com/acme/own.git")
+        # many repositories in use: only so many, each looked at less often, the first folder's first
+        many = [checkout(os.path.join(TMP, "gh-many"), "https://github.com/acme/own.git")]
         for n in range(40):
-            checkout(os.path.join(many, f"r{n}"), f"https://github.com/acme/r{n}.git")
+            many.append(checkout(os.path.join(TMP, "gh-many-r", f"r{n}"), f"https://github.com/acme/r{n}.git"))
             hub.state["rest"][f"acme/r{n}"] = []
         hub.state["rest"]["acme/own"] = []
         hub.write()
         gh.forget()
         hub.calls()
-        gh.round([many])
+        gh.round(many)
         asked = hub.calls()
         assert len({c.split("/issues")[0] for c in asked}) == lookup.GITHUB_REPOS, len(asked)
         assert asked[0].startswith("repos/acme/own/issues"), asked[0]
         for r in gh._repos.values():
             r["looked"] = time.time() - 120
-        gh.round([many])
+        gh.round(many)
         assert hub.calls() == [], "24 of them: every 4 minutes"
         for r in gh._repos.values():
             r["looked"] = time.time() - 241
-        gh.round([many])
+        gh.round(many)
         assert len(hub.calls()) == lookup.GITHUB_REPOS
 
-        # shared out: one folder's many checkouts don't crowd out another's, or the chat's own
-        small = os.path.join(TMP, "gh-small")
-        checkout(small, "https://github.com/acme/small.git")
-        checkout(os.path.join(small, "sub"), "https://github.com/acme/small-sub.git")
-        chat = os.path.join(TMP, "gh-chat")
-        checkout(chat, "https://github.com/acme/chat.git")
+        # shared out: each folder's own first, then an upstream, in turn
+        small = checkout(os.path.join(TMP, "gh-small"), "https://github.com/acme/small.git")
+        subprocess.run(GIT + ["remote", "add", "upstream", "https://github.com/acme/small-up.git"], cwd=small, check=True)
+        chat = checkout(os.path.join(TMP, "gh-chat"), "https://github.com/acme/chat.git")
         checkout(os.path.join(chat, "vendor-ish", "dep"), "https://github.com/acme/vendored.git")
-        hub.state["rest"].update({"acme/small": [], "acme/small-sub": [], "acme/chat": [], "acme/vendored": []})
+        hub.state["rest"].update({"acme/small": [], "acme/small-up": [], "acme/chat": [], "acme/vendored": []})
         hub.write()
         gh.forget()
         hub.calls()
-        gh.round([many, small], [chat])
+        gh.round([small, chat])
         asked = [c.split("/issues")[0][len("repos/"):] for c in hub.calls() if "state=all" in c]
-        assert asked[:3] == ["acme/own", "acme/small", "acme/chat"], ("each folder's own, then the chat's", asked[:4])
-        assert "acme/small-sub" in asked and len(asked) == lookup.GITHUB_REPOS, ("and in turn", asked)
-        assert asked.index("acme/small-sub") == 4, ("in the first turn of the rest", asked)
+        assert asked == ["acme/small", "acme/chat", "acme/small-up"], ("each folder's own, then the rest", asked)
 
-        # the chat's folder, which no one attached: the repository it's in, not the checkouts under it
-        assert "acme/vendored" not in asked, asked
+        # a chat's folder: the repository it's in, not the checkouts under it
         gh.forget()
-        gh.round([], [chat])
+        gh.round([chat])
         assert [c.split("/issues")[0][len("repos/"):] for c in hub.calls() if "state=all" in c] == ["acme/chat"]
-        assert gh.own_repository(chat) == "acme/chat" and gh.own_repository(os.path.join(TMP, "gh-small")) is None
-        gh.round([chat])  # (attached, it's another matter)
-        assert "acme/vendored" in {c.split("/issues")[0][len("repos/"):] for c in hub.calls()}
+        assert gh.own_repository(chat) == "acme/chat" and gh.own_repository(os.path.join(TMP, "gh-plain")) is None
         assert not gh._repos["acme/chat"]["paused"]
 
         # off the main loop: look returns at once, and a folder with no remote on GitHub asks nothing at all
         gh.forget()
-        gh.round([os.path.join(work, "plain")])
-        gh.round([os.path.join(work, "three")])
+        gh.round([plain])
+        gh.round([three])
         assert hub.calls() == [], "no remote on GitHub: nothing"
-        assert gh.listed(os.path.join(work, "plain")) == ()
+        assert gh.listed(plain) == ()
         gh.look([work])
         wait_for(lambda: gh.listed(work), "read on its thread")
         assert gh._thread.name == "lookup-github" and gh._thread.is_alive()
@@ -1954,6 +1941,23 @@ def test_github_lists(app):
     assert not os.path.exists(cached), "nothing at all"
 
 
+def read_in(win, folder, name):
+    """A chat in folder (a transcript of its own) opened and read: its folder's what @, ⌘K, the viewers and GitHub's
+    lists know. Its path, for read_back."""
+    path = os.path.realpath(transcript(name, ["Nothing to see."], cwd=folder))
+    win.open_chat(path)
+    pump(0.1)
+    return path
+
+
+def read_back(win, path):
+    """The chat read_in opened, closed and gone: the one read before it read again."""
+    if path is not None:
+        win.tabs.close(("chat", path))
+        os.remove(path)
+        pump(0.1)
+
+
 def test_diary_hash_lists_issues(app):
     """# in the notes lists GitHub's issues and pull requests, as @ lists the rest: Enter puts in the reference, seen as
     #12, its logo the #; a pull request's the branch's logo where the # was, green and then orange; a click opens it.
@@ -1963,7 +1967,8 @@ def test_diary_hash_lists_issues(app):
     notebook = win.current
     folder = os.path.join(TMP, "gh-shop")
     checkout(folder, "https://github.com/acme/shop.git")
-    checkout(os.path.join(folder, "tools"), "git@github.com:acme/tools.git")
+    subprocess.run(GIT + ["remote", "add", "upstream", "git@github.com:acme/tools.git"], cwd=folder, check=True,
+                   capture_output=True)
     with open(os.path.join(folder, "README.md"), "w") as f:
         f.write("# shop\n")
     for args in (["add", "README.md"], ["commit", "-qm", "shop"], ["branch", "-f", "feature/login#12"]):
@@ -1976,15 +1981,14 @@ def test_diary_hash_lists_issues(app):
             "acme/tools": [rest_item(12, "A twelve of its own", ago=40), rest_item(77, "Only here", pr=True, ago=41)]}
     opened = []
     real_web, record.fixview.web = record.fixview.web, lambda _win, url: opened.append(url)
-    page = "On GitHub"
+    page, chat = "On GitHub", None
     with Github(rest) as hub:
         try:
-            notebook["folders"] = [folder]
-            win.attached_changed(notebook)
+            chat = read_in(win, folder, "gh-shop-chat")
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(*win.github_folders())
+            lookup.GITHUB.round(win.github_folders())
             assert space.find("acme/shop#12") is not None
             d = win.open_note(page)
             d.view.grab_focus()
@@ -2139,7 +2143,7 @@ def test_diary_hash_lists_issues(app):
             hub.now()["rest"]["acme/shop"][2] = rest_item(61, "Fix the wrap", pr=True, state="closed", merged=True)
             hub.write()
             hub.due()
-            lookup.GITHUB.round(*win.github_folders())
+            lookup.GITHUB.round(win.github_folders())
             record.Window._github_changed(win)
             assert (at, "pr_merged") in d.view.logos, d.view.logos
             wait_for(lambda: space.find("acme/shop#61")["icon"] == "pr_merged", "the items")
@@ -2147,8 +2151,8 @@ def test_diary_hash_lists_issues(app):
             # a name in a reply, as Baude's markdown asks (the backticked #, the full name, PR #)
             names = record.ReaderNames(space, folder)
             assert names.refs["acme/shop#60"].kind == "pr" and names.refs["PR #60"] is names.refs["acme/shop#60"]
-            assert "PR #77" not in names.refs and "acme/tools#77" in names.refs, "the chat's own repository's, not a " \
-                "vendored checkout's"
+            assert "PR #77" not in names.refs and "acme/tools#77" in names.refs, "the chat's own repository's, not " \
+                "its upstream's"
             assert "PR #60" not in record.ReaderNames(space).refs, "no chat's: no repository a bare number means"
             was, widgets.SIGNAL = widgets.SIGNAL, names
             try:
@@ -2174,18 +2178,8 @@ def test_diary_hash_lists_issues(app):
             # another repository with a #12 of its own: each stays its own, and what's written stays what it was
             assert space.find("acme/tools#12")["summary"].startswith("A twelve of its own")
             assert space.issues("12")[0][0]["surface"] == "acme/shop#12", "the first repository's, for the number typed"
-            second = checkout(os.path.join(TMP, "gh-shop-again"), "https://github.com/acme/shop.git")  # (and two checkouts
-            notebook["folders"] = [folder, second]  # of one repository: it's listed once)
-            win.attached_changed(notebook)
-            lookup.GITHUB.round(*win.github_folders())
-            both = win.space()
-            both.refresh()
-            wait_for(lambda: not both.busy and both.find("acme/shop#12") is not None, "both folders")
-            assert [it["surface"] for it in both.items()].count("acme/shop#12") == 1
-            assert both.find("acme/shop#12")["summary"] == "Lists scroll past the end · acme/shop", \
+            assert space.find("acme/shop#12")["summary"] == "Lists scroll past the end · acme/shop", \
                 "it says its repository, not a folder"
-            notebook["folders"] = [folder]
-            win.attached_changed(notebook)
 
             # backspacing over one takes it whole; what's typed at its edge goes beside it
             d.buf.place_cursor(d.buf.get_end_iter())
@@ -2197,8 +2191,7 @@ def test_diary_hash_lists_issues(app):
             record.fixview.web = real_web
             win.tabs.close(("note", page))
             notebook["pages"].pop(page, None)
-            notebook["folders"] = []
-            win.attached_changed(notebook)
+            read_back(win, chat)
             win.pages.fill()
 
 
@@ -2213,23 +2206,22 @@ def test_github_shots(app):
     checkout(folder, "https://github.com/nassir90/Baude.git")
     subprocess.run(GIT + ["add", "-A"], cwd=folder, capture_output=True)
     rest = {"nassir90/Baude": [
-        rest_item(62, 'When the "gh" CLI is available, integrate with the git repos on attached folders', ago=60),
+        rest_item(62, 'When the "gh" CLI is available, integrate with the git repo of the chat read', ago=60),
         rest_item(63, "Option and an arrow stops after a closing } and a line's full stop", pr=True, ago=120),
         rest_item(60, "Keep the tab strip's fade while a tab is closing", pr=True, state="closed", merged=True, ago=7200),
         rest_item(58, "Try a second renderer for the code view", pr=True, state="closed", ago=9000),
         rest_item(52, "The feedback tab loses its place on refresh", ago=10000),
         rest_item(49, "Selecting across two replies copies only one", state="closed", ago=86000),
         rest_item(47, "Draft: smaller tab close targets", pr=True, draft=True, ago=99000)]}
-    page = "On GitHub"
+    page, chat = "On GitHub", None
     manager = Adw.StyleManager.get_default()
     with Github(rest):
         try:
-            notebook["folders"] = [folder]
-            win.attached_changed(notebook)
+            chat = read_in(win, folder, "gh-shots-chat")
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(*win.github_folders())
+            lookup.GITHUB.round(win.github_folders())
             for scheme, name in ((Adw.ColorScheme.FORCE_LIGHT, "light"), (Adw.ColorScheme.FORCE_DARK, "dark")):
                 manager.set_color_scheme(scheme)
                 pump(0.3)
@@ -2275,8 +2267,7 @@ def test_github_shots(app):
             manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
             win.tabs.close(("note", page))
             notebook["pages"].pop(page, None)
-            notebook["folders"] = []
-            win.attached_changed(notebook)
+            read_back(win, chat)
             win.pages.fill()
 
 
@@ -2286,11 +2277,11 @@ def test_watch_github(app):
     asked, told = [], []
     real_look, tick = lookup.GITHUB.look, widgets.GITHUB_TICK_S
     # (only what's asked of "a folder": the app's own window has a watch of its own)
-    lookup.GITHUB.look, widgets.GITHUB_TICK_S = (lambda a, b: "a folder" in b and asked.append(b)), 1
+    lookup.GITHUB.look, widgets.GITHUB_TICK_S = (lambda folders: "a folder" in folders and asked.append(folders)), 1
     in_use = ["a folder"]
     try:
         win = Adw.Window(default_width=200, default_height=100)
-        widgets.watch_github(win, lambda w: ([], list(in_use)), told.append)
+        widgets.watch_github(win, lambda w: list(in_use), told.append)
         pump(1.3)
         assert not asked and not widgets.window_shown(win), "not shown yet"
         win.present()
@@ -2335,15 +2326,14 @@ def test_hash_key_never_rewrites_what_is_typed(app):
     rest = {"acme/shop": [rest_item(1042, "Lists scroll past the end", ago=15), rest_item(12, "Wrapped titles overlap", ago=20),
                           rest_item(13, "Add a folder", ago=25), rest_item(61, "Fix the wrap", pr=True, ago=10),
                           rest_item(60, "Faster lists", pr=True, state="closed", merged=True, ago=5)]}
-    page = "On GitHub, by key"
+    page, chat = "On GitHub, by key", None
     with Github(rest):
         try:
-            notebook["folders"] = [folder]
-            win.attached_changed(notebook)
+            chat = read_in(win, folder, "gh-keys-chat")
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(*win.github_folders())
+            lookup.GITHUB.round(win.github_folders())
             d = win.open_note(page)
             d.view.grab_focus()
             pump(0.2)
@@ -2514,15 +2504,14 @@ def test_hash_key_never_rewrites_what_is_typed(app):
                 known["at"] = 0.0
             for r in lookup.GITHUB._repos.values():
                 r["looked"] = 0.0
-            lookup.GITHUB.round(*win.github_folders())
+            lookup.GITHUB.round(win.github_folders())
             assert lookup.GITHUB.generation == generation and lookup.GITHUB.listed(folder) is listing
             assert d.pop_selected()["surface"] == picked
             key(mouse.ESCAPE)
         finally:
             win.tabs.close(("note", page))
             notebook["pages"].pop(page, None)
-            notebook["folders"] = []
-            win.attached_changed(notebook)
+            read_back(win, chat)
             win.pages.fill()
 
 
@@ -2706,15 +2695,15 @@ def test_ci_events_arent_shown(app):
 def test_open_chat(app):
     """A notebook has no chat: one opened (record.py --chat from Baude's Open in Record, an @chat, ⌘K's) is read in a
     tab of its own, whichever notebook's open, kept open for the next start; one open already, shown; no notebook's
-    made or attached for it. One from when a notebook had its chat: that chat open, its folder the notebook's."""
+    made for it. One from when a notebook had its chat: that chat open, and nothing of it kept in the notebook."""
     win = app.win
-    assert "chat" not in by_id(win, "a") and by_id(win, "a")["folders"][0] == REPO, "a's chat's folder: a's"
+    assert "chat" not in by_id(win, "a") and "folders" not in by_id(win, "a"), "a's chat: open, not a's"
     assert win.store.reading["path"] == CHAT
     select(win, "b")
     count, b = len(win.store.notebooks), win.current
     assert win.reader.path == CHAT, "the chat open, whichever notebook's"
     win.open_chat(OTHER)
-    assert len(win.store.notebooks) == count and win.current is b and "chat" not in b and not b["folders"]
+    assert len(win.store.notebooks) == count and win.current is b and "chat" not in b and "folders" not in b
     assert isinstance(win.tabs.current(), record.Reader) and win.reader.path == os.path.realpath(OTHER)
     assert [c["path"] for c in record.Store().chats] == [os.path.realpath(CHAT), os.path.realpath(OTHER)], "kept open"
     assert record.Store().reading["path"] == os.path.realpath(OTHER), "kept"
@@ -2727,89 +2716,21 @@ def test_open_chat(app):
     assert [c["path"] for c in win.store.chats] == [os.path.realpath(CHAT)], "closed: not kept open"
 
 
-def test_attach_to_folder(app):
-    """Attach… lists Choose a folder… and the folders the chats ran in; Open a Chat… the chats. A notebook attached
-    to a folder: its @ knows the folder's names, the chat open is as it was; Detach lets it go."""
-    win = app.win
+def test_choose_chat(app):
+    """Open a Chat… lists the chats, the one picked handed on."""
     picked = []
     sessions = [{"path": CHAT, "title": "Jobs", "cwd": REPO, "mtime": time.time() - 60},
                 {"path": OTHER, "title": "Other", "cwd": REPO, "mtime": time.time() - 999},
                 {"path": "/x/3.jsonl", "title": "Gone", "cwd": "/no/such/folder", "mtime": time.time()}]
     rows = lambda lb: [r.get_title() for i in range(20) if (r := lb.get_row_at_index(i))]  # noqa: E731
-    chats = record.AttachDialog(picked.append, chats=True)
+    chats = record.ChatDialog(picked.append)
     chats._loaded(sessions)
     assert rows(chats.list) == ["Jobs", "Other", "Gone"], rows(chats.list)
-    assert chats.folders.get_parent() is None, "no folders"
-    dlg = record.AttachDialog(picked.append)
-    dlg._loaded(sessions)
-    assert "shop" in rows(dlg.folders) and dlg.list.get_parent() is None, rows(dlg.folders)
-    dlg.search.set_text("nothing like it")
-    dlg.fill()
-    assert "shop" not in rows(dlg.folders)
-    dlg.search.set_text("")
-    dlg.fill()
-    picked.append(dlg.folders.get_row_at_index(1).session)
-    assert picked == [{"path": None, "title": "shop", "cwd": REPO}], picked
-    select(win, "b")
-    notebook, reading = win.current, win.reader.path
-    try:
-        notebook["folders"].append(picked[0]["cwd"])  # (a folder picked: one more of the Record's folders)
-        win.attached_changed(notebook)
-        assert win.reader.path == reading, "the chat open as it was"
-        assert win.right_stack.get_child_by_name("folders") is win.folders_page, "in the right bar"
-        row = win.folders_page.rows.get_row_at_index(0)
-        assert row.get_title() == "shop" and not win.folders_page.none.get_visible()
-        space = catalogued(win)
-        assert space.root == REPO and space.find("relay_jobs.py") is not None, "@ knows the folder's names"
-        win.detach()
-        assert notebook["folders"] == [] and win.folders_page.rows.get_row_at_index(0) is None
-        assert win.folders_page.none.get_visible(), "says what they're for"
-        win.folders_page.add_btn.emit("clicked")  # (+: Attach…)
-        pump(0.1)
-        dialog = win.get_visible_dialog()
-        assert isinstance(dialog, record.AttachDialog)
-        dialog.on_pick(record.folder_attachment(REPO))
-        dialog.force_close()
-        pump(0.1)
-        assert notebook["folders"] == [REPO] and win.folders_page.rows.get_row_at_index(0).get_title() == "shop"
-    finally:
-        notebook["folders"] = []
-
-
-def test_many_folders(app):
-    """A Record attached to several folders: @ and the questions know all their names, each said with its folder's,
-    a name two have the first folder's; the Folders page lists what's attached, each with ×; Detach all lets them all go."""
-    other = os.path.join(TMP, "api")
-    os.makedirs(os.path.join(other, "api"), exist_ok=True)
-    with open(os.path.join(other, "api", "routes.py"), "w") as f:
-        f.write("ROUTES = []\n")
-    with open(os.path.join(other, "README.md"), "w") as f:
-        f.write("# api\n")
-    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "api"]):
-        subprocess.run(GIT + args, cwd=other, check=True, capture_output=True)
-    win = app.win
-    select(win, "b")
-    notebook = win.current
-    try:
-        notebook["folders"] = [REPO, other]
-        win.attached_changed(notebook)
-        space = win.space()
-        assert isinstance(space, record.Spaces)
-        space.refresh()
-        wait_for(lambda: not space.busy and space.find("routes.py") is not None, "both folders catalogued")
-        assert space.find("relay_jobs.py")["root"] == REPO and space.find("routes.py")["root"] == other
-        assert space.find("README.md")["root"] == REPO, "a name both have: the first folder's"
-        assert space.find("routes.py")["summary"].startswith("api · ")
-        rows = win.folders_page.rows
-        assert rows.get_row_at_index(1) is not None and rows.get_row_at_index(2) is None, "each listed"
-        win.detach_folder(other)  # (its ×)
-        assert notebook["folders"] == [REPO] and rows.get_row_at_index(1) is None
-        notebook["folders"] = [REPO, other]
-        win.attached_changed(notebook)
-        win.detach()
-        assert notebook["folders"] == [] and win.space().find("routes.py") is None
-    finally:
-        notebook["folders"] = []
+    chats.search.set_text("oth")
+    chats.fill()
+    assert rows(chats.list) == ["Other"], rows(chats.list)
+    chats._activated(chats.list, chats.list.get_row_at_index(0))
+    assert picked == [sessions[1]], picked
 
 
 def test_images_open_in_the_large_view(app):
@@ -4894,12 +4815,21 @@ def forget_zip_sizes():
         record._ZIPPED.clear()
 
 
-def folders_back(win, folders):
-    """A notebook's attached folders as they were, kept: None, it had none."""
-    if folders is None:
-        win.current.pop("folders", None)
-    else:
-        win.current["folders"] = folders
+def cite(*paths):
+    """Chats cited, as a passage's citation has them (Reader.citation): what makes them a notebook's (chats_of)."""
+    return " ".join(record.CITE_SCHEME + os.path.basename(p)[:-len(".jsonl")] for p in paths)
+
+
+def cite_chat(win, path=CHAT):
+    """A chat cited on the open notebook's Home, so its export has it: Home as it was, for home_back."""
+    home = win.current["pages"].get(record.HOME, "")
+    win.current["pages"][record.HOME] = f"{home}\n\n{cite(path)}"
+    return home
+
+
+def home_back(win, home):
+    """The open notebook's Home as it was (cite_chat), kept."""
+    win.current["pages"][record.HOME] = home
     win.store.save_now()
 
 
@@ -4911,10 +4841,10 @@ def test_export_sizes_are_the_zips(app):
     named = transcript("chat-sizes", ["Ünï wörds " * 300])
     with open(named, "a") as f:
         f.write(json.dumps({"type": "custom-title", "customTitle": "Ça va, a/b"}) + "\n")
-    book = {"id": "x1", "name": "Shöp notes", "folders": [REPO], "pages": {record.HOME: "Home words " * 500, "Plans:Nëxt": "Next", "Empty": " "},
+    book = {"id": "x1", "name": "Shöp notes", "pages": {record.HOME: "Home words " * 500 + cite(CHAT, named), "Plans:Nëxt": "Next", "Empty": " "},
             "messages": [{"role": "user", "text": "What is it?", "quote": "a passage"}, {"role": "record", "text": "A thing."}]}
-    other = {"id": "x2", "name": "Elsewhere", "folders": [REPO], "pages": {record.HOME: "Other words"}, "messages": []}
-    nothing = {"id": "x3", "name": "Nothing", "folders": [], "pages": {}, "messages": []}
+    other = {"id": "x2", "name": "Elsewhere", "pages": {record.HOME: "Other words " + cite(CHAT)}, "messages": []}
+    nothing = {"id": "x3", "name": "Nothing", "pages": {}, "messages": []}
 
     def made(notebooks, extras):
         path = os.path.join(out, "made.zip")
@@ -4980,8 +4910,7 @@ def test_export_in_settings(app):
     assert "Settings…" in listed and not [s for s in listed if s.startswith("Export")], listed
     out = os.path.join(TMP, "settings-exports")
     os.makedirs(out, exist_ok=True)
-    folders = win.current.get("folders")
-    win.current["folders"] = [REPO]
+    home = cite_chat(win)
 
     def said(notebooks):
         path = os.path.join(out, "size.zip")
@@ -5066,7 +4995,7 @@ def test_export_in_settings(app):
     finally:
         record.Gtk.FileDialog = was
         del win.toast
-        folders_back(win, folders)
+        home_back(win, home)
 
 
 def test_export_sizes_off_the_main_loop(app):
@@ -5075,8 +5004,7 @@ def test_export_sizes_off_the_main_loop(app):
     so. (#124)"""
     win = app.win
     select(win, "a")
-    folders = win.current.get("folders")
-    win.current["folders"] = [REPO]
+    home = cite_chat(win)
     gate, reading, most, reads, read = threading.Event(), [], [0], [], record.chat_text
 
     def held(*a):
@@ -5154,7 +5082,7 @@ def test_export_sizes_off_the_main_loop(app):
         record.chat_text = read
         forget_zip_sizes()
         select(app.win, "a")
-        folders_back(app.win, folders)
+        home_back(app.win, home)
 
 
 def test_feedback_over_settings_and_notes_lines(app):
@@ -5459,10 +5387,11 @@ def test_export_to_a_zip(app):
     select(win, "a")
     out = os.path.join(TMP, "exports")
     os.makedirs(out, exist_ok=True)
-    book = {"id": "x1", "name": "Shop notes", "folders": [REPO], "pages": {record.HOME: "Home words", "Plans:Next": "Next words", "Empty": " "},
+    home, tools = None, os.path.join(CHATS, "tools-1.jsonl")
+    book = {"id": "x1", "name": "Shop notes", "pages": {record.HOME: "Home words " + cite(CHAT, tools), "Plans:Next": "Next words", "Empty": " "},
             "messages": [{"role": "user", "text": "What is it?", "quote": "a passage"}, {"role": "record", "text": "A thing."}]}
-    other = {"id": "x2", "name": "Elsewhere", "folders": [], "pages": {record.HOME: "Other words"}, "messages": []}
-    with open(os.path.join(CHATS, "tools-1.jsonl"), "w") as f:  # (what's not shown of a chat stays out)
+    other = {"id": "x2", "name": "Elsewhere", "pages": {record.HOME: "Other words"}, "messages": []}
+    with open(tools, "w") as f:  # (what's not shown of a chat stays out)
         for d in ({"type": "user", "cwd": REPO, "uuid": "u1", "message": {"role": "user", "content": "Run it"}},
                   {"type": "assistant", "cwd": REPO, "uuid": "a1", "message": {"id": "m1", "role": "assistant", "content": [
                       {"type": "tool_use", "name": "Bash", "input": {"command": "secret-command"}}, {"type": "text", "text": "It ran."}]}},
@@ -5486,7 +5415,7 @@ def test_export_to_a_zip(app):
         same = [{"id": "a1", "name": "Foo", "pages": {}}, {"id": "b1", "name": "Foo", "pages": {}}, {"id": "c1", "name": "Foo (a1)", "pages": {}}]
         folders = record.book_folders(same)
         assert len(set(folders.values())) == 3 and folders["b1"] == "Foo (b1)", folders
-        # with the glossary and chats: those in its folder, not in the other's
+        # with the glossary and chats: those its notes cite and their folders' glossary, not the other's
         path = os.path.join(out, "all.zip")
         record.export_zip(path, [book, other], extras=True)
         with zipfile.ZipFile(path) as z:
@@ -5588,7 +5517,7 @@ def test_export_to_a_zip(app):
             win.store.notebooks = real
         # with the glossary and chats, as Settings says, whether or not the notebooks have changed; kept
         select(win, "a")
-        win.current.setdefault("folders", []).append(REPO)
+        home = cite_chat(win)
         win.activate_action("win.backupall", None)
         assert win.store.backup_all is True
         with open(win.store.path) as f:
@@ -5605,8 +5534,8 @@ def test_export_to_a_zip(app):
         os.remove(os.path.join(CHATS, "tools-1.jsonl"))
         if win.store.backup_all:
             win.activate_action("win.backupall", None)
-        if REPO in win.current.get("folders", []):
-            win.current["folders"].remove(REPO)
+        if home is not None:
+            home_back(win, home)
 
 
 def test_no_focus_ring(app):
@@ -5656,7 +5585,7 @@ def test_times_say_when(app):
     recent = record.recent_sessions
     record.recent_sessions = lambda: [{"path": CHAT, "title": "Jobs", "cwd": REPO, "mtime": at}]
     try:
-        chats = record.AttachDialog(lambda _s: None, chats=True)
+        chats = record.ChatDialog(lambda _s: None)
         chats.present(win)
         wait_for(lambda: chats.list.get_row_at_index(0) is not None, "the chats")
         pump(0.5)
@@ -5679,13 +5608,6 @@ def test_times_say_when(app):
             finally:
                 widgets.time_tip_at = ask
         chats.force_close()
-        folders = record.AttachDialog(lambda _s: None)
-        folders.present(win)
-        wait_for(lambda: folders.folders.get_row_at_index(1) is not None, "the folders")
-        pump(0.5)
-        row = folders.folders.get_row_at_index(1)
-        says(next(w for w in walk(row) if isinstance(w, Gtk.Label) and w.get_text() == row.get_subtitle()))
-        folders.force_close()
     finally:
         record.recent_sessions = recent
     pump(0.2)

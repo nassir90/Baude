@@ -10,7 +10,7 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
     python3 baude.py [--cwd DIR] [--model MODEL] [--resume SESSION_ID]
     python3 baude.py --install | --uninstall   # app-menu launcher (per user)
 
-Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
+Keys: Ctrl+Enter (⌘Enter) sends, Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
 Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused, or
 closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
@@ -132,13 +132,14 @@ from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
+from widgets import UserTurn  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
 from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
     EXISTS_FOR, FILE_SCHEME, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
     HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
-    KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch,
+    KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch, natural_height,
     REF_ABSENT_WHY, REF_SCHEME, SETTINGS_RENAMED, SUB_BULLET, TableScroll, WEB_IMAGE_MAX,
     WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, _ARTIFACT_URL, _BARE_URL,
     _BOLD, _BOLD_ITALIC, _CODE_SPAN, _FENCE, _HEADING, _IMAGE,
@@ -160,7 +161,7 @@ from widgets import (  # noqa: E402,F401
 )
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
-    file_children, file_icon, git_ignored, in_code, python_context,
+    file_children, file_icon, find_in_focus, git_ignored, in_code, python_context,
 )
 from kubeview import (  # noqa: E402,F401
     CERT_MANAGER_CERTIFICATE, CERT_MANAGER_ISSUER, KEDA_SCALED_JOB, KEDA_SCALED_OBJECT, KEDA_TRIGGER_AUTH, KUBE_CLIMB,
@@ -1876,7 +1877,7 @@ class Signal(Names):
                 row["why"] = why
                 refs.append(self._absent_entity(surface, row, old, st))
             elif verdict == "plain":
-                if ref_codeish(surface):
+                if ref_codeish(surface) and not widgets.ref_cloud_provider(surface):  # (Fly.io, DigitalOcean: plain)
                     rejected.append({"i": i, "name": name, "why": f"{surface!r} is written as code, not English: "
                                      "link it, or not_in_code with why proposed, external, elsewhere or not_found"})
                     continue
@@ -1923,7 +1924,8 @@ class Signal(Names):
                         re.search(r"[A-Za-z]", key) and not re.fullmatch(r"\d[\d.,:%\sA-Za-z]*", key):
                     names[key] = (ref_kind(key) or "name", False)
             for surface, (kind, _strong) in names.items():
-                if kind in REF_TOOL_KINDS or decided.get(surface, set()) & before:
+                if kind in REF_TOOL_KINDS or decided.get(surface, set()) & before or \
+                        widgets.ref_cloud_provider(surface):
                     continue
                 ref = self._load(surface)
                 if ref is not None and ref.status == "resolved" and (ref.kind in ("commit", "branch", "pr") or
@@ -3905,7 +3907,9 @@ ideas, numbers and secrets.
 
 Every name gets a decision, including the ones that aren't in this repository: outside tools, products, \
 libraries, services and their commands (Postgres, Vite, FastAPI, Keycloak, Chrome, the Anthropic API, `npm ci`, \
-`uv sync`, `docker exec`) are not_in_code, why external; a name the conversation proposes that isn't written \
+`uv sync`, `docker exec`) are not_in_code, why external, except well-known cloud and hosting providers and \
+their products (Cloudflare, Vercel, Supabase, Shopify, AWS Lambda…), which need no decision: they're never \
+linked; a name the conversation proposes that isn't written \
 yet is proposed; one in another checkout or branch, on another machine, or only in a running system (a job id, \
 an org or app someone made, a container, a file in another repository) is elsewhere. Marking them tells the \
 person they won't find it in this code.
@@ -5720,6 +5724,18 @@ def track_commands(commands, msg):
             commands.pop(k)
 
 
+STOP_SAID_RE = re.compile(r"\W*(api error:\s*)?((the )?(request|operation) (was )?(aborted|interrupted|cancell?ed)"
+                          r"( by (the )?user)?|this operation was aborted|aborted|interrupted|cancell?ed"
+                          r"|\[request interrupted by user[^\]]*\])\W*", re.I)
+
+
+def ended_by_stop(msg):
+    """Whether a turn's end (its result), coming after Esc or the stop button, is what stopping it says: Claude Code's
+    error_during_execution, or its words (⚠ This operation was aborted, API Error: Request was aborted.), Codex's
+    too. Not another error that came meanwhile (a sign-in's, a full context's): that one's still said."""
+    return msg.get("subtype") == "error_during_execution" or bool(STOP_SAID_RE.fullmatch(msg.get("result") or ""))
+
+
 def api_error_label(text):
     """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
     colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: widgets.CSS), and
@@ -6844,6 +6860,9 @@ class SlashCompleter:
             if self.matches:
                 self.picks.move(steps[keyval])
                 self.moved = True
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+            self.hide()  # (Ctrl/⌘+Enter sends what's typed, past the list)
+            return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
@@ -6855,10 +6874,9 @@ class SlashCompleter:
 
 
 class ChatRefCompleter(meta.RefCompleter):
-    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), where Enter sends: not in code (an @ there
-    is a decorator's, an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @
-    is one word, or once the arrows have moved to it; else it sends, as Ctrl+Enter always does, and Shift+Enter is a
-    new line. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
+    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), not in code (an @ there is a decorator's,
+    an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @ is one word, or
+    once the arrows have moved to it; else it's a new line. Ctrl+Enter (⌘Enter) always sends, past the list. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
 
     def __init__(self, space, view, anchor, slash):
         self.slash = slash
@@ -6875,7 +6893,7 @@ class ChatRefCompleter(meta.RefCompleter):
         if not self.visible():
             return False
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (
-                state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) or
+                widgets.sends(state) or state & Gdk.ModifierType.SHIFT_MASK or
                 not self.moved and " " in (self.word() or (0, ""))[1].strip()):
             self.forget()
             return False
@@ -7557,6 +7575,11 @@ def chat_group(info, assigned=None):
 
 def remote_name(r):
     return r.info.get("name") or r.host
+
+
+def stopping_said(r):
+    """What a host said as it stopped (Remote.said_stopping), as its banner says it while it's gone, or None."""
+    return None if r is None else r.said_stopping("Daemon" if r.mine else remote_name(r))
 
 
 def local_host():
@@ -8733,6 +8756,8 @@ class SessionSidebar(Gtk.Box):
         if r is None:
             key = self.shown_host()
             return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if not r.deactivated and (said := stopping_said(r)) is not None:  # (stopping: said as it goes)
+            return said
         if r.state == "alive" and not r.deactivated:
             return None
         name = remote_name(r)
@@ -8762,6 +8787,24 @@ class SessionSidebar(Gtk.Box):
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
+    def new_group(self):
+        """The group a new chat's put in: the one group picked in ⋮; with several, the open chat's if it's one of them,
+        else none ("")."""
+        picked = self.group_filter()
+        if picked is None:
+            return ""
+        if len(picked) == 1:
+            return next(iter(picked))
+        win, sid = self.win, self.win.session_id
+        r = win.remote
+        if sid is None or r is not None and r.sessions.get(sid, {}).get("draft"):
+            group = getattr(win, "draft_group", "")  # (a new chat still: the group it was started in)
+        elif r is not None and sid in r.sessions:
+            group = chat_group(remote_info({**r.sessions[sid], "server": r}))
+        else:
+            group = chat_group({"id": sid})
+        return group if group in picked else ""
+
     def mine_listed(self):
         """Is a new chat here listed (this machine's host picked in New session's dropdown, and No group in ⋮: it's in
         no group till it's put in one)?"""
@@ -8769,9 +8812,10 @@ class SessionSidebar(Gtk.Box):
         return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
 
     def new_chat(self):
-        """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here; or, while a new
-        one here isn't listed (⋮: only groups), one through this machine's host process (ask_remote_start: in the group
-        picked, if one is), so it's listed too."""
+        """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here. With groups
+        picked in ⋮, it's in one of them (new_group), a draft like any other till it's written in, so its folder and
+        model can still be changed (new_session's group); only while This Mac's host process is too old for drafts,
+        one through it (ask_remote_start)."""
         key = self.host_dd.value() or HERE_HOST
         if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
             # not known)
@@ -8779,7 +8823,12 @@ class SessionSidebar(Gtk.Box):
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
         elif self.mine_listed():
-            self.win.switch_to(self.win.new_session)
+            self.win.switch_to(lambda: self.win.new_session(group=""))
+        elif not host_old():
+            picked, group = self.group_filter(), self.new_group()
+            if picked is not None and group not in picked:  # (no group: listed in ⋮ too, as remote_started does)
+                self.filtered(sidebar_groups=sorted(picked | {group}))
+            self.win.switch_to(lambda: self.win.new_session(group=group))
         else:
             self.win.ask_remote_start(hosts=self.host_filter())
 
@@ -8916,6 +8965,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.add_css_class("side-question")
         self.win, self.busy, self.answer, self.proc, self.answers = win, False, None, None, {}
         self.stopped = None  # (the answer stopped: Esc, or the box's stop button)
+        self.reverting = None  # (a follow-up being reverted, not sent yet: {turn, hidden, draft, asked}: revert_to)
+        self.model = win.model
         rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_child(rows)
         head = Gtk.Box(spacing=12, margin_start=12, margin_end=6, margin_top=8, margin_bottom=8)
@@ -8943,9 +8994,10 @@ class SideQuestion(Gtk.ListBoxRow):
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
                             margin_top=12)
         self.body.add_css_class("zoomable")
-        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                         visible=False)  # (nothing over its box till something's asked)
-        self.inside.append(self.scroll)
+        self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                                        visible=False))  # (nothing over its box till something's asked)
+        self.chat_find = widgets.ChatFind(self.body, self.scroll, pane=self.inside)  # (⌘F / Ctrl+F in it)
+        self.inside.append(self.chat_find.wrap())
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
         self.writing = widgets.Composer()
@@ -9034,25 +9086,32 @@ class SideQuestion(Gtk.ListBoxRow):
         return self.writing.text()
 
     def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line; Esc stops the answer:
-        as in Meta's box."""
+        """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item); Esc stops the answer: as in Meta's
+        box."""
         if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
             self.stop()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None and self.reverting["asked"] is None:
+            self.cancel_revert()
+            return True
         return False
 
     def submit(self):
-        """What's written asked (kept if it couldn't be: said in the window's note, there to send again)."""
+        """What's written asked (kept if it couldn't be: said in the window's note, there to send again); a revert
+        pending, made first (commit_revert)."""
         if self.busy or not self.text().strip():
+            return
+        if self.reverting is not None:
+            if self.reverting["asked"] is None:
+                self.commit_revert()
             return
         if self.ask(self.text()) is not False:
             self.composer.get_buffer().set_text("")
@@ -9094,6 +9153,7 @@ class SideQuestion(Gtk.ListBoxRow):
                 self.proc = None
         if self.proc is None:
             return False
+        self.model = win.model  # (what it was started on: whether it can revert, can_revert)
         self.title.set_label(question)
         self.win.panel.side_question_titled(self)
         self.ask(question, first=True)
@@ -9105,13 +9165,88 @@ class SideQuestion(Gtk.ListBoxRow):
             return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
-        if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
-            self.body.append(self.win.user_bubble(text, []))
+        said = str(uuid.uuid4())  # (its claude keeps it as the message's: what a revert names, revert_to)
+        if not first:
+            self.body.append(UserTurn(self, self.win.user_bubble(text, []), text, said))
         self.answer = MarkdownView()
         self.body.append(self.answer)
         self.scroll.set_visible(True)
         self._busy(True)
-        self.proc.user((self.PREFACE if first else "") + text)
+        self.proc.user((self.PREFACE if first else "") + text, uuid=said)
+
+    # ---- revert (as the chat's: Baude's revert_to): a follow-up, and everything after it, taken back
+    def can_revert(self):
+        """Whether a follow-up of its can be reverted now: its claude there, and not answering. Not on Codex's models,
+        whose program has no rewind."""
+        return self.proc is not None and not self.busy and self.writing.get_sensitive() and \
+            model_program(self.model) != "codex"
+
+    def revert_to(self, turn):
+        """A follow-up reverted (UserTurn's button), tentatively: it and what came after it hidden, and what it said in
+        the box. Esc puts them back, and the draft that was there (cancel_revert); asking makes the revert
+        (commit_revert), then asks. One already being reverted is put back first (the draft kept: the one from before
+        either)."""
+        if not self.can_revert() or (self.reverting is not None and self.reverting["asked"] is not None):
+            return
+        draft = None
+        if self.reverting is not None:
+            draft = self.reverting["draft"]
+            self.cancel_revert(restore_draft=False)
+        buf = self.composer.get_buffer()
+        hidden, w = [], turn
+        while w is not None:
+            if w.get_visible():
+                w.set_visible(False)
+                hidden.append(w)
+            w = w.get_next_sibling()
+        self.reverting = {"turn": turn, "hidden": hidden, "asked": None,
+                          "draft": draft if draft is not None else buf.get_text(*buf.get_bounds(), True)}
+        buf.set_text(turn.text)
+        self.composer.grab_focus()
+
+    def cancel_revert(self, restore_draft=True):
+        """Esc on a revert not asked: what it hid shown again, and the box as it was before."""
+        rev, self.reverting = self.reverting, None
+        if rev is None:
+            return
+        for w in rev["hidden"]:
+            w.set_visible(True)
+        if restore_draft:
+            self.composer.get_buffer().set_text(rev["draft"])
+
+    def commit_revert(self):
+        """A revert asked (submit): its claude takes the follow-up and everything after it back (rewind_conversation, as
+        the chat's revert does), then what's in the box is asked (reverted); if it won't, said in the thread."""
+        rev = self.reverting
+        rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": rev["turn"].uuid,
+                                 "interrupt_if_running": True})
+        rev["asked"] = rid
+        self.writing.gate("reverting", True)  # (its box off till its claude's answered)
+        self.answers[rid] = (lambda r: self.reverted(rev, r), lambda why: self.revert_refused(rev, why))
+
+    def revert_refused(self, rev, why):
+        """Its claude wouldn't revert: said under what's still shown, the revert still pending (Esc puts it back;
+        Enter asks again)."""
+        rev["asked"] = None
+        self.writing.gate("reverting", False)
+        if self.reverting is rev:
+            self.win.note(f"Couldn't revert the side question's follow-up: {why}")
+
+    def reverted(self, rev, response):
+        """Its claude's answer to commit_revert: rewound, the follow-up and what came after it gone, and what's in the
+        box asked; else why not, said."""
+        if not (response or {}).get("rewound"):
+            why = next((v for k, v in (response or {}).items() if k != "rewound" and isinstance(v, str)), None)
+            return self.revert_refused(rev, why or "its claude said no")
+        self.writing.gate("reverting", False)
+        if self.reverting is not rev:
+            return
+        self.reverting = None
+        for w in rev["hidden"]:
+            self.body.remove(w)
+        last = self.body.get_last_child()
+        self.answer = last if isinstance(last, MarkdownView) else None
+        self.submit()
 
     def _busy(self, busy):
         self.busy = busy
@@ -9154,7 +9289,10 @@ class SideQuestion(Gtk.ListBoxRow):
         elif t == "control_response":
             r = msg.get("response") or {}
             then = self.answers.pop(r.get("request_id"), None)
-            if then is not None and r.get("subtype") == "success":
+            if isinstance(then, tuple):  # (a revert's: what's done with its answer, and with its refusal)
+                then[0](r.get("response") or {}) if r.get("subtype") == "success" else \
+                    then[1](r.get("error") or "its claude couldn't")
+            elif then is not None and r.get("subtype") == "success":
                 then(r.get("response") or {})
         elif t == "result":
             stopped, self.stopped = self.stopped is not None and self.stopped is self.answer, None
@@ -9174,6 +9312,9 @@ class SideQuestion(Gtk.ListBoxRow):
                 self._busy(False)
                 self._mark("interrupted")
             self.writing.set_sensitive(False)
+            if self.reverting is not None:  # (its claude gone: nothing to revert in, what was hidden shown again)
+                self.writing.gate("reverting", False)
+                self.cancel_revert()
         return False
 
     def close(self):
@@ -9449,6 +9590,15 @@ class BaudeMeta(meta.MetaChat):
 
     def told(self):
         return meta_store().setdefault("told", [])
+
+    def can_revert(self):
+        """Not while any window's Meta is answering: the conversation's theirs too."""
+        return super().can_revert() and all(o.ask is None for o in list(BaudeMeta.every))
+
+    def close_agents(self):
+        """Every window's session stopped (a revert sent): each one's next message starts one told what's left."""
+        for other in list(BaudeMeta.every):
+            other.close_agent()
 
     def space(self):
         return self.names
@@ -9994,7 +10144,7 @@ class ProcessRow(Gtk.ListBoxRow):
         self.command = None
         self.output = CodeBlock("(no output yet)", "output")
         self.body.append(self.output)
-        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.inside.append(self.scroll)
         # (the row's fill under its line is the revealer's, so what goes to the page, and the square ExpandStack grows
         # for it, are on the panel's own, there and back)
@@ -10136,9 +10286,14 @@ class SidePanel(Gtk.Box):
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
-        self.detail_holder = widgets.inside(Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                                               margin_top=6), start=False)
-        detail.append(self.detail_holder)
+        # (and ⌘F / Ctrl+F in the subagent shown, its find bar inside it: its box, the holder's child)
+        self.detail_holder = natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
+            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.agent_find = widgets.ChatFind(lambda: getattr(self.detail_holder.get_child(), "get_child", lambda: None)(),
+                                           self.detail_holder)
+        self.detail_inside = widgets.inside(self.agent_find.wrap(), start=False)
+        self.detail_inside.set_margin_top(6)
+        detail.append(self.detail_inside)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
         page.set_icon_name("system-users-symbolic")
@@ -10207,12 +10362,21 @@ class SidePanel(Gtk.Box):
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
         # empty)
-        self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
-        self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
-        self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
-        self.btw_ask.set_margin_top(10)
-        self.btw_ask.input.get_parent().set_min_content_height(self.ASK_HEIGHT)
+        # (at least as tall as the other pages' empty lists, whatever the theme and text size: over one, unseen, the
+        # box filling it; taller as more's typed. Its text fills the box, so a click anywhere in it is in the text)
+        self.btw_ask.input.get_parent().set_vexpand(True)
+        ghost = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, opacity=0, can_target=False,
+                            accessible_role=Gtk.AccessibleRole.PRESENTATION)  # (not read out)
+        ghost.add_css_class("boxed-list")
+        ghost.set_placeholder(self._empty(""))
+        ask_holder = Gtk.Overlay(child=ghost, vexpand=False)  # (not the page's to grow: the list's under it)
+        ask_holder.add_overlay(self.btw_ask)
+        ask_holder.set_measure_overlay(self.btw_ask, True)
+        ask_holder.set_margin_start(0)  # (edge to edge with the list under it)
+        ask_holder.set_margin_end(widgets.INSIDE_GAP)
+        ask_holder.set_margin_top(10)
         self.btw_ask.gate("empty", True)
         self.btw_ask.input.get_buffer().connect("changed", lambda *_: self.btw_ask.gate(
             "empty", not self.btw_ask.text().strip()))
@@ -10220,7 +10384,7 @@ class SidePanel(Gtk.Box):
         keys.connect("key-pressed", self._ask_key)
         self.btw_ask.input.add_controller(keys)
         self.btw_ask.send.connect("clicked", lambda *_: self.ask_typed())
-        btw_page.append(self.btw_ask)
+        btw_page.append(ask_holder)
         self.btw_scroll = self._scrolled(self.btw_list)
         # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
         self.btw_list.set_margin_start(0)
@@ -10286,7 +10450,8 @@ class SidePanel(Gtk.Box):
         child.set_margin_top(10)
         child.set_margin_bottom(10)
         child.set_valign(Gtk.Align.START)
-        return Gtk.ScrolledWindow(child=child, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        # (at its natural height: a page's chat, its code, isn't squashed as it outgrows the panel: natural_height)
+        return natural_height(Gtk.ScrolledWindow(child=child, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
 
     def show_page(self, name):
         self.stack.set_visible_child_name(name)
@@ -10299,18 +10464,15 @@ class SidePanel(Gtk.Box):
         self.btw_list.set_visible(True)
         sq.set_expanded(True)
 
-    ASK_HEIGHT = 63  # (px: the box's least)
-
     def _ask_key(self, _c, keyval, _code, state):
-        """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
-        code block, is a new line: as in a side question's own box."""
+        """Ctrl+Enter (⌘Enter) asks what's typed in the box over the list (nothing, while it's empty); Enter is a
+        new line: as in a side question's own box."""
         if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.ask_typed()
             return True
         return False
@@ -10522,8 +10684,9 @@ class SidePanel(Gtk.Box):
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
+        self.agent_find.refresh()
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
-            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+            self.agent_expand.open("detail", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                    across=self.agent_list)
         else:
             self.agent_stack.set_visible_child_name("detail")
@@ -10557,7 +10720,7 @@ class SidePanel(Gtk.Box):
         if row is None:
             self.agent_stack.set_visible_child_name("list")
             return
-        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+        self.agent_expand.close("list", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                 across=self.agent_list)
 
     # ---- background processes
@@ -11306,17 +11469,19 @@ def ref_place_items(win, ref, on_open=None):
     return items
 
 
-class SignalPage(Gtk.Stack):
+class SignalPage(widgets.ExpandStack):
     """The side panel's Signal page: the names this chat's replies mention, by kind, with how far
-    each lookup got; a name opens its card (locations, a commit's PRs, ...)."""
+    each lookup got; a name opens its card (locations, a commit's PRs, ...), sliding in; the reader's row opens its
+    chat out of the row, as a subagent's does (ExpandStack)."""
 
     ICONS = {"resolved": ("object-select-symbolic", "success"), "ambiguous": ("view-more-symbolic", None),
              "pending": ("content-loading-symbolic", "dim-label"), "not_found": ("dialog-question-symbolic", "dim-label"),
              "stale": ("dialog-warning-symbolic", "warning")}
 
     def __init__(self, win):
-        super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
+        super().__init__(vexpand=True)
         self.win, self.current, self.soon, self.status_soon = win, None, None, None
+        self.reader_to_end = False  # (opened: at its chat's end once it's laid out)
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         bar = Gtk.Box(spacing=6)
         self.search = Gtk.SearchEntry(placeholder_text="Filter names", hexpand=True)
@@ -11370,23 +11535,33 @@ class SignalPage(Gtk.Stack):
         self.now.add_css_class("ref-now")
         now.append(self.now)
         top.append(now)
-        # the reader's chat: the parts it's given, what it says, the searches and lookups it runs, what it adds
-        self.reader = Gtk.Expander(expanded=True)
-        self.reader_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4)
-        self.reader_scroll = Gtk.ScrolledWindow(child=self.reader_box, max_content_height=420,
-                                                propagate_natural_height=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.reader.set_child(self.reader_scroll)
-        self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
+        # the reader, an agent as a subagent is: its row (its model, what it's doing), opening its chat on a page of its
+        # own, set into the panel as Meta's and a subagent's are (the inside: widgets.inside)
+        self.reader = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, visible=False)
+        self.reader.add_css_class("boxed-list")
+        self.reader_row = Adw.ActionRow(activatable=True, title="Reader", subtitle_lines=2)
+        self.reader_status = StatusSlot("done")
+        self.reader_row.add_prefix(self.reader_status)
+        self.reader_chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        self.reader_row.add_suffix(self.reader_chevron)
+        self.reader.append(self.reader_row)
+        self.reader.connect("row-activated", lambda *_: self.show_reader_page())
         top.append(self.reader)
+        # its chat: the parts it's given, what it says, the searches and lookups it runs, what it adds
+        self.reader_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
+                                  margin_top=12, margin_bottom=12)  # (as far in as a subagent's chat is in its own)
+        self.reader_box.add_css_class("zoomable")
+        self.reader_scroll = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (its code unsquashed)
+            child=self.reader_box, vexpand=True, margin_top=6, hscrollbar_policy=Gtk.PolicyType.NEVER)), start=False)
+        self.reader_scroll.get_vadjustment().connect("changed", self.reader_laid_out)
+        self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
         self.empty = empty_label("")
         self.empty.set_wrap(True)
         self.empty.set_justify(Gtk.Justification.CENTER)
         top.append(self.empty)
         self.groups = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         top.append(self.groups)
-        page = SidePanel._scrolled(top)
-        # (at its natural height: at its minimum, the default, the reader's chat is squashed to a line or two)
-        page.get_child().set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+        page = self.list_scroll = SidePanel._scrolled(top)
         self.add_named(page, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
@@ -11401,7 +11576,75 @@ class SignalPage(Gtk.Stack):
         self.detail_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         detail.append(SidePanel._scrolled(self.detail_body))
         self.add_named(detail, "detail")
+        # the reader's page: its row as its header (status, its model, what it's doing; back where the row's › is),
+        # its chat under that
+        reading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        head = Gtk.Box(spacing=6, margin_start=15, margin_end=12, margin_top=6, margin_bottom=6)
+        self.reader_page_status = StatusSlot("done")
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER,
+                         margin_start=6)
+        self.reader_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.reader_title.add_css_class("heading")
+        self.reader_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2,
+                                     ellipsize=Pango.EllipsizeMode.END)  # (two lines, as its row's)
+        self.reader_info.add_css_class("dim-label")
+        self.reader_info.add_css_class("caption")
+        titles.append(self.reader_title)
+        titles.append(self.reader_info)
+        back = self.reader_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names",
+                                             valign=Gtk.Align.CENTER)
+        back.add_css_class("flat")
+        back.connect("clicked", lambda *_: self.close_reader_page())
+        head.append(self.reader_page_status)
+        head.append(titles)
+        head.append(back)
+        reading.append(head)
+        reading.append(self.reader_scroll)
+        self.add_named(reading, "reader")
         self.rebuild()
+
+    # (its pages as a stack's: a name's card slides in; the reader's page opens out of its row: show_reader_page)
+    def add_named(self, child, name):
+        self.stack.add_named(child, name)
+
+    def get_visible_child_name(self):
+        return self.stack.get_visible_child_name()
+
+    def set_visible_child_name(self, name):
+        self.finish()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_visible_child_name(name)
+
+    def reader_parts(self):
+        """How the reader's row turns into its page's header (ExpandStack): its title, its line and its status each
+        into the header's, and its › into back (flipped: ‹)."""
+        labels = {cls: next((w for w in walk(self.reader_row) if isinstance(w, Gtk.Label) and w.has_css_class(cls)),
+                            None) for cls in ("title", "subtitle")}
+        pairs = [(labels["title"], self.reader_title), (labels["subtitle"], self.reader_info),
+                 (self.reader_status, self.reader_page_status), (self.reader_chevron, self.reader_back.get_child(), True)]
+        return {"pairs": [pair for pair in pairs if pair[0] is not None], "within": self.list_scroll,
+                "across": self.reader}
+
+    def show_reader_page(self):
+        """The reader's chat on its own page, opening out of its row, at its end."""
+        self.reader_to_end = True
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        if self.get_visible_child_name() == "list":
+            self.open("reader", self.reader_row, self.reader_scroll, **self.reader_parts())
+        else:
+            self.stack.set_visible_child_name("reader")
+        self.reader_laid_out(self.reader_scroll.get_vadjustment())
+
+    def close_reader_page(self):
+        """Back to the names, the reader's page closing into its row."""
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.close("list", self.reader_row, self.reader_scroll, **self.reader_parts())
+
+    def reader_laid_out(self, adj):
+        """The reader's chat laid out (again): just opened, at its end."""
+        if self.reader_to_end and adj.get_upper() > adj.get_page_size() > 0:
+            self.reader_to_end = False
+            adj.set_value(adj.get_upper() - adj.get_page_size())
 
     def status_changed(self):
         """What Signal is doing changed: update the status, the log and the skipped names (once a frame)."""
@@ -11414,11 +11657,19 @@ class SignalPage(Gtk.Stack):
         for w in (self.spinner, self.now):
             w.set_visible(ref is not None)
         self.reader.set_visible(ref is not None and bool(ref.reader_chat))
+        if (ref is None or not ref.reader_chat) and self.get_visible_child_name() == "reader":
+            self.show_list()  # (another folder's, whose reader hasn't read: nothing to show)
         if ref is None:
             return False
         busy = ref_busy(ref) and self.win in ref.runners  # (this chat's: another window's chat may run it)
         self.spinner.set_visible(busy)
         self.now.set_label(ref.status_text())
+        for slot in (self.reader_status, self.reader_page_status):
+            slot.set_state(self.reader_state(ref, busy))
+        line = self.reader_line_text(ref)
+        self.reader_row.set_subtitle(html.escape(line))
+        self.reader_info.set_text(line)
+        self.reader_info.set_visible(bool(line))
         self.show_reader(ref)
         return False
 
@@ -11426,7 +11677,8 @@ class SignalPage(Gtk.Stack):
         """The reader's chat, the lines it's added since it was last drawn (kept at the bottom if it was there)."""
         chat, box = ref.reader_chat, self.reader_box
         name = ref.agent.model.capitalize() if ref.agent is not None else "Reader"
-        self.reader.set_label(name)
+        self.reader_row.set_title(name)
+        self.reader_title.set_text(name)
         drawn = self.reader_shown
         if drawn is None or drawn[0] is not chat or drawn[1] > len(chat) or \
                 (drawn[1] and chat[drawn[1] - 1][0] != drawn[2]):  # (another chat, or older lines dropped)
@@ -11455,6 +11707,34 @@ class SignalPage(Gtk.Stack):
             discard(first)
         if at_end:
             GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) and False)
+
+    @staticmethod
+    def reader_state(ref, busy):
+        """The reader's mark, as a subagent's is: reading (a spinner); its last call refused (✗); stopped partway, by
+        Activate Signal or its spending cap, with replies left to read (stopped); else done (✓)."""
+        ai, last = ref.agent, (ref.reader_chat[-1][1] if ref.reader_chat else None)
+        if busy and ai is not None and ai.busy():
+            return "running"
+        if last == "refused":
+            return "error"
+        if last not in ("done", None) or ref.waiting or (ai is not None and ai.cost >= ai.budget and ai.part):
+            return "interrupted"
+        return "done"
+
+    @staticmethod
+    def reader_line_text(ref):
+        """What the reader's row says under its name: the part it's on, else the last thing it did or said."""
+        ai = ref.agent
+        if ai is not None and ai.busy() and ai.part:
+            return f"Reading replies {ai.part['a']} to {ai.part['b']}"
+        for _when, kind, text in reversed(ref.reader_chat):
+            if kind in ("part", "done", "refused") and isinstance(text, str):
+                return text
+            if kind == "assistant":
+                said = " ".join(c.get("text", "") for c in text if isinstance(c, dict) and c.get("type") == "text")
+                if said.strip():
+                    return " ".join(said.split())
+        return ""
 
     def reader_message(self, content):
         """A message of the reader's, drawn as a subagent's is in its side-panel view: its words as a reply, its tool
@@ -11526,7 +11806,8 @@ class SignalPage(Gtk.Stack):
         linked = {s for (_m, s), d in ref.decisions.items() if d["verdict"] == "link"}  # (the reader's own names too)
         for s in list(self.win.ref_surfaces) + sorted(linked - set(self.win.ref_surfaces)):
             r = ref.refs.get(s)
-            if r is None or (r.status in ("not_found", "pending") and s not in ref.strong) or r.data.get("plain"):
+            if r is None or (r.status in ("not_found", "pending") and s not in ref.strong) or r.data.get("plain") or \
+                    widgets.ref_cloud_provider(s):  # (never a link: not a name to list either)
                 continue
             if want and want not in s.lower() and want not in r.canonical.lower():
                 continue
@@ -11933,50 +12214,6 @@ class SettingsDialog(Adw.PreferencesDialog):
     size_row = staticmethod(settings_size)
 
 
-class UserTurn(Gtk.Box):
-    """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
-    anywhere in the row, a revert button fades in just outside the bubble, level with its last line, and fades out as
-    it leaves (the chat's revert_to: this message and everything after it taken back, and what it said put back in
-    the box)."""
-
-    def __init__(self, win, bubble, text, uuid):
-        super().__init__(spacing=6, hexpand=True)
-        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
-        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
-                                 tooltip_text="Revert: take back this message and everything after it, and put it "
-                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
-                                 opacity=0, can_target=False)
-        self.revert.add_css_class("flat")
-        self.revert.add_css_class("circular")
-        self.revert.add_css_class("revert-turn")
-        self.revert.connect("clicked", lambda *_: win.revert_to(self))
-        self.append(self.revert)
-        self.append(bubble)
-        hover = Gtk.EventControllerMotion()
-        hover.connect("enter", lambda *_: self.show_revert(True))
-        hover.connect("leave", lambda *_: self.show_revert(False))
-        self.add_controller(hover)
-
-    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
-    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
-    fade = None
-
-    def show_revert(self, on):
-        on = on and self.uuid is not None and self.win.can_revert()
-        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
-            metrics = self.bubble.get_pango_context().get_metrics(None, None)
-            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
-            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
-        self.revert.set_can_target(on)
-        if self.fade is None:
-            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
-                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
-            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
-        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
-        self.fade.set_value_to(1.0 if on else 0.0)
-        self.fade.play()
-
-
 class Repaint(Gtk.Widget):
     """Over the whole window, drawing nothing but for a frame when asked (flash): a change across all of it, which makes
     all of that frame's picture new. GTK 4.24's macOS backend shows a window as tiles, each given the new picture only
@@ -12055,6 +12292,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
         self.reverting = None      # a revert not sent yet: {turn, hidden, draft, asked} (revert_to)
         self.send_after_result = None  # (a revert made mid-turn: what's in the box sent once the turn's ended: reverted)
+        self.interrupting = None   # (proc, timer): an interrupt asked of it, its turn not over yet (interrupt)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
         self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
@@ -12111,6 +12349,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         menu.append_item(item)
         menu.append("Ongoing Feedback", "win.fixes")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         self.main_menu = menu
         menu.append("Restart Baude", "win.restart")
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
@@ -12149,6 +12388,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         feedback = Gio.SimpleAction.new("feedback", None)
         feedback.connect("activate", lambda *_: self.open_feedback())
         self.add_action(feedback)
+        report = Gio.SimpleAction.new("copyreport", None)
+        report.connect("activate", lambda *_: self.copy_report())
+        self.add_action(report)
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
@@ -12205,13 +12447,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter\n"
+            send_tip=f"Send ({widgets.SEND_KEY})\nNew line: Enter\n"
                      "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
+        self.input.connect("paste-clipboard", self.on_paste)  # (⌘V, Ctrl+V, Shift+Insert, the menu's Paste)
         self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
                               else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
         self.attach_row = Gtk.Box(spacing=6)
@@ -12246,6 +12489,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tasks_btn.add_css_class("tasks-indicator")
         self.tasks_btn.connect("clicked", lambda *_: self.show_panel(True))
         statusbar.append(self.tasks_btn)
+        # (what the chat's spent, a label of its own, never cut short: the folder and the turn's figures give way,
+        # however narrow the chat or long another host's path; beside the context count, the other running total)
+        self.cost_label = Gtk.Label(xalign=1, tooltip_text="What this chat has spent")
+        statusbar.append(self.cost_label)
         statusbar.append(ctx)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -12262,10 +12509,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tabs = widgets.MainTabs(shown_alone=False, reopen=self.reopen_tab, closed=BaudeWindow.tab_closed)
         self.tabs.prepend(self.tabs.bar)
         self.tabs.open("chat", lambda: root, "Chat", icon="baude-claude-symbolic", pinned=True)  # (Claude's logo)
-        widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
+        # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
+        widgets.inside(self.tabs, under_bar=True)
         self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
+        self.banner.connect("button-clicked", lambda *_: self.banner_kind == "missing" and self.new_chat_on_host())
         root.append(self.banner)
-        root.append(self.scroller)
+        self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
@@ -12274,6 +12524,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # then, and the chat: drop)
         self.drop_timer = self.resume_reason = None  # (resume_reason: (chat, why) the next message resumes it)
         self.retrying, self.banner_kind = None, None  # (show_retry; what the banner says: update_banner)
+        self.missing_session = self.missing_reason = self.retaken = self.attach_said = None  # (a chat its host has
+        # no session for, why it couldn't be taken up again, and one taken up again for that: session_missing; the
+        # kind of attach failure last said: start_remote_proc)
         self.banner_timer, self.banner_dots = None, 0  # (its ellipsis going, while it's waiting something out)
         self.outgrown = False  # (a turn ended with claude saying the prompt's too long: exhausted, show_context)
         root.append(statusbar)
@@ -12339,9 +12592,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.sidebar.new_chat()), ("<Control>o", self.show_sessions),
-                             # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
-                             # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
-                             ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                             # (Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
                              (widgets.META_KEY, self.toggle_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
@@ -12362,12 +12613,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             for t in triggers.split():
                 sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
                                                  Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
-        # Ctrl+F: the Kubernetes view's filter while it's open (it covers the window, so not the find bar of a Code
-        # page under it), else the Code page's find bar if that's showing
-        sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Control>f"),
-                                         Gtk.CallbackAction.new(lambda *_: self.kube.find() or self.schema.start_find() or
-                                                                                self.find_in_code())))
         self.add_controller(sc)
+        # Ctrl+B the sessions on the left, as an editor's sidebar. Ctrl+F: the find bar of the code the focus is in
+        # (the Kubernetes view's YAML or logs), else the Kubernetes view's filter while it's open (it covers the
+        # window, so not the find bar of a Code page under it), else the Code page's find bar if that's showing. Both
+        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward. ⌘F on a Mac
+        # too; and past those, the chat the focus is in (Meta, a side question, a subagent), else the main chat
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS),
+                                   lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
+                                   self.find_in_chat())))
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)
@@ -12436,7 +12691,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def feedback_context(self):
         """What a note sent from here says it came from (feedback.save_feedback)."""
         return [f"- session: {self.session_id or '-'} ({getattr(self, 'session_title', None) or 'untitled'})",
-                f"- folder: {self.cwd}", f"- Baude: {os.path.realpath(__file__)}"]
+                f"- folder: {self.cwd}", f"- Baude: {os.path.realpath(__file__)}",
+                *feedback.report_lines([("the chat", self.report), ("Meta", self.panel.meta.report)])]
 
     def capture_areas(self):
         """The window's parts, by name, for the text a capture records."""
@@ -12974,6 +13230,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
         self.busy = busy
+        if not busy:
+            self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
         if not busy and self.proc is not None:
@@ -13267,6 +13525,33 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.proc:
             self.pending[self.proc.control(req)] = (callback, refused)
 
+    def report(self, most=None):
+        """The open chat as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
+        and tools as claude said them as it started, its effort, mode, host, folder and context, as the header shows
+        them, then its transcript as it's drawn here (its mirror, for a chat on another host), each tool call with its
+        input and result (meta.transcript_report); None if there's no transcript yet."""
+        ctx, here = self.ctx_box, self.chat_host() == HERE_HOST
+        init = getattr(self, "init_info", None) or {}
+        tip = (ctx.get_tooltip_text() or "").split("\n")[1:]
+        tools = [t for t in init.get("tools") or () if isinstance(t, str)]
+        head = [("App", "Baude"), ("Session", self.session_id or "new"),
+                ("Model", init.get("model") or self.model or "default"),
+                ("Picked", self.model if self.model and self.model != init.get("model") else ""),
+                ("Effort", self.effort or "default"), ("Mode", self.mode),
+                ("Host", THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                ("Folder", self.cwd or ""), ("Claude Code", init.get("claude_code_version") or ""),
+                ("Context", (shown + (f" ({', '.join(tip)})" if tip else "")) if (shown := ctx.label.get_text()
+                                                                                .removeprefix("context").strip(" :—"))
+                 else "not said yet"),
+                ("Tools", ", ".join(tools)), ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        path = getattr(self, "history_path", None) or \
+            ((find_session(self.session_id) or {}).get("path") if self.session_id and here else None)
+        return meta.transcript_report(head, path, most=most) if path and os.path.exists(path) else None
+
+    def copy_report(self):
+        self.get_clipboard().set(self.report() or "(nothing said yet)\n")
+        widgets.toast(self, "Transcript copied")
+
     def refresh_context(self):
         self.request({"subtype": "get_context_usage"}, self.show_context)
 
@@ -13381,28 +13666,68 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.input.grab_focus()
         return True
 
+    def on_paste(self, view):
+        """A paste, however it's asked for (⌘V, Ctrl+V, Shift+Insert, the menu): copied files or a copied image
+        attached (paste_attachment); text pasted as text."""
+        if self.paste_attachment():
+            view.stop_emission_by_name("paste-clipboard")
+
+    IMAGE_NAME = re.compile(r"\S+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp|svg)|[a-z][\w+.-]*://\S+", re.I)
+
     def paste_attachment(self):
-        """Ctrl+V: attach copied files or a copied image; returns False to let text paste happen."""
+        """Copied files, or a copied image, attached. An image copied with text beside it: the image, if the text's
+        only its name or address (a browser's, Finder's: IMAGE_NAME), else the text (a spreadsheet's cells, copied
+        with a picture of them). Returns False to let text paste."""
         clip = self.input.get_clipboard()
         formats = clip.get_formats()
+        image = clipboard_has(formats, Gdk.Texture, ("image/",))
+
+        def got_texture(c, res):
+            try:
+                self.attach_texture(c.read_texture_finish(res))
+            except GLib.Error as e:
+                self.note(f"paste failed: {e.message}")
+
+        def got_text(c, res):
+            try:
+                text = c.read_text_finish(res) or ""
+            except GLib.Error as e:
+                text = None
+                if not image:
+                    self.note(f"paste failed: {e.message}")
+            if image and (not text or self.IMAGE_NAME.fullmatch(text.strip())):
+                c.read_texture_async(None, got_texture)  # (the image's own name or address: the image's meant)
+            elif text:
+                buf = self.input.get_buffer()
+                buf.begin_user_action()  # (one step to undo, as GTK's own paste)
+                buf.delete_selection(True, True)
+                buf.insert_at_cursor(text)
+                buf.end_user_action()
+                self.input.scroll_mark_onscreen(buf.get_insert())
+
+        def image_or_text():
+            if clipboard_has(formats, GObject.TYPE_STRING, ("text/plain", "text/uri-list")):
+                clip.read_text_async(None, got_text)
+            elif image:
+                clip.read_texture_async(None, got_texture)
+
         if clipboard_has(formats, Gdk.FileList, ("text/uri-list", "x-special/gnome-copied-files")):
             def got_files(c, res):
                 try:
-                    self.attach_paths([f.get_path() for f in c.read_value_finish(res).get_files()])
+                    paths = [f.get_path() for f in c.read_value_finish(res).get_files()]
                 except GLib.Error as e:
                     self.note(f"paste failed: {e.message}")
+                    return
+                if paths and all(paths):
+                    self.attach_paths(paths)
+                else:  # (web addresses, not files here: the image beside them, else the text they are)
+                    image_or_text()
             clip.read_value_async(Gdk.FileList, GLib.PRIORITY_DEFAULT, None, got_files)
             return True
-        has_text = clipboard_has(formats, GObject.TYPE_STRING, ("text/plain",))
-        if clipboard_has(formats, Gdk.Texture, ("image/",)) and not has_text:
-            def got_texture(c, res):
-                try:
-                    self.attach_texture(c.read_texture_finish(res))
-                except GLib.Error as e:
-                    self.note(f"paste failed: {e.message}")
-            clip.read_texture_async(None, got_texture)
-            return True
-        return False
+        if not image:
+            return False
+        image_or_text()
+        return True
 
     def update_status(self, extra=None):
         if extra is not None:
@@ -13411,11 +13736,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         here = self.chat_host() == HERE_HOST
         there = None if here else self.remote_folder()
         self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
-                             f"   ${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
+                             f"   {getattr(self, 'status_extra', '')}")
+        self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
         self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
                                          ("" if here else f" ({self.remote.host})"))
+
+    def cost_said(self):
+        """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own
+        machines (providers.runs_free), which a turn adds nothing to, $0.00 (local) while it's spent nothing, so it
+        reads as a price and not as one missing."""
+        if not self.total_cost and providerslib.runs_free(self.model):
+            return "$0.00 (local)"
+        return f"${self.total_cost:.4f}"
 
     def remote_folder(self):
         """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it
@@ -13492,10 +13826,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
                                        always_allow=sorted(self.always_allow))
             except OSError as e:
-                if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
-                    self.drop_running = self.drop_session = None  # not tried again)
-                if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
-                    self.note(f"couldn't reach {'daemon' if r.mine else remote_name(r)}: {e}")
+                refused = isinstance(e, baudelib.client.Refused)
+                if refused:  # (its host there, but the session not to be had)
+                    self.drop_running = self.drop_session = None
+                if refused and str(e).startswith("no session"):  # (its host doesn't know it: session_missing)
+                    return self.session_missing(r)
+                name = "daemon" if r.mine else remote_name(r)
+                kind = "refused" if refused else "unreachable"
+                # (dropped: said under the chat already. Each kind of failure said once a chat, however often it's
+                # tried again)
+                if self.drop_running is None and self.attach_said != (self.session_id, kind):
+                    self.note(f"{name} wouldn't open this chat: {e}" if refused else f"couldn't reach {name}: {e}")
+                    self.attach_said = (self.session_id, kind)
+        if self.proc is not None:
+            self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -13508,6 +13852,53 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.h_control_request(msg)
         self.update_status()
         self.update_banner()
+
+    def session_missing(self, r):
+        """A chat's host answered but has no such session (its state lost, a draft it dropped, ended there). Nothing
+        shown in the chat (a draft it dropped): a new chat in its place, the text box as it is. On this machine with a
+        Claude transcript here: taken up again by its id, as take_up does, and attached (once a loss: if that doesn't
+        hold, as below). Else it's marked missing: the banner says so, with New chat, send's off, and it isn't tried
+        again till its host lists it again (on_network)."""
+        sid = self.session_id
+        if r.mine and not self.shows_anything() and not getattr(self, "chat_sent", False):
+            self.restart_proc(resume=False)
+            return
+        info = find_session(sid) if r.mine and sid else None  # (Claude's transcripts only: a Codex chat, or pi's,
+        self.missing_reason = None                            # its host can't take up again)
+        if info is not None and self.retaken != sid:
+            self.retaken = sid
+            effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
+                if self.effort_dd.get_sensitive() else None
+            reply = r.call({"op": "start", "adopt": sid, "cwd": info.get("cwd") or self.run_cwd, "model": self.model,
+                            "effort": effort, "mode": self.mode, "env": claudelib.claude_env(), "group": ""},
+                           timeout=10)
+            if reply.get("op") == "started":
+                r.sessions[sid] = reply["session"]
+                return self.start_remote_proc()
+            self.missing_reason = reply.get("error") or "no answer"
+        r.sessions.pop(sid, None)  # (as its host has it: listed again, it's there again)
+        self.missing_session = sid
+        self.update_status()
+        self.update_banner()
+
+    def shows_anything(self):
+        """Whether the chat shows anything of a conversation: a turn drawn, or a transcript it's viewed from."""
+        if self.view_path and os.path.exists(self.view_path) and os.path.getsize(self.view_path):
+            return True
+        child = self.transcript.get_first_child()
+        while child is not None:
+            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None):
+                return True
+            child = child.get_next_sibling()
+        return False
+
+    def new_chat_on_host(self):
+        """New chat (the banner's, for a chat its host no longer has): one on that host."""
+        r = self.remote
+        if r is None or r.mine:
+            self.new_session()
+        else:
+            self.new_session_on(r)
 
     def side_question_proc(self, on_msg, on_exit):
         """(proc, forked) for a side question in a chat of Baude's: a session of the host process's, forked from the
@@ -13560,7 +13951,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None
         reply = r.call({"op": "start", "draft": True, "prompt": "", "cwd": self.run_cwd, "model": self.model,
-                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env(), "group": ""}, timeout=10)
+                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env(),
+                        "group": getattr(self, "draft_group", "")}, timeout=10)
         if reply.get("op") != "started":
             self.note(f"{THIS_MACHINE}'s host process didn't start a chat: {reply.get('error')}")
             self.update_status()
@@ -13594,8 +13986,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                   "env": claudelib.claude_env(), "group": ""}  # (Baude's own chats: in no group)
         if self.session_id and find_session(self.session_id):
             params["adopt"], params["cwd"] = self.session_id, self.recorded_cwd()
-        else:
-            params["prompt"] = ""
+        else:  # (a new chat: in the group it was started in, its draft not made: start_draft)
+            params["prompt"], params["group"] = "", getattr(self, "draft_group", "")
         reply = r.call(params, timeout=10)  # (on the main loop: this machine's socket, an answer in a moment)
         if reply.get("op") != "started":
             self.note(f"{THIS_MACHINE}'s host process didn't take this chat up: {reply.get('error')}")
@@ -13767,9 +14159,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """The chat's tab shown (from the Feedback tab, a file's code)."""
         self.tabs.show("chat")
 
-    def new_session(self, run_in=None):
+    def new_session(self, run_in=None, group=None):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
-        Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that."""
+        Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that. group:
+        the group it's started in (New session with one group picked in ⋮), kept while it's a draft (another folder or
+        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none."""
+        if group is not None or self.remote is None or not (self.remote.sessions.get(self.session_id) or {}).get(
+                "draft"):
+            self.draft_group = group or ""
         self.opening_remote = None  # (a network session still being fetched: not opened after all)
         run_in = self.norm_dir(run_in) if run_in else self.cwd if os.path.isdir(self.cwd) else self.run_cwd
         if run_in != self.run_cwd:
@@ -13867,14 +14264,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
                 widgets.wrap_selection(self.input.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
-        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK:
-            return self.paste_attachment()
+        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and sys.platform == "darwin":
+            self.input.emit("paste-clipboard")  # (GTK binds only ⌘V on a Mac: Ctrl+V pastes there as well)
+            return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            if state & Gdk.ModifierType.CONTROL_MASK:  # Ctrl+Enter always sends
-                self.on_send()
-                return True
-            if state & Gdk.ModifierType.SHIFT_MASK or self.composer_md.code_state()[0]:
-                return self.composer_md.newline()  # False: the TextView inserts a plain newline
+            if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
+                return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
             self.on_send()
             return True
         if keyval == Gdk.KEY_Escape and self.reverting is not None:
@@ -14022,6 +14417,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
+        self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)
         self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
 
@@ -14183,13 +14579,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         finally:
             if rev["turn"].is_ancestor(self.transcript):
                 self.reverting = rev
+        if self.busy:  # (the turn it stops ends as a stopped one: not an error, h_result)
+            self.proc.stop_asked = True
         rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid,
                                  "interrupt_if_running": True})
         self.pending[rid] = (lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
         rev["asked"] = (self.proc, rid)
 
     def revert_refused(self, rev, why):
-        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
+        if rev["asked"] is not None:
+            rev["asked"][0].stop_asked = False  # (its turn not stopped by it: an error that ends it is said, h_result)
         rev["asked"] = None
         if self.reverting is rev:
             self.say_now(f"Couldn't revert: {why}")
@@ -14249,10 +14649,61 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.fill_jobs.clear()
         self.fill_jobs.extend(kept)
 
+    INTERRUPT_WAIT = 5000  # ms for an interrupted turn to end, before its claude's stopped outright (stop_stuck)
+
     def interrupt(self):
-        if self.proc:
-            self.proc.control({"subtype": "interrupt"})
-            self.note("interrupt requested")
+        """The turn interrupted (Esc, the stop button): asked of its claude once (pressed again meanwhile: nothing
+        more). Not over within INTERRUPT_WAIT, whatever runs the model, its claude's stopped (stop_stuck), so the chat's
+        usable again; at once if its host says nothing's running there to interrupt. Nothing said yet: the turn's end
+        says it, once (h_result; stop_stuck)."""
+        if not self.proc:
+            return
+        if self.interrupting is not None and self.interrupting[0] is self.proc:
+            return  # (asked already: stopped outright if it doesn't end soon)
+        self.drop_interrupting()
+        proc = self.proc
+        proc.stop_asked = True
+        self.pending[proc.control({"subtype": "interrupt"})] = (lambda r: self.interrupt_answered(proc, r), None)
+        self.interrupting = (proc, GLib.timeout_add(self.INTERRUPT_WAIT, lambda: self.stop_stuck(proc)))
+
+    def interrupt_answered(self, proc, response):
+        """An interrupt's answer: a host's, that its claude isn't running (or is being stopped), ends the turn now,
+        as no result's coming; claude's own, that it's stopping, waits for the turn's end (or INTERRUPT_WAIT)."""
+        if response.get("running") is False:
+            self.drop_interrupting()
+            self.stop_stuck(proc, ran=False)
+
+    def drop_interrupting(self):
+        """An interrupt's wait (interrupt) let go of: its turn's over, or its claude's gone."""
+        it, self.interrupting = getattr(self, "interrupting", None), None
+        if it is not None:
+            GLib.source_remove(it[1])
+
+    def stop_stuck(self, proc, ran=True):
+        """An interrupted turn not over in time (its claude still starting on a resume, stuck, or gone without a
+        word), or with nothing running to end it (ran False: its host said so): its claude stopped, the turn shown
+        over. A host's session's, there, as Stop does it (its next message starts it again); this process's own,
+        killed and started again on the conversation."""
+        self.interrupting = None
+        if proc is not self.proc or not self.busy:
+            return False
+        proc.stop_asked = "said"  # (its end said here: not again if its result comes after all, h_result)
+        self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it" if ran else
+                  f"{self.program_name()} wasn't running: turn ended")
+        self.cut_short()
+        if self.remote is not None:
+            if ran:
+                self.remote.request({"op": "stop", "session": self.session_id})
+            self.blocks.clear()
+            for waiting in list(self.waiting_cards):  # (what it asked: nothing to answer now. A copy: answered()
+                if isinstance(waiting, ToolCard):  # takes the card out of waiting_cards as it goes)
+                    waiting.answered()
+            self.waiting_cards.clear()
+        else:
+            self.restart_after_turn = False  # (started again now, on whatever sign-in there is)
+            self.restart_proc(resume=True)
+        self.end_turn(proc)
+        return False
 
     def model_said(self, value):
         """A model's name as a note says it: as the model picker lists it (Qwen3 4B)."""
@@ -14386,7 +14837,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         kept = (load_settings().get("chat_models") or {}).get(info["id"])
         want = (kept if kept != "default" else None) or transcript_model(info["path"])
         models = {v: m for v, m in getattr(self, "models_info", {}).items() if v != "default"}  # (an alias, not a model)
-        model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) if want else None
+        model = next((v for v, m in models.items() if want in (v, m.get("resolvedModel"))), None) or \
+            (modelslib.claude_match(want, list(models.values())) or {}).get("value") if want else None
         if model is None and want and model_program(want) == "claude":  # ("claude-opus-5-5" for the picker's "opus")
             model = next((v for v in models if model_program(v) == "claude" and v in want), None)
         if model is None and model_program(self.model) != "claude":
@@ -14431,7 +14883,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         default = next((m for m in models if m["value"] == "default"), {})
         models = [m for m in models if m["value"] != "default"]
         want = self.model or default.get("resolvedModel")
-        hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), want) if want else None
+        hit = next((m["value"] for m in models if want in (m["value"], m.get("resolvedModel"))), None) or \
+            (modelslib.claude_match(want, models) or {}).get("value", want) if want else None
         self.model_shown = hit  # (what the picker shows while claude's own default's the model: self.model None)
         self.sync_providers(hit)
         self.sync_effort_choices()
@@ -14551,17 +15004,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if pid is not None and shown not in seen:
             offered.append(info(shown))
         kinds = providerslib.alike(offered, [shown] if shown else [])
-        listed = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and m["value"] not in seen and
-                  pid_of(m) is None] + [lead for lead, _ms in kinds]
-        if shown and not any(m["value"] == shown for m in listed):  # (Claude's, by a name claude didn't list)
-            listed.append(info(shown))
+        own = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and
+               m["value"] not in seen and pid_of(m) is None]  # (Claude's as claude lists them, each its own row)
+        same = modelslib.claude_match(shown, own) if shown and pid is None else None  # (the chat's model said
+        if shown and pid is None and same is None:  # another way, claude-opus-5-5, its server's say: the row it is;
+            own.append(info(shown))  # else its own row, last)
+        pick = same["value"] if same else shown
+        listed = own + [lead for lead, _ms in kinds]
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
         names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
                   m.get("displayName") or m["value"]) for m in listed]
-        self.model_names = dict(names)
+        self.model_names = dict(names) | ({shown: dict(names)[pick]} if same else {})
         self.model_dd.set_choices(names or MODELS)
-        if shown:
-            self.model_dd.select(shown)
+        if pick:
+            self.model_dd.select(pick)
 
         here = THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(self.remote)
         copies = next((ms for _lead, ms in kinds if any(m["value"] == shown for m in ms)), []) if pid else []
@@ -14747,6 +15203,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def h_system(self, msg):
         st = msg.get("subtype")
         if st == "init":
+            self.init_info = msg  # (its model and tools, as claude says them: report)
             TOOL_NAMES.update(t for t in msg.get("tools") or [] if isinstance(t, str))  # (what Signal can name)
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
@@ -14976,8 +15433,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
         if msg.get("is_api_error_message") or m.get("model") == "<synthetic>":
+            stopped = parent is None and getattr(self.proc, "stop_asked", False)
             for c in m.get("content", []):
-                if c.get("type") == "text":
+                if c.get("type") == "text" and not (stopped and STOP_SAID_RE.fullmatch(c["text"])):  # (a stop's
+                    # words, aborted: said once, as the turn ends, h_result)
                     self.add(api_error_label(c["text"]), parent)
             return
         self.render_assistant(m.get("content", []), parent, streamed=m.get("id") in self.streamed_ids)
@@ -15658,6 +16117,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         current = self.tabs.current()
         return current if current in pages else pages[-1] if pages else None
 
+    def find_in_chat(self):
+        """⌘F / Ctrl+F: find in the chat the focus is in (Meta's, a side question's, a subagent's: widgets.ChatFind),
+        else in the code tab shown, else in the main chat."""
+        find = widgets.ChatFind.for_focus(self)
+        if find is not None:
+            return find.open()
+        if self.find_in_code():
+            return True
+        return self.chat_find.open() if self.tabs.current() is self.tabs.get("chat") else False
+
     def find_in_code(self):
         """Ctrl+F: find in the code tab shown, if one is; False (not handled) if not."""
         page = self.tabs.current()
@@ -15782,7 +16251,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def github_folders(self):
         """What GitHub's lists are read for (lookup.GitHub.look): the repository this chat's folder is in."""
-        return [], [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
+        return [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
 
     @staticmethod
     def _github_changed(win):
@@ -16490,8 +16959,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
+        turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
         for kind, content, *rest in items:
-            if kind == "tool_results":
+            if kind in ("user", "start_prompt"):
+                turn_calls, stop_said = [], False
+            elif kind == "assistant":
+                before = len(self.tool_cards)
+            stopped = kind == "stopped" or kind == "assistant" and rest and rest[0] and \
+                STOP_SAID_RE.fullmatch(_first_text(content) or "")  # (aborted: as the live chat's, h_assistant)
+            if stopped:  # (stopped: said once, as the live chat says it, h_result; not if a call it stopped says so)
+                if not stop_said and not any(self.tool_cards[t].state in ("running", "interrupted")
+                                             and t not in self.orphan_results for t in turn_calls):
+                    self.note("interrupted")
+                stop_said = True
+            elif kind == "tool_results":
                 self.render_tool_results(content, from_file=True)
             elif kind == "artifact":
                 if content["url"] not in self.artifacts:  # not already shown by its tool call
@@ -16515,6 +16996,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":
                 self.render_assistant(content, written_at=ref_epoch(rest[1]) if len(rest) > 1 else None)
+                turn_calls += list(self.tool_cards)[before:]
             else:
                 text = "\n\n".join(clean_prompt(t) for t in _prompt_texts(content))
                 atts = [Attachment("image", "image", c["source"].get("media_type"),
@@ -16525,7 +17007,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
+                if kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
+                    row = Gtk.Box(spacing=6)
+                    for a in atts:
+                        row.append(attachment_widget(a, 96))
+                    self.add(widgets.start_prompt_view(text, row if atts else None))
+                else:
+                    self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:
@@ -16571,6 +17059,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         server (start_remote_proc) as Baude's own claude is. Its folder is this window's only when its server is on
         this machine: links to files elsewhere are fetched from it (open_remote_link)."""
         r = info["remote"]
+        self.draft_group = ""  # (a new chat's group: not another's)
         self.remember_own_writes()
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)
@@ -16661,7 +17150,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):
             self.sync_remote(self.remote, self.session_id)
+        if listed and self.missing_session == self.session_id:  # (its host has it again: attached again, below)
+            self.missing_session = self.missing_reason = None
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                self.missing_session != self.session_id and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:
             self.start_remote_proc()  # (its server's there again, or at last: what it asks, its models)
         self.update_banner()
@@ -16946,7 +17438,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             GLib.timeout_add(250, gone)
         if busy:
             return later(len(busy))
-        r.request({"op": "quit", "if_idle": True}, answered)
+        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once
@@ -16987,8 +17479,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
         once it's written in, as a new chat here is."""
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
-        picked = self.sidebar.group_filter()
-        group = next(iter(picked)) if picked is not None and len(picked) == 1 else ""
+        group = self.sidebar.new_group()
         model = self.model if self.model and model_program(self.model) == "claude" else None
         self.note(f"a new session on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
@@ -17054,6 +17545,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def resume_session(self, info):
         if info.get("remote") is not None:
             return self.open_remote(info)
+        self.draft_group = ""  # (a new chat's group: not another's)
         self.remember_own_writes()  # before the view switches to the other session
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc; a host's chat's let go of, before it's not this one)
@@ -17157,6 +17649,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.update_banner()
             return False
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                self.missing_session != self.session_id and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:  # (a try waits seconds for its host, as
             # on_network's: on the main loop)
             self.start_remote_proc()
@@ -17172,13 +17665,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def banner_text(self, kind):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
-        if kind == "gone":
+        if kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
+            text = said
+        elif kind == "gone":
             name = "daemon" if self.remote.mine else remote_name(self.remote)  # (this machine's: over its socket,
             # not the network)
             text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
                 "Looking for daemon…" if self.remote.mine else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
+        elif kind == "missing":  # (its host there, but with no such session: session_missing)
+            name = "Daemon" if self.remote.mine else remote_name(self.remote)
+            text = f"{name} couldn't take this chat up again: {self.missing_reason}" if self.missing_reason else \
+                f"{name} no longer has this chat"
         elif kind == "drop":
             text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
@@ -17206,28 +17705,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
         here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
-        gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
+        gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
+                                            stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
-        kind = "gone" if gone else "live" if live else "drop" if dropped else \
+        missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
+        kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
             "retry" if self.retrying is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
         if kind in ("drop", "retry") and self.banner_timer is None:
             self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
-        self.banner.set_button_label(None)
+        self.banner.set_button_label("New chat" if kind == "missing" else None)
         self.banner.set_revealed(kind is not None)
         self.locked = live
         if hasattr(self, "composer_box"):
             self.composer_box.gate("network", dropped)
-            self.composer_box.gate("host", gone)
+            self.composer_box.gate("host", gone or missing)
         self.show_composer()
 
     def tail_lines(self, lines):
         """Draw what other programs appended to the viewed session."""
         if not (self.resume_pending and self.view_path):
             return
-        items = history_items(lines)
+        items = history_items(lines, first=self.history.first if self.history is not None else None)
         if items:
             if self.history is not None:
                 self.history.shown += len(items)
@@ -17275,38 +17776,51 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
         self.blocks.clear()
-        self.cut_short()
+        cut = self.cut_short()
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
         said, self.said_last = getattr(self, "said_last", None), None
-        if msg.get("is_error"):
+        stop_asked = getattr(self.proc, "stop_asked", False)
+        if self.proc is not None:
+            self.proc.stop_asked = False
+        if msg.get("is_error") and stop_asked and ended_by_stop(msg):
+            if stop_asked is True and self.send_after_result is None and not cut:  # (said already, stop_stuck; one
+                self.note("interrupted")  # a revert stopped: gone from the chat; a call it stopped: its card says so)
+        elif msg.get("is_error"):
             shown = msg.get("result")
             if (gone := msg.get("gone")) and self.remote is not None and not self.remote.mine:  # (no /cd there)
                 shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
                     + f"on {remote_name(self.remote)} to carry on"
-            if (msg.get("result") or "").strip() != said:
+            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said:
                 self.note(f"turn ended with error: {shown or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
             if needs_login(msg.get("result")):
                 self.login_prompt(msg["result"])
+        self.end_turn()
+        self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
+                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
+
+    def end_turn(self, proc=None):
+        """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and
+        what waited for its end done."""
+        proc = self.proc if proc is None else proc
         self.set_busy(False)
         self.keep_chat_model()
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] is self.proc:  # (a model or provider picked while it ran: that model now)
+        if move is not None and move[0] is proc:  # (a model or provider picked while it ran: that model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
-        self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
-                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning
-        for ever. A background subagent's calls go on after the turn: left running."""
+        for ever. A background subagent's calls go on after the turn: left running. Whether any was."""
+        cut = False
         for tid, card in list(self.tool_cards.items()):
             if card.state != "running":
                 continue
@@ -17316,6 +17830,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if parent is None:
                 card.answered()  # (asked whether to allow it: nothing to answer now)
                 card.set_state("interrupted")
+                cut = True
+        return cut
 
     def goes_on(self, tool_id):
         """Whether a subagent's call goes on after its turn: run in the background (its card says so, or, its card
@@ -17587,7 +18103,7 @@ class BaudeApp(Adw.Application):
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
-                host.request({"op": "quit"})  # (it comes back as a chat wants it: local_server)
+                host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
             if self.updater is not None and self.updater.ready:
                 u = self.updater
                 self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})

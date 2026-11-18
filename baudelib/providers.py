@@ -53,13 +53,33 @@ def provider_of(value):
         return f"{modelslib.AGENT}{agent[0]}/{'apple' if agent[1] == modelslib.APPLE_MODEL['value'] else 'mlx'}"
     if value == modelslib.APPLE_MODEL["value"]:
         return "apple"
-    if any(m["value"] == value for m in modelslib.mlx_models()):
-        return "mlx"
+    if value.startswith("mlx-") or any(m["value"] == value for m in modelslib.mlx_models()):
+        return "mlx"  # (mlx-…: one not downloaded here, as another host has it, or a network session's there)
     if value.startswith("ollama/"):
         return "ollama"
     if value.startswith("openai/") and value.count("/") >= 2:
         return "openai/" + value.split("/")[1]
     return None
+
+
+def runs_free(value):
+    """Is a model one run on your own machines, which costs nothing a token: Apple's, MLX's, Ollama's, or one of those
+    on another host of the mesh (as an agent there, or through its proxy here, a mesh-<member>-<provider> endpoint)?
+    pi-claude prices them at 0 (its models.json) and says a turn cost $0."""
+    pid = provider_of(value)
+    if pid in NAMES or pid and pid.startswith(modelslib.AGENT):
+        return True
+    if not (pid and pid.startswith("openai/mesh-")):
+        return False
+    eid = pid[len("openai/"):]
+    try:
+        from baudelib import mesh
+        there = next((e for e in mesh.endpoints() if e.get("id") == eid), None)
+    except Exception:  # noqa: BLE001 (no mesh here, or its file unreadable: by the id, below)
+        there = None
+    if there is not None:  # (the provider as its host has it: its Ollama, say, not an endpoint its settings list)
+        return there.get("provider") in NAMES
+    return bool(re.fullmatch(r"mesh-[a-z0-9]{1,8}-(ollama|mlx|apple)", eid))  # (its host gone from the mesh)
 
 
 def provider_name(pid, settings=None):
@@ -110,19 +130,28 @@ def entries():
 
 
 def kind(m):
-    """What makes a model the same one on every host that has it: what it's served as (its repo, its name to its
-    server; else its name; Apple's, with no runtime, by its name), whatever its case (gpt-oss:20B on one host is
-    gpt-oss:20b on another), its window and its version, where they're said. Two of a kind are the same one unless
-    their digests differ (same). Each keeps its own case to show."""
-    served = (None if not has_runtime(m.get("provider") or provider_of(m["value"])) else
-              m.get("resolvedModel") or m.get("id")) or m.get("displayName") or m["value"]
-    return served.casefold(), m.get("window"), m.get("version")
+    """What a model's served as, whatever its case (gpt-oss:20B on one host is gpt-oss:20b on another): its repo or its
+    name to its server; None for one with no runtime (Apple's), or one a host doesn't say it of (an older one)."""
+    served = m.get("resolvedModel") or m.get("id") if has_runtime(m.get("provider") or provider_of(m["value"])) else None
+    return served.casefold() if isinstance(served, str) and served else None
 
 
 def same(a, b):
-    """Whether two models are the same one: of a kind, and with the same digest of it (Ollama's) where both say one (a
-    host on an older version doesn't)."""
-    return kind(a) == kind(b) and not (a.get("digest") and b.get("digest") and a["digest"] != b["digest"])
+    """Whether two models are the same one, on two hosts or served two ways: what they're served as (kind; where
+    either doesn't say, their names, in any case), and their version and digest (Ollama's) where both say one: one a
+    host doesn't say (an older one) isn't a difference. Their windows count where both say one and neither has a
+    digest: an Ollama model's is the one it's loaded with now, which changes as it's loaded; its digest says what it is."""
+    ka, kb = kind(a), kind(b)
+    if ka and kb:
+        if ka != kb:
+            return False
+    elif (a.get("displayName") or a["value"]).casefold() != (b.get("displayName") or b["value"]).casefold():
+        return False
+
+    def differ(k):
+        return a.get(k) is not None and b.get(k) is not None and a[k] != b[k]
+    return not (differ("version") or differ("digest") or
+                differ("window") and not (a.get("digest") or b.get("digest")))
 
 
 def alike(models, first=()):
@@ -184,15 +213,18 @@ def elsewhere(p, member):
     serves an API; else run there, as an agent whose tools are here (agent/<member>/<its value>: agentproxy)."""
     from baudelib import mesh
     keep = ("id", "tools", "window", "version", "digest", "input", "thinking")
+
+    def served(m):  # (what it's served as, where a host says it as its resolvedModel: what tells it's the same one, kind)
+        return {"id": m["resolvedModel"]} if not m.get("id") and isinstance(m.get("resolvedModel"), str) else {}
     if p.get("http"):
         pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
         return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,
-                      "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m}
-                     for m in p.get("models") or []]
+                      "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m} |
+                     served(m) for m in p.get("models") or []]
     pid = f"{modelslib.AGENT}{member}/{p['id']}"
     return pid, [{"value": f"{modelslib.AGENT}{member}/{m['value']}", "provider": pid,
-                  "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m}
-                 for m in p.get("models") or []]
+                  "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m} |
+                 served(m) for m in p.get("models") or []]
 
 
 def rank(pid):

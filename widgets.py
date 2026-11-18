@@ -8041,9 +8041,9 @@ def _probe_corners(window):
 #   bar less its top padding, and the bar's plain colour shows above it. The image is stretched across the bar instead,
 #   the same picture with nothing cut off.
 # And where the inside meets the bar: the frame's round it at the sides and bottom; at the top, the bar is the frame
-# when it's drawn in the frame's colour (libadwaita's, a theme's like it), and the inside's edge is enough there. A bar
-# of another colour (XP's blue, Windows 95's navy) ran straight into the inside, white on blue: there the frame shows
-# above it too (.baude-under-bar), as it does round the rest of it.
+# when it's drawn in the frame's colour (libadwaita's, a theme's like it), and the inside's edge is enough there. Under
+# a bar of another colour (XP's blue, Windows 95's navy) the frame shows above the inside too (.baude-under-bar), so
+# the inside's set into it on all four sides.
 _title_bar = {"tries": 0}
 
 
@@ -8077,20 +8077,12 @@ def _probe_title_bar(window):
 def bar_on_frame(bar):
     """Whether bar, as it's drawn, is the frame's colour where the inside meets it (a few pixels up from its foot, clear
     of its buttons and its bottom edge's line): the colour most of the way across it, or see-through there."""
-    w, h = bar.get_width(), bar.get_height()
-    native = bar.get_native()
-    snap = Gtk.Snapshot()
-    Gtk.WidgetPaintable.new(bar).snapshot(snap, w, h)
-    node = snap.to_node()
-    if node is None or native is None or native.get_renderer() is None or w < 8 or h < 8:
+    drawn = drawn_pixels(bar)
+    if drawn is None or drawn[2] < 8 or drawn[3] < 8:
         return True
-    texture = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
-    down = Gdk.TextureDownloader.new(texture)
-    down.set_format(Gdk.MemoryFormat.R8G8B8A8)
-    data, stride = down.download_bytes()
-    data = data.get_data()
-    y = texture.get_height() - 1 - max(2, texture.get_height() // 10)
-    row = [data[y * stride + x * 4:y * stride + x * 4 + 4] for x in range(0, texture.get_width(), 3)]
+    data, stride, w, h = drawn
+    y = h - 1 - max(2, h // 10)
+    row = [data[y * stride + x * 4:y * stride + x * 4 + 4] for x in range(0, w, 3)]
     r, g, b, a = (sorted(p[i] for p in row)[len(row) // 2] for i in range(4))
     if a < 128:
         return True
@@ -8118,10 +8110,9 @@ def title_bar_cut(bar):
     return False
 
 
-def corner_radius(widget):
-    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
-    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
-    them). None: no solid top edge to tell by (a flat button)."""
+def drawn_pixels(widget):
+    """widget as it's drawn, rendered by its window's renderer: (RGBA bytes, stride, width, height) in the texture's
+    pixels, or None (not drawn yet, or no renderer)."""
     w, h = widget.get_width(), widget.get_height()
     snap = Gtk.Snapshot()
     Gtk.WidgetPaintable.new(widget).snapshot(snap, w, h)
@@ -8133,13 +8124,23 @@ def corner_radius(widget):
     down = Gdk.TextureDownloader.new(texture)
     down.set_format(Gdk.MemoryFormat.R8G8B8A8)
     data, stride = down.download_bytes()
-    data = data.get_data()
+    return data.get_data(), stride, texture.get_width(), texture.get_height()
+
+
+def corner_radius(widget):
+    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
+    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
+    them). None: no solid top edge to tell by (a flat button)."""
+    drawn = drawn_pixels(widget)
+    if drawn is None:
+        return None
+    data, stride, w, h = drawn
     alpha = lambda x, y: data[y * stride + x * 4 + 3]  # noqa: E731
-    edge = alpha(texture.get_width() // 2, 0)
+    edge = alpha(w // 2, 0)
     if edge < 128:
         return None
     clear = 0
-    while clear < min(texture.get_width(), texture.get_height()) // 2 and alpha(clear, clear) * 10 < edge * 9:
+    while clear < min(w, h) // 2 and alpha(clear, clear) * 10 < edge * 9:
         clear += 1
     return round(clear / (1 - 0.5 ** 0.5))
 

@@ -2880,6 +2880,12 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.title = Gtk.Entry(has_frame=False, hexpand=True)
         self.title.add_css_class("diary-title")
         self.title.connect("activate", lambda *_: self._title_entered())
+        self.title.connect("changed", lambda *_: self._title_typed())
+        title_keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (before its text's IM)
+        title_keys.connect("key-pressed", lambda _c, kv, _k, state: kv == Gdk.KEY_Escape and not state & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK
+            | Gdk.ModifierType.SHIFT_MASK) and self._title_escaped())
+        self.title.add_controller(title_keys)
         leave = Gtk.EventControllerFocus()
         # (once what took the focus is done: it can be a page's row, being clicked, and renaming lists the pages again)
         leave.connect("leave", lambda *_: GLib.idle_add(self.rename_page))
@@ -3020,6 +3026,27 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.scroll.get_vadjustment().set_value(0)
         self.view.grab_focus()
 
+    def _title_typed(self):
+        """The title as it's typed in: the page's name in the pages' list and on its tab says what's typed, at once
+        (renamed only once it's kept: rename_page). Nothing typed, or only spaces: its own name, as it'd stay."""
+        win = self.win
+        if self.notebook is None or getattr(win, "pages", None) is None:
+            return
+        typed, own = self.title.get_text().strip(), short_page(self.page)
+        shown = typed if typed and self.page != HOME else own
+        win.pages.typed(self.notebook, self.page, None if shown == own else shown)
+        if win.tabs.get(("note", self.page)) is self:
+            win.tabs.retitle(("note", self.page), shown, tooltip=self.page)
+
+    def _title_escaped(self):
+        """Escape in the title: what's typed in it let go, its own name back (in the list and on its tab too), and
+        on to its text, the caret where it was (the find bar, open, closed too: as Escape in the text)."""
+        self.title.set_text(short_page(self.page))
+        if self.search_bar.get_search_mode():
+            FindInText.close_search(self)
+        self.view.grab_focus()
+        return True
+
     def rename_page(self):
         """The title edited (the page's own name: it stays under its parent): the page renamed with its sub-pages,
         and every [[link]] to any of them; a +link stays one where it still can (its page's sub-page). Their tabs
@@ -3042,6 +3069,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         pages.clear()  # (the same dict: the notebook keeps it)
         pages.update(renamed)
         self.win.store.save()
+        self.win.pages.typed(self.notebook, old, None)  # (kept: listed by its new name, in its place)
         self.win.note_renamed(moved)
 
     def reload(self):
@@ -4859,6 +4887,7 @@ class PagesList(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.notebook, self.listed = win, None, None
+        self.typing = {}  # (a page's title being typed in, not yet kept: {page: (its notebook, the name shown)}, typed)
         self.head = widgets.group_header("Pages", win.store.pages_folded, lambda: self.set_folded(not self.folded),
                                          plus=("list-add-symbolic", "New page (+Name in a page makes one under it)",
                                                self.new_page))
@@ -4952,7 +4981,7 @@ class PagesList(Gtk.Box):
         for name in order:
             depth = name.count(":")
             box = Gtk.Box(spacing=6, margin_start=6 + depth * widgets.TreeList.INDENT, margin_end=4)
-            lb = widgets.FadeLabel(label=short_page(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
+            lb = widgets.FadeLabel(label=self.shown_name(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
             if name in grey:
                 lb.add_css_class("dim-label")
                 lb.add_css_class("page-placeholder")
@@ -4971,6 +5000,31 @@ class PagesList(Gtk.Box):
             self.index.append(row)
             if name == shown:
                 self.index.select_row(row)
+
+    def shown_name(self, page):
+        """A page's name in the list: what's typed in its title as it's typed (typed), while its page is open;
+        else its own (and what was typed let go: its page closed, deleted or moved before the name was kept)."""
+        notebook, name = self.typing.get(page, (None, None))
+        editor = self.win.tabs.get(("note", page)) if notebook is not None else None
+        if editor is None or getattr(editor, "notebook", None) is not notebook:
+            self.typing.pop(page, None)
+            return short_page(page)
+        return name if notebook is self.notebook else short_page(page)
+
+    def typed(self, notebook, page, name):
+        """A page's title typed in (DiaryEditor._title_typed): its row named so at once, where it is (it's sorted
+        again once the name's kept); name None, its own name back."""
+        if name is None:
+            self.typing.pop(page, None)
+        else:
+            self.typing[page] = (notebook, name)
+        if notebook is not self.notebook:
+            return
+        i = 0
+        while (row := self.index.get_row_at_index(i)) is not None:
+            if row.page == page:
+                row.tree_anchor.set_label(self.shown_name(page))
+            i += 1
 
     def page_menu(self, row, x, y):
         """A page's menu (right-click on it in the list): New Page… (one under it), then Rename… (its title, to

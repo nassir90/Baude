@@ -3547,6 +3547,46 @@ class ComposerMarkdown:
                     self._tag(hide, n, m.end() - mark, m.end())
         return False
 
+    def indent(self, step):
+        """Tab (step 1) or Shift+Tab (-1) on the lines the caret or the selection is on: a list item in or out a level
+        (a bullet two spaces, its glyph the new level's; a number its marker's width), a line inside a code block four
+        spaces. Fence lines and prose are left as they are. True if any such line was there."""
+        buf = self.buf
+        bounds = buf.get_selection_bounds() or (buf.get_iter_at_mark(buf.get_insert()),) * 2
+        first, last = bounds[0].get_line(), bounds[1].get_line()
+        if last > first and bounds[1].starts_line():
+            last -= 1  # (a selection ending at a line's start doesn't take that line)
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        moves = []  # (line, its leading whitespace's length, unit, the list item's match or None)
+        for n, line, code, fence in self._lines(text):
+            if first <= n <= last and not fence:
+                m = None if code else _LIST_ITEM.match(line)
+                if code or m:
+                    lead = len(line) - len(line.lstrip(" \t"))
+                    unit = 4 if m is None else 2 if m.group(2) in "-*+•◦" else len(m.group(2)) + 1
+                    moves.append((n, lead, unit, m))
+        if not moves:
+            return False
+        buf.begin_user_action()
+        for n, lead, unit, m in moves:
+            width = len(text.split("\n")[n][:lead].expandtabs(4))
+            new = width + unit if step > 0 else max(0, width - unit)
+            if new == width:
+                continue
+            start = buf.get_iter_at_line(n)[1]
+            end = start.copy()
+            end.forward_chars(lead)
+            buf.delete(start, end)  # (its indent made again, in spaces: a tab's counted as four)
+            buf.insert(buf.get_iter_at_line(n)[1], " " * new)
+            if m is not None and m.group(2) in "•◦":  # (the bullet the level's: • ◦ • ...)
+                at = buf.get_iter_at_line_offset(n, new)[1]
+                to = at.copy()
+                to.forward_char()
+                buf.delete(at, to)
+                buf.insert(buf.get_iter_at_line_offset(n, new)[1], bullet_for(new // 2))
+        buf.end_user_action()
+        return True
+
     def continue_list(self):
         """Enter on a list item starts the next item (or ends the list if this one is
         empty). Returns False when the cursor isn't on a list item."""
@@ -3577,6 +3617,15 @@ def sends(state):
     new line (a list's next item); Shift+Enter a plain line break (newline_key)."""
     return bool(state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)) if sys.platform == "darwin" \
         else bool(state & Gdk.ModifierType.CONTROL_MASK)
+
+
+def tab_key(markdown, keyval, state):
+    """Tab or Shift+Tab in a box (ComposerMarkdown), as on a Record page: list items in or out a level, a code block's
+    lines in or out four spaces. True if it did; elsewhere Tab is left to move the focus."""
+    if keyval not in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab) or \
+            state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK):
+        return False
+    return markdown.indent(-1 if keyval == Gdk.KEY_ISO_Left_Tab or state & Gdk.ModifierType.SHIFT_MASK else 1)
 
 
 def newline_key(markdown, state):

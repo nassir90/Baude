@@ -9208,6 +9208,8 @@ class SideQuestion(Gtk.ListBoxRow):
         box."""
         if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
+        if widgets.tab_key(self.writing.markdown, keyval, state):
+            return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
             if not widgets.sends(state):
@@ -10589,6 +10591,8 @@ class SidePanel(Gtk.Box):
         new line: as in a side question's own box."""
         if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
             return True
+        if widgets.tab_key(self.btw_ask.markdown, keyval, state):
+            return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
             if not widgets.sends(state):
@@ -14438,6 +14442,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return True
         if widgets.leave_wrapped(self.input.get_buffer(), keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)
+        if widgets.tab_key(self.composer_md, keyval, state):
+            return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and state & Gdk.ModifierType.ALT_MASK and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK):
             return self.composer_md.move_item(-1 if keyval == Gdk.KEY_Up else 1)  # (a list item, past its neighbour)

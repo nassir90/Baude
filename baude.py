@@ -7560,6 +7560,11 @@ def remote_name(r):
     return r.info.get("name") or r.host
 
 
+def stopping_said(r):
+    """What a host said as it stopped (Remote.said_stopping), as its banner says it while it's gone, or None."""
+    return None if r is None else r.said_stopping("Daemon" if r.mine else remote_name(r))
+
+
 def local_host():
     """This machine's host process (its socket: Remote.mine), if it's there, which runs every chat of Baude's."""
     return next((r for r in network().alive() if r.mine), None)
@@ -8734,6 +8739,8 @@ class SessionSidebar(Gtk.Box):
         if r is None:
             key = self.shown_host()
             return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if not r.deactivated and (said := stopping_said(r)) is not None:  # (stopping: said as it goes)
+            return said
         if r.state == "alive" and not r.deactivated:
             return None
         name = remote_name(r)
@@ -16933,7 +16940,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             GLib.timeout_add(250, gone)
         if busy:
             return later(len(busy))
-        r.request({"op": "quit", "if_idle": True}, answered)
+        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once
@@ -17153,7 +17160,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def banner_text(self, kind):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
-        if kind == "gone":
+        if kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
+            text = said
+        elif kind == "gone":
             name = "daemon" if self.remote.mine else remote_name(self.remote)  # (this machine's: over its socket,
             # not the network)
             text = f"Can't connect to {name} at the moment" if self.remote.state == "dead" else \
@@ -17187,7 +17196,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
         here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
-        gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
+        gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
+                                            stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         kind = "gone" if gone else "live" if live else "drop" if dropped else \
             "retry" if self.retrying is not None else None
@@ -17564,7 +17574,7 @@ class BaudeApp(Adw.Application):
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
-                host.request({"op": "quit"})  # (it comes back as a chat wants it: local_server)
+                host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
             if self.updater is not None and self.updater.ready:
                 u = self.updater
                 self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})

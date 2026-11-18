@@ -90,7 +90,7 @@ def serve(args):
         if menubar.can_show():
             try:
                 item = menubar.MenuBar(lambda: server.listing(), lambda: threading.Thread(
-                    target=server.shutdown, daemon=True, name="quit").start())
+                    target=server.shutdown, daemon=True, name="quit").start(), lambda: server.quitting)
             except Exception as e:  # (no window server after all, say: served without it)
                 print(f"baude-headless: no menu bar item: {e}", file=sys.stderr)
     # signals, from the C handler, through a pipe read on a thread of its own: AppKit's run loop may have the main

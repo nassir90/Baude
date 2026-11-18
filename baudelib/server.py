@@ -157,7 +157,8 @@ class Conn:
         self.channel, self.out = channel, queue.Queue()
         self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
         self.archived = False  # (subscribed to archived sessions too)
-        threading.Thread(target=self._write, daemon=True, name="client-out").start()
+        self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
+        self.writer.start()
 
     def send(self, msg):
         self.out.put(msg)
@@ -167,8 +168,13 @@ class Conn:
             if not self.channel.send(msg):
                 break
 
-    def close(self):
+    def close(self, flush=0):
+        """Nothing more sent. flush: what's queued written first (waited for that long at most), then its channel
+        closed (else it's left as it is: the mesh's, say, which takes it on)."""
         self.out.put(None)
+        if flush:
+            self.writer.join(flush)
+            self.channel.close()
 
 
 class Session:
@@ -390,6 +396,9 @@ class Server:
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
+        # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
+        # for the menu bar's item to say; None while it isn't
+        self.quitting = None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
@@ -665,6 +674,9 @@ class Server:
             if self.stopped.is_set():
                 if not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
                     self.restarting = None
+                    if self.quitting is not None and self.quitting["restart"]:
+                        self.quitting = {**self.quitting, "restart": False}
+                        self.said_quitting()
                 return None, None
             if if_idle and (busy := self.running()):
                 return busy, None
@@ -681,13 +693,23 @@ class Server:
                 procs.append(s.proc)
         return None, procs
 
+    def said_quitting(self):
+        """(lock held) How far along stopping it is (quitting), to the heads attached and the menu bar's item."""
+        q = self.quitting
+        for c in list(self.conns):
+            c.send({"op": "stopping", "procs": q["total"], "left": q["left"], "restart": q["restart"]})
+        self.on_change()
+
     def cut(self, s):
         """(lock held) A session's turn marked cut short by this host's stop (listed: cut), and kept so."""
         s.meta["cut"] = time.time()
         self.save(s)
 
-    def stop_procs(self, procs):
-        """(shutdown's second half, once halt's stopped it) Its connections, claudes and socket let go of."""
+    def stop_procs(self, procs, again=False):
+        """(shutdown's second half, once halt's stopped it) Its connections, claudes and socket let go of. How far
+        along, kept (quitting) and said as it goes, each claude that's stopped (said_quitting): in the menu bar's item
+        and to the heads attached, whose connections are let go of once the last has. again: it's to start again (a
+        head's restart of it, or an update's)."""
         self.woken.set()
         try:  # (one starting meanwhile waits for this one to go: Server)
             open(self.state_dir + "/.stopping", "w").close()
@@ -697,9 +719,9 @@ class Server:
         for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
             run.end()
         with self.lock:
-            for c in list(self.conns):
-                c.close()
             procs = procs + [s.proc for s in self.sessions.values() if s.proc is not None and s.proc not in procs]
+            self.quitting = {"left": len(procs), "total": len(procs), "restart": bool(again or self.restarting)}
+            self.said_quitting()
         for p in procs:
             p.stopping = True
             p.close_stdin()  # (claude, its stdin closed, ends as it would at the end of a pipe)
@@ -709,11 +731,18 @@ class Server:
                 p.p.wait(timeout=max(0.1, end - time.monotonic()))
             except Exception:  # (one that doesn't, in time: made to)
                 p.kill()
+            with self.lock:
+                self.quitting = {**self.quitting, "left": self.quitting["left"] - 1}
+                self.said_quitting()
         while time.monotonic() < end + 2:  # (what each said last, read and kept: its exit's handled once it's all read)
             with self.lock:
                 if not any(s.proc in procs for s in self.sessions.values()):
                     break
             time.sleep(0.05)
+        with self.lock:
+            conns = list(self.conns)
+        for c in conns:  # (what it's said written first: the process may end the moment it's closed)
+            c.close(flush=1)
         os.write(self.wake_w, b"x")  # (the accept loop sees it's stopped)
         try:
             if os.stat(self.socket_path).st_ino == self.bound:
@@ -764,6 +793,8 @@ class Server:
         if op == "ping":
             return None
         if self.stopped.is_set():  # (going: nothing more started, nothing more sent to a claude it's stopping)
+            if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
+                return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
             return reply("error", error="the host process is stopping")
         if op == "hello":
             return reply("hello", server=self.info())
@@ -783,7 +814,8 @@ class Server:
                     return reply("busy", sessions=sorted({b["session"] for b in busy}), commands=busy)
                 reply("quitting")
             if procs is not None:
-                threading.Thread(target=self.stop_procs, args=(procs,), daemon=True, name="quit").start()
+                threading.Thread(target=self.stop_procs, args=(procs, bool(msg.get("restart"))), daemon=True,
+                                 name="quit").start()
             return None
         if op == "start":
             return self.start(msg, conn, req)
@@ -1440,7 +1472,8 @@ class Server:
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
             s.waiting_init = []
             self.drop_routes(s)
-            if not getattr(made[0], "restarting", False):
+            if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
+                # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)
                 for conn in s.live:
                     conn.send({"op": "exited", "session": s.id, "code": code, **stopped})

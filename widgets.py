@@ -6664,6 +6664,54 @@ def code_attrs(text, spans, dark, skip=()):
     return attrs
 
 
+START_PROMPT_HEIGHT = 260  # (past this, the prompt a session was started with scrolls in its own box)
+
+
+def start_prompt_view(text, above=None):
+    """The prompt a session was started with from outside, at the top of its chat (Baude's and Record's): a dim
+    heading, the prompt as markdown (under above, its images, if any) in a box that scrolls once it's long, and a rule
+    under it."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    head = Gtk.Label(label="Started with this prompt", xalign=0)
+    head.add_css_class("dim-label")
+    head.add_css_class("caption-heading")
+    box.append(head)
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    if above is not None:
+        inner.append(above)
+    inner.append(MarkdownView(text))
+    scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, max_content_height=START_PROMPT_HEIGHT,
+                                propagate_natural_height=True, child=inner)
+    pass_edge_scroll(scroll)
+    box.append(scroll)
+    box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+    return box
+
+
+def pass_edge_scroll(scroll):
+    """A scrolling box inside the chat's that doesn't keep the wheel at its ends: scrolled up at its top (or down at
+    its bottom, or when it has nothing to scroll), the chat scrolls instead."""
+    ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL,
+                                    propagation_phase=Gtk.PropagationPhase.CAPTURE)
+
+    def on_scroll(ctl, _dx, dy):
+        adj = scroll.get_vadjustment()
+        value, top, end = adj.get_value(), adj.get_lower(), adj.get_upper() - adj.get_page_size()
+        if not (dy < 0 and value <= top or dy > 0 and value >= end - 0.5 or end <= top):
+            return False  # (its own to scroll)
+        outer = scroll.get_parent()
+        while outer is not None and not isinstance(outer, Gtk.ScrolledWindow):
+            outer = outer.get_parent()
+        if outer is None:
+            return False
+        oadj = outer.get_vadjustment()
+        step = dy if ctl.get_unit() == Gdk.ScrollUnit.SURFACE else dy * oadj.get_page_size() ** (2 / 3)
+        oadj.set_value(min(max(oadj.get_value() + step, oadj.get_lower()), oadj.get_upper() - oadj.get_page_size()))
+        return True
+
+    ctl.connect("scroll", on_scroll)
+    scroll.add_controller(ctl)
+
 class LineGutter(Gtk.Widget):
     """Line numbers beside a TextView (its left gutter), the marked line's in bold."""
 

@@ -16429,21 +16429,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             _adj, _before, expire = pending
             GLib.source_remove(expire) if GLib.MainContext.default().find_source_by_id(expire) else None
 
-    def start_prompt_view(self, text):
-        """What a session started from outside was asked first, at the top of its transcript: formatted, scrolling
-        inside its own box past a few lines, with a rule under it."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.add_css_class("start-prompt")
-        head = Gtk.Label(label="Started with this prompt", xalign=0)
-        head.add_css_class("dim-label")
-        head.add_css_class("caption-heading")
-        box.append(head)
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, max_content_height=260,
-                                    propagate_natural_height=True, child=MarkdownView(text))
-        box.append(scroll)
-        box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
-        return box
-
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         for kind, content, *rest in items:
@@ -16463,8 +16448,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))
                 fold.add_css_class("sysnote")
                 self.add(fold)
-            elif kind == "start_prompt":
-                self.add(self.start_prompt_view(content))
             elif kind == "ci_event":  # (what the desktop app says of a pull request it's watching: folded)
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
                 fold.add_css_class("sysnote")
@@ -16483,7 +16466,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
+                if kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
+                    row = Gtk.Box(spacing=6)
+                    for a in atts:
+                        row.append(attachment_widget(a, 96))
+                    self.add(widgets.start_prompt_view(text, row if atts else None))
+                else:
+                    self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:
@@ -17179,7 +17168,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """Draw what other programs appended to the viewed session."""
         if not (self.resume_pending and self.view_path):
             return
-        items = history_items(lines)
+        items = history_items(lines, first=self.history.first if self.history is not None else None)
         if items:
             if self.history is not None:
                 self.history.shown += len(items)

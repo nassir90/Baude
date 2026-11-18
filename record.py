@@ -71,7 +71,7 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
-from baudelib.transcripts import rewind_mark, task_notification  # noqa: E402  (a background task's ending, as said;
+from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification  # noqa: E402  (a background task's ending, as said;
 # a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
@@ -803,10 +803,12 @@ class Store:
 # ---------------------------------------------------------------- transcripts
 
 def _text_of(content):
+    """A message's text, without the reminders a client put before what was typed (strip_reminders)."""
     if isinstance(content, str):
-        return content
+        return strip_reminders(content)
     if isinstance(content, list):
-        return "\n\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        return "\n\n".join(t for b in content if isinstance(b, dict) and b.get("type") == "text"
+                           and (t := strip_reminders(b.get("text", ""))).strip())
     return ""
 
 
@@ -820,7 +822,8 @@ def parse_records(lines, items, seen=None):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. A revert (rewind_mark) takes back the items after the record it
+    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
+    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
     keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
@@ -843,6 +846,11 @@ def parse_records(lines, items, seen=None):
         msg = d.get("message") or {}
         text = _text_of(msg.get("content")).strip()
         if kind == "user":
+            first = "\0first user" not in seen  # (kept with seen: the file's first user record is read once)
+            seen["\0first user"] = True
+            if first and started_outside(d) and not _is_noise(text):
+                items.append({"role": "start", "text": text, "id": d.get("uuid")})
+                continue
             if _is_noise(text) or d.get("toolUseResult") is not None:
                 continue
             if (note := task_notification(text)) is not None:
@@ -1732,7 +1740,8 @@ def chat_text(path, title, cwd):
     with open(path, encoding="utf-8", errors="replace") as f:
         parse_records(f, items)
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
-    return "\n\n".join([head] + [f"**{'You' if it['role'] == 'user' else 'Claude'}:**\n\n{it['text']}" for it in items
+    who = {"user": "You", "start": "Started with"}
+    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
                                   if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
@@ -5401,6 +5410,13 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "start":  # (what a session started from outside was asked: at its top, as Baude has it)
+            view = widgets.start_prompt_view(it["text"])
+            row.append(view)
+            row.prose, row.item = view, it
             self.rows.append(row)
             self.box.append(row)
             return

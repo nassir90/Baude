@@ -1223,7 +1223,7 @@ def _(app):
     return win
 
 
-@scene("55-network-group-menu", "⋮ beside the search: Group by, Add Host…, then which groups are listed: each "
+@scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
                                 "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):
     win = network_window(app)
@@ -1288,7 +1288,7 @@ def _(app):
     return win
 
 
-@scene("55k-network-add-server", "⋮ → Hosts → Add Host…: another machine's host, by where ssh goes (an "
+@scene("55k-network-add-server", "New session's host right-clicked → Add Host…: another machine's host, by where ssh goes (an "
                                  "alias, or user@host), and its host process's command there if it isn't on PATH; "
                                  "kept from then on, reached or not")
 def _(app):
@@ -1300,7 +1300,7 @@ def _(app):
 
 
 @scene("55l-network-hosts", "New session's host, lab-mac, picked: lab-mac's sessions listed, in every group; ⋮ "
-                            "has Add Host… and the groups")
+                            "has the groups")
 def _(app):
     win = network_window(app, None)
     win.sidebar.view_btn.popup()
@@ -1365,7 +1365,8 @@ def _(app):
     return win
 
 
-@scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Host Command… and Deactivate")
+@scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Host Command… and Deactivate, "
+                                "then Add Host…")
 def _(app):
     win = network_window(app, None, host=None)
     r = studio(win)

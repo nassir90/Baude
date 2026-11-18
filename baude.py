@@ -7825,9 +7825,11 @@ class SessionSidebar(Gtk.Box):
         self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
                                        lambda: win.pick_folder())
         # (beside it: the host a new session's made on, by its name, verbatim (this machine's local), and whose chats
-        # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click: host_menu)
+        # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click, or press and
+        # hold: host_menu)
         self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)], "The host a new session is made "
-                                                         "on, and whose chats are listed",
+                                                         "on, and whose chats are listed. Right-click (or "
+                                                         "press and hold) for Add Host…",
                                                          self.pick_host), 12)
         self.host_dd.add_css_class("flat")
         self.host_dd.add_css_class("new-host")
@@ -7838,6 +7840,11 @@ class SessionSidebar(Gtk.Box):
         right.connect("pressed", lambda _g, _n, x, y: not (popup and popup.get_visible())  # (not in its list, open)
                       and self.host_menu(x, y))
         self.host_dd.add_controller(right)
+        hold = Gtk.GestureLongPress(touch_only=False)  # (touch's right-click: the same menu, its list not opened)
+        hold.connect("pressed", lambda g, x, y: not (popup and popup.get_visible())
+                     and (g.set_state(Gtk.EventSequenceState.CLAIMED), self.host_menu(x, y)))
+        hold.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        self.host_dd.add_controller(hold)
         new_row = Gtk.Box(spacing=2)
         new_row.append(self.new_btn)
         new_row.append(self.host_dd)
@@ -7852,8 +7859,7 @@ class SessionSidebar(Gtk.Box):
         by.append("Date", "sb.group::date")
         view.append_section("Group by", by)
         # (Groups: which sessions are listed, a list of its own in the menu (FilterList), filled by fill_filters; a
-        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter; Add
-        # Host…: a right-click on it, host_menu)
+        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter)
         groups = Gio.Menu()
         item = Gio.MenuItem.new(None, None)
         item.set_attribute_value("custom", GLib.Variant.new_string("groups"))
@@ -8059,16 +8065,15 @@ class SessionSidebar(Gtk.Box):
     def host_menu(self, x, y):
         """Right-click New session's host: Add Host…, always; and for another machine's, Host Command…, for one reached
         over ssh; Deactivate, or Activate for one that's deactivated."""
-        menu, this, add = Gio.Menu(), Gio.Menu(), Gio.Menu()
+        menu, add = Gio.Menu(), Gio.Menu()
         if (r := self.shown_remote()) is not None:
             if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
                 item = Gio.MenuItem.new("Host Command…", None)
                 item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
-                this.append_item(item)
+                menu.append_item(item)
             item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
             item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
-            this.append_item(item)
-            menu.append_section(None, this)
+            menu.append_item(item)
         add.append("Add Host…", "sb.add_server")  # (another machine, by where ssh goes: ask_add_host)
         menu.append_section(None, add)
         self.host_menu_shown = self.menu_at(menu, self.host_dd, x, y)
@@ -8099,7 +8104,9 @@ class SessionSidebar(Gtk.Box):
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         pop.set_pointing_to(rect)
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        pop.popup()
+        # (on an idle, after the one its sections' separators are shown in: popped up before it, it's sized without
+        # them, and macOS never sizes it again, so its last item was cut off)
+        GLib.idle_add(pop.popup)
         return pop
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).

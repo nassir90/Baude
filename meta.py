@@ -46,7 +46,7 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
-from baudelib import agentproxy, codex, wire  # noqa: E402
+from baudelib import agentproxy, codex, modelfiles, wire  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
@@ -1122,8 +1122,9 @@ setting:<name>). show also lists chats{and_pages} as rows the user can click, an
 
 Models: local_models says what runs models here besides Claude's (Ollama, MLX, Apple's adapter, OpenAI-compatible \
 servers). check_models finds Ollama's unhealthy ones; prune_models removes them (the user's asked first: it can't be \
-undone). add_mlx_model and add_endpoint add one; build_apple_adapter builds Apple's (asked first). Nothing is \
-installed or downloaded that the user didn't ask for: say what they'd run.
+undone). add_mlx_model and add_endpoint add one; build_apple_adapter builds Apple's (asked first). fetch_model \
+copies a model another host in the mesh has (asked first); model_files says where a model's files are, here or there, \
+for copying them some other way. Nothing is installed or downloaded that the user didn't ask for: say what they'd run.
 
 Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it."""
 
@@ -1209,6 +1210,18 @@ SETUP_TOOLS = [
      "inputSchema": {"type": "object", "required": ["name", "url"], "properties": {
          "name": {"type": "string"}, "url": {"type": "string"}, "key_env": {"type": "string"},
          "window": {"type": "integer"}}}},
+    {"name": "model_files", "description": "Where a model's files are: an Ollama model's (its manifest and blobs, in "
+     "Ollama's models folder) or an MLX model's (its Hugging Face cache snapshot), with their sizes; here, or on host "
+     "(another host in the mesh, by name). For copying them some other way (rsync, scp) when fetch_model can't.",
+     "inputSchema": {"type": "object", "required": ["model"], "properties": {
+         "model": {"type": "string", "description": "Ollama's name (qwen3:4b), or a Hugging Face repo (org/name)"},
+         "host": {"type": "string"}, "kind": {"type": "string", "enum": ["ollama", "mlx"]}}}},
+    {"name": "fetch_model", "description": "Copy a model from another host in the mesh to this one, over the mesh "
+     "(no download from the internet): an Ollama model (one of Ollama's library's: qwen3:4b), which this machine's "
+     "Ollama pulls from that host's and checks; or an MLX model (its Hugging Face repo), into the Hugging Face cache "
+     "here. The user's asked first; it copies in the background (local_models says how it's going).",
+     "inputSchema": {"type": "object", "required": ["model", "host"], "properties": {
+         "model": {"type": "string"}, "host": {"type": "string"}, "kind": {"type": "string", "enum": ["ollama", "mlx"]}}}},
     {"name": "build_apple_adapter", "description": "Build apple-claude, which runs Apple's on-device model (macOS 26.4 "
      "or later, with swift). The user's asked first; it builds in the background (local_models: how it went).",
      "inputSchema": {"type": "object", "properties": {}}},
@@ -1262,12 +1275,40 @@ def models_report():
                      ("" if st["built"] or st["build"] else " (build_apple_adapter)"))
         if st["build"] == "failed" and st["log"]:
             lines.append("  its build's last lines: " + " | ".join(st["log"][-6:]))
+    for f in list(FETCHES.values()):
+        gb = lambda n: f"{n / 1e9:.1f} GB"  # noqa: E731
+        lines.append(f"Fetching {f['model']} from {f['host']}: " + (
+            f"{gb(f['done'])} of {gb(f['total'])}" if f["state"] == "copying" and f["total"] else f["state"]) +
+            (f" ({f['error']})" if f.get("error") else ""))
+    if hosts := modelfiles.hosts():
+        lines.append("Other hosts with models (fetch_model copies one here; model_files says where its files are): " +
+                     ", ".join(sorted(hosts)))
     for pid, p in found.items():
         if pid.startswith("openai/"):
             lines.append(f"{p['name']} ({p['url']}): " + (p["error"] or f"{len(p['models'])} models: " +
                                                            ", ".join(m["resolvedModel"] for m in p["models"][:10])))
     if not any(pid.startswith("openai/") for pid in found):
         lines.append("OpenAI-compatible servers: none added (add_endpoint)")
+    return "\n".join(lines)
+
+
+FETCHES = {}  # (fetch_model's, by (host, model): {"host", "model", "kind", "state", "done", "total", "error"})
+
+
+def files_report(where, kind, host):
+    """model_files' answer: where a model's files are."""
+    gb = f"{where['size'] / 1e9:.1f} GB" if where["size"] >= 1e8 else f"{where['size'] / 1e6:.1f} MB"
+    if kind == "ollama":
+        lines = [f"Ollama model {where['name']} on {host}, {gb}: Ollama's models folder {where['dir']}",
+                 f"  manifest: {where['manifest']}"]
+        lines += [f"  blob: {b['path']}" + (f" ({b['size']:,} bytes)" if b["size"] is not None else " (missing)")
+                  for b in where["blobs"]]
+        lines.append("  (copied to the same places under another Ollama's models folder, that Ollama lists it)")
+    else:
+        lines = [f"MLX model {where['repo']} on {host}, {gb}: snapshot {where['dir']}"]
+        lines += [f"  {f['name']} ({f['size']:,} bytes)" for f in where["files"]]
+        lines.append("  (copied to models--<org>--<name>/snapshots/<revision>/ in another Hugging Face cache, with "
+                     "refs/main naming the revision, it's found there)")
     return "\n".join(lines)
 
 
@@ -4069,6 +4110,62 @@ class MetaChat(Gtk.Box):
             return {"text": f"Added {name} at {found['url']} (action {a['id']}); its models: {listed}. It's a "
                     "provider in the pickers now."}
         return Later(work, done)
+
+    def model_files(self, turn, args):
+        model, host, kind = str(args.get("model") or "").strip(), str(args.get("host") or "").strip(), args.get("kind")
+
+        def work():
+            if not host or host.lower() in ("here", "this", socket.gethostname().split(".")[0].lower()):
+                errors = []
+                for k in [kind] if kind else ["ollama", "mlx"]:
+                    try:
+                        where = modelfiles.ollama_where(model) if k == "ollama" else modelfiles.mlx_where(model)
+                        return {"text": files_report(where, k, "this machine")}
+                    except ValueError as e:
+                        errors.append(str(e))
+                raise ValueError("; ".join(errors))
+            k, where = modelfiles.remote_where(modelfiles.member_of(host), model, kind)
+            return {"text": files_report(where, k, host)}
+        return Later(work)
+
+    def fetch_model(self, turn, args):
+        model, host, kind = str(args.get("model") or "").strip(), str(args.get("host") or "").strip(), args.get("kind")
+        told = self.told()
+
+        def work():
+            member = modelfiles.member_of(host)
+            k, where = modelfiles.remote_where(member, model, kind)
+            key = (host, model)
+            if (FETCHES.get(key) or {}).get("state") in ("starting", "copying"):
+                return {"text": f"{model} is being fetched from {host} already: local_models says how it's going."}
+            if k == "ollama" and providerslib.ollama()["error"]:
+                raise ValueError("Ollama isn't running here: the user opens it (or runs ollama serve) first.")
+            into = "this machine's Ollama" if k == "ollama" else f"the Hugging Face cache here ({modelslib.hf_hub()})"
+            if not self.confirm(turn, f"{NAME} would like to copy {model} ({where['size'] / 1e9:.1f} GB) from {host} "
+                                      f"into {into}, over the mesh.", "Copy"):
+                return {"text": "The user said no: nothing was copied."}
+            f = FETCHES[key] = {"host": host, "model": model, "kind": k, "state": "starting", "done": 0,
+                                "total": where["size"], "error": None}
+
+            def progress(done, total, _what):
+                f.update(state="copying", done=done, total=total or f["total"])
+
+            def run():
+                try:
+                    got = modelfiles.ollama_fetch(member, model, progress) if k == "ollama" else \
+                        modelfiles.mlx_fetch(member, model, progress)
+                    f.update(state="done", done=f["total"])
+                    providerslib.found(max_age=0)
+                    note = f"(fetched {model} from {host}: " + (f"Ollama has it as {got}.)" if k == "ollama" else
+                                                                f"in {got}; it's listed among MLX's models.)")
+                except (OSError, ValueError) as e:
+                    f.update(state="failed", error=str(e))
+                    note = f"(fetching {model} from {host} failed: {e})"
+                GLib.idle_add(lambda: told.append(note) and False)
+            threading.Thread(target=run, daemon=True, name="fetch-model").start()
+            return {"text": f"Copying {model} from {host} in the background; you're told when it's done "
+                            "(local_models says how it's going)."}
+        return Later(work)
 
     def build_apple_adapter(self, turn, args):
         told = self.told()  # (this conversation's: another may be open when it's built)

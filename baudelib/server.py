@@ -841,6 +841,8 @@ class Server:
                                                           else None, msg.get("id")))
         if op == "infer":
             return self.mesh.infer(conn, msg)
+        if op == "files":
+            return self.mesh.files(conn, msg)
         if op == "agent":  # (a model of this machine's, run here as an agent for a chat elsewhere: agentproxy)
             if getattr(conn, "agent_run", None) is not None:
                 return reply("error", error="this connection runs an agent already")

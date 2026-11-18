@@ -113,6 +113,8 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        infer_end: an HTTP request to one of this machine's model
                                                        providers (an OpenAI-compatible server's: path after its
                                                        base_url), its answer as it comes
+    files {method, path, headers}                   -> infer_head, infer_data..., infer_end: one of this machine's
+                                                       models' files, or where they are (modelfiles.serve), read-only
     ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
                                                      and the other end's taken for gone)
 Anything wrong: error {error}, with the request's "req".

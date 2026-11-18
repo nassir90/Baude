@@ -64,6 +64,7 @@ import baudelib.client  # noqa: E402  (servers on the network and their sessions
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
+from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
 from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
 )
@@ -17017,12 +17018,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         cwd = info.get("cwd")
         self.clear_transcript()
         self.switching_chat = True  # (its own switches come below: not the chat before's, in its folder)
+        gone = None
+        if cwd and not os.path.isdir(cwd):  # (its worktree removed, as Claude Desktop does as it archives a chat: its
+            try:                            # branch checked out there again, as Desktop does as it resumes one)
+                if branch := worktreelib.restore(cwd, info.get("path")):
+                    self.note(f"worktree {os.path.basename(main_folder(cwd)[1] or cwd)} was removed: "
+                              f"made again from its branch {branch}")
+            except worktreelib.Gone as e:
+                gone = e
         if cwd and os.path.isdir(cwd):  # (where it was recorded, a worktree too: --resume finds it in that folder's
             self.set_cwd(cwd)           # project, so claude runs there; the window's folder is its repository's)
         elif cwd:
             if (folder := main_folder(cwd)[0]) != cwd and os.path.isdir(folder):
                 self.set_cwd(folder)  # (a worktree that's gone: its repository)
-            self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
+            self.note(f"{gone.why if gone else pretty_path(cwd) + ' no longer exists'}; resuming in {self.short_cwd()}")
         self.reset_stream_state()
         self.session_id = info["id"]  # (before the history: Signal files its replies under it)
         self.apply_chat_model(info)  # (the model it was on, not the chat before's)

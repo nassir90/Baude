@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire
+from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -740,6 +740,8 @@ class Server:
                     break
                 try:
                     self.handle(conn, msg)
+                except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
@@ -919,6 +921,8 @@ class Server:
         elif params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
             raise ValueError(f"no conversation here to fork: {params['fork_from']}")
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or (src.meta["cwd"] if src else "~")))
+        if src and not os.path.isdir(cwd):  # (a fork of a chat whose worktree's gone: made again first, or Gone)
+            worktree.restore(cwd, src.transcript())
         if not os.path.isdir(cwd):
             raise ValueError(f"not a folder here: {cwd}")
         if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
@@ -1053,6 +1057,9 @@ class Server:
             self.drop_routes(s)
         if s.proc is not None:
             return s.proc
+        if not os.path.isdir(s.meta["cwd"]):  # (its worktree removed, as Claude Desktop does when it archives a chat:
+            branch = worktree.restore(s.meta["cwd"], s.transcript())  # its branch checked out there again; else Gone)
+            self.log(f"made {s.meta['cwd']} again, on {branch}, for {s.id}")
         resumed = s.transcript() is not None
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=resumed)

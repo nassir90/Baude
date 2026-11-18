@@ -115,7 +115,8 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        base_url), its answer as it comes
     ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
                                                      and the other end's taken for gone)
-Anything wrong: error {error}, with the request's "req".
+Anything wrong: error {error, plain?}, with the request's "req" (plain: said for the user as it is, a session's
+folder gone: what to do instead).
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
 subagents, asks, cli_id, commands, cut}: its id a UUID the server made as it started it (claude's --session-id;

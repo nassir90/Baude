@@ -1139,6 +1139,23 @@ def ref_markup(ref, inner, icon=True):
     return f'{slot}<a href="{href}" title="{html.escape(title)}">{inner}</a>'
 
 
+# Well-known cloud, hosting and platform providers: named in replies all the time, and a link to "an outside product"
+# (or to the one config file that mentions it) tells you nothing, so Signal never links them. Names that are also
+# English words or common identifiers (Neon, Render, Convex) are left out: one may be this code's own
+CLOUD_PROVIDERS = frozenset(n.casefold() for n in (
+    "Cloudflare", "Cloudflare Workers", "Cloudflare Pages", "Vercel", "Netlify", "Supabase", "Firebase", "Shopify",
+    "AWS", "Amazon Web Services", "GCP", "Google Cloud", "Google Cloud Platform", "Azure", "Microsoft Azure",
+    "Heroku", "DigitalOcean", "Digital Ocean", "Fly.io", "Linode", "Akamai", "Fastly", "Hetzner", "OVH", "OVHcloud",
+    "Render.com", "Railway.app", "PlanetScale", "Upstash", "Appwrite", "Auth0", "Okta", "Stripe", "Twilio", "SendGrid",
+    "Mailgun", "Sentry", "Datadog", "New Relic", "GitHub Pages", "Oracle Cloud", "IBM Cloud", "Alibaba Cloud",
+    "Backblaze"))
+
+
+def ref_cloud_provider(surface):
+    """Whether a name is one of CLOUD_PROVIDERS (as written, any case): never a link."""
+    return surface.strip().casefold() in CLOUD_PROVIDERS
+
+
 REF_BARE_NUMBER = re.compile(r"#\d+")  # (in code it's no link: a colour, a comment; owner/name#12 says what it is)
 
 
@@ -1149,6 +1166,8 @@ def ref_code_markup(code, message=None):
         return None
 
     def markup(s, inner):
+        if ref_cloud_provider(s):
+            return None
         if (dec := SIGNAL.decision(message, s)) is not None:  # (no logos in code: its columns stay put)
             return ref_decision_markup(s, dec, inner, icon=False) if dec["verdict"] != "plain" else None
         r = SIGNAL.refs.get(s)  # (a plain word: not in code blocks, where nothing decides it)
@@ -1178,6 +1197,8 @@ def ref_link(text, inner, backticked):
     if SIGNAL is None:
         return None
     key = ref_key(text)
+    if ref_cloud_provider(key):  # (Cloudflare, Vercel…: noise as a link)
+        return None
     if backticked and REF_BARE_NUMBER.fullmatch(key):  # (code: a colour's #333 as like as not)
         return None
     git = SIGNAL.refs.get(key)

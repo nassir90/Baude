@@ -1922,7 +1922,8 @@ class Signal(Names):
                         re.search(r"[A-Za-z]", key) and not re.fullmatch(r"\d[\d.,:%\sA-Za-z]*", key):
                     names[key] = (ref_kind(key) or "name", False)
             for surface, (kind, _strong) in names.items():
-                if kind in REF_TOOL_KINDS or decided.get(surface, set()) & before:
+                if kind in REF_TOOL_KINDS or decided.get(surface, set()) & before or \
+                        widgets.ref_cloud_provider(surface):
                     continue
                 ref = self._load(surface)
                 if ref is not None and ref.status == "resolved" and (ref.kind in ("commit", "branch", "pr") or
@@ -3904,7 +3905,8 @@ ideas, numbers and secrets.
 
 Every name gets a decision, including the ones that aren't in this repository: outside tools, products, \
 libraries, services and their commands (Postgres, Vite, FastAPI, Keycloak, Chrome, the Anthropic API, `npm ci`, \
-`uv sync`, `docker exec`) are not_in_code, why external; a name the conversation proposes that isn't written \
+`uv sync`, `docker exec`) are not_in_code, why external, but for well-known cloud and hosting providers \
+(Cloudflare, Vercel, Supabase, Shopify, AWS…), which are plain and never linked; a name the conversation proposes that isn't written \
 yet is proposed; one in another checkout or branch, on another machine, or only in a running system (a job id, \
 an org or app someone made, a container, a file in another repository) is elsewhere. Marking them tells the \
 person they won't find it in this code.

@@ -10733,11 +10733,11 @@ class SidePanel(Gtk.Box):
 
     @staticmethod
     def describe(task, marked=False):
-        """A task's state and what it's done so far. marked: for a list row, whose spinner or ✓ already says running
-        or completed, so only the other endings (failed, killed, interrupted) are said in words."""
+        """A task's state and what it's done so far. marked: for a list row, whose spinner, ✓ or grey ✕ already says
+        running, completed or interrupted, so only the other endings (failed, killed) are said in words."""
         status = task.get("status", "running")
         usage = task.get("usage") or {}
-        bits = [] if marked and status in ("running", "completed") else [status]
+        bits = [] if marked and status in ("running", "completed", "interrupted") else [status]
         if task.get("subagent_type"):
             bits.insert(0, task["subagent_type"])
         if usage.get("tool_uses"):

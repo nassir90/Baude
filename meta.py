@@ -2003,7 +2003,11 @@ class MetaChat(Gtk.Box):
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
                            margin_start=12, margin_end=12)
-        self.scroll = widgets.markdown_scroller(self.box, vexpand=True)
+        # (a selection across messages, yours and its replies, as Baude's chat has one: widgets.ChatSelection, its
+        # shading in an overlay over the conversation, under the forms pinned over it)
+        shaded = Gtk.Overlay(child=self.box)
+        self.scroll = widgets.markdown_scroller(shaded, vexpand=True)
+        self.text_selection = widgets.ChatSelection(self.box, self.scroll, shaded)
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
         # widgets.inside), all of the column's height theirs (clear, or /clear, asked: cleared, submit)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)

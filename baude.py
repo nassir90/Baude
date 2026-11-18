@@ -12453,6 +12453,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
+        self.input.connect("paste-clipboard", self.on_paste)  # (⌘V, Ctrl+V, Shift+Insert, the menu's Paste)
         self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
                               else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
         self.attach_row = Gtk.Box(spacing=6)
@@ -13664,28 +13665,68 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.input.grab_focus()
         return True
 
+    def on_paste(self, view):
+        """A paste, however it's asked for (⌘V, Ctrl+V, Shift+Insert, the menu): copied files or a copied image
+        attached (paste_attachment); text pasted as text."""
+        if self.paste_attachment():
+            view.stop_emission_by_name("paste-clipboard")
+
+    IMAGE_NAME = re.compile(r"\S+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp|svg)|[a-z][\w+.-]*://\S+", re.I)
+
     def paste_attachment(self):
-        """Ctrl+V: attach copied files or a copied image; returns False to let text paste happen."""
+        """Copied files, or a copied image, attached. An image copied with text beside it: the image, if the text's
+        only its name or address (a browser's, Finder's: IMAGE_NAME), else the text (a spreadsheet's cells, copied
+        with a picture of them). Returns False to let text paste."""
         clip = self.input.get_clipboard()
         formats = clip.get_formats()
+        image = clipboard_has(formats, Gdk.Texture, ("image/",))
+
+        def got_texture(c, res):
+            try:
+                self.attach_texture(c.read_texture_finish(res))
+            except GLib.Error as e:
+                self.note(f"paste failed: {e.message}")
+
+        def got_text(c, res):
+            try:
+                text = c.read_text_finish(res) or ""
+            except GLib.Error as e:
+                text = None
+                if not image:
+                    self.note(f"paste failed: {e.message}")
+            if image and (not text or self.IMAGE_NAME.fullmatch(text.strip())):
+                c.read_texture_async(None, got_texture)  # (the image's own name or address: the image's meant)
+            elif text:
+                buf = self.input.get_buffer()
+                buf.begin_user_action()  # (one step to undo, as GTK's own paste)
+                buf.delete_selection(True, True)
+                buf.insert_at_cursor(text)
+                buf.end_user_action()
+                self.input.scroll_mark_onscreen(buf.get_insert())
+
+        def image_or_text():
+            if clipboard_has(formats, GObject.TYPE_STRING, ("text/plain", "text/uri-list")):
+                clip.read_text_async(None, got_text)
+            elif image:
+                clip.read_texture_async(None, got_texture)
+
         if clipboard_has(formats, Gdk.FileList, ("text/uri-list", "x-special/gnome-copied-files")):
             def got_files(c, res):
                 try:
-                    self.attach_paths([f.get_path() for f in c.read_value_finish(res).get_files()])
+                    paths = [f.get_path() for f in c.read_value_finish(res).get_files()]
                 except GLib.Error as e:
                     self.note(f"paste failed: {e.message}")
+                    return
+                if paths and all(paths):
+                    self.attach_paths(paths)
+                else:  # (web addresses, not files here: the image beside them, else the text they are)
+                    image_or_text()
             clip.read_value_async(Gdk.FileList, GLib.PRIORITY_DEFAULT, None, got_files)
             return True
-        has_text = clipboard_has(formats, GObject.TYPE_STRING, ("text/plain",))
-        if clipboard_has(formats, Gdk.Texture, ("image/",)) and not has_text:
-            def got_texture(c, res):
-                try:
-                    self.attach_texture(c.read_texture_finish(res))
-                except GLib.Error as e:
-                    self.note(f"paste failed: {e.message}")
-            clip.read_texture_async(None, got_texture)
-            return True
-        return False
+        if not image:
+            return False
+        image_or_text()
+        return True
 
     def update_status(self, extra=None):
         if extra is not None:
@@ -14222,8 +14263,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
                 widgets.wrap_selection(self.input.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
-        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK:
-            return self.paste_attachment()
+        if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and sys.platform == "darwin":
+            self.input.emit("paste-clipboard")  # (GTK binds only ⌘V on a Mac: Ctrl+V pastes there as well)
+            return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
                 return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline

@@ -13769,7 +13769,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
-        self.apply_chat_signal()  # (a new chat: the defaults for new chats)
+        self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -14985,8 +14985,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- Signal
     def signal_menu(self):
-        """The link button's dropdown: this chat's two Signal switches (shown links, and running), the defaults new
-        chats start with, and Signal's page."""
+        """The link button's dropdown: this chat's two Signal switches (shown links, and running)."""
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=8, margin_bottom=6, margin_start=10,
                       margin_end=10, width_request=310)
@@ -15008,43 +15007,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                              "Kubernetes objects, tools")
         self.signal_run = row("Activate Signal", "Look up the names in this chat's replies as they come, and let the "
                                                  "reader (a model session) read the chat")
-        line = Gtk.Box(spacing=8)
-        self.signal_default = Gtk.Label(xalign=0, wrap=True, hexpand=True, max_width_chars=30)
-        self.signal_default.add_css_class("dim-label")
-        self.signal_default.add_css_class("caption")
-        line.append(self.signal_default)
-        use = Gtk.Button(label="Use for new chats", valign=Gtk.Align.CENTER,
-                         tooltip_text="New chats start with these two switches as they are now")
-        use.add_css_class("flat")
-        use.connect("clicked", lambda *_: (save_settings(signal=self.signal_run.get_active(),
-                                                         signal_links=self.signal_show.get_active()),
-                                           self.show_signal_default()))
-        line.append(use)
-        box.append(line)
-        page = Gtk.Button(label="Signal Page", halign=Gtk.Align.END)
-        page.add_css_class("flat")
-        page.connect("clicked", lambda *_: (pop.popdown(), self.show_panel(True, "refs")))
-        box.append(page)
         pop.set_child(box)
-        pop.connect("show", lambda *_: self.show_signal_default())
         return pop
 
-    def show_signal_default(self):
-        on, links = self.chat_signal(None)
-        self.signal_default.set_label("For this chat. New chats: " + ("links shown" if links else "links hidden") +
-                                      (", activated" if on else ", not activated"))
-
-    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with the
-    # defaults ("signal" and "signal_links" in settings; the dropdown's Use for new chats sets them)
+    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with
+    # its links shown and Signal not activated
     SIGNAL_CHATS = 500  # chats whose switches are kept (the most recently changed)
 
     def chat_signal(self, sid):
-        """A chat's Signal switches, (on, links): its own if it has some, else the defaults for new chats."""
+        """A chat's Signal switches, (on, links): its own if it has some, else a new chat's (not activated, links
+        shown)."""
         s = load_settings()
         kept = (s.get("signal_chats") or {}).get(sid) if sid else None
         if isinstance(kept, list) and len(kept) == 2:
             return bool(kept[0]), bool(kept[1])
-        return bool(s.get("signal")), s.get("signal_links") is not False
+        return False, True
 
     def keep_chat_signal(self, sid, on, links):
         chats = {k: v for k, v in (load_settings().get("signal_chats") or {}).items() if k != sid}
@@ -15052,8 +15029,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         save_settings(signal_chats=dict(list(chats.items())[-self.SIGNAL_CHATS:]))
 
     def apply_chat_signal(self):
-        """The chat shown changed: its switches (a new chat's: the defaults, or what you set before it had an id), and
-        Signal as they say."""
+        """The chat shown changed: its switches (a new chat's: links shown and not activated, or what you set before
+        it had an id), and Signal as they say."""
         on, links = self.chat_signal(self.session_id) if self.session_id else \
             (self.signal_pending or self.chat_signal(None))
         for sw, value, handler in ((self.signal_run, on, self.signal_run_handler),

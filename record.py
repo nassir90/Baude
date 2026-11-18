@@ -2881,7 +2881,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.title.add_css_class("diary-title")
         self.title.connect("activate", lambda *_: self._title_entered())
         self.title.connect("changed", lambda *_: self._title_typed())
-        title_keys = Gtk.EventControllerKey()
+        title_keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (before its text's IM)
         title_keys.connect("key-pressed", lambda _c, kv, _k, state: kv == Gdk.KEY_Escape and not state & (
             Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK
             | Gdk.ModifierType.SHIFT_MASK) and self._title_escaped())
@@ -3040,8 +3040,10 @@ class DiaryEditor(Gtk.Box, FindInText):
 
     def _title_escaped(self):
         """Escape in the title: what's typed in it let go, its own name back (in the list and on its tab too), and
-        on to its text, the caret where it was."""
+        on to its text, the caret where it was (the find bar, open, closed too: as Escape in the text)."""
         self.title.set_text(short_page(self.page))
+        if self.search_bar.get_search_mode():
+            FindInText.close_search(self)
         self.view.grab_focus()
         return True
 
@@ -5000,9 +5002,14 @@ class PagesList(Gtk.Box):
                 self.index.select_row(row)
 
     def shown_name(self, page):
-        """A page's name in the list: what's typed in its title as it's typed (typed), else its own."""
+        """A page's name in the list: what's typed in its title as it's typed (typed), while its page is open;
+        else its own (and what was typed let go: its page closed, deleted or moved before the name was kept)."""
         notebook, name = self.typing.get(page, (None, None))
-        return name if notebook is not None and notebook is self.notebook else short_page(page)
+        editor = self.win.tabs.get(("note", page)) if notebook is not None else None
+        if editor is None or getattr(editor, "notebook", None) is not notebook:
+            self.typing.pop(page, None)
+            return short_page(page)
+        return name if notebook is self.notebook else short_page(page)
 
     def typed(self, notebook, page, name):
         """A page's title typed in (DiaryEditor._title_typed): its row named so at once, where it is (it's sorted

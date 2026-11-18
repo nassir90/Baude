@@ -186,7 +186,12 @@ class ClaudeProc:
         self.send({"type": "control_response",
                    "response": {"subtype": "success", "request_id": request_id, "response": response}})
 
+    KILL_WAIT = 3  # s for a claude told to end (SIGTERM) to go, before it's killed outright: one stuck won't
+
     def kill(self):
         if self.p.poll() is None:
             self.p.terminate()
+            timer = threading.Timer(self.KILL_WAIT, lambda: self.p.poll() is None and self.p.kill())
+            timer.daemon = True
+            timer.start()
         self.close_stdin()

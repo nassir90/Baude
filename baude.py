@@ -12085,6 +12085,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.chunk_slots = None    # the places of its earlier chunks not drawn yet (make_chunk_slots)
         self.reverting = None      # a revert not sent yet: {turn, hidden, draft, asked} (revert_to)
         self.send_after_result = None  # (a revert made mid-turn: what's in the box sent once the turn's ended: reverted)
+        self.interrupting = None   # (proc, timer): an interrupt asked of it, its turn not over yet (interrupt)
         self.estimated_per = 0     # the px per item they're sized by (estimate_slots)
         self.history_refs = None   # its replies Signal's being given, a few at a time (queue_history_refs)
         self.history_path = None   # its transcript (subagents live in <it without .jsonl>/subagents/)
@@ -13004,6 +13005,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
         self.busy = busy
+        if not busy:
+            self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
         if not busy and self.proc is not None:
@@ -14239,10 +14242,43 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.fill_jobs.clear()
         self.fill_jobs.extend(kept)
 
+    INTERRUPT_WAIT = 5000  # ms for an interrupted turn to end, before its claude's stopped outright (stop_stuck)
+
     def interrupt(self):
-        if self.proc:
-            self.proc.control({"subtype": "interrupt"})
-            self.note("interrupt requested")
+        """The turn interrupted (Esc, the stop button): asked of its claude once (pressed again meanwhile: nothing
+        more); not over within INTERRUPT_WAIT, its claude's stopped (stop_stuck), so the chat's usable again."""
+        if not self.proc:
+            return
+        if self.interrupting is not None and self.interrupting[0] is self.proc:
+            return  # (asked already: stopped outright if it doesn't end soon)
+        self.drop_interrupting()
+        proc = self.proc
+        proc.control({"subtype": "interrupt"})
+        self.note("interrupt requested")
+        self.interrupting = (proc, GLib.timeout_add(self.INTERRUPT_WAIT, lambda: self.stop_stuck(proc)))
+
+    def drop_interrupting(self):
+        """An interrupt's wait (interrupt) let go of: its turn's over, or its claude's gone."""
+        it, self.interrupting = getattr(self, "interrupting", None), None
+        if it is not None:
+            GLib.source_remove(it[1])
+
+    def stop_stuck(self, proc):
+        """An interrupted turn not over in time (its claude still starting on a resume, stuck, or gone without a
+        word): its claude stopped, the turn shown over. A host's session's, there, as Stop does it (its next message
+        starts it again); this process's own, killed and started again on the conversation."""
+        self.interrupting = None
+        if proc is not self.proc or not self.busy:
+            return False
+        self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it")
+        self.cut_short()
+        if self.remote is not None:
+            self.remote.request({"op": "stop", "session": self.session_id})
+            self.blocks.clear()
+            self.set_busy(False)
+        else:
+            self.restart_proc(resume=True)
+        return False
 
     def model_said(self, value):
         """A model's name as a note says it: as the model picker lists it (Qwen3 4B)."""

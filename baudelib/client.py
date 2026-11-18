@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, wire
+from baudelib import claude, mesh, selfupdate, wire
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -39,6 +39,28 @@ def is_here(info):
         return False
     home = info.get("home")
     return not isinstance(home, str) or os.path.realpath(home) == os.path.realpath(os.path.expanduser("~"))
+
+
+APART_S = 3 * selfupdate.CHECK_S  # (how long a head and its host process run different code before it's said: an
+# update that one has picked up, and the other will in its next look at the checkout, isn't)
+
+
+def code_apart(info, started, root=selfupdate.HERE):
+    """(git: off the main loop) How a head whose code is commit started, from the checkout root, and this machine's
+    host process (info: as it says) run different code: None, the same (or nothing to tell by); "head", the head's
+    behind the host's; "host", the host's behind (its protocol, wire.VERSION, too); "both", both apart from what's
+    checked out; "elsewhere", the host's code is another checkout's."""
+    commit, old = info.get("commit"), (info.get("version") or 1) < wire.VERSION
+    if not commit or not started or commit == started:
+        return "host" if old else None
+    if isinstance(info.get("checkout"), str) and os.path.realpath(info["checkout"]) != os.path.realpath(root):
+        return "elsewhere"
+    if selfupdate.git(root, "merge-base", "--is-ancestor", started, commit, timeout=5) is not None:
+        return "head"
+    if selfupdate.git(root, "merge-base", "--is-ancestor", commit, started, timeout=5) is not None:
+        return "host"
+    head = selfupdate.git(root, "rev-parse", "HEAD", timeout=5)  # (neither after the other: a branch changed)
+    return "host" if head == started else "head" if head == commit and not old else "both"
 
 
 class Remote:

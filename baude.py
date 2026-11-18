@@ -121,6 +121,7 @@ import pointers  # noqa: E402  (the pointer's shape: Record's too)
 from livefeed import (  # noqa: E402
     LIVE_SECONDS, TURN_OPEN_SECONDS, external_state, read_appended, transcript_turn_open)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
@@ -7503,7 +7504,7 @@ def on_main(fn):
 
 _NETWORK = []
 _LOCAL_SERVER = {"wanted": None}
-_HOST_SAID = {}  # (check_host_version's: the host process it's said is older, by its pid)  # (local_server's: what waits for the server on this machine it's started)
+_HOST_SAID = {}  # (check_host_version's: the host process, by its pid and code, looked at or said to run other code)  # (local_server's: what waits for the server on this machine it's started)
 
 
 def network():
@@ -13545,7 +13546,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
                 return None, False
         if r is None or (r.info.get("version") or 1) < 2:
-            self.note("Daemon is older than client: restart it to ask a side question" if r is not None and r.mine else
+            self.note("Daemon is older than Baude: restart it to ask a side question" if r is not None and r.mine else
                       f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
         mode = "default" if model_program(self.model) == "codex" else "plan"
@@ -16887,32 +16888,65 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                               "puts it there")
 
     def check_host_version(self):
-        """This Mac's host process older than Baude (an update since it started: its protocol, wire.VERSION, behind):
-        said, once a host process, with Restart Daemon (restart_host)."""
-        r = local_host()
-        if r is None or (r.info.get("version") or 1) >= baudelib.wire.VERSION or \
-                _HOST_SAID.get("old") == r.info.get("pid"):
-            return
-        _HOST_SAID["old"] = r.info.get("pid")
-        t = Adw.Toast(title="Daemon is older than client", button_label="Restart Daemon", timeout=0)
-        t.connect("button-clicked", lambda *_: self.restart_host())
-        self.toasts.add_toast(t)
-
-    def restart_host(self, waited=0):
-        """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
-        there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
-        cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
-        its sessions resumes as it's next written to (the windows on them reattach as it's back)."""
+        """This Mac's host process on other code than Baude (an update one has picked up and the other hasn't; its
+        protocol, wire.VERSION, behind; or another checkout's): said once a host process, if it lasts APART_S (an
+        update the other picks up in its next look isn't), with the restart that puts them on the same code."""
         r = local_host()
         if r is None:
             return
+        key = (r.info.get("pid"), r.info.get("commit"), r.info.get("version"))
+        if _HOST_SAID.get("looked") == key:
+            return
+        _HOST_SAID["looked"] = key
+        info = dict(r.info)
+
+        def look():
+            apart = baudelib.client.code_apart(info, update.STARTED)
+            if apart is not None:
+                GLib.timeout_add_seconds(0 if apart == "elsewhere" else baudelib.client.APART_S,
+                                         lambda: self.say_host_apart(key) and False)
+        threading.Thread(target=look, daemon=True, name="code-apart").start()
+
+    def say_host_apart(self, key):
+        """(check_host_version's, once APART_S is up) Said, if it's still so: what's behind, and the restart for it.
+        An update waiting already (the sidebar's Update bar: Baude's, or the host process's) is left to that bar."""
+        r = local_host()
+        if r is None or (r.info.get("pid"), r.info.get("commit"), r.info.get("version")) != key or \
+                _HOST_SAID.get("said") == key or getattr(self, "let_go_done", False):
+            return
+        if (app := self.get_application()) is None:
+            return
+
+        def look():
+            apart = baudelib.client.code_apart(dict(r.info), update.STARTED)
+            GLib.idle_add(lambda: show(apart) and False)
+
+        def show(apart):
+            baude_waits = app.updater is not None and app.updater.ready
+            if apart == "both" and (baude_waits or r.info.get("update")):
+                apart = "host" if baude_waits else "head"
+            if apart is None or apart == "head" and baude_waits or apart == "host" and r.info.get("update"):
+                return
+            _HOST_SAID["said"] = key
+            self.toasts.add_toast(widgets.apart_toast(apart, "Baude", app.restart, self.restart_host))
+        threading.Thread(target=look, daemon=True, name="code-apart").start()
+
+    def restart_host(self, waited=0, then=None):
+        """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
+        there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
+        cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
+        its sessions resumes as it's next written to (the windows on them reattach as it's back). then: what's done
+        once it's gone, in place of starting it again (Baude restarted too: the new Baude starts it)."""
+        r = local_host()
+        if r is None:
+            return then() if then is not None else None
         busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
 
         def later(n):
             if not waited:
                 toast(self.sidebar, f"Restarting the daemon once {n} session"
                                     f"{'s finish' if n > 1 else ' finishes'} running a command")
-            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
+            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5, then) and False)
 
         def answered(reply):
             if reply.get("op") == "busy":
@@ -16922,6 +16956,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             def gone():  # (the old one gone: a new one, started as any is: local_server)
                 if r.state == "alive" and time.monotonic() < end:
                     return True
+                if then is not None:
+                    then()
+                    return False
                 self.local_server(lambda _r: toast(self.sidebar, "Daemon restarted"), quiet=True)
                 return False
             GLib.timeout_add(250, gone)

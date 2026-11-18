@@ -8983,3 +8983,18 @@ def _card_status(state):
     if state in ("running", "background"):
         return _status_icon(state)
     return None
+
+
+def apart_toast(apart, app, restart_app, restart_host):
+    """What's said of an app (Baude, Record) and this machine's host process on different code (baudelib.client's
+    code_apart: "head", the app behind; "host", the host process; "both"; "elsewhere", another checkout's), with the
+    restart that puts them on the same code: a toast that stays till it's closed."""
+    title, button, then = {
+        "head": (f"{app} is older than its daemon", f"Restart {app}", restart_app),
+        "host": (f"Daemon is older than {app}", "Restart Daemon", restart_host),
+        "both": (f"{app} and its daemon are out of date", "Restart Both", lambda: restart_host(then=restart_app)),
+        "elsewhere": ("Daemon runs another checkout's code", None, None)}[apart]
+    toast = Adw.Toast(title=title, timeout=0, **({"button_label": button} if button else {}))
+    if then is not None:
+        toast.connect("button-clicked", lambda *_: then())
+    return toast

@@ -1216,7 +1216,9 @@ def _(app):
     r = baude.local_host()
     r.info = {**r.info, "version": baude.baudelib.wire.VERSION - 1}  # (as one started before the update says)
     baude._HOST_SAID.clear()
+    baude.baudelib.client.APART_S = 0  # (said at once, not after an update's time to be picked up)
     win.check_host_version()
+    T.wait_for(lambda: baude._HOST_SAID.get("said"), "said")
     T.pump(0.5)
     return win
 

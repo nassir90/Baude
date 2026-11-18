@@ -390,6 +390,7 @@ class Server:
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
+        self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
@@ -501,6 +502,7 @@ class Server:
                            {"value": m["value"], "displayName": m.get("displayName") or m["value"]}
                            for m in self.models()],
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),
+                "checkout": selfupdate.HERE,  # (where its code is: a head here run from elsewhere is told, code_apart)
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
                 "init": self.me.get("init") or None, "commit": self.commit, "update": self.update,
@@ -766,6 +768,10 @@ class Server:
         if self.stopped.is_set():  # (going: nothing more started, nothing more sent to a claude it's stopping)
             return reply("error", error="the host process is stopping")
         if op == "hello":
+            head = msg.get("commit")  # (the head's code: one on other code than this, said in the log, once each)
+            if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
+                self.heads_apart.add(head)
+                self.log(f"a head on {head[:12]} connected; this is on {self.commit[:12]}")
             return reply("hello", server=self.info())
         if op == "subscribe":
             if not conn.subscribed:  # (a head's come: this machine's model providers looked at again, for it)

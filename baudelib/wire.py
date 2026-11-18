@@ -170,6 +170,7 @@ import time
 VERSION = 7  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found)
+HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word
@@ -321,7 +322,7 @@ def own_dir(path):
 def _hello(ch, timeout, what):
     """(channel, the server's info) past hello, or OSError: what didn't answer."""
     ch.sock.settimeout(timeout)
-    ch.send({"op": "hello", "client": "baude", "version": VERSION})
+    ch.send({"op": "hello", "client": "baude", "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()

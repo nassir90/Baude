@@ -81,7 +81,7 @@ import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
-from codeview import FindInText  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
+from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 
@@ -7121,9 +7121,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.add_action(launcher)
         self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
-        widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),  # (as Baude's: before the
-                                  ("<Control>f", lambda: self.kube.find() or self.schema.start_find() or  # text boxes'
-                                                         self.find_in_code())))  # Emacs Ctrl+B / Ctrl+F on macOS)
+        # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
+        # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
+        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or self.find_in_code()
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
         for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
                              (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
@@ -7132,8 +7134,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                              (widgets.NAV_KEYS["up"], lambda: self.go_up()),
                              (widgets.SETTINGS_KEY, lambda: Settings(self).present(self)),
                              (widgets.PALETTE_KEY, lambda: self.open_palette()),
-                             (" ".join(m + "f" for m in widgets.ZOOM_MODS[1:]),  # (⌘F; Ctrl+F: first_keys)
-                              lambda: self.kube.find() or self.schema.start_find() or self.find_in_code()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
                               lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
                              (widgets.zoom_keys("minus", "underscore", "KP_Subtract"),

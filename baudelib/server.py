@@ -1208,6 +1208,8 @@ class Server:
             # revert, which its claude makes)
             if sub == "get_settings":
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
+            if sub == "interrupt":  # (nothing here to stop: no result's coming, so a head waiting on one ends its turn)
+                return answer({"running": False})
             return answer({})
         try:
             proc = self.ensure_proc(s)

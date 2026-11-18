@@ -5303,7 +5303,8 @@ class Reader(Gtk.Box):
                                                 on_own=self._took_selection)
         self.selection.menu_at = self._passage_menu
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.zoom_tab)
-        self.stack.add_named(self.scroll, "chat")
+        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F: Window.find_in_code)
+        self.stack.add_named(self.chat_find.wrap(), "chat")
         self.append(self.stack)
         self.follow = livefeed.FollowEnd(self.scroll)  # (the newest in view, once it's read to, as in Baude's chat)
         self.follow.attach()
@@ -7271,7 +7272,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
         # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
-        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or self.find_in_code()
+        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or \
+            ((chat := widgets.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
         widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
         for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
@@ -8780,6 +8782,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if isinstance(page, DiaryEditor):
             page.open_search()
             return True
+        if isinstance(page, Reader):
+            return page.chat_find.open()
         return False
 
     def zoom_code(self, steps):

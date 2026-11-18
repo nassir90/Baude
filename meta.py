@@ -2161,10 +2161,13 @@ class MetaChat(Gtk.Box):
                             margin_start=12, margin_end=12)
         self.forms_open = {}  # (each form's id: {spec, form, widget (its card), slot (its place in its reply)})
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
+        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F in Meta: its bar over the
+        over.add_overlay(self.chat_find.marks)                              # conversation, its matches under the forms)
         over.add_overlay(self.pins)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
             self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_soon())
         self._pin_after, self._pin_waits = None, 0  # (the after-paint handler waiting to look again: _pin_soon)
+        talk.append(self.chat_find.bar)
         talk.append(over)
         self.append(talk)
         comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10)

@@ -11449,17 +11449,19 @@ def ref_place_items(win, ref, on_open=None):
     return items
 
 
-class SignalPage(Gtk.Stack):
+class SignalPage(widgets.ExpandStack):
     """The side panel's Signal page: the names this chat's replies mention, by kind, with how far
-    each lookup got; a name opens its card (locations, a commit's PRs, ...)."""
+    each lookup got; a name opens its card (locations, a commit's PRs, ...), sliding in; the reader's row opens its
+    chat out of the row, as a subagent's does (ExpandStack)."""
 
     ICONS = {"resolved": ("object-select-symbolic", "success"), "ambiguous": ("view-more-symbolic", None),
              "pending": ("content-loading-symbolic", "dim-label"), "not_found": ("dialog-question-symbolic", "dim-label"),
              "stale": ("dialog-warning-symbolic", "warning")}
 
     def __init__(self, win):
-        super().__init__(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, vexpand=True)
+        super().__init__(vexpand=True)
         self.win, self.current, self.soon, self.status_soon = win, None, None, None
+        self.reader_to_end = False  # (opened: at its chat's end once it's laid out)
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         bar = Gtk.Box(spacing=6)
         self.search = Gtk.SearchEntry(placeholder_text="Filter names", hexpand=True)
@@ -11520,7 +11522,8 @@ class SignalPage(Gtk.Stack):
         self.reader_row = Adw.ActionRow(activatable=True, title="Reader", subtitle_lines=2)
         self.reader_status = StatusSlot("done")
         self.reader_row.add_prefix(self.reader_status)
-        self.reader_row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        self.reader_chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        self.reader_row.add_suffix(self.reader_chevron)
         self.reader.append(self.reader_row)
         self.reader.connect("row-activated", lambda *_: self.show_reader_page())
         top.append(self.reader)
@@ -11530,6 +11533,7 @@ class SignalPage(Gtk.Stack):
         self.reader_box.add_css_class("zoomable")
         self.reader_scroll = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (its code unsquashed)
             child=self.reader_box, vexpand=True, margin_top=6, hscrollbar_policy=Gtk.PolicyType.NEVER)), start=False)
+        self.reader_scroll.get_vadjustment().connect("changed", self.reader_laid_out)
         self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
         self.empty = empty_label("")
         self.empty.set_wrap(True)
@@ -11537,7 +11541,7 @@ class SignalPage(Gtk.Stack):
         top.append(self.empty)
         self.groups = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         top.append(self.groups)
-        page = SidePanel._scrolled(top)  # (at its natural height: the reader's chat isn't squashed to a line or two)
+        page = self.list_scroll = SidePanel._scrolled(top)
         self.add_named(page, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
@@ -11561,14 +11565,16 @@ class SignalPage(Gtk.Stack):
                          margin_start=6)
         self.reader_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.reader_title.add_css_class("heading")
-        self.reader_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.reader_info = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2,
+                                     ellipsize=Pango.EllipsizeMode.END)  # (two lines, as its row's)
         self.reader_info.add_css_class("dim-label")
         self.reader_info.add_css_class("caption")
         titles.append(self.reader_title)
         titles.append(self.reader_info)
-        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names", valign=Gtk.Align.CENTER)
+        back = self.reader_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names",
+                                             valign=Gtk.Align.CENTER)
         back.add_css_class("flat")
-        back.connect("clicked", lambda *_: self.show_list())
+        back.connect("clicked", lambda *_: self.close_reader_page())
         head.append(self.reader_page_status)
         head.append(titles)
         head.append(back)
@@ -11577,11 +11583,48 @@ class SignalPage(Gtk.Stack):
         self.add_named(reading, "reader")
         self.rebuild()
 
+    # (its pages as a stack's: a name's card slides in; the reader's page opens out of its row: show_reader_page)
+    def add_named(self, child, name):
+        self.stack.add_named(child, name)
+
+    def get_visible_child_name(self):
+        return self.stack.get_visible_child_name()
+
+    def set_visible_child_name(self, name):
+        self.finish()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_visible_child_name(name)
+
+    def reader_parts(self):
+        """How the reader's row turns into its page's header (ExpandStack): its title, its line and its status each
+        into the header's, and its › into back (flipped: ‹)."""
+        labels = {cls: next((w for w in walk(self.reader_row) if isinstance(w, Gtk.Label) and w.has_css_class(cls)),
+                            None) for cls in ("title", "subtitle")}
+        pairs = [(labels["title"], self.reader_title), (labels["subtitle"], self.reader_info),
+                 (self.reader_status, self.reader_page_status), (self.reader_chevron, self.reader_back.get_child(), True)]
+        return {"pairs": [pair for pair in pairs if pair[0] is not None], "within": self.list_scroll,
+                "across": self.reader}
+
     def show_reader_page(self):
-        """The reader's chat on its own page, at its end."""
-        self.set_visible_child_name("reader")
-        adj = self.reader_scroll.get_vadjustment()
-        GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) and False)
+        """The reader's chat on its own page, opening out of its row, at its end."""
+        self.reader_to_end = True
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        if self.get_visible_child_name() == "list":
+            self.open("reader", self.reader_row, self.reader_scroll, **self.reader_parts())
+        else:
+            self.stack.set_visible_child_name("reader")
+        self.reader_laid_out(self.reader_scroll.get_vadjustment())
+
+    def close_reader_page(self):
+        """Back to the names, the reader's page closing into its row."""
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.close("list", self.reader_row, self.reader_scroll, **self.reader_parts())
+
+    def reader_laid_out(self, adj):
+        """The reader's chat laid out (again): just opened, at its end."""
+        if self.reader_to_end and adj.get_upper() > adj.get_page_size() > 0:
+            self.reader_to_end = False
+            adj.set_value(adj.get_upper() - adj.get_page_size())
 
     def status_changed(self):
         """What Signal is doing changed: update the status, the log and the skipped names (once a frame)."""
@@ -11594,16 +11637,15 @@ class SignalPage(Gtk.Stack):
         for w in (self.spinner, self.now):
             w.set_visible(ref is not None)
         self.reader.set_visible(ref is not None and bool(ref.reader_chat))
+        if (ref is None or not ref.reader_chat) and self.get_visible_child_name() == "reader":
+            self.show_list()  # (another folder's, whose reader hasn't read: nothing to show)
         if ref is None:
-            if self.get_visible_child_name() == "reader":
-                self.show_list()
             return False
         busy = ref_busy(ref) and self.win in ref.runners  # (this chat's: another window's chat may run it)
         self.spinner.set_visible(busy)
         self.now.set_label(ref.status_text())
-        reading = busy and ref.agent is not None and ref.agent.busy()
         for slot in (self.reader_status, self.reader_page_status):
-            slot.set_state("running" if reading else "done")
+            slot.set_state(self.reader_state(ref, busy))
         line = self.reader_line_text(ref)
         self.reader_row.set_subtitle(html.escape(line))
         self.reader_info.set_text(line)
@@ -11645,6 +11687,19 @@ class SignalPage(Gtk.Stack):
             discard(first)
         if at_end:
             GLib.idle_add(lambda: adj.set_value(adj.get_upper() - adj.get_page_size()) and False)
+
+    @staticmethod
+    def reader_state(ref, busy):
+        """The reader's mark, as a subagent's is: reading (a spinner); its last call refused (✗); stopped partway, by
+        Activate Signal or its spending cap, with replies left to read (stopped); else done (✓)."""
+        ai, last = ref.agent, (ref.reader_chat[-1][1] if ref.reader_chat else None)
+        if busy and ai is not None and ai.busy():
+            return "running"
+        if last == "refused":
+            return "error"
+        if last not in ("done", None) or ref.waiting or (ai is not None and ai.cost >= ai.budget and ai.part):
+            return "interrupted"
+        return "done"
 
     @staticmethod
     def reader_line_text(ref):

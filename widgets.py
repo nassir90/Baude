@@ -6092,6 +6092,308 @@ class ChatSelection:
         return True
 
 
+def find_tints():
+    """The (red, green, blue, alpha) of a match found and of the current one, for the light or dark theme: a code tab's
+    and a page's (codeview.FindInText), a chat's (ChatFind)."""
+    return ((255, 214, 102, 0.28), (255, 170, 40, 0.75)) if Adw.StyleManager.get_default().get_dark() else \
+        ((255, 200, 0, 0.35), (255, 150, 0, 0.70))
+
+
+class FindMarks(Gtk.Widget):
+    """A ChatFind's matches, drawn over the chat's scroller."""
+
+    def __init__(self, find):
+        super().__init__(can_target=False, hexpand=True, vexpand=True, overflow=Gtk.Overflow.HIDDEN)
+        self.find = find
+
+    def do_snapshot(self, snapshot):
+        self.find.draw(snapshot, self)
+
+
+class ChatFind:
+    """⌘F / Ctrl+F in a chat (Baude's, Meta's, a side question's, a subagent's, Record's Read): its find bar at the top
+    of what's read (a bar over the chat, the text moved down for it, as a code tab's), every match in its text shaded,
+    the current one more (find_tints, as a code tab's), "3 of 12" beside the box, Enter / ⌘G for the next, Shift+Enter /
+    ⇧⌘G for the one before, Esc or × to close, the focus back where it was. A chat's text is many labels
+    (MarkdownView): each label's matches are found, in order, and drawn over them; a part of a long chat set aside far
+    from the view (BaudeWindow.cull_chunks) is in what's found, a closed tool card's or revealer's isn't. The current
+    one's brought into view, in a code block's own scroller too. What's selected (one line) is what it looks for. A reply
+    still coming in: its matches found again as Enter's pressed, from where the current one was.
+
+    root: what holds the labels, or a function giving it (a subagent's, whichever's shown). scroller: what they're read
+    in (or, its own not scrolling, as a side question's in its row, the one it's in). pane: what the focus is in when
+    this is the one ⌘F is for (the chat and its box: for_focus)."""
+
+    MATCH_LIMIT = 2000
+    live = weakref.WeakSet()  # (each made: for_focus)
+
+    def __init__(self, root, scroller, pane=None):
+        self._root, self.scroller, self.pane = root, scroller, pane or scroller
+        self.matches, self.index, self.text, self.back_to = [], -1, "", None
+        self.by_label, self.texts = {}, {}  # (each label's matches' places in matches, and its text as it was found)
+        self.marks = FindMarks(self)
+        self.entry = Gtk.SearchEntry(placeholder_text="Find in chat", hexpand=True)
+        self.count = Gtk.Label(width_chars=9, xalign=1, css_classes=["dim-label", "caption"])
+        bar = Gtk.Box(spacing=4)
+        bar.append(self.entry)
+        bar.append(self.count)
+        for icon, tip, step in (("go-up-symbolic", "Previous match (Shift+Enter)", -1),
+                                ("go-down-symbolic", "Next match (Enter)", 1)):
+            btn = Gtk.Button(icon_name=icon, tooltip_text=tip, css_classes=["flat"])
+            btn.connect("clicked", lambda *_, step=step: self.step(step))
+            bar.append(btn)
+        self.bar = FindBar(child=bar, show_close_button=True)
+        self.bar.add_css_class("chat-find")
+        self.bar.connect_entry(self.entry)
+        self.bar.connect("notify::search-mode-enabled", lambda *_: self.bar.get_search_mode() or self._closed())
+        self.entry.connect("stop-search", lambda *_: self.bar.set_search_mode(False))
+        self.entry.connect("search-changed", lambda e: self.find(e.get_text()))
+        self.entry.connect("activate", lambda *_: self.step(1))
+        self.entry.connect("next-match", lambda *_: self.step(1))
+        self.entry.connect("previous-match", lambda *_: self.step(-1))
+        keys = Gtk.EventControllerKey()  # (Shift+Enter: the match before)
+        keys.connect("key-pressed", lambda _c, kv, _k, state: (self.step(-1), True)[1]
+                     if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.SHIFT_MASK else False)
+        self.entry.add_controller(keys)
+        marks = weakref.ref(self.marks)  # (the theme's for the app's life: not keeping this one)
+        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: (m := marks()) is not None and m.queue_draw())
+        self.heard = []  # (the adjustments a scroll's heard on, to draw again: the chat's, and the one it's in: open)
+        self._hear(scroller)
+        ChatFind.live.add(self)
+
+    def _hear(self, scroller):
+        adj = scroller.get_vadjustment()
+        if not any(a is adj for a in self.heard):
+            self.heard.append(adj)
+            adj.connect("value-changed", lambda *_: self.matches and self.marks.queue_draw())
+
+    def wrap(self):
+        """The bar over the scroller, the shading laid over that, for its pane to show in the scroller's place."""
+        over = Gtk.Overlay(child=self.scroller, vexpand=True)
+        over.add_overlay(self.marks)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(self.bar)
+        box.append(over)
+        return box
+
+    def root(self):
+        return self._root() if callable(self._root) else self._root
+
+    def scrolling(self):
+        """What scrolls the chat: its scroller, or, that one never scrolling up or down, the one it's in."""
+        scroller = self.scroller
+        while scroller.get_policy()[1] == Gtk.PolicyType.NEVER and \
+                (outer := scroller.get_parent() and scroller.get_parent().get_ancestor(Gtk.ScrolledWindow)) is not None:
+            scroller = outer
+        return scroller
+
+    @classmethod
+    def for_focus(cls, window):
+        """The chat's find of window's that the focus is in (its pane), or None."""
+        focus = window.get_focus()
+        if focus is None:
+            return None
+        for find in cls.live:
+            if find.pane.get_mapped() and (focus is find.pane or focus.is_ancestor(find.pane)):
+                return find
+        return None
+
+    def open(self):
+        """The bar shown, what's selected in the chat (a line of it) in it, and the focus in it."""
+        window = self.pane.get_root()
+        focus = window.get_focus() if isinstance(window, Gtk.Window) else None
+        if focus is not None and not focus.is_ancestor(self.bar):
+            self.back_to = weakref.ref(focus)
+        self._hear(self.scrolling())  # (a side question's in its row: the list's)
+        picked = self._picked()
+        if picked:
+            self.entry.set_text(picked)
+        self.bar.set_search_mode(True)
+        self.entry.grab_focus()
+        self.entry.select_region(0, -1)
+        if self.entry.get_text() and not self.matches:
+            self.find(self.entry.get_text())
+        return True
+
+    def refresh(self):
+        """What's shown changed under it (another subagent's): found again, if the bar's open."""
+        if self.bar.get_search_mode():
+            self.find(self.entry.get_text())
+
+    def _picked(self):
+        for w in self._labels():
+            ok, a, b = w.get_selection_bounds()
+            if ok and b > a and "\n" not in (text := w.get_text()[a:b]):
+                return text
+        return None
+
+    def close(self):
+        self.bar.set_search_mode(False)
+
+    def _closed(self):
+        """The bar closed (Esc, ×, close): the matches gone, and the focus, if it was in the bar, back where it was
+        (a label's selection as it was: GTK selects all of one given the focus)."""
+        self.matches, self.index, self.text, self.by_label, self.texts = [], -1, "", {}, {}
+        self.count.set_label("")
+        self.marks.queue_draw()
+        window = self.bar.get_root()
+        focus = window.get_focus() if isinstance(window, Gtk.Window) else None
+        back = self.back_to() if self.back_to is not None else None
+        if back is None or not back.get_mapped() or (focus is not None and not focus.is_ancestor(self.bar)):
+            return
+        if isinstance(back, Gtk.Label):
+            ok, a, b = back.get_selection_bounds()
+            back.grab_focus()
+            back.select_region(a, b) if ok else back.select_region(0, 0)
+        else:
+            focus_shown(back)
+
+    def _labels(self):
+        """The chat's text, in order: its selectable labels shown, or set aside (cull_chunks), not in what's hidden
+        (a closed revealer, a closed expander's child)."""
+        out = []
+
+        def visit(w):
+            if not w.get_visible():
+                return
+            if isinstance(w, Gtk.Label):
+                if w.get_selectable():
+                    out.append(w)
+                return
+            if isinstance(w, Gtk.Revealer) and not w.get_child_revealed():
+                return
+            closed = w.get_child() if isinstance(w, Gtk.Expander) and not w.get_expanded() else None
+            child = w.get_first_child()
+            while child is not None:
+                if child is not closed:
+                    visit(child)
+                child = child.get_next_sibling()
+
+        if (root := self.root()) is not None:
+            visit(root)
+        return out
+
+    def find(self, text, after=None):
+        """Every match of text in the chat's labels (case ignored), in order; the current one the first at or below
+        after (a height in what's scrolled), else the first in view, else the first."""
+        self.text, self.matches, self.index, self.by_label, self.texts = text, [], -1, {}, {}
+        self.marks.queue_draw()
+        if not text:
+            self.count.set_label("")
+            return
+        pattern = re.compile(re.escape(text), re.IGNORECASE)
+        for label in self._labels():
+            said = label.get_text()
+            for m in pattern.finditer(said):
+                if m.end() > m.start() and len(self.matches) < self.MATCH_LIMIT:
+                    self.by_label.setdefault(label, []).append(len(self.matches))
+                    self.matches.append((label, m.start(), m.end()))
+            if label in self.by_label:
+                self.texts[label] = said
+            if len(self.matches) >= self.MATCH_LIMIT:
+                break
+        if not self.matches:
+            self.count.set_label("No matches")
+            return
+        if after is None:
+            after = self.scrolling().get_vadjustment().get_value()
+        self.show(self._first_below(after))
+
+    def _first_below(self, y):
+        """The first match whose label reaches below y (in what's scrolled), else the first."""
+        content = self._content(self.scrolling())
+        for label, idxs in self.by_label.items():
+            ok, b = label.compute_bounds(content) if content is not None else (False, None)
+            if ok and b.get_y() + b.get_height() > y:
+                for i in idxs:
+                    if (r := self._rect(i, content)) is not None and r.get_y() + r.get_height() > y:
+                        return i
+        return 0
+
+    def _stale(self):
+        root = self.root()
+        return any(root is None or not label.is_ancestor(root) or label.get_text() != said
+                   for label, said in self.texts.items())
+
+    def step(self, by):
+        """The next match (by 1) or the one before (-1): found again first, from where the current one was, if the
+        chat's changed under them."""
+        if self.matches and self._stale():
+            r = self._rect(self.index, self._content(self.scrolling())) if self.index >= 0 else None
+            was = r.get_y() if r is not None else None
+            self.find(self.text, after=None if was is None else was + (1 if by > 0 else 0))
+            if by > 0 or not self.matches:
+                return
+        if not self.matches:
+            if self.entry.get_text():
+                self.find(self.entry.get_text())
+            return
+        self.show((self.index + by) % len(self.matches))
+
+    def show(self, i):
+        """The i'th match the current one, brought into view: in its code block's scroller, then in the chat's."""
+        self.index = i
+        more = "+" if len(self.matches) >= self.MATCH_LIMIT else ""
+        self.count.set_label(f"{i + 1} of {len(self.matches)}{more}")
+        self.marks.queue_draw()
+        label = self.matches[i][0]
+        root = self.root()
+        inner = inner_scroller(label, root) if root is not None else None
+        if inner is not None:
+            self._bring(inner, i, sideways=True)
+        self._bring(self.scrolling(), i)
+
+    def _bring(self, scroller, i, sideways=False):
+        r = self._rect(i, self._content(scroller), last=True)
+        if r is None:
+            return
+        top, bottom, x0, x1 = r
+        adj = scroller.get_vadjustment()
+        if top < adj.get_value() or bottom > adj.get_value() + adj.get_page_size():  # (else a third of the way down)
+            adj.set_value(max(0, top - adj.get_page_size() / 3))
+        if sideways and scroller.get_policy()[0] != Gtk.PolicyType.NEVER:
+            h = scroller.get_hadjustment()
+            if x0 < h.get_value() or x1 > h.get_value() + h.get_page_size():
+                h.set_value(max(0, x0 - h.get_page_size() / 3))
+
+    @staticmethod
+    def _content(scroller):
+        child = scroller.get_child()
+        return child.get_child() if isinstance(child, Gtk.Viewport) else child
+
+    def _rect(self, i, content, last=False):
+        """Where the i'th match is in content (what a scroller scrolls): its first line's rectangle; last: (top, bottom,
+        left, right) of all its lines."""
+        label, start, end = self.matches[i]
+        rects = passage_rects(label, start, end, content) if content is not None else []
+        if not rects:
+            return None
+        if last:
+            return (rects[0].get_y(), rects[-1].get_y() + rects[-1].get_height(),
+                    min(r.get_x() for r in rects), max(r.get_x() + r.get_width() for r in rects))
+        return rects[0]
+
+    def draw(self, snapshot, target):
+        """The matches in view shaded: each label looked at once, not each match."""
+        if not self.matches:
+            return
+        height = target.get_height()
+        match, current = (Gdk.RGBA() for _ in range(2))
+        for rgba, (r, g, b, a) in zip((match, current), find_tints()):
+            rgba.red, rgba.green, rgba.blue, rgba.alpha = r / 255, g / 255, b / 255, a
+        root, origin = self.root(), Graphene.Point().init(0, 0)
+        for label, idxs in self.by_label.items():
+            if not label.get_mapped() or label.get_text() != self.texts[label]:
+                continue
+            ok, at = label.compute_point(target, origin)
+            if not ok or at.y > height or at.y + label.get_height() < 0:
+                continue  # (off the view)
+            for i in idxs:
+                _label, start, end = self.matches[i]
+                shade_passage(snapshot, current if i == self.index else match, label,
+                              passage_rects(label, start, end, target), target, root)
+
+
 class MarkdownView(Gtk.Box):
     """Markdown as widgets, one per block. While a reply streams in, only what changed is
     touched: finished blocks keep their widgets, the one still growing is updated in place,

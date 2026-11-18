@@ -7218,6 +7218,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .composer-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
+.file-thumb { border-radius: 3px; }
 .attach-chip.image { background: none; padding: 0; }
 .codeblock { background: @baude_raised; border-radius: 6px; }
 .kube-error-fix { background: @baude_raised; border-radius: 6px; padding: 2px 2px 2px 10px; }

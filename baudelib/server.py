@@ -1748,7 +1748,7 @@ class Server:
             folder = lookup.Folder.for_folder(real)
             folder.catalogue_soon()
             first = self.catalogue_asked.setdefault(folder.root, time.monotonic())
-        lookup.GITHUB.look(tops=[folder.root])
+        lookup.GITHUB.look([folder.root])
 
         def busy():
             github = lookup.gh_path() is not None and lookup.GITHUB.listed(folder.root) is lookup.GITHUB.NOTHING and \

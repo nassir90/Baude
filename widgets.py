@@ -9183,7 +9183,7 @@ def window_shown(win):
 
 
 def watch_github(win, folders, changed=None):
-    """While win's shown: GitHub's lists of the folders in use (folders(win): (attached, tops), lookup.GitHub.look)
+    """While win's shown: GitHub's lists of the folders in use (folders(win): a list, lookup.GitHub.look)
     looked at when it's time, or the folders are others, and once they've changed, what's on show drawn afresh: ⌘K if
     it's open and its first row is what's picked (changed(win), the rest). Where the pull requests of those folders'
     repositories stand (lookup.PULLS, once something's shown them) likewise. folders and changed are plain functions,
@@ -9200,8 +9200,8 @@ def watch_github(win, folders, changed=None):
         now, in_use = time.monotonic(), folders(win)
         if now - looked[0] >= lookup.GITHUB_LOOK_S or in_use != asked[0]:
             looked[0], asked[0] = now, in_use
-            lookup.GITHUB.look(*in_use)
-        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in (*in_use[0], *in_use[1]))
+            lookup.GITHUB.look(in_use)
+        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in in_use)
         if seen[0] != lookup.GITHUB.generation or pulls[0] != lookup.PULLS.generation:
             seen[0], pulls[0] = lookup.GITHUB.generation, lookup.PULLS.generation
             dialog = win.get_visible_dialog()

@@ -3061,7 +3061,7 @@ class ComposerMarkdown:
     headings at the chat's sizes, bold/italic/inline code, shaded code blocks. Markdown
     symbols (#, **, `) are hidden except on the line being edited. Bullets are stored as
     "•" while editing and turned back into "-" by to_markdown() when the message is sent.
-    Also continues lists on Shift+Enter."""
+    Also continues lists on Enter."""
 
     def __init__(self, view):
         self.view, self.buf = view, view.get_buffer()
@@ -3144,7 +3144,7 @@ class ComposerMarkdown:
         return block is not None, bool(block and block[2])
 
     def newline(self):
-        """Enter/Shift+Enter handling. In a code block: a plain new line, and an unclosed block
+        """Enter's handling (a box's, not sending). In a code block: a plain new line, and an unclosed block
         gets its closing fence, so the new line is never the (unstylable) last line.
         On a list item: the next item. Returns False to let the TextView insert a newline."""
         block = self._block_here()
@@ -3274,7 +3274,7 @@ class ComposerMarkdown:
         return False
 
     def continue_list(self):
-        """Shift+Enter on a list item starts the next item (or ends the list if this one is
+        """Enter on a list item starts the next item (or ends the list if this one is
         empty). Returns False when the cursor isn't on a list item."""
         buf = self.buf
         cur = buf.get_iter_at_mark(buf.get_insert())
@@ -3295,6 +3295,22 @@ class ComposerMarkdown:
         return True
 
 
+SEND_KEY = "⌘Enter" if sys.platform == "darwin" else "Ctrl+Enter"  # (what sends from a box: Enter is a new line)
+
+
+def sends(state):
+    """Whether Enter with these modifiers sends what's written: Ctrl+Enter, or ⌘Enter on a Mac too. Plain Enter is a
+    new line (a list's next item); Shift+Enter a plain line break (newline_key)."""
+    return bool(state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)) if sys.platform == "darwin" \
+        else bool(state & Gdk.ModifierType.CONTROL_MASK)
+
+
+def newline_key(markdown, state):
+    """Enter not sending, in a box (ComposerMarkdown): Shift+Enter a plain line break (False: the TextView's own),
+    inside a list item too, as Record's pages have it; Enter a new line, a list's next item."""
+    return False if state & Gdk.ModifierType.SHIFT_MASK else markdown.newline()
+
+
 class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
     written: ComposerMarkdown) in a card, at least two lines tall and scrolling past nine, with its buttons in its
@@ -3302,7 +3318,7 @@ class Composer(Gtk.Overlay):
     any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
     as it needs (Record's quote). Its owner connects the send button and the keys."""
 
-    def __init__(self, buttons=(), send_tip="Send (Enter)\nNew line: Shift+Enter"):
+    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter"):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
         self.input.add_css_class("zoomable")

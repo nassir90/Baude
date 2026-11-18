@@ -66,7 +66,8 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        all again)
     delete {session}                                -> deleted {session, trashed: [paths]}: its claude stopped and
                                                        waited for, its transcript and the folder beside it (its
-                                                       subagents'), and pi's own copy of it, moved to the trash,
+                                                       subagents'), pi's own copy of it, and a Bot's folder (its
+                                                       memory, its picture), moved to the trash,
                                                        where they can be got back, as Baude's Move to Trash does
                                                        with a chat of its own; then it's gone from the list and from
                                                        what the server keeps. One whose files can't be moved stays:
@@ -87,6 +88,17 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        there's more, past limit; those it didn't reach aren't listed)
     rename {session, title}                         -> renamed {session} (claude renames it, if it's running; else
                                                        the server does as claude would)
+    bot {session, bot}                              -> bot_set {session}: (version 8) the session made a Bot, bot
+                                                       {name, picture?} (picture: a PNG, base64; "" to drop it; left
+                                                       out, kept), its name or picture changed; bot null, a chat
+                                                       again, its memory and picture kept. Its agent's told who it
+                                                       is and what its memory says from its next start (one running
+                                                       is started again with the next message, after its turn)
+    bot_picture {session}                           -> bot_picture {session, picture}: a Bot's picture (base64), or
+                                                       null for none (version 8)
+    memory {session, text?}                         -> memory {session, text, path, mtime}: a Bot's memory (the file
+                                                       its agent keeps it in, on the host), after writing text if
+                                                       it's given (version 8)
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
     catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
                                                        its sessions' folders, made there (lookup.items: its files,
@@ -123,7 +135,7 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut}: its id a UUID the server made as it started it (claude's --session-id;
+subagents, asks, cli_id, commands, cut, bot}: its id a UUID the server made as it started it (claude's --session-id;
 what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
@@ -136,7 +148,8 @@ too, from the call to its result (one waiting on its permission ask isn't runnin
 but those in a subagent running in the background), and its background tasks but subagents (a Bash run in the
 background: background true) from their start to their notification; none once its claude's gone. cut: when (epoch
 seconds) the host process stopped its claude at a turn or asking (shutting down, a quit, a restart; not a turn that
-ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input).
+ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input). bot:
+a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8).
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.

@@ -195,6 +195,7 @@ class Session:
         self.deleting = self.deleted = False  # (Server.delete's: nothing more taken for it; nothing more kept of it)
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
+        self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
         # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
         # subagents' too: parent, the call they're in); its background tasks, by task_id. Not listed, its subagents:
@@ -319,6 +320,8 @@ class Session:
 
 
 BOT_PICTURE_MAX = 2 << 20  # (bytes: a Bot's picture, as sent)
+BOT_MEMORY_TOLD = 32 << 10  # (bytes of a Bot's memory put in what its agent's told: an argument, of 128 KiB at most on
+# Linux; the rest it reads in the file)
 
 
 def bot_dir(state_dir, sid):
@@ -327,13 +330,20 @@ def bot_dir(state_dir, sid):
 
 
 def bot_system(name, memory_path, memory):
-    """What a Bot's agent is told at each start, after its harness's own instructions: who it is, and its memory."""
+    """What a Bot's agent is told at each start, after its harness's own instructions: who it is, and its memory (its
+    first BOT_MEMORY_TOLD bytes, cut at a line's end; the rest it's told is in the file)."""
+    told, rest = memory.strip(), ""
+    if len(told.encode()) > BOT_MEMORY_TOLD:
+        cut = told.encode()[:BOT_MEMORY_TOLD].decode(errors="ignore")
+        told = cut[:cut.rfind("\n")] if "\n" in cut else cut
+        rest = (f"\n\nThat's the first {len(told.encode()) >> 10} KB of your memory: the rest is in the file. Read "
+                "it before you rely on what's there, and make the memory shorter.")
     return (f"You are {name}, a Bot: a chat the user keeps coming back to, with a name and a memory that last.\n"
             f"Your memory is the Markdown file {memory_path}. It is yours to keep: read it, and edit it with your "
             "file tools when you learn something worth keeping (who the user is, what they want, how they like to "
             "work, what's in progress), and take out what's no longer true. Keep it short and current; the user can "
             "read and edit it too.\n\n"
-            + ("Your memory as this run starts:\n<memory>\n" + memory.strip() + "\n</memory>" if memory.strip()
+            + ("Your memory as this run starts:\n<memory>\n" + told + "\n</memory>" + rest if told
                else "Your memory is empty so far."))
 
 
@@ -567,9 +577,10 @@ class Server:
     def delete(self, s, reply):
         """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,
         as what it writes as it ends is its transcript's; then its transcript (claude's, or the one kept here), the
-        folder claude keeps beside it (its subagents'), and pi's own copy of it, moved to the trash, where they can be
-        got back, as Baude's Move to Trash does with a chat of its own; only then is it no longer listed or kept, and
-        those attached to it told (deleted). One whose files can't be moved stays, and the error says why."""
+        folder claude keeps beside it (its subagents'), pi's own copy of it and a Bot's folder, moved to the trash,
+        where they can be got back, as Baude's Move to Trash does with a chat of its own; only then is it no longer
+        listed or kept, and those attached to it told (deleted). One whose files can't be moved stays, and the error
+        says why."""
         with self.lock:
             proc = s.proc
             if proc is not None:
@@ -588,7 +599,8 @@ class Server:
             path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
             program = models.program(s.meta.get("model"))["name"]
             names = {s.meta.get("cli_id") or s.id, s.id}
-        paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None]
+        paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None,
+                 bot_dir(self.state_dir, s.id)]  # (a Bot's, or a chat's that was one: its memory and its picture)
         pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
         if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)
             paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(i in n for i in names)]
@@ -1009,8 +1021,31 @@ class Server:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
+        if getattr(s, "proc", None) is not None:  # (told who it is anew: started again with its next message)
+            if s.busy:
+                s.renew = True
+            else:
+                self.restart_agent(s)
         self.changed()
         return s.listing()
+
+    @staticmethod
+    def restart_agent(s):
+        """(under the lock) A session's agent started again with its next message, as set_cwd's is: what it's told
+        at its start changed. Not at a turn (its end's waited for: from_claude)."""
+        s.renew = False
+        s.proc.stopping = s.proc.restarting = True
+        s.proc.close_stdin()
+
+    def edits_memory(self, s, request):
+        """Is what a Bot's agent asks to do an edit of a file in its own folder (its memory's)?"""
+        path = (request.get("input") or {}).get("file_path")
+        if not s.meta.get("bot") or request.get("tool_name") not in ("Edit", "MultiEdit", "Write") or \
+                not isinstance(path, str) or not path:
+            return False
+        folder = os.path.realpath(bot_dir(self.state_dir, s.id))
+        path = os.path.realpath(os.path.join(s.meta.get("cwd") or "/", os.path.expanduser(path)))
+        return path.startswith(folder + os.sep)
 
     def bot_picture(self, s):
         pic = os.path.join(bot_dir(self.state_dir, s.id), "picture")
@@ -1239,8 +1274,15 @@ class Server:
                 extra[at] = extra[at] + "\n\n" + told
             else:
                 extra += ["--append-system-prompt", told]
-            if run["program"] == "claude":  # (its memory's folder its to edit, as the chat's own is)
-                extra += ["--add-dir", os.path.dirname(mem["path"])]
+            if run["program"] == "claude":  # (its memory's folder its to edit, as the chat's own is, without asking)
+                folder = os.path.dirname(mem["path"])
+                extra += ["--add-dir", folder]
+                rules = [f"{tool}(/{folder}/**)" for tool in ("Edit", "Write")]  # (//: a path from the root)
+                if "--allowedTools" in extra:  # (one: the chat's own allowed_tools with them)
+                    at = extra.index("--allowedTools") + 1
+                    extra[at:at] = rules
+                else:
+                    extra += ["--allowedTools", *rules]
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
@@ -1433,6 +1475,10 @@ class Server:
                     proc.respond(msg.get("request_id"), {"behavior": "allow",  # (always allowed, a head said:
                                                          "updatedInput": request.get("input") or {}})  # whoever's here)
                     return
+                if self.edits_memory(s, request):  # (a Bot's memory is its own to keep: pi's and others' too)
+                    proc.respond(msg.get("request_id"), {"behavior": "allow",
+                                                         "updatedInput": request.get("input") or {}})
+                    return
                 s.asks[msg.get("request_id")] = msg
                 self.cutting.discard(s.id)  # (asking as it stops: nobody can answer, so it stays cut, however it ends)
                 if s.meta.get("ask_timeout"):
@@ -1479,6 +1525,8 @@ class Server:
                 self.cutting.discard(s.id)  # (it ended as it was stopped: not cut after all)
                 s.meta.pop("cut", None)
                 self.save(s)
+            if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
+                self.restart_agent(s)
             if kind == "result":
                 for message, said in s.queued:
                     self.keep(s, "user", message, said)

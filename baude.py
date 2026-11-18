@@ -7492,6 +7492,14 @@ def own_writes(proc, exiting=False):
             w.own_mtimes[proc.path] = max(mtime, time.time() + 2) if exiting else mtime
 
 
+def turn_said(msg):
+    """A turn's result (its stream-json result message), for a notification: what it said last, or that it ended."""
+    said = (msg.get("result") or "").strip()
+    if msg.get("is_error"):
+        return f"Ended with an error: {said or msg.get('subtype') or 'unknown'}"
+    return said or "Finished"
+
+
 def background_proc(session_id):
     """The claude a Baude window keeps at a turn for a chat left mid-turn (BaudeWindow.detach_proc), if any."""
     app = Gio.Application.get_default()
@@ -12198,6 +12206,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
+        group.add(widgets.notifications_row())  # (Record's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
         page.add(group)
@@ -12663,6 +12672,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.signal_show.set_active(links)
         self.set_signal(save=False)
         self.connect("notify::is-active", lambda *_: self.is_active() and self.links_on_focus())
+        self.connect("notify::is-active", lambda *_: self.is_active() and self.seen_chat())
         widgets.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
         self.signal_run_handler = self.signal_run.connect("notify::active", lambda sw, _p: self.set_signal(on=sw.get_active()))
         self.signal_show_handler = self.signal_show.connect("notify::active",
@@ -14076,8 +14086,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             else:
                 proc.asks[msg["request_id"]] = msg
                 self.sidebar.restate()
+                self.tell_desktop(proc.key, f"Waiting for your answer: {req.get('tool_name') or 'a tool'}")
         elif t == "result":
             self.let_go_background(proc)
+            self.tell_desktop(proc.key, turn_said(msg))
         return False
 
     def let_go_background(self, proc):
@@ -15638,6 +15650,34 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             view.relink()
         self.panel.signal_page.changed()
         self.on_ref_status()
+
+    def tell_desktop(self, session_id, body, title=None):
+        """A turn's end, or a question it asks, in a chat you aren't looking at (this window not the one you're in, or
+        another chat open in it: one left mid-turn), as a desktop notification (widgets.desktop_notify): a click on it
+        brings this window up with that chat open. The sidebar's dot says it too."""
+        here = session_id is not None and session_id == self.session_id
+        if here and self.is_active():
+            return
+        if title is None:
+            title = self.title_label.get_text() if here else \
+                ((find_session(session_id) if session_id and not session_id.startswith("new-") else None)
+                 or {}).get("title")
+        me = weakref.ref(self)
+
+        def clicked():
+            if (win := me()) is None:
+                return
+            win.present()
+            win.show_chat()
+            if session_id and session_id != win.session_id and (info := find_session(session_id)) is not None:
+                win.opening_remote = None  # (as a click on its row in the sidebar opens it: Sidebar.on_activate)
+                win.switch_to(lambda: win.resume_session(info))
+        widgets.desktop_notify(f"chat-{session_id}", title or "(untitled)", body, clicked)
+
+    def seen_chat(self):
+        """The open chat seen (this window's the one you're in, or the chat's just opened): its notification gone."""
+        if self.is_active():
+            widgets.withdraw_notification(f"chat-{self.session_id}")
 
     def links_on_focus(self):
         """This window became the active one: its own links are drawn (another window's chat may show none)."""
@@ -17589,6 +17629,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
         self.reset_stream_state()
         self.session_id = info["id"]  # (before the history: Signal files its replies under it)
+        self.seen_chat()
         self.apply_chat_model(info)  # (the model it was on, not the chat before's)
         self.signal_pending, self.switching_chat = None, False
         tree = main_folder(self.run_cwd)[1]  # (the checkout it works in, before Signal starts: from what it did, else
@@ -17832,6 +17873,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         proc = self.proc if proc is None else proc
         self.set_busy(False)
         self.keep_chat_model()
+        self.tell_desktop(self.session_id, turn_said(msg))
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
@@ -17897,6 +17939,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         self.proc.asks[rid] = msg  # (asked again here if the chat's left and opened again before it's answered)
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
+        self.tell_desktop(self.session_id, f"Waiting for your answer: {name or 'a tool'}")
 
     def sign_in(self, args=()):
         """/login (or Sign in on a turn that failed for want of it): claude auth login, as a card (LoginCard)."""

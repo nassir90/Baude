@@ -405,12 +405,69 @@ def save_settings(**changes):
 # The settings Baude and Record share, in settings.json (this machine's: they never go to another host). Changed in
 # one app, every other one running here takes it as it's written (watch_settings): the accent, the text's, the icons'
 # and the Global Scale, Auto restart on update and the code font (each read where it's used, the font at the next
-# start), and Meta's model, effort, Code mode and Run commands. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
+# start), Meta's model, effort, Code mode and Run commands, and Notifications. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
 SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
-                   "meta_model", "meta_effort", "meta_code_mode", "meta_commands")
+                   "meta_model", "meta_effort", "meta_code_mode", "meta_commands", "notify")
 SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
 _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
 _following = weakref.WeakSet()  # (Settings rows up that show a shared setting: follow_setting)
+
+
+# ---- desktop notifications: a reply finished (or a question asked) where you aren't looking, said by the desktop's
+# own notifications: on Linux GLib's (the portal's, or org.freedesktop.Notifications), a click on one opening what it's
+# about; on macOS Notification Center's, through osascript (an unbundled Python can't post its own: a click there
+# brings nothing to the front). Settings → Notifications, on unless turned off, in Baude and Record both.
+_notified = {}  # (a notification's key: what a click on it does)
+
+
+def notifications_on():
+    return load_settings().get("notify") is not False
+
+
+def desktop_notify(key, title, body="", clicked=None):
+    """A desktop notification, key's (one key, one notification: a newer one takes the older's place); clicked(), run
+    when it's clicked (Linux). Nothing when Notifications is off."""
+    if not notifications_on():
+        return
+    body = " ".join((body or "").split())
+    body = body[:157] + "…" if len(body) > 160 else body
+    if sys.platform == "darwin":
+        quote = lambda t: '"' + t.replace("\\", "\\\\").replace('"', '\\"') + '"'  # noqa: E731
+        script = f"display notification {quote(body)} with title {quote(GLib.get_application_name() or '')}" + \
+            f" subtitle {quote(title)}"
+        try:
+            subprocess.Popen(["osascript", "-e", script], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+        return
+    app = Gio.Application.get_default()
+    if app is None or not app.get_is_registered():
+        return
+    if app.lookup_action("notification-clicked") is None:
+        act = Gio.SimpleAction.new("notification-clicked", GLib.VariantType.new("s"))
+        act.connect("activate", lambda _a, v: (fn := _notified.pop(v.get_string(), None)) and fn())
+        app.add_action(act)
+    n = Gio.Notification.new(title)
+    if body:
+        n.set_body(body)
+    n.set_default_action_and_target("app.notification-clicked", GLib.Variant.new_string(key))
+    _notified[key] = clicked or (lambda: None)
+    app.send_notification(key, n)
+
+
+def withdraw_notification(key):
+    """key's notification taken back (what it was about seen now), if one's up."""
+    if _notified.pop(key, None) is not None and (app := Gio.Application.get_default()) is not None:
+        app.withdraw_notification(key)
+
+
+def notifications_row():
+    """Settings → Notifications (Baude's and Record's, the one setting)."""
+    row = Adw.SwitchRow(title="Notifications", active=notifications_on(),
+                        subtitle="When a reply finishes, or asks you something, while you're elsewhere")
+    row.connect("notify::active", lambda r, _p: r.syncing or save_settings(notify=r.get_active()))
+    return follow_setting(row, "notify", lambda v: row.set_active(v is not False))
 
 
 def follow_setting(row, key, show):

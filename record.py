@@ -7168,6 +7168,7 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
+        group.add(widgets.notifications_row())  # (Baude's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
         group.add(widgets.settings_switch("Include glossary and chats in backup",

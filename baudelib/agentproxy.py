@@ -32,7 +32,8 @@ from baudelib.claude import ClaudeProc, claude_env
 
 PREFIX = "agent/"
 HEADLESS = os.path.join(models.REPO, "baude_headless.py")
-NAMED = ("--system-prompt", "--tools", "--mcp-config", "--session-id")  # (the flags of a caller's taken, with a value)
+NAMED = ("--system-prompt", "--append-system-prompt", "--tools", "--mcp-config", "--session-id")  # (the flags of a
+# caller's taken, with a value)
 
 
 def value(member, inner):
@@ -337,6 +338,7 @@ class ProxiedProc(ClaudeProc):
         self.pi_session = PiSession.get(pi_sessions(), sid, self.cwd) if self.ids else None
         self.ask_for = {"op": "agent", "req": 1, "model": inner, "mode": mode, "effort": effort, "resume": sid,
                         "system_prompt": got.get("--system-prompt"), "persist": persist,
+                        "append_system_prompt": got.get("--append-system-prompt"),  # (a Bot's: who it is, its memory)
                         "servers": sorted(self.servers), "cwd": self.cwd,
                         "relay": True}  # (pi's session as pi writes it, from a host that does: session.ts)
         self.ch, self.waiting, self.lock = None, [], threading.Lock()
@@ -576,6 +578,8 @@ class Run:
                 *(["--effort", run["effort"]] if run["effort"] else []), "--tools", "", "--mcp-config", json.dumps(cfg)]
         if isinstance(msg.get("system_prompt"), str):
             args += ["--system-prompt", msg["system_prompt"]]
+        if isinstance(msg.get("append_system_prompt"), str) and models.model_program(model) == "pi":
+            args += ["--append-system-prompt", msg["append_system_prompt"]]  # (after pi's own: pi-claude's)
         if msg.get("persist") is False:
             args += ["--no-session-persistence"]
         try:

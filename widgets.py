@@ -8370,6 +8370,9 @@ levelbar.context-meter trough, levelbar.context-meter block { min-height: 16px; 
 .session-sidebar list.navigation-sidebar > row { min-height: 26px; padding-top: 1px; padding-bottom: 1px;
   margin-top: 1px; margin-bottom: 0; }
 .session-sidebar list.navigation-sidebar > row:first-child > box.sidebar-header { margin-top: 0; }
+/* a Bot: twice a chat's height, its picture and its name (baude's SessionSidebar.bot_row) */
+.session-sidebar list.navigation-sidebar > row.bot-row { min-height: 52px; }
+.session-sidebar .bot-name { font-weight: 600; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
 dropdown.choice > button, menubutton.choice > button { font-weight: normal; }
 /* the top bar's pickers (provider, model, effort, mode): each list's rows the same height, a palette's as a menu's */

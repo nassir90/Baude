@@ -7132,6 +7132,11 @@ def fork_tree(items):
             if (up := next((i for i in desktop_parents(info) if i in by_id), None)) is not None:
                 parent[info["id"]] = by_id[up]
             continue
+        if info.get("fork_from"):  # (a host's fork: its host says what it came from)
+            up = next((c for c in items if c is not info and info["fork_from"] in (c["id"], c.get("cli_id"))), None)
+            if up is not None:
+                parent[info["id"]] = up
+            continue
         best, shared = None, 9
         if sum(map(len, mine)) <= shared:
             continue  # (too few records to share 10 with anything)
@@ -7646,7 +7651,47 @@ def remote_info(s):
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),
             "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
-            "archived": bool(s.get("archived"))}
+            "archived": bool(s.get("archived")), "bot": s.get("bot"),
+            "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id")}
+
+
+BOT_PICTURES = {}  # (session id, its picture's mtime) -> Gdk.Texture: a Bot's picture, fetched from its host once
+BOT_FETCHING = {}  # (the same) -> [then]: those waiting for a picture asked of its host, not come yet
+
+
+def bot_picture(info, then):
+    """A Bot's picture (its host's: op bot_picture), as a texture: then(texture), or then(None) if it has none (or
+    it couldn't be got: asked again next time). Asked once while it's coming, whoever wants it."""
+    bot, r = info.get("bot") or {}, info.get("remote")
+    if not bot.get("picture") or r is None:
+        return then(None)
+    key = (info["id"], bot["picture"])
+    if key in BOT_PICTURES:
+        return then(BOT_PICTURES[key])
+    if key in BOT_FETCHING:
+        return BOT_FETCHING[key].append(then)
+    BOT_FETCHING[key] = [then]
+
+    def got(reply):
+        tex = None
+        if reply.get("picture"):
+            try:
+                tex = Gdk.Texture.new_from_bytes(GLib.Bytes.new(base64.b64decode(reply["picture"])))
+            except (GLib.Error, ValueError):
+                tex = None
+        if tex is not None:
+            BOT_PICTURES[key] = tex
+        for fn in BOT_FETCHING.pop(key, []):
+            fn(tex)
+    r.request({"op": "bot_picture", "session": info["id"]}, got)
+
+
+def can_be_bot(info):
+    """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and knows Bots (wire
+    version 8), on a model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
+    r = info.get("remote")
+    return r is not None and not info.get("dead") and r.state == "alive" and (r.info.get("version") or 1) >= 8 and \
+        modelslib.model_program(info.get("model")) in ("claude", "pi")
 
 
 def chat_groups(st=None):
@@ -7991,7 +8036,8 @@ class SessionSidebar(Gtk.Box):
         self.list.add_controller(keys)
         actions = Gio.SimpleActionGroup()
         for name, fn in (("rename", self.ask_rename), ("archive", self.archive), ("unarchive", self.unarchive),
-                         ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote)):
+                         ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote),
+                         ("make_bot", self.ask_bot), ("unbot", self.unbot)):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))
             actions.add_action(act)
@@ -8399,7 +8445,8 @@ class SessionSidebar(Gtk.Box):
             folder = info.get("folder", info.get("cwd"))
             key, label = session_group(folder)
             tree = os.path.basename(info.get("worktree") or "")
-            if q and q not in f"{info.get('title') or ''} {label} {tree}".lower():
+            if q and q not in f"{info.get('title') or ''} {label} {tree} {(info.get('bot') or {}).get('name') or ''}" \
+                    .lower():
                 continue
             if info["id"] in archived and info["id"] not in marks:
                 gone.append(info)
@@ -8423,7 +8470,8 @@ class SessionSidebar(Gtk.Box):
                            # (a draft, the open one's)
                            key=last_used, reverse=True):
             r = info["remote"]
-            if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r)]).lower():
+            if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
+                                        (info.get("bot") or {}).get("name") or ""]).lower():
                 continue
             if (info.get("archived") or info["id"] in archived) and info["id"] not in marks:  # (archived on its host;
                 gone.append(info)  # or here, before hosts did)
@@ -8471,6 +8519,20 @@ class SessionSidebar(Gtk.Box):
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
             last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
+        bots = []  # (Bots first, each with what's under it: its forks, its threads)
+        for k, label, folder, rows in out:
+            keep, under = [], False
+            for row in rows:
+                if not row[1]:
+                    under = bool(row[0].get("bot"))
+                    if under:
+                        bots.append([])
+                (bots[-1] if under else keep).append(row)
+            rows[:] = keep
+        out = [g for g in out if g[3]]
+        if bots:  # (the last used first)
+            out.insert(0, ("bots", "Bots", None, [row for tree in sorted(bots, key=lambda t: -last_used(t[0][0]))
+                                                  for row in tree]))
         if gone:
             out.append(("archived", "Archived", None, fork_tree(gone)))
         return out
@@ -8538,7 +8600,7 @@ class SessionSidebar(Gtk.Box):
             self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
             if shut:
                 continue
-            limit = None if searching or key in self.expanded else self.limit(key)
+            limit = None if searching or key in self.expanded or key == "bots" else self.limit(key)
             # (the limit counts top-level sessions: their forks come with them)
             tops = [n for n, (_info, depth, _last) in enumerate(rows) if not depth]
             shown = rows if limit is None or len(tops) <= limit else rows[:tops[limit]]
@@ -8598,10 +8660,50 @@ class SessionSidebar(Gtk.Box):
         panel = getattr(self.win, "panel", None)
         return panel.meta.ghosts() if panel is not None else []
 
+    def bot_row(self, info):
+        """A Bot: twice a chat's height, its picture (its initials till it has one), its name and, under it, what it's
+        on; a dot as a chat's. What's under it (its threads) is nested as forks are."""
+        box = Gtk.Box(spacing=8, margin_start=4, margin_end=4)
+        bot = info.get("bot") or {}
+        name = bot.get("name") or "Bot"
+        avatar = Adw.Avatar(size=32, text=name, show_initials=True, valign=Gtk.Align.CENTER)
+        bot_picture(info, lambda tex: tex is not None and avatar.set_custom_image(tex))
+        box.append(widgets.shaded_picture(avatar))
+        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
+        title = widgets.FadeLabel(label=name, xalign=0, hexpand=True)
+        title.add_css_class("bot-name")
+        words.append(title)
+        what = widgets.FadeLabel(label=info.get("title") or "", xalign=0, hexpand=True)
+        what.add_css_class("dim-label")
+        what.add_css_class("caption")
+        words.append(what)
+        box.append(words)
+        is_open = info["id"] == self.win.session_id
+        dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
+        box.append(dot)
+        r = info.get("remote")
+        tip = [f"{name}, a Bot", info.get("title") or "", info.get("cwd") or "",
+               f"On {remote_name(r)} ({r.host})" if r is not None else ""]
+        if group := chat_group(info, self.assigned):
+            tip.append(f"Group {group}")
+        if tree := info.get("worktree"):
+            tip.append(f"Worktree {os.path.basename(tree)} of {pretty_path(info.get('folder') or '')}")
+        row = Gtk.ListBoxRow(child=box, tooltip_text="\n".join(t for t in tip if t))
+        row.add_css_class("bot-row")
+        row.info, row.dot, row.depth, row.tree_anchor = info, dot, 0, avatar
+        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: meta.mark_row)
+            meta.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
+        click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        click.connect("pressed", lambda g, n, x, y: self.show_menu(row, x, y))
+        row.add_controller(click)
+        return row
+
     def session_row(self, info, depth=0, last=True):
         """Title ··· [dot] — one line; the dot only when something's happening (working, waiting for an answer,
         finished and waiting for input). Forks sit under their session like files in a tree. One Meta's changed:
-        marked, with Keep and Undo (meta.mark_row)."""
+        marked, with Keep and Undo (meta.mark_row). A Bot: bot_row."""
+        if info.get("bot") and not depth and not info.get("dead"):
+            return self.bot_row(info)
         box = Gtk.Box(spacing=6, margin_start=6 + depth * TreeList.INDENT, margin_end=4)
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
@@ -8650,6 +8752,7 @@ class SessionSidebar(Gtk.Box):
 
     def show_menu(self, row, x, y):
         info, sid = row.info, GLib.Variant.new_string(row.info["id"])
+        top = not getattr(row, "depth", 0) and not info.get("fork_parent")  # (a Bot's a top-level chat)
         menu = Gio.Menu()
         items = [("Rename…", "rename"),
                  ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
@@ -8664,6 +8767,9 @@ class SessionSidebar(Gtk.Box):
                                            [("Archive", "archive")]) + \
                 ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]  # (Archive stops it: not at a turn)
         items.insert(1 if items[0][1] == "rename" else 0, ("Move to Group", None))  # (any chat's, on a host or not)
+        if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
+            items[1:1] = [("Bot Settings…", "make_bot"), ("Make a Chat Again", "unbot")] if info.get("bot") else \
+                [("Make Bot…", "make_bot")]
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -8711,6 +8817,97 @@ class SessionSidebar(Gtk.Box):
         self.dialog = dlg
         dlg.present(self.win)
         entry.grab_focus()
+
+    def ask_bot(self, info):
+        """Make Bot… (or Bot Settings…): a name and a picture for a chat on a host, which then lists it as a Bot, gives
+        its agent its name and its memory each time it starts, and keeps both there."""
+        if info is None or info.get("remote") is None:
+            return
+        bot = info.get("bot") or {}
+        named = bot.get("name") or " ".join((info.get("title") or "").split())[:80]  # (a new one: the chat's title)
+        entry = Gtk.Entry(text=named, placeholder_text="Name", activates_default=True)
+        pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
+        avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
+        choose = Gtk.Button(label="Choose Picture…")
+        remove = Gtk.Button(label="Remove Picture", visible=False)
+
+        def shown(tex):
+            if tex is not None and pick["data"] is None:
+                avatar.set_custom_image(tex)
+                remove.set_visible(True)
+        bot_picture(info, shown)
+
+        def chosen(dialog, result):
+            try:
+                f = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            try:
+                pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(f.get_path(), 256, 256, True)
+                ok, data = pix.save_to_bufferv("png", [], [])
+            except GLib.Error as e:
+                return self.win.note(f"Couldn't read that picture: {e.message}")
+            pick["data"] = bytes(data)
+            avatar.set_custom_image(Gdk.Texture.new_for_pixbuf(pix))
+            remove.set_visible(True)
+
+        def removed(*_a):
+            pick["data"] = "" if bot.get("picture") else None
+            avatar.set_custom_image(None)
+            remove.set_visible(False)
+        remove.connect("clicked", removed)
+
+        def open_picker(*_a):
+            images = Gtk.FileFilter(name="Pictures")
+            images.add_pixbuf_formats()
+            store = Gio.ListStore.new(Gtk.FileFilter)
+            store.append(images)
+            Gtk.FileDialog(title="A picture for the Bot", filters=store).open(self.win, None, chosen)
+        choose.connect("clicked", open_picker)
+        buttons = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
+        buttons.append(choose)
+        buttons.append(remove)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        body.append(widgets.shaded_picture(avatar))
+        body.append(buttons)
+        body.append(entry)
+        dlg = Adw.AlertDialog(heading="Bot Settings" if bot else "Make Bot",
+                              body=None if bot else "A Bot is a chat you keep coming back to: it has a name and a "
+                              "picture here, and a memory it keeps on its host and is given each time it starts.",
+                              extra_child=body, default_response="save", close_response="cancel")
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("save", "Save" if bot else "Make Bot")
+        dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+
+        def typed(e):
+            name = " ".join(e.get_text().split())
+            avatar.set_text(name or "Bot")
+            dlg.set_response_enabled("save", bool(name))
+        entry.connect("changed", typed)
+        typed(entry)
+
+        def answered(_d, response):
+            name = " ".join(entry.get_text().split())
+            if response != "save" or not name:
+                return
+            sent = {"name": name}
+            if pick["data"] is not None:
+                sent["picture"] = base64.b64encode(pick["data"]).decode() if pick["data"] else ""
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": sent}, self.bot_set)
+        dlg.connect("response", answered)
+        self.dialog = dlg
+        dlg.present(self.win)
+        entry.grab_focus()
+
+    def unbot(self, info):
+        """Make a Chat Again: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
+        if info is not None and info.get("remote") is not None:
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": None}, self.bot_set)
+
+    def bot_set(self, reply):
+        if reply.get("op") == "error":
+            return self.win.note(f"Bot: {reply.get('error')}")
+        self.fill()
 
     def rename(self, info, title):
         title = " ".join((title or "").split())

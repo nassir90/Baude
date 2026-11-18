@@ -2628,6 +2628,7 @@ class NotesView(Gtk.TextView):
 # Text kept, its place too, but not seen (what's drawn over it): all but clear. GTK draws a clear colour, alpha 0, as
 # if no colour were set, the alpha dropped: the - a bullet's drawn over came out black, an @ under its logo too.
 UNSEEN = "rgba(0,0,0,0.002)"
+WORD_JOINER = "\u2060"  # (before an edit's Accept and Reject, in its green: DiaryEditor._put_greens)
 
 
 class PageHistory:
@@ -3045,6 +3046,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.win.store.save()
         self.win.pages.typed(self.notebook, old, None)  # (kept: listed by its new name, in its place)
         self.win.note_renamed(moved)
+        self.win.chat.edit_cards_changed()  # (an edit's card: its page's there again)
 
     def reload(self):
         """The page changed elsewhere (a word added to To learn, a link renamed): shown again, the caret kept, nothing
@@ -3281,8 +3283,8 @@ class DiaryEditor(Gtk.Box, FindInText):
                     tag("hidden", m.start() + 1, m.start() + 2)
                     tag("hidden", m.end() - 1, m.end())
         pos, item = 0, None  # (item: the list item the lines after it may go on with: its text's margin)
-        # (an edit's Accept and Reject, U+FFFC, after a ``` its green ends with: still a bare fence, closing its block)
-        spans = widgets.fence_spans(text.replace("\ufffc", "").split("\n"), typing=shown)
+        # (an edit's Accept and Reject, U+FFFC and a joiner, after a ``` its green ends with: still a bare fence)
+        spans = widgets.fence_spans(text.replace("\ufffc", "").replace(WORD_JOINER, "").split("\n"), typing=shown)
         blocks = [[first, last] for first, last, _closed in spans]  # (each code block's lines, for its card: NotesView)
         in_block = {n for first, last, _closed in spans for n in range(first, last + 1)}
         fences = {first for first, _last, _closed in spans} | {last for _first, last, closed in spans if closed}
@@ -3539,12 +3541,16 @@ class DiaryEditor(Gtk.Box, FindInText):
             lead = "\n" if p["old"] and not e["gone"] and not p["old"].endswith("\n") and not body.startswith("\n") \
                 and a.starts_line() and b.ends_line() else ""
             at, words = b.get_offset(), lead + body
+            # (its Accept and Reject after a word joiner, unseen and seen, in its line: GTK 4.24 puts a widget just after
+            # hidden text, a [[link]]'s ]] or **bold**'s ** off the caret's line, at its line's start or off the page)
+            tie = "" if words.endswith("\n") or not words and b.starts_line() else WORD_JOINER
+            words += tie
             self.buf.insert(b, words)
             e["anchor"] = self.buf.create_child_anchor(self.buf.get_iter_at_offset(at + len(words)))
             self.buf.insert(self.buf.get_iter_at_offset(at + len(words) + 1), trail)
             e["g0"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at), False)
             e["g1"] = self.buf.create_mark(None, self.buf.get_iter_at_offset(at + len(words) + 1 + len(trail)), True)
-            e["lead"], e["body"] = len(lead), len(body)
+            e["lead"], e["body"], e["tie"] = len(lead), len(body), len(tie)
             e["controls"] = EditControls(self, p, self._control_px())
             self.view.add_child_at_anchor(e["controls"], e["anchor"])
         for e in self.proposals:  # (a passage with nothing in it, where a green went in: its start back before that)
@@ -3599,16 +3605,11 @@ class DiaryEditor(Gtk.Box, FindInText):
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
             tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
-            # (its Accept and Reject's anchor never in markup hidden off the caret's line, a fence's ``` or a link's
-            # target: GTK puts a widget in hidden text at its line's start, over the text there; nor its red or green,
-            # if all of either is: a link's target changed)
+            # (its Accept and Reject, and the joiner before them, never in markup hidden off the caret's line, a fence's
+            # ``` or a link's target: GTK puts a widget in hidden text at its line's start, or off the page; nor its
+            # red or green, if all of either is: a link's target changed)
             at = g0 + e["lead"] + e["body"]
-            start = buf.get_iter_at_offset(at)  # (and what's hidden just before it in its line, a fence's ```: seen)
-            if at > g0 and buf.get_iter_at_offset(at - 1).has_tag(hidden):
-                start.backward_to_tag_toggle(hidden)
-                start = max(start, buf.get_iter_at_offset(max(g0, at - buf.get_iter_at_offset(at).get_line_offset())),
-                            key=lambda i: i.get_offset())
-            buf.remove_tag(hidden, start, buf.get_iter_at_offset(at + 1))
+            buf.remove_tag(hidden, buf.get_iter_at_offset(at), buf.get_iter_at_offset(at + e.get("tie", 0) + 1))
             for x, y in [(g0 + e["lead"], at), *self._kept_pieces(*(buf.get_iter_at_mark(e[k]).get_offset()
                                                                       for k in ("a", "b")))]:
                 start = buf.get_iter_at_offset(x)
@@ -6024,25 +6025,32 @@ class RecordChat(meta.MetaChat):
         m = self.EDIT_ID_RE.search(str(it.get("result") or ""))
         return m.group(1) if m else None
 
-    def _last_edit_card(self, pid):
-        """Which card has an edit as it is now, the last call that made or changed it: its (call id, input)."""
+    def _last_edit_cards(self):
+        """{an edit's id: the input of the last call that made or changed it}: the card that has it as it is now. Its
+        input, as that's the one thing every copy of a call's item shares (its card's drawn from a copy, and its call
+        id can come after it's drawn). Worked out once for every card drawn, till something changes (_edits_stale)."""
+        if (last := self.__dict__.get("_edit_last")) is not None:
+            return last
         live = self.agent.turn["items"] if self.agent is not None and self.agent.turn is not None else ()
-        last = None
+        last = {}
         for it in [it for m in self.messages() for it in m.get("items") or ()] + list(live):
-            if it.get("kind") == "tool" and self.card_edit_id(it) == pid and self.call_hunks(it) and \
-                    it.get("state") != "error":
-                last = it
-        return (last.get("id"), last.get("input")) if last is not None else None
+            if it.get("kind") == "tool" and it.get("state") != "error" and (pid := self.card_edit_id(it)) is not None \
+                    and self.call_hunks(it):
+                last[pid] = it.get("input")
+        self.__dict__["_edit_last"] = last
+        return last
+
+    def _edits_stale(self):
+        self.__dict__["_edit_last"] = None
 
     def card_extra(self, it, line, hunks):
         if hunks is None or (pid := self.card_edit_id(it)) is None:
             return
         slot = Gtk.Box(spacing=3, valign=Gtk.Align.CENTER)
         line.append(slot)
-        slots = self.__dict__.setdefault("edit_slots", [])
-        slots[:] = [s for s in slots if s[0].get_root() is not None]  # (cards drawn again since: gone)
-        slots.append((slot, pid, (it.get("id"), it.get("input")), hunks))
-        self._fill_edit_slot(*slots[-1])
+        # (kept till the cards are drawn again, not pruned here: a reply's cards are made before it's in the window)
+        self.__dict__.setdefault("edit_slots", []).append((slot, pid, it.get("input"), hunks))
+        self._fill_edit_slot(slot, pid, it.get("input"), hunks)
 
     def _fill_edit_slot(self, slot, pid, key, hunks):
         """A card's edit as it is now: Accept and Reject while it waits (and is this card's), else what became of it,
@@ -6052,41 +6060,72 @@ class RecordChat(meta.MetaChat):
         p = self._proposal(pid)
         if p is None:
             return
-        status = p.get("status")
+        status, buttons = p.get("status"), ()
         said = self.EDIT_SAID.get(status)
-        if status == "pending" and self._last_edit_card(pid) != key:
-            said = "revised"  # (a later call changed it: that one's card has it as it is)
-        elif status == "pending" and (self.notebook is None or p.get("notebook") != self.notebook.get("id")):
-            said = "waiting in another notebook"
+        here = self.notebook is not None and p.get("notebook") == self.notebook.get("id")
+        if self._last_edit_cards().get(pid) is not key:
+            said = "revised"  # (a later call changed it: that one's card has it as it is, and what became of it)
+        elif status == "pending" and not here:
+            nb = self._book(p.get("notebook"))
+            said = f"waiting in {full_name(nb)}" if nb is not None else "waiting in a notebook that's gone"
+            if nb is not None:
+                btn = Gtk.Button(label="Open", tooltip_text=f"Open {full_name(nb)}", valign=Gtk.Align.CENTER)
+                btn.add_css_class("flat")
+                btn.add_css_class("meta-batch")
+                btn.connect("clicked", lambda *_: self.open_edit(p))
+                buttons = (btn,)
         elif status == "pending" and p["page"] not in self.notebook["pages"]:
             said = "its page is gone"
-        if said is None and status == "pending":
-            for icon, tip, css, accept in (("object-select-symbolic", "Accept", "edit-accept", True),
-                                           ("window-close-symbolic", "Reject", "edit-reject", False)):
-                btn = Gtk.Button(tooltip_text=tip, valign=Gtk.Align.CENTER)
-                btn.set_child(Gtk.Image(icon_name=icon, pixel_size=12))
-                for c in ("edit-control", "edit-card-control", css):
-                    btn.add_css_class(c)
-                pointers.hand(btn)
-                btn.connect("clicked", lambda *_, accept=accept: self.decide_from_card(p, accept))
-                slot.append(btn)
-        elif said:
-            slot.append(label(said, css=("dim-label", "caption")))
-        (hunks.add_css_class if said and status != "accepted" else hunks.remove_css_class)("dim-label")
+            buttons = (self._edit_button(p, False, "Reject (its page is gone)"),)
+        elif status == "pending":
+            buttons = (self._edit_button(p, True, "Accept"), self._edit_button(p, False, "Reject"))
+        if said:
+            slot.append(label(said, css=("dim-label", "caption"), wrap=False))
+        for btn in buttons:
+            slot.append(btn)
+        (hunks.add_css_class if said and status != "accepted" or said == "revised" else
+         hunks.remove_css_class)("dim-label")
+
+    def _edit_button(self, p, accept, tip):
+        btn = Gtk.Button(tooltip_text=tip, valign=Gtk.Align.CENTER)
+        btn.set_child(Gtk.Image(icon_name="object-select-symbolic" if accept else "window-close-symbolic",
+                                pixel_size=12))
+        for c in ("edit-control", "edit-card-control", "edit-accept" if accept else "edit-reject"):
+            btn.add_css_class(c)
+        pointers.hand(btn)
+        btn.connect("clicked", lambda *_: self.decide_from_card(p, accept))
+        return btn
 
     def edit_cards_changed(self):
         """Every edit's card shown, as its edit is now (one decided, revised, taken back; another notebook open)."""
+        self._edits_stale()
         slots = self.__dict__.setdefault("edit_slots", [])
-        slots[:] = [s for s in slots if s[0].get_root() is not None]
+        if self.get_root() is not None:  # (nothing's being drawn now: a card out of the window is one drawn again)
+            slots[:] = [s for s in slots if s[0].get_root() is not None]
         for s in slots:
             self._fill_edit_slot(*s)
 
+    def open_edit(self, p):
+        """An edit waiting in another notebook: that one opened, and the edit shown on its page, the caret in it."""
+        self.win.select(p.get("notebook"))
+        nb = self.notebook
+        if nb is not None and nb.get("id") == p.get("notebook") and p["page"] in nb["pages"] and \
+                (editor := self.win.open_note(p["page"])) is not None:
+            editor.show_proposal(p, scroll=True, caret=True)
+            editor.view.grab_focus()
+
     def decide_from_card(self, p, accept):
         """An edit's Accept or Reject on its card: done on its page, as its own are (the page opened, the edit shown
-        there and decided: DiaryEditor.decide)."""
-        if p.get("status") != "pending" or self.notebook is None or p["page"] not in self.notebook["pages"]:
+        there and decided: DiaryEditor.decide); its page gone, Reject only, with no page. Only ever in the edit's own
+        notebook, the one open: another's page of the same name is never touched."""
+        if p.get("status") != "pending" or self.notebook is None or p.get("notebook") != self.notebook.get("id"):
             return self.edit_cards_changed()
-        if (editor := self.win.open_note(p["page"])) is not None:
+        if p["page"] not in self.notebook["pages"]:
+            if not accept:
+                p["status"] = "rejected"
+                self.decided(p)
+            return self.edit_cards_changed()
+        if (editor := self.win.open_note(p["page"])) is not None and editor.notebook is self.notebook:
             editor.show_proposal(p, scroll=True)
             editor.decide(p, accept)
 
@@ -6223,6 +6262,8 @@ class RecordChat(meta.MetaChat):
 
     # ---- what it says
     def render(self):
+        self.__dict__["edit_slots"] = []  # (every card drawn again: their slots too)
+        self._edits_stale()
         super().render()
         self.show_pending_bar()
 

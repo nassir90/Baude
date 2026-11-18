@@ -7132,6 +7132,11 @@ def fork_tree(items):
             if (up := next((i for i in desktop_parents(info) if i in by_id), None)) is not None:
                 parent[info["id"]] = by_id[up]
             continue
+        if info.get("fork_from"):  # (a host's fork: its host says what it came from)
+            up = next((c for c in items if c is not info and info["fork_from"] in (c["id"], c.get("cli_id"))), None)
+            if up is not None:
+                parent[info["id"]] = up
+            continue
         best, shared = None, 9
         if sum(map(len, mine)) <= shared:
             continue  # (too few records to share 10 with anything)
@@ -7646,7 +7651,8 @@ def remote_info(s):
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),
             "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
-            "archived": bool(s.get("archived")), "bot": s.get("bot")}
+            "archived": bool(s.get("archived")), "bot": s.get("bot"),
+            "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id")}
 
 
 BOT_PICTURES = {}  # (session id, its picture's mtime) -> Gdk.Texture: a Bot's picture, fetched from its host once

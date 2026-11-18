@@ -64,6 +64,7 @@ import baudelib.client  # noqa: E402  (servers on the network and their sessions
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
+from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
 from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
 )
@@ -13906,7 +13907,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (an older host process: said)."""
         r = self.remote or local_host()
         if self.remote is None and r is not None and self.session_id and find_session(self.session_id):
-            reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.run_cwd, "model": self.model,
+            reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.recorded_cwd(), "model": self.model,
                             "mode": self.mode, "group": "", "env": claudelib.claude_env()}, timeout=10)
             if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
@@ -13984,7 +13985,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         params = {"op": "start", "cwd": self.run_cwd, "model": self.model, "effort": effort, "mode": self.mode,
                   "env": claudelib.claude_env(), "group": ""}  # (Baude's own chats: in no group)
         if self.session_id and find_session(self.session_id):
-            params["adopt"] = self.session_id
+            params["adopt"], params["cwd"] = self.session_id, self.recorded_cwd()
         else:  # (a new chat: in the group it was started in, its draft not made: start_draft)
             params["prompt"], params["group"] = "", getattr(self, "draft_group", "")
         reply = r.call(params, timeout=10)  # (on the main loop: this machine's socket, an answer in a moment)
@@ -13994,7 +13995,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         listed = reply["session"]
         r.sessions[listed["id"]] = listed  # (listed before it next says what it has)
         self.remote, self.session_id, self.desktop_chat = r, listed["id"], False
-        self.resume_pending, self.view_path = False, None
+        self.resume_pending, self.view_path, self.gone_tree = False, None, None
         self.tail.stop()
         self.start_remote_proc()
         self.sidebar.fill()
@@ -14310,6 +14311,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 except ValueError as e:  # (a quote left open)
                     self.note(f"/login: {e}")
             return
+        if (typed or self.attachments) and not self.busy and not (typed in ("/clear", "/new", "/cd") or
+                                                                  typed.startswith("/cd ")) and self.remake_tree():
+            return  # (its worktree being made again: sent once it is, from the box)
         if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
             if (typed or self.attachments) and not self.revert_asked():
                 self.commit_revert()  # (sent: the revert made, then this sent, reverted)
@@ -14338,6 +14342,46 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.change_cwd(text[3:].strip() or "~")
             return
         self.send_text(text)
+
+    def recorded_cwd(self):
+        """Where the open chat ran, for the host process to take it up in: its worktree even if it's gone (made again
+        there with its first message: the host process's restore_folder), else where claude runs here."""
+        gone = getattr(self, "gone_tree", None)
+        return gone[1] if gone and gone[0] == self.session_id else self.run_cwd
+
+    def remake_tree(self):
+        """Written in a chat Baude runs itself (a Claude Desktop chat) whose worktree is gone (gone_tree): made again
+        from its branch on a thread (baudelib.worktree: git), then what's in the box sent, in it; or, if it can't be,
+        said, and sent in its repository, where claude finds the conversation by its id. True while that's under way.
+        A chat the host process takes up has it made again there (recorded_cwd)."""
+        if getattr(self, "remaking", None) is not None:
+            return True
+        gone = getattr(self, "gone_tree", None)
+        if gone is None or gone[0] != self.session_id or self.remote is not None or not self.runs_here():
+            return False
+        self.gone_tree, self.remaking = None, gone[0]
+
+        def work():
+            try:
+                result = worktreelib.restore(gone[1], gone[2])
+            except worktreelib.Gone as e:
+                result = e
+            on_main(lambda: done(result))
+
+        def done(result):
+            self.remaking = None
+            if self.session_id != gone[0] or self.remote is not None:
+                return
+            if isinstance(result, worktreelib.Gone):
+                self.note(f"{result.why}; resuming in {self.short_cwd()}")
+            else:
+                if result:
+                    self.note(f"worktree {os.path.basename(main_folder(gone[1])[1] or gone[1])} was removed: "
+                              f"made again from its branch {result}")
+                self.set_cwd(gone[1])
+            self.on_send()
+        threading.Thread(target=work, daemon=True, name="worktree").start()
+        return True
 
     def send_text(self, text):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
@@ -15118,8 +15162,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.busy:
             self.note("wait for the current turn to finish (or Stop it) before changing folder")
             return
-        if path == self.run_cwd:
-            return
+        if path == self.run_cwd and (self.remote is None or self.remote_folder() in (None, path)):
+            return  # (a host's chat whose folder there isn't this window's, a worktree that's gone, say: moved still)
         if self.remote is not None and not self.remote.mine:  # (another machine's folders: not this one's to pick)
             self.note(f"/cd is this machine's: a session on {remote_name(self.remote)} stays in its folder there")
             return
@@ -15148,6 +15192,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if handler:
             handler(msg)
         return False
+
+    def h_note(self, msg):  # (the host process's word on the chat: its worktree made again, say)
+        self.note(msg.get("text") or "")
 
     def h_stderr(self, msg):
         own = model_program(self.model) != "claude"  # (apple-claude and pi-claude say things there for the chat)
@@ -17507,12 +17554,18 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         cwd = info.get("cwd")
         self.clear_transcript()
         self.switching_chat = True  # (its own switches come below: not the chat before's, in its folder)
+        self.gone_tree = None
         if cwd and os.path.isdir(cwd):  # (where it was recorded, a worktree too: --resume finds it in that folder's
             self.set_cwd(cwd)           # project, so claude runs there; the window's folder is its repository's)
         elif cwd:
             if (folder := main_folder(cwd)[0]) != cwd and os.path.isdir(folder):
-                self.set_cwd(folder)  # (a worktree that's gone: its repository)
-            self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
+                self.set_cwd(folder)  # (a worktree that's gone: its repository, till it's made again)
+            if worktreelib.restorable(cwd):  # (removed, as Claude Desktop does as it archives a chat: made again from
+                self.gone_tree = (info["id"], cwd, info.get("path"))  # its branch as it's written in, as Desktop does)
+                self.note(f"worktree {os.path.basename(main_folder(cwd)[1] or cwd)} was removed: "
+                          "it's made again from its branch when you write")
+            else:
+                self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
         self.reset_stream_state()
         self.session_id = info["id"]  # (before the history: Signal files its replies under it)
         self.apply_chat_model(info)  # (the model it was on, not the chat before's)
@@ -17735,8 +17788,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if stop_asked is True and self.send_after_result is None and not cut:  # (said already, stop_stuck; one
                 self.note("interrupted")  # a revert stopped: gone from the chat; a call it stopped: its card says so)
         elif msg.get("is_error"):
+            shown = msg.get("result")
+            if (gone := msg.get("gone")) and self.remote is not None and not self.remote.mine:  # (no /cd there)
+                shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
+                    + f"on {remote_name(self.remote)} to carry on"
             if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said:
-                self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
+                self.note(f"turn ended with error: {shown or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
             if needs_login(msg.get("result")):

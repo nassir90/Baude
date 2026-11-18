@@ -31,8 +31,6 @@ def permission_params(mode, *, turn=False, read_only=False):
 
 
 LEVELS = ("TRACE", "DEBUG", "INFO", "WARN", "ERROR")
-# (tracing's plain format: "2026-01-01T00:00:00.000000Z  WARN codex_core::x: message", colours stripped)
-PLAIN_LOG = re.compile(r"^\d{4}-\d\d-\d\dT\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+([\w:]+)(?:\{[^}]*\})?:\s?(.*)$")
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # Codex's own housekeeping (usage reporting, telemetry): nothing the user can do about it, at any level.
 QUIET_TARGETS = ("codex_analytics", "codex_otel", "codex_feedback")
@@ -40,17 +38,15 @@ NOT_SUPPORTED = re.compile(r"The '([^']+)' model is not supported when using Cod
 
 
 def log_record(line):
-    """(level, target, message) of one line of Codex's tracing log, or None for any other line."""
+    """(level, target, fields) of one line of Codex's JSON tracing log, or None for any other line."""
     try:
         record = json.loads(line)
     except ValueError:
-        match = PLAIN_LOG.match(ANSI.sub("", line).strip())
-        return match.groups() if match else None
+        return None
     if not isinstance(record, dict) or str(record.get("level", "")).upper() not in LEVELS:
         return None
     fields = record.get("fields")
-    message = fields.get("message", "") if isinstance(fields, dict) else ""
-    return str(record["level"]).upper(), str(record.get("target", "")), str(message)
+    return str(record["level"]).upper(), str(record.get("target", "")), fields if isinstance(fields, dict) else {}
 
 
 def plain(message, limit=300):
@@ -68,23 +64,30 @@ def plain(message, limit=300):
     return message if len(message) <= limit else message[:limit - 1].rstrip() + "…"
 
 
-def stderr_notice(line):
-    """What the user should see of one line of Codex's stderr, or None. Its tracing log is for Codex's developers:
-    warnings and below are dropped, but for the few that say something the user can act on; errors are kept, as
-    one plain line. Lines that aren't its log (a crash, say) are shown as they are."""
+def stderr_notice(line, model=None):
+    """(kind, text) of what the user should see of one line of Codex's stderr, or None. Its tracing log is for Codex's
+    developers: warnings and below are dropped, but for the few that say something the user can act on (kind
+    "model": the chat's model, (id, name), isn't one this account can use); errors are kept, as one plain line
+    ("error"). Lines that aren't its log (a crash, say) are shown as they are ("raw")."""
     line = ANSI.sub("", line).rstrip()
     if not line.strip():
         return None
     record = log_record(line)
     if record is None:
-        return line
-    level, target, message = record
+        return "raw", line
+    level, target, fields = record
+    message = str(fields.get("message", ""))
     unsupported = NOT_SUPPORTED.search(message)
     if unsupported:
-        return f"Codex can't use {unsupported.group(1)} with a ChatGPT account. Choose another model."
-    if level != "ERROR" or target.startswith(QUIET_TARGETS) or not message.strip():
+        if model is None or unsupported.group(1) != model[0]:
+            return None  # (another model's: one it tried ahead, say, not the one this chat asks for)
+        return "model", f"Codex can't use {model[1]} with a ChatGPT account. Choose another model."
+    if level != "ERROR" or target.startswith(QUIET_TARGETS):
         return None
-    return f"Codex: {plain(message)}"
+    if not message.strip():
+        message = " ".join(f"{key}={value}" for key, value in fields.items() if key != "message") \
+            or f"an error in {target or 'Codex'}"
+    return "error", f"Codex: {plain(message)}"
 
 
 def user_input(content):
@@ -131,7 +134,7 @@ class AppServer(ClaudeProc):
         self.on_exit, self.stderr = on_exit, stderr
         self.lock = threading.RLock()
         self.ids, self.requests = itertools.count(1), {}
-        self.said = set()
+        self.said, self.said_lock = {}, threading.Lock()  # (notes shown: text → kind)
         self.p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   text=True, bufsize=1, env=os.environ | (env or {}))
@@ -154,12 +157,24 @@ class AppServer(ClaudeProc):
             self.notice(line)
 
     def notice(self, line):
-        notice = stderr_notice(line)
-        with self.lock:
-            if not notice or notice in self.said:  # (each once: Codex repeats its warnings for every request)
+        notice = stderr_notice(line, self.current_model())
+        if notice is None:
+            return
+        kind, text = notice
+        with self.said_lock:  # (not self.lock: a long write to Codex's stdin holds that)
+            if text in self.said:  # (each once: Codex repeats its warnings for every request)
                 return
-            self.said.add(notice)
-        self.stderr(notice)
+            self.said[text] = kind
+        self.stderr(text)
+
+    def forget(self, *kinds):
+        """Notes of these kinds may be shown again."""
+        with self.said_lock:
+            self.said = {text: kind for text, kind in self.said.items() if kind not in kinds}
+
+    def current_model(self):
+        """(id, name) of the model this connection's chat uses, or None."""
+        return None
 
     def rpc(self, method, params, done, failed):
         with self.lock:
@@ -319,6 +334,16 @@ class CodexProc(AppServer):
         self.initialize(lambda: self.rpc("config/read", {"cwd": cwd}, start_meta, failed) if self.meta_only else start(),
                         failed)
 
+    def current_model(self):
+        model = self.model
+        if model == "codex/default":
+            resolved = next((m for m in self.catalog if m["value"] == model), {}).get("resolvedModel")
+            if not resolved:
+                return None
+            model = f"codex/{resolved}"
+        choice = next((m for m in self.catalog if m["value"] == model), {})
+        return model.removeprefix("codex/"), choice.get("displayName") or model.removeprefix("codex/")
+
     def emit(self, kind, **fields):
         self.dispatch(self.on_msg, self, {"type": kind, **fields})
 
@@ -405,6 +430,7 @@ class CodexProc(AppServer):
                     if not self.meta_only:
                         params.update(permission_params(self.mode, turn=True, read_only=self.read_only))
                     self.starting = True
+                    self.forget("error", "raw")  # (a turn's own: one that comes back on a later turn is said again)
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return
             self.result(error)
@@ -507,6 +533,7 @@ class CodexProc(AppServer):
                 result = {"applied": {"model": self.model, "effort": self.effort}}
             elif subtype == "set_model" and str(request.get("model")).startswith("codex/"):
                 self.model = request["model"]
+                self.forget("model")  # (back to a model it can't use: said again)
                 self.effort = codex_effort(self.catalog, self.model, self.effort)
             elif subtype == "set_permission_mode" and isinstance(request.get("mode"), str) \
                     and request["mode"] in CODEX_MODE_VALUES:

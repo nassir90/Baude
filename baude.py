@@ -9028,7 +9028,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.foot.add_css_class("meta-foot")
         self.dots = widgets.WorkingDots()
         self.foot.append(self.dots)
-        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END, window=win.shown_window)  # (the chat's model's)
+        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END,  # (the window of the model it's asked on)
+                                        window=lambda: win.shown_window(self.model or getattr(win, "model_shown", None)))
         self.context_soon = None
         self.foot.append(self.ctx)
         comp.append(self.foot)
@@ -9273,7 +9274,9 @@ class SideQuestion(Gtk.ListBoxRow):
 
     def refresh_context(self):
         if self.proc is not None:
-            self.answers[self.proc.control({"subtype": "get_context_usage"})] = self.ctx.set_usage
+            model = self.model  # (what it answers for, whatever's picked meanwhile)
+            self.answers[self.proc.control({"subtype": "get_context_usage"})] = \
+                lambda usage: (self.win.remember_context(model, usage), self.ctx.set_usage(usage))
 
     def refresh_context_soon(self):
         """The meter asked again a moment after each step of an answer, at most once a second (as the chat's)."""
@@ -13575,7 +13578,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         widgets.toast(self, "Transcript copied")
 
     def refresh_context(self):
-        self.request({"subtype": "get_context_usage"}, self.show_context)
+        model = self.model  # (the model the answer's for: another picked while it's asked for isn't, on_model_changed)
+        self.request({"subtype": "get_context_usage"},
+                     lambda usage: (self.remember_context(model, usage), self.show_context(usage)))
 
     CONTEXT_EVERY_MS = 1000
 
@@ -13592,14 +13597,28 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.refresh_context()
         return False
 
-    def shown_window(self):
-        """The window of the chat's model, as far as it's known before its claude says (meta.window): None for
-        claude's own default, till it's said which model that is."""
-        model = getattr(self, "model", None) or getattr(self, "model_shown", None)
-        return meta.window(model) if model and model != "default" else None
+    def window_key(self, model):
+        """What a model's window is kept by (modelslib.remember_window): its value, for a chat on this machine (as
+        Meta's are); with its host, for one on another, whose account can give the same model another window."""
+        host = self.chat_host()
+        return model if host == HERE_HOST else f"{model}@{host}"
+
+    def shown_window(self, model=None):
+        """The window of a model (the chat's, if none's given), as far as it's known before its session says
+        (meta.window, by window_key); on claude's own default before it's said which model that is, the window the
+        default last had."""
+        model = model or getattr(self, "model", None) or getattr(self, "model_shown", None)
+        if not model or model == "default":
+            return modelslib.said_window(self.window_key("default"))
+        return meta.window(model, said=self.window_key(model))
+
+    def remember_context(self, model, usage):
+        """A session on model (None: claude's own default) has said its window (usage): kept for the next's, by
+        window_key; the default's under "default" too, and under what it's resolved to."""
+        for m in {model or getattr(self, "model_shown", None), None if model else "default"} - {None}:
+            modelslib.remember_window(self.window_key(m), usage.get("maxTokens"))
 
     def show_context(self, usage):
-        modelslib.remember_window(self.model or getattr(self, "model_shown", None), usage.get("maxTokens"))
         self.ctx_box.set_usage(usage)
         if self.outgrown:
             self.ctx_box.bar.set_value(1)
@@ -15282,6 +15301,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if not self.busy:
                 self.set_busy(True)
         elif st == "codex_context":
+            self.remember_context(self.model, msg["usage"])
             self.show_context(msg["usage"])
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)

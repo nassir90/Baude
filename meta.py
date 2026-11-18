@@ -283,11 +283,12 @@ def effort():
     return chosen if chosen in efforts() else None
 
 
-def window(value):
+def window(value, said=None):
     """How many tokens a model's session holds, till it says: its provider's say (Ollama's, an endpoint's, another
-    host's), else what its last session said (modelslib.said_window), else WINDOWS'."""
+    host's), else what its last session said (modelslib.said_window, by said: its value, unless it's kept by
+    another key: Baude's chat on another host's), else WINDOWS'."""
     program = model_program(value)
-    said = (modelslib.window_of(value) if program != "claude" else None) or modelslib.said_window(value)
+    said = (modelslib.window_of(value) if program != "claude" else None) or modelslib.said_window(said or value)
     if said:
         return said
     if program == "claude":

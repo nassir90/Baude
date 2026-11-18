@@ -3,6 +3,7 @@ or an OpenAI-compatible server serves on this machine in pi-claude (pi-claude/: 
 claude's stream-json on stdin and stdout, and each is started, given an id and carried on differently: PROGRAMS says
 how, for Baude and the headless server alike (launch). Where the models besides Claude's are, and which there are:
 baudelib.providers."""
+import contextlib
 import glob
 import json
 import os
@@ -478,8 +479,9 @@ def window_of(value):
         next((m.get("window") for m in providers.mesh_agents() if m["value"] == value), None)
 
 
-# what each model's sessions last said its window was (get_context_usage's maxTokens), by its value, for its next
-# session's before it says: claude's for a model depends on the account, and Apple's on the OS
+# what each model's sessions last said its window was (get_context_usage's maxTokens), by its value (a Baude chat's on
+# another host: "<value>@<host>", BaudeWindow.window_key; claude's own default: "default"), for its next session's
+# before it says: claude's for a model depends on the account, and Apple's on the OS
 SAID_WINDOWS = {"at": None, "windows": {}}
 
 
@@ -514,7 +516,7 @@ def said_window(value):
 
 def remember_window(value, tokens):
     """A session of a model's said its window (tokens): kept, for its next one's before it says (said_window)."""
-    if not isinstance(value, str) or not value or value == "default" or not isinstance(tokens, int) or tokens <= 0 \
+    if not isinstance(value, str) or not value or not isinstance(tokens, int) or tokens <= 0 \
             or said_window(value) == tokens:
         return
     path = said_windows_path()
@@ -524,8 +526,9 @@ def remember_window(value, tokens):
         with open(part, "w") as f:
             json.dump(said_windows() | {value: tokens}, f)
         os.replace(part, path)
-    except OSError:
-        pass
+    except (OSError, TypeError, ValueError):
+        with contextlib.suppress(OSError):
+            os.remove(part)  # (none left half written)
 
 
 def launch(model, mode, effort, session_id=None, resumed=False):

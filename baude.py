@@ -6831,6 +6831,9 @@ class SlashCompleter:
             if self.matches:
                 self.picks.move(steps[keyval])
                 self.moved = True
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+            self.hide()  # (Ctrl/⌘+Enter sends what's typed, past the list)
+            return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
@@ -9027,7 +9030,7 @@ class SideQuestion(Gtk.ListBoxRow):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
             if not widgets.sends(state):
-                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
@@ -10294,7 +10297,7 @@ class SidePanel(Gtk.Box):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
             if not widgets.sends(state):
-                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.ask_typed()
             return True
         return False
@@ -13855,7 +13858,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return self.paste_attachment()
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
-                return self.composer_md.newline()  # False: the TextView inserts a plain newline
+                return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
             self.on_send()
             return True
         if keyval == Gdk.KEY_Escape and self.reverting is not None:
@@ -14127,7 +14130,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         rev["asked"] = (self.proc, rid)
 
     def revert_refused(self, rev, why):
-        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
         rev["asked"] = None
         if self.reverting is rev:
             self.say_now(f"Couldn't revert: {why}")

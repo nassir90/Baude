@@ -2259,7 +2259,7 @@ class MetaChat(Gtk.Box):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
             if not widgets.sends(state):
-                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.ask:

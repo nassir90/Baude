@@ -43,6 +43,16 @@ def is_here(info):
 
 STOPPING_SAID_S = 60  # (how long a host's last word as it stopped is said, while it isn't back)
 
+
+def stopping_line(name, restart, left, total):
+    """A host stopping (or restarting), how far along, as its menu bar item and the heads' banners say it."""
+    verb = "restarting" if restart else "stopping"
+    if left is None:
+        return f"{name} {verb}…"
+    if left > 0:
+        return f"{name} {verb} — {left} of {total} process{'es' if total != 1 else ''} to stop"
+    return f"{name} {verb} — every process stopped" if total else f"{name} {verb}…"
+
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
@@ -67,7 +77,7 @@ class Remote:
         self.untold = bool(cached.get("untold"))  # (this machine's host process not told of it yet)
         self.toggled = float("-inf")  # (when it was deactivated or activated here, or the host process told)
         self.state = "connecting"  # then "alive", or "dead"
-        self.stopping = None  # (its last word as it stopped: {procs, restart, at}; till it's back)
+        self.stopping = None  # (what it says as it stops: {procs, left, restart, at}; till it's back)
         self.ch = None
         self.calls, self.reqs = {}, itertools.count(1)
         self.wake, self.stopped = threading.Event(), False
@@ -158,7 +168,7 @@ class Remote:
             if not wire.is_id(info.get("id")):
                 self.error = "it gave no id Baude can use"
             return
-        self.info, self.seen = info, time.time()
+        self.info, self.seen, self.stopping = info, time.time(), None  # (back: whatever it said as it went, done with)
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
         ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
@@ -169,15 +179,19 @@ class Remote:
                 self.info = msg.get("server") or self.info
                 self.sessions = {s["id"]: s for s in msg.get("sessions") or []
                                  if isinstance(s, dict) and wire.is_id(s.get("id"))}
-                self.stopping = None
                 if self.state != "alive":
                     self.state = "alive"
                 if self.mine:
                     self.network.meshed(self)
                 self.network.changed()
-            elif op == "stopping":  # (it's going: how many claudes it's stopping, said while it's gone)
-                self.stopping = {"procs": msg.get("procs") or 0, "restart": bool(msg.get("restart")),
-                                 "at": time.monotonic()}
+            elif op == "stopping":  # (it's going: how many claudes it has still to stop, said till it's back)
+                if self.stopping is None:  # (what's said of it no more, unless it's back by then: said_stopping)
+                    gone = threading.Timer(STOPPING_SAID_S + 1, self.network.changed)
+                    gone.daemon = True
+                    gone.start()
+                self.stopping = {"procs": msg.get("procs") or 0, "left": msg.get("left"),
+                                 "restart": bool(msg.get("restart")),
+                                 "at": self.stopping["at"] if self.stopping else time.monotonic()}
                 self.network.changed()
             elif op != "ping" and (req := msg.get("req")) is not None and req in self.calls:
                 self.calls.pop(req)(msg)
@@ -189,14 +203,13 @@ class Remote:
             done({"op": "error", "error": "the server's gone"})
 
     def said_stopping(self, name):
-        """What it said as it stopped (stopping: how many processes it had to stop), as a banner says it while it's
-        gone, under name; None if it said nothing, or long enough ago (STOPPING_SAID_S) it isn't coming back of
+        """What it says as it stops (stopping: how many processes it has still to stop), as a banner says it, under
+        name; None if it said nothing, or long enough ago (STOPPING_SAID_S) it isn't coming back of
         itself."""
         if self.stopping is None or time.monotonic() - self.stopping["at"] > STOPPING_SAID_S:
             return None
-        n = self.stopping["procs"]
-        return f"{name} {'restarting' if self.stopping['restart'] else 'stopping'}" + \
-            (f" — {n} process{'es' if n != 1 else ''} to stop" if n else "")
+        q = self.stopping
+        return stopping_line(name, q["restart"], q["left"], q["procs"])
 
     def request(self, msg, done=None):
         """Send a request; done(reply) through dispatch (an error reply if the server isn't there)."""

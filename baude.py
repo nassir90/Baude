@@ -8739,10 +8739,10 @@ class SessionSidebar(Gtk.Box):
         if r is None:
             key = self.shown_host()
             return None if key == HERE_HOST else f"Looking for {dict(self.new_hosts()).get(key, key)} on the network…"
+        if not r.deactivated and (said := stopping_said(r)) is not None:  # (stopping: said as it goes)
+            return said
         if r.state == "alive" and not r.deactivated:
             return None
-        if not r.deactivated and (said := stopping_said(r)) is not None:
-            return said
         name = remote_name(r)
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
             if r.state == "dead" else f"Looking for {name} on the network…"
@@ -16934,7 +16934,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             GLib.timeout_add(250, gone)
         if busy:
             return later(len(busy))
-        r.request({"op": "quit", "if_idle": True}, answered)
+        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once
@@ -17190,7 +17190,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
         here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
-        gone = self.remote is not None and self.resume_pending and self.remote.state != "alive"
+        gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
+                                            stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         kind = "gone" if gone else "live" if live else "drop" if dropped else \
             "retry" if self.retrying is not None else None

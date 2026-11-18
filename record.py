@@ -7937,10 +7937,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         r, name = self.host_remote(key), dict(self.note_hosts()).get(key, store.host_name)
         if r is None:
             return f"Looking for {name} on the network…"
+        if not r.deactivated and (said := r.said_stopping(name)) is not None:  # (stopping: said as it goes)
+            return said
         if self.reachable(r):
             return None
-        if not r.deactivated and (said := r.said_stopping(name)) is not None:
-            return said
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
             if r.state == "dead" else f"Looking for {name} on the network…"
 

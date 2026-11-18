@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 from macos import ns_string, objc_send  # noqa: E402
+from baudelib.client import stopping_line  # noqa: E402
 
 NS_VARIABLE_LENGTH = -1.0
 USER_INITIATED_ALLOWING_SLEEP = 0x00FFFFFF  # (NSActivityUserInitiatedAllowingIdleSystemSleep: no App Nap)
@@ -51,15 +52,9 @@ def say(listing):
 def say_stopping(quitting):
     """(title, line) while it's stopping (Server.quitting; {} for Quit picked, before it's started on that): how many
     of its claudes are still to stop."""
-    verb = "restarting" if quitting.get("restart") else "stopping"
-    left, total = quitting.get("left"), quitting.get("total")
-    if left is None:
-        line = f"Daemon {verb}…"
-    elif left > 0:
-        line = f"Daemon {verb} — {left} of {total} process{'es' if total != 1 else ''} to stop"
-    else:
-        line = f"Daemon {verb} — every process stopped" if total else f"Daemon {verb} — no processes to stop"
-    return f"Baude · {verb}", line
+    restart = bool(quitting.get("restart"))
+    return f"Baude · {'restarting' if restart else 'stopping'}", \
+        stopping_line("Daemon", restart, quitting.get("left"), quitting.get("total"))
 
 
 class MenuBar:

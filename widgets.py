@@ -1916,7 +1916,8 @@ class Exhausted:
 
     def __init__(self, chat, box):
         self.box, self.on = box, False
-        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False)
+        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False, wrap=True,
+                               max_width_chars=1)  # (a longer reason wrapped in the column, not widening it)
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 

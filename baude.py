@@ -12956,7 +12956,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         said = Gtk.Label(label="Continuing…" if going else "Cut short by a restart", xalign=0)
         said.add_css_class("dim-label")
         if going:
-            row.append(Gtk.Spinner(spinning=True))
+            row.append(widgets.Spinner())
             row.append(said)
         else:
             go = Gtk.Button(label="Continue", tooltip_text=f"Send “{CUT_CONTINUE}”")
@@ -12970,17 +12970,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""
         if self.composer_box.gates:
             return
-        cut = self.cut_state()
+        self.cut_waiting = self.cut_state() or time.time()  # (its line again, if Continue can't be sent after all)
         self.cut_pending = None
-        atts, self.attachments = self.attachments, []
         if self.resume_pending:
             self.begin_resume()
         self.cut_continuing = True
         self.send_text(CUT_CONTINUE)
         if not self.busy:  # (not sent yet: its host still starting, said as Continuing…; or it couldn't be: Continue back)
-            self.show_cut(cut or time.time())
-        self.attachments = atts + self.attachments
-        self.refresh_attach_strip()
+            self.show_cut(self.cut_waiting)
+
+    def continue_failed(self, sid=None):
+        """Continue's message couldn't be sent (its host refused the chat, or never came up): the line back as it was,
+        its Continue to press again; sid: only if this window's still on that chat and it hasn't been sent since."""
+        if not getattr(self, "cut_continuing", False) or sid is not None and self.session_id != sid or self.busy:
+            return
+        self.cut_continuing = False
+        self.cut_pending = getattr(self, "cut_waiting", None) or time.time()
+        self.show_cut(self.cut_pending)
 
     # ---- helpers
     def short_cwd(self):
@@ -14317,6 +14323,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             discard(c)
         self.unqueue(list(self.queued))  # (another chat: this one's queue gone with it)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
+        self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None
         self.total_cost = 0.0
@@ -14670,6 +14677,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     buf.set_text(text)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
                 sid = self.session_id
+                if going:  # (the host process never answering: Continue back once it's given up on)
+                    GLib.timeout_add_seconds(22, lambda: self.continue_failed(sid) and False)
 
                 def ready(_r):
                     if self.session_id != sid or self.remote is not None:
@@ -14683,7 +14692,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return
             if took is None:
                 if going:
-                    self.cut_continuing = False  # (Continue back, to press again)
+                    self.continue_failed()  # (Continue back, to press again)
                 else:
                     buf.set_text(text)
                 return
@@ -14691,14 +14700,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.start_proc()
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
             if going:
-                self.cut_continuing = False
+                self.continue_failed()
             else:
                 buf.set_text(text)
             if self.remote is not None:
                 self.remote_view()
             return
         self.cut_continuing = False
-        atts, self.attachments = self.attachments, []
+        # (Continue's message goes alone: what's attached is kept for what's written next)
+        atts, self.attachments = ([], self.attachments) if going else (self.attachments, [])
         self.refresh_attach_strip()
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))

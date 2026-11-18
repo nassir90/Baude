@@ -690,7 +690,9 @@ def resolve_link(url):
 
 
 def file_href(path, line=None):
-    return FILE_SCHEME + urllib.parse.quote(path) + (f"#{line}" if line else "")
+    """A file link's target: the path itself, :line after it, so Copy Link Address gives what a terminal or an editor
+    takes (on_label_link opens it, as it does a [link](path))."""
+    return path + (f":{line}" if line else "")
 
 
 def link_paths(escaped_text):

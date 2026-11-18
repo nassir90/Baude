@@ -427,8 +427,7 @@ _identity = {}  # (notify_as's: the logo notifications show)
 
 
 def notify_as(svg):
-    """The app's logo as an SVG file: its notifications' icon (Linux). (macOS credits osascript's to Script Editor,
-    and turns away an unsigned bundle of the app's own: "Notifications are not allowed for this application".)"""
+    """The app's logo as an SVG file: its notifications' icon (Linux)."""
     _identity["svg"] = svg
 
 
@@ -528,7 +527,7 @@ def desktop_notify(key, title, body="", clicked=None):
         hints["desktop-entry"] = GLib.Variant.new_string(app.get_application_id())
     _fdo_call("Notify", GLib.Variant("(susssasa{sv}i)", (
         GLib.get_application_name() or "", _fdo["ids"].get(key, 0),
-        _identity.get("svg") or app.get_application_id() or "", title, body,
+        GLib.filename_to_uri(_identity["svg"]) if _identity.get("svg") else app.get_application_id() or "", title, body,
         ["default", "Open"], hints, -1)), posted)
 
 

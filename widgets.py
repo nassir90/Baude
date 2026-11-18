@@ -1641,6 +1641,37 @@ class UpdateBar(Gtk.Box):
                                          "A new version is ready")
 
 
+class HostState(Gtk.Revealer):
+    """Over a sidebar's list: what's in the way of the host it lists (gone, deactivated), an island inset from the
+    sidebar's edges, as an empty list says it (the subagents' "No subagents yet"): a boxed-list with only its
+    placeholder (empty_label), outlined as the side panel's lists are. set_title: what it says (markup);
+    set_revealed: whether it's shown."""
+
+    def __init__(self):
+        super().__init__(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.label = empty_label("")
+        self.label.set_margin_top(12)
+        self.label.set_margin_bottom(12)
+        self.label.set_margin_start(12)
+        self.label.set_margin_end(12)
+        self.label.set_wrap(True)
+        self.label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)  # (a long host name, an address: broken too)
+        self.label.set_justify(Gtk.Justification.CENTER)
+        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, focusable=False, margin_start=8, margin_end=8,
+                          margin_top=6, margin_bottom=6, css_classes=["boxed-list", "host-state"])
+        box.set_placeholder(self.label)
+        self.set_child(box)
+
+    def set_title(self, markup):
+        self.label.set_markup(markup)
+
+    def set_revealed(self, on):
+        self.set_reveal_child(on)
+
+    def get_revealed(self):
+        return self.get_reveal_child()
+
+
 TASK_ENDINGS_SAID = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
 
@@ -7274,9 +7305,10 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .tool-group > box > box > label { opacity: 0.8; }
 /* a tool card's Command / Output: small toggle buttons after its name, only a little rounded */
 .tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
-/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed */
+/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed (and a sidebar's
+   host state, an island as they are: HostState) */
 .side-panel { background: transparent; }
-.side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
+.side-panel .boxed-list, .boxed-list.host-state { box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its

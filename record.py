@@ -7045,8 +7045,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
         # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
-        self.host_banner = Adw.Banner(use_markup=True)
-        books.append(self.host_banner)
+        self.host_note = widgets.HostState()
+        books.append(self.host_note)
         books.append(self.pages)
         self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,
                                                lambda: self.fold_books(not self.store.books_folded),
@@ -7889,12 +7889,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
-        """The host shown isn't there (or is deactivated): said in the banner over the left bar, its notebooks as
+        """The host shown isn't there (or is deactivated): said in the note over the left bar, its notebooks as
         they were last listed; what's changed in them is sent once it's back."""
         said = self.host_state()
         if said is not None:
-            self.host_banner.set_title(GLib.markup_escape_text(said))
-        self.host_banner.set_revealed(said is not None)
+            self.host_note.set_title(GLib.markup_escape_text(said))
+        self.host_note.set_revealed(said is not None)
 
     def host_menu(self, x, y):
         """Right-click the notebooks' host (another machine's), as Baude's New session's: Host Command…, for one
@@ -7920,7 +7920,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     def deactivate_host(self, key, off):
         """The host right-clicked → Deactivate (off), or Activate: as Baude's (Network.deactivate, kept in
-        servers.json and by this machine's host process); the banner says so while it is."""
+        servers.json and by this machine's host process); the note over them says so while it is."""
         if (r := self.host_remote(key)) is not None:
             network().deactivate(r, off)
             self.toast(f"{remote_name(r)} {'deactivated' if off else 'activated'}")

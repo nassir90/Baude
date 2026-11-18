@@ -1829,6 +1829,50 @@ class ContextUsage(Gtk.Box):
         self.set_tooltip_text("Context window usage")
 
 
+class UserTurn(Gtk.Box):
+    """A message of yours in a conversation (Baude's chat, a side question's, Meta's): the whole width of it is its row,
+    its bubble at the right. With the pointer anywhere in the row, a revert button fades in just outside the bubble,
+    level with its last line, and fades out as it leaves (win: what it's in, its revert_to: this message and
+    everything after it taken back, and what it said put back in the box; its can_revert: whether it can be now)."""
+
+    def __init__(self, win, bubble, text, uuid):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
+                                 tooltip_text="Revert: take back this message and everything after it, and put it "
+                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
+        self.revert.add_css_class("circular")
+        self.revert.add_css_class("revert-turn")
+        self.revert.connect("clicked", lambda *_: win.revert_to(self))
+        self.append(self.revert)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_revert(True))
+        hover.connect("leave", lambda *_: self.show_revert(False))
+        self.add_controller(hover)
+
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
+
+    def show_revert(self, on):
+        on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
+        self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
+
+
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
     over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model

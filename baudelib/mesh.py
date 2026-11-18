@@ -42,6 +42,12 @@ MLX models) are in its record. One that serves HTTP (it has a base_url) is run f
 own host process's Proxy, on 127.0.0.1 with a key, which carries each request to the member that has the provider
 (infer {provider, method, path, headers, body} -> infer_head {status, headers}, infer_data {data}..., infer_end) and
 the answer back as it comes. A program's (apple-claude, pi-claude) runs where it is: a chat started on that member.
+
+A model's files come the same way (files {method, path, headers} -> infer_head, infer_data..., infer_end: what
+modelfiles.serve has of them there, read-only): through the Proxy at {url}/files/<member>/... with its key (where a
+model's files are, an MLX model's files), and at /v2/<namespace(member)>/... with none, as a registry this machine's
+Ollama pulls a member's Ollama model from (ollama pull --insecure 127.0.0.1:<port>/<namespace>/<model>:<tag>), the
+namespace the key's own mark for the member: what knows the key knows it, nothing else does.
 """
 import base64
 import hashlib
@@ -78,6 +84,8 @@ PROVIDERS_S = 60  # this machine's providers looked at again this often, while i
 FORGET_S = 3600  # a record of a member no longer reached is let go after this long
 INFER_S = 600  # a provider has this long to answer
 CHUNK = 64 << 10
+BACKLOG = 32  # (messages a model's files may have waiting to go out, on a link or a connection, before more are read:
+# what's read goes no faster than the link takes it, and a ping waits behind no more than this)
 LINKS = "links.json"
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
 _PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
@@ -106,6 +114,24 @@ def _kept(path=None):
     except (OSError, ValueError, KeyError, TypeError):
         return {}
     return kept if isinstance(kept, dict) else {}
+
+
+def proxy(path=None):
+    """This machine's host process's Proxy, {url, key}, for anything running here: None if it has none."""
+    p = _kept(path).get("proxy")
+    return p if isinstance(p, dict) and isinstance(p.get("url"), str) and isinstance(p.get("key"), str) else None
+
+
+def me(path=None):
+    """This machine's own {id, name} in the mesh, as its host process says (None if it isn't running)."""
+    m = _kept(path).get("me")
+    return m if isinstance(m, dict) else None
+
+
+def namespace(key, member):
+    """The namespace a member's Ollama models have at the Proxy's /v2/ (its registry for this machine's Ollama): the
+    Proxy's key's mark for the member, so what doesn't know the key can't name one."""
+    return "m" + hashlib.sha256(f"{key}/{member}".encode()).hexdigest()[:24]
 
 
 def agents(path=None):
@@ -340,6 +366,9 @@ class Here:
             return
         try:
             for msg in self.ch:
+                while self.link.out.q.qsize() > BACKLOG and self.error is None:  # (a model's files, mostly: read
+                    # here no faster than the link sends them)
+                    time.sleep(0.01)
                 self.link.tsend(self.key, {"op": "data", "msg": msg})
         finally:
             if self.mesh.forget(self.link, self.key) is not None:
@@ -997,14 +1026,15 @@ class Mesh:
                                                  "input", "thinking") if k in x} for x in p["models"]]}
                   for m in view["members"] for p in m["providers"] if not p.get("http")]
         with self.lock:
-            if (eps, agents) == self.told:
+            if (eps, agents, proxy) == self.told:
                 return
-            self.told = (eps, agents)
+            self.told = (eps, agents, proxy)
             path = self.endpoints_path()
             try:
                 fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump({"pid": os.getpid(), "endpoints": eps, "agents": agents}, f)
+                    json.dump({"pid": os.getpid(), "endpoints": eps, "agents": agents, "proxy": proxy,
+                               "me": {"id": self.id, "name": self.server.me.get("name")}}, f)
                 os.replace(path + ".tmp", path)
             except OSError as e:
                 self.log(f"mesh: {path}: {e}")
@@ -1118,7 +1148,7 @@ class Mesh:
         through, by name; None for one linked to here)}], links: [{where, id, name, state ("linked", "connecting",
         "dropped", "inactive"), error, active}] (those made from here), found: [{id, name, state ("waiting",
         "connecting", "linked", "dropped"), error}] (links straight to members learned of through others: Found),
-        proxy: {url, key} (Proxy's: None till a member has a provider it serves), inactive: [the ids of members
+        proxy: {url, key} (Proxy's: None till a member has a provider), inactive: [the ids of members
         deactivated here]}."""
         with self.lock:
             members = []
@@ -1130,7 +1160,7 @@ class Mesh:
                       "active": o.active} for o in self.outs]
             inactive = sorted(self.inactive)
             found = [{"id": f.expect, "name": f.name, "state": f.state, "error": f.error} for f in self.found.values()]
-            if self.proxy is None and any(p.get("http") for m in members for p in m["providers"]):
+            if self.proxy is None and any(m["providers"] for m in members):  # (their models run, or come, here)
                 try:
                     self.proxy = Proxy(self).start()
                 except OSError as e:
@@ -1148,6 +1178,33 @@ class Mesh:
         """infer from a member (or a head here): an HTTP request to one of this machine's providers, its answer sent
         back as it comes. On a thread of its own."""
         threading.Thread(target=self._infer, args=(conn, msg), daemon=True, name="infer").start()
+
+    def files(self, conn, msg):
+        """files from a member (or a head here): one of this machine's models' files, or where they are
+        (modelfiles.serve), sent back as it comes. On a thread of its own."""
+        threading.Thread(target=self._files, args=(conn, msg), daemon=True, name="files").start()
+
+    def _files(self, conn, msg):
+        from baudelib import modelfiles
+        req, path = msg.get("req"), msg.get("path")
+        reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
+        if not isinstance(path, str) or not path.startswith("/") or ".." in path.split("/") or "\\" in path:
+            return reply("error", error="not a model's file")
+        heads = msg.get("headers") if isinstance(msg.get("headers"), dict) else {}
+        status, headers, chunks = modelfiles.serve(path, heads)
+        reply("infer_head", status=status, headers=headers)
+        gone = lambda: getattr(getattr(conn, "channel", None), "closed", False)  # noqa: E731
+        queued = getattr(conn, "out", None)  # (server.Conn's: what's waiting to go out to whoever asked)
+        try:
+            for chunk in (() if msg.get("method") == "HEAD" else chunks):
+                while queued is not None and queued.qsize() > BACKLOG and not gone():
+                    time.sleep(0.01)
+                if gone():
+                    return
+                reply("infer_data", data=base64.b64encode(chunk).decode())
+        except OSError as e:
+            return reply("error", error=f"{self.server.me['name']}: {e}")
+        reply("infer_end")
 
     def _infer(self, conn, msg):
         req = msg.get("req")
@@ -1204,7 +1261,7 @@ class Proxy:
             def do_GET(self):
                 proxy.carry(self)
 
-            do_POST = do_GET
+            do_POST = do_HEAD = do_GET
 
             def log_message(self, *args):
                 pass
@@ -1220,18 +1277,27 @@ class Proxy:
         threading.Thread(target=self.httpd.shutdown, daemon=True).start()
 
     def carry(self, h):
-        def fail(status, error):
-            body = json.dumps({"error": {"message": error}}).encode()
-            h.send_response(status)
-            h.send_header("Content-Type", "application/json")
-            h.send_header("Content-Length", str(len(body)))
-            h.send_header("Connection", "close")
-            h.end_headers()
-            h.wfile.write(body)
+        fail = lambda status, error: self.fail(h, status, error)  # noqa: E731
         given = h.headers.get("Authorization", "").removeprefix("Bearer ").strip() or h.headers.get("x-api-key", "")
+        parts = h.path.split("/", 4)
+        if parts[1:2] == ["v2"] and h.command in ("GET", "HEAD"):  # (this machine's Ollama pulling a member's model)
+            member = next((m for m in self.members() if secrets.compare_digest(
+                namespace(self.key, m).encode(), (parts[2] if len(parts) > 2 else "").encode())), None)
+            if member is None:
+                return fail(404, "not a member's models")
+            return self.relay(h, member, {"op": "files", "method": h.command,
+                                          "path": "/v2/library/" + (parts[3] if len(parts) > 3 else "") +
+                                                  ("/" + parts[4] if len(parts) > 4 else ""),
+                                          "headers": {k: v for k in ("Range", "Accept") if (v := h.headers.get(k))}},
+                              moved=lambda to: f"http://[::ffff:127.0.0.1]:{self.httpd.server_address[1]}" +
+                              to.replace("/v2/library/", f"/v2/{parts[2]}/", 1))  # (127.0.0.1 by another name: Ollama
+            # follows a redirect to the host it asked, and stops only at one elsewhere, a CDN's)
         if not secrets.compare_digest(given.encode(), self.key.encode()):
             return fail(401, "not this proxy's key")
-        parts = h.path.split("/", 4)
+        if parts[1:2] == ["files"] and len(parts) >= 4 and wire.is_id(parts[2]) and h.command in ("GET", "HEAD"):
+            return self.relay(h, parts[2], {"op": "files", "method": h.command,
+                                            "path": "/" + "/".join(parts[3:]),
+                                            "headers": {k: v for k in ("Range",) if (v := h.headers.get(k))}})
         provider = urllib.parse.unquote(parts[3]) if len(parts) >= 4 else None
         if len(parts) < 4 or parts[1] != "mesh" or not wire.is_id(parts[2]) or not is_provider_id(provider):
             return fail(404, "not a member's provider: /mesh/<member>/<provider>/...")
@@ -1240,6 +1306,30 @@ class Proxy:
             body = h.rfile.read(int(h.headers.get("Content-Length") or 0)) if h.command == "POST" else b""
         except ValueError:
             return fail(400, "no Content-Length")
+        self.relay(h, member, {"op": "infer", "provider": provider, "method": h.command, "path": rest,
+                               "headers": {k: v for k in ("Content-Type", "Accept") if (v := h.headers.get(k))},
+                               "body": base64.b64encode(body).decode()})
+
+    def members(self):
+        with self.mesh.lock:
+            return list(self.mesh.hops)
+
+    @staticmethod
+    def fail(h, status, error):
+        body = json.dumps({"error": {"message": error}}).encode()
+        h.send_response(status)
+        h.send_header("Content-Type", "application/json")
+        h.send_header("Content-Length", str(len(body)))
+        h.send_header("Connection", "close")
+        h.end_headers()
+        if h.command != "HEAD":
+            h.wfile.write(body)
+
+    def relay(self, h, member, ask, moved=lambda to: to):
+        """A request (ask: infer's, or files') carried to the member, and its answer back to h as it comes (a Location
+        it gives as moved has it here)."""
+        fail = lambda status, error: self.fail(h, status, error)  # noqa: E731
+        head = h.command == "HEAD"
         try:
             ch, _info = self.mesh.channel(member)
         except OSError as e:
@@ -1247,20 +1337,25 @@ class Proxy:
         try:
             ch.sock.settimeout(wire.SILENT_S)
             ch.keep_alive()
-            ch.send({"op": "infer", "req": 1, "provider": provider, "method": h.command, "path": rest,
-                     "headers": {k: v for k in ("Content-Type", "Accept") if (v := h.headers.get(k))},
-                     "body": base64.b64encode(body).decode()})
+            ch.send({**ask, "req": 1})
             started = False
             while (msg := ch.reply()) is not None:
                 op = msg.get("op")
                 if op == "infer_head" and not started:
                     started = True
                     h.send_response(int(msg.get("status") or 502))
-                    for k, v in (msg.get("headers") or {}).items():
-                        h.send_header(k, v)
-                    h.send_header("Transfer-Encoding", "chunked")
+                    heads = msg.get("headers") or {}
+                    for k, v in heads.items():
+                        if k in ("Content-Type", "Content-Range", "Accept-Ranges") or (head and k == "Content-Length"):
+                            h.send_header(k, v)
+                        elif k == "Location":
+                            h.send_header(k, moved(str(v)))
+                    if not head:
+                        h.send_header("Transfer-Encoding", "chunked")
                     h.send_header("Connection", "close")
                     h.end_headers()
+                    if head:
+                        return
                 elif op == "infer_data" and started:
                     data = base64.b64decode(msg.get("data") or "")
                     if data:

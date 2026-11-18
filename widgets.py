@@ -1041,6 +1041,12 @@ def pr_title(p, repo, number):
     return " · ".join(x for x in (f"{repo}#{number}", said, (p or {}).get("title")) if x)
 
 
+def pill_code_scale():
+    """A pill's size of the text's: code's (code_scale), never more than the text's (a code font measured larger than
+    the prose's, as one can be, leaves pills the prose's size)."""
+    return min(1.0, code_scale())
+
+
 def chat_repo():
     """The GitHub repository (owner/name) the reply being drawn is in, what a bare #12 in it means: its Signal's (the
     chat's checkout's origin), else its folder's as GITHUB has read it. None if there's none."""
@@ -1053,7 +1059,8 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     chat's (chat_repo: another's keeps its link as it was) unless any_repo (a link to one, whose shape says it is: its
     pill, in where it stands once that's read, and a link's colour till then), with no gh or gh signed out, if
     nothing's been read of its pull requests (and not any_repo), or (known) if number isn't one of them as far as is
-    known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered)."""
+    known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered),
+    at code's size (pill_code_scale: a number among `names` is as big as they are; LinkLabel's logo and patch follow)."""
     if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
         return None
     if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
@@ -1061,7 +1068,9 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     p = lookup.PULLS.pull(repo, number)
     if p is None and known:
         return None
-    return pr_pill_markup(pr_numbered(inner, number),
+    # (a size="…%" is a share of the label's own size, not of the span it's in: code in a link's text keeps its)
+    inner = f'<span size="{round(pill_code_scale() * 100)}%">{pr_numbered(inner, number)}</span>'
+    return pr_pill_markup(inner,
                           href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
                           pr_title(p, repo, number), (p or {}).get("state"))
 
@@ -1889,7 +1898,7 @@ class LinkLabel(WrapLabel):
     CHIP_PAD, CHIP_SCALE, CHIP_RADIUS = 5, 0.78, 4  # px either side of a chip's name, its size of the text's, and its
     # corners' px: .git-ref's, as a chip on its own had them (a pill's corners too)
     PILL_IN, PILL_OUT = 4, 5  # px: a pill's margin before its logo, and after its name
-    pill_scale = 1.0  # (a pill's size of the text's: a log row's are a chip's size)
+    pill_scale = None  # (a pill's size of the text's: code's, as pr_pill draws its number; a log row's a chip's)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -1908,9 +1917,13 @@ class LinkLabel(WrapLabel):
         m = self.get_pango_context().get_metrics(None, None)
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
+    def pill_ratio(self):
+        """A pill's size of the text's: pill_scale, else its number's (pill_code_scale)."""
+        return self.pill_scale or pill_code_scale()
+
     def pill_px(self):
         """A pill's logo's size, px."""
-        return max(8, round(self.icon_px * self.pill_scale))
+        return max(8, round(self.icon_px * self.pill_ratio()))
 
     def place_icons(self):
         """Find the places kept for logos, chips' and pills' ends, and make each its width (again, when the text's size
@@ -1980,7 +1993,7 @@ class LinkLabel(WrapLabel):
 
         def pixel(v, base):
             return round((base + v) * scale) / scale - base
-        small = (ascent - descent) / Pango.SCALE / 2 * (1 - self.pill_scale)  # (a smaller pill's middle: lower)
+        small = (ascent - descent) / Pango.SCALE / 2 * (1 - self.pill_ratio())  # (a smaller pill's middle: lower)
         for at, icon, pad, color, px, lower in [(at, icon, 0, fg, self.icon_px, 0) for at, icon in self.icons] + \
                 [(at, "merge", self.PILL_IN, pr_rgba(state, fg), self.pill_px(), small) for at, _end, state in self.pills]:
             size = max(8, round(px * scale))
@@ -2000,7 +2013,7 @@ class LinkLabel(WrapLabel):
         def chip_box(scale):  # (top, height) of a patch, from the baseline
             return -(ascent * scale + 1), (ascent + descent) * scale + 2
         tall = round((ascent + descent) * 0.86)
-        pill_box = chip_box(self.pill_scale) if self.pill_scale < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
+        pill_box = chip_box(self.pill_ratio()) if self.pill_ratio() < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
         patches = [(s, e, chip_colors(kind, fg)[1], chip_box(self.CHIP_SCALE)) for s, e, kind in self.chips]
         for s, e, state in self.pills:
             color = pr_rgba(state, fg)

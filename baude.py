@@ -12290,6 +12290,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tasks = {}            # background task id -> latest info (commands and subagents)
         self.waiting_cards = set()  # permission prompts not answered yet
         self.background = {}  # session id -> the claude of a chat left mid-turn, going on with it (detach_proc)
+        self.left_remote = {}  # session id -> [its Remote, its state as last listed]: a network chat left mid-turn
         self.desktop_chat = False  # (the chat's Claude Desktop's: its claude runs here, not in the host process)
         # a past session opens read-only: its file is shown (and tailed) but no claude touches it
         # until you send a message (even resuming without a message writes to the file)
@@ -12673,6 +12674,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.set_signal(save=False)
         self.connect("notify::is-active", lambda *_: self.is_active() and self.links_on_focus())
         self.connect("notify::is-active", lambda *_: self.is_active() and self.seen_chat())
+        self.tabs.view.connect("notify::selected-page", lambda *_: self.seen_chat())
         widgets.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
         self.signal_run_handler = self.signal_run.connect("notify::active", lambda sw, _p: self.set_signal(on=sw.get_active()))
         self.signal_show_handler = self.signal_show.connect("notify::active",
@@ -14057,6 +14059,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # is asked when the chat's opened. Once its turn's over it's let go; it goes with the window.
     def detach_proc(self):
         if self.remote is not None:  # (a host's session: its turn goes on there, attached or not: let go of here)
+            if self.session_id:  # (what it does there said as it's listed: watch_left_remote)
+                self.left_remote[self.session_id] = [self.remote, "working"]
             p, self.proc = self.proc, None
             p.on_msg, p.on_exit = (lambda *_: False), (lambda *_: None)
             p.kill()
@@ -14071,6 +14075,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.background[p.key] = p
         self.waiting_cards.clear()
         self.set_busy(False)
+
+    def watch_left_remote(self):
+        """Network chats left mid-turn here (detach_proc), their turns going on at their hosts: as one's listed waiting
+        for an answer, or its turn over, said (tell_desktop), as its dot says it. Once over, no longer watched."""
+        for sid, seen in list(self.left_remote.items()):
+            r, before = seen
+            listed = r.sessions.get(sid)
+            state = "gone" if listed is None or r.state == "dead" else listed.get("state") or "idle"
+            if state == before:
+                continue
+            seen[1] = state
+            if state not in ("working", "waiting"):
+                del self.left_remote[sid]
+            if state in ("waiting", "idle", "stopped"):
+                info = remote_info({**listed, "server": r})
+                self.tell_desktop(sid, "Waiting for your answer" if state == "waiting" else "Finished",
+                                  title=listed.get("title"), info=info)
 
     def on_background_msg(self, proc, msg):
         t, req = msg.get("type"), msg.get("request") or {}
@@ -15234,6 +15255,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
+            if new_id and self.session_id is None:  # (a new chat's notification, under its id now)
+                widgets.withdraw_notification(self.chat_key(None))
             self.session_id = msg.get("session_id")
             if new_id:
                 if self.session_id and (self.signal_pending is not None or self.session_id not in
@@ -15651,17 +15674,30 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.panel.signal_page.changed()
         self.on_ref_status()
 
-    def tell_desktop(self, session_id, body, title=None):
-        """A turn's end, or a question it asks, in a chat you aren't looking at (this window not the one you're in, or
-        another chat open in it: one left mid-turn), as a desktop notification (widgets.desktop_notify): a click on it
-        brings this window up with that chat open. The sidebar's dot says it too."""
-        here = session_id is not None and session_id == self.session_id
-        if here and self.is_active():
+    def chat_key(self, session_id):
+        """A chat's notification's key: a new chat's, till it has an id, this window's (seen_chat takes it back then)."""
+        return f"chat-{session_id}" if session_id else f"chat-new-{id(self)}"
+
+    def looking_at(self, session_id):
+        """Whether the chat's in front of you: some Baude window the one you're in, with it open and its chat's tab
+        shown (not Feedback, not a file's code)."""
+        app = self.get_application()
+        return any(w.is_active() and w.session_id == session_id and w.tabs.current() is w.tabs.get("chat")
+                   for w in (app.windows() if app is not None else [self]))
+
+    def tell_desktop(self, session_id, body, title=None, info=None):
+        """A turn's end, or a question it asks, in a chat you aren't looking at (looking_at: in another window or
+        app, behind the Feedback tab, or left mid-turn behind another chat), as a desktop notification
+        (widgets.desktop_notify): a click on it brings this window up with that chat open. info: the chat's, if it's
+        known (a network chat's, which find_session doesn't know). The sidebar's dot says it too. Other programs'
+        chats (Claude Desktop, a terminal) are theirs to say: they notify on their own."""
+        if self.looking_at(session_id):
             return
+        here = session_id == self.session_id
+        if info is None and session_id and not session_id.startswith("new-") and not here:
+            info = find_session(session_id)
         if title is None:
-            title = self.title_label.get_text() if here else \
-                ((find_session(session_id) if session_id and not session_id.startswith("new-") else None)
-                 or {}).get("title")
+            title = self.title_label.get_text() if here else (info or {}).get("title")
         me = weakref.ref(self)
 
         def clicked():
@@ -15669,15 +15705,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 return
             win.present()
             win.show_chat()
-            if session_id and session_id != win.session_id and (info := find_session(session_id)) is not None:
+            if session_id and session_id != win.session_id and info is not None:
                 win.opening_remote = None  # (as a click on its row in the sidebar opens it: Sidebar.on_activate)
-                win.switch_to(lambda: win.resume_session(info))
-        widgets.desktop_notify(f"chat-{session_id}", title or "(untitled)", body, clicked)
+                if info.get("remote") is not None:
+                    win.open_remote_soon(info)
+                else:
+                    win.switch_to(lambda: win.resume_session(info))
+        widgets.desktop_notify(self.chat_key(session_id), title or "(untitled)", body, clicked)
 
     def seen_chat(self):
-        """The open chat seen (this window's the one you're in, or the chat's just opened): its notification gone."""
-        if self.is_active():
-            widgets.withdraw_notification(f"chat-{self.session_id}")
+        """The open chat seen (this window's the one you're in, on its chat's tab, or the chat's just opened): its
+        notification gone."""
+        if self.is_active() and self.tabs.current() is self.tabs.get("chat"):
+            widgets.withdraw_notification(self.chat_key(self.session_id))
 
     def links_on_focus(self):
         """This window became the active one: its own links are drawn (another window's chat may show none)."""
@@ -17109,6 +17149,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         server (start_remote_proc) as Baude's own claude is. Its folder is this window's only when its server is on
         this machine: links to files elsewhere are fetched from it (open_remote_link)."""
         r = info["remote"]
+        self.left_remote.pop(info["id"], None)  # (open here again: what it does is seen)
         self.draft_group = ""  # (a new chat's group: not another's)
         self.remember_own_writes()
         if self.busy and self.proc is not None:
@@ -17177,6 +17218,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         title as it's listed (renamed in another window, or elsewhere), the banner as it is now."""
         if getattr(self, "let_go_done", False):
             return
+        self.watch_left_remote()
         self.check_host_version()
         if (app := self.get_application()) is not None:
             app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)
@@ -17864,6 +17906,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if needs_login(msg.get("result")):
                 self.login_prompt(msg["result"])
         self.end_turn()
+        self.tell_desktop(self.session_id, turn_said(msg))
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
                            f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
 
@@ -17873,7 +17916,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         proc = self.proc if proc is None else proc
         self.set_busy(False)
         self.keep_chat_model()
-        self.tell_desktop(self.session_id, turn_said(msg))
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)

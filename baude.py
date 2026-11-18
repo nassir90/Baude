@@ -122,6 +122,7 @@ import pointers  # noqa: E402  (the pointer's shape: Record's too)
 from livefeed import (  # noqa: E402
     LIVE_SECONDS, TURN_OPEN_SECONDS, external_state, read_appended, transcript_turn_open)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
@@ -7520,7 +7521,7 @@ def on_main(fn):
 
 _NETWORK = []
 _LOCAL_SERVER = {"wanted": None}
-_HOST_SAID = {}  # (check_host_version's: the host process it's said is older, by its pid)  # (local_server's: what waits for the server on this machine it's started)
+_HOST_APART = []  # (widgets.HostApart: this Mac's host process on other code than Baude's, said in the banner)  # (local_server's: what waits for the server on this machine it's started)
 
 
 def network():
@@ -7585,6 +7586,14 @@ def stopping_said(r):
 def local_host():
     """This machine's host process (its socket: Remote.mine), if it's there, which runs every chat of Baude's."""
     return next((r for r in network().alive() if r.mine), None)
+
+
+def host_apart(app):
+    """The app's widgets.HostApart, made as it's first wanted: what it says, in every window's banner."""
+    if not _HOST_APART:
+        _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [w.update_banner() for w in app.windows()
+                                                                          if not getattr(w, "let_go_done", False)]))
+    return _HOST_APART[0]
 
 
 def host_old():
@@ -12512,7 +12521,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         widgets.inside(self.tabs, under_bar=True)
         self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
-        self.banner.connect("button-clicked", lambda *_: self.banner_kind == "missing" and self.new_chat_on_host())
+        self.banner.connect("button-clicked", lambda *_: self.new_chat_on_host() if self.banner_kind == "missing" else
+                            self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
         self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
         root.append(self.chat_find.wrap())
@@ -13913,7 +13923,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
                 return None, False
         if r is None or (r.info.get("version") or 1) < 2:
-            self.note("Daemon is older than client: restart it to ask a side question" if r is not None and r.mine else
+            self.note("Daemon is older than Baude: restart it to ask a side question" if r is not None and r.mine else
                       f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
         mode = "default" if model_program(self.model) == "codex" else "plan"
@@ -17398,32 +17408,40 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                               "puts it there")
 
     def check_host_version(self):
-        """This Mac's host process older than Baude (an update since it started: its protocol, wire.VERSION, behind):
-        said, once a host process, with Restart Daemon (restart_host)."""
-        r = local_host()
-        if r is None or (r.info.get("version") or 1) >= baudelib.wire.VERSION or \
-                _HOST_SAID.get("old") == r.info.get("pid"):
-            return
-        _HOST_SAID["old"] = r.info.get("pid")
-        t = Adw.Toast(title="Daemon is older than client", button_label="Restart Daemon", timeout=0)
-        t.connect("button-clicked", lambda *_: self.restart_host())
-        self.toasts.add_toast(t)
+        """This Mac's host process on other code than Baude (an update one has picked up and the other hasn't; its
+        protocol, wire.VERSION, behind; or another checkout's): looked at (host_apart), and said in every window's
+        banner once it's lasted, with the restart that puts them on the same code."""
+        if (app := self.get_application()) is not None:
+            host_apart(app).look(local_host())
 
-    def restart_host(self, waited=0):
+    def host_apart_said(self):
+        """(apart, title, button label) for the banner, or None (widgets.HostApart.now)."""
+        app = self.get_application()
+        if app is None or not _HOST_APART:
+            return None
+        return _HOST_APART[0].now(local_host(), "Baude", app.updater is not None and bool(app.updater.ready))
+
+    def act_host_apart(self):
+        if (said := self.host_apart_said()) is not None:
+            app = self.get_application()
+            _HOST_APART[0].act(said[0], app.restart, lambda then=None: self.restart_host(then=then))
+
+    def restart_host(self, waited=0, then=None):
         """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
         there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
         cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
-        its sessions resumes as it's next written to (the windows on them reattach as it's back)."""
+        its sessions resumes as it's next written to (the windows on them reattach as it's back). then: what's done
+        once it's gone, in place of starting it again (Baude restarted too: the new Baude starts it)."""
         r = local_host()
         if r is None:
-            return
+            return then() if then is not None else None
         busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
 
         def later(n):
             if not waited:
                 toast(self.sidebar, f"Restarting the daemon once {n} session"
                                     f"{'s finish' if n > 1 else ' finishes'} running a command")
-            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5) and False)
+            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5, then) and False)
 
         def answered(reply):
             if reply.get("op") == "busy":
@@ -17433,6 +17451,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             def gone():  # (the old one gone: a new one, started as any is: local_server)
                 if r.state == "alive" and time.monotonic() < end:
                     return True
+                if then is not None:
+                    then()
+                    return False
                 self.local_server(lambda _r: toast(self.sidebar, "Daemon restarted"), quiet=True)
                 return False
             GLib.timeout_add(250, gone)
@@ -17665,7 +17686,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def banner_text(self, kind):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
-        if kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
+        if kind == "apart":
+            text = (self.host_apart_said() or (None, ""))[1]
+        elif kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
             text = said
         elif kind == "gone":
             name = "daemon" if self.remote.mine else remote_name(self.remote)  # (this machine's: over its socket,
@@ -17709,14 +17732,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                             stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
+        apart = self.host_apart_said()  # (this Mac's host process on other code: said when nothing of the chat's is)
         kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
-            "retry" if self.retrying is not None else None
+            "retry" if self.retrying is not None else "apart" if apart is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
         if kind in ("drop", "retry") and self.banner_timer is None:
             self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
-        self.banner.set_button_label("New chat" if kind == "missing" else None)
+        self.banner.set_button_label("New chat" if kind == "missing" else apart[2] if kind == "apart" else None)
         self.banner.set_revealed(kind is not None)
         self.locked = live
         if hasattr(self, "composer_box"):

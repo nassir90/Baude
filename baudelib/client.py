@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, wire
+from baudelib import claude, mesh, selfupdate, wire
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -41,6 +41,46 @@ def is_here(info):
     return not isinstance(home, str) or os.path.realpath(home) == os.path.realpath(os.path.expanduser("~"))
 
 
+APART_S = 3 * selfupdate.CHECK_S  # (how long a head and its host process run different code before it's said: an
+# update that one has picked up, and the other will in its next look at the checkout, isn't)
+
+
+def code_apart(info, started, root=selfupdate.HERE):
+    """(git: off the main loop) How a head whose code is commit started, from the checkout root, and this machine's
+    host process (info: as it says) run different code: None, the same (or nothing to tell by); "head", the head's
+    behind the host's; "host", the host's behind (its protocol, wire.VERSION, too); "both", both apart from what's
+    checked out; "elsewhere", the host's code is another checkout's (its checkout, as it says; or a commit this
+    checkout hasn't got, from one that doesn't say). OSError if git couldn't tell."""
+    commit, old = info.get("commit"), (info.get("version") or 1) < wire.VERSION
+    if not commit or not started or commit == started:
+        return "host" if old else None
+    if isinstance(info.get("checkout"), str) and os.path.realpath(info["checkout"]) != os.path.realpath(root):
+        return "elsewhere"
+    if not _git_ok(root, "cat-file", "-e", f"{commit}^{{commit}}"):
+        return "elsewhere"
+    if _git_ok(root, "merge-base", "--is-ancestor", started, commit):
+        return "head"
+    if _git_ok(root, "merge-base", "--is-ancestor", commit, started):
+        return "host"
+    head = selfupdate.git(root, "rev-parse", "HEAD", timeout=5)  # (neither after the other: a branch changed)
+    if head is None:
+        raise OSError("git couldn't say what's checked out")
+    return "host" if head == started else "head" if head == commit and not old else "both"
+
+
+def _git_ok(root, *args):
+    """Did git say yes (0) or no (1)? OSError for anything else: it couldn't tell."""
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", root, *args], env=selfupdate.GIT_ENV, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=5, start_new_session=True)
+    except subprocess.TimeoutExpired as e:
+        raise OSError(f"git {args[0]} took too long") from e
+    if r.returncode not in (0, 1):
+        raise OSError(f"git {args[0]}: {r.stderr.decode(errors='replace').strip()}")
+    return r.returncode == 0
+
+
 STOPPING_SAID_S = 60  # (how long a host's last word as it stopped is said, while it isn't back)
 
 
@@ -52,6 +92,7 @@ def stopping_line(name, restart, left, total):
     if left > 0:
         return f"{name} {verb} — {left} of {total} process{'es' if total != 1 else ''} to stop"
     return f"{name} {verb} — every process stopped" if total else f"{name} {verb}…"
+
 
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and

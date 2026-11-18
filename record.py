@@ -75,6 +75,7 @@ from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, 
 # a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
+import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
@@ -83,6 +84,7 @@ import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: bes
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
 from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
+baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 
 APP_ID = "dev.baude.Record"
@@ -393,6 +395,20 @@ def diary_mentions(notebook, term):
 HERE_HOST = "here"  # (the host whose notebooks are shown: this machine's key, as Baude's New session has it)
 THIS_MACHINE = "local"  # (this machine, by name, as Baude says it)
 _NETWORK = []
+_HOST_APART = []  # (widgets.HostApart: this machine's host process on other code than Record's, said in the banner)
+
+
+def host_apart(app):
+    """The app's widgets.HostApart, made as it's first wanted: what it says, in its windows' banner."""
+    if not _HOST_APART:
+        _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [
+            w.show_host_apart() for w in app.get_windows() if isinstance(w, Window)]))
+    return _HOST_APART[0]
+
+
+def local_remote():
+    """This machine's host process (its socket), if it's there."""
+    return next((r for r in network().alive() if r.mine), None)
 
 
 def network():
@@ -7462,6 +7478,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         framed = Adw.ToolbarView(content=split)
         framed.add_css_class("baude-frame")  # (the bar on the frame, as the columns are: widgets.CSS)
         framed.add_top_bar(head)
+        # (this machine's host process on other code than Record's: show_host_apart)
+        self.apart_banner = Adw.Banner(revealed=False)
+        self.apart_banner.connect("button-clicked", lambda *_: self.act_host_apart())
+        framed.add_top_bar(self.apart_banner)
         self.toasts = Adw.ToastOverlay(child=self.viewer_overlays(framed))  # (Kubernetes, Databases: over it all)
         self.set_content(self.toasts)
         self.fill_sidebar()
@@ -8048,7 +8068,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     def on_network(self):
         """The hosts changed: the dropdown's as they are, on the host picked; the one shown, back, listed again (what
-        wasn't sent it, sent first: list_notes); what's in its way said (show_host_state)."""
+        wasn't sent it, sent first: list_notes); what's in its way said (show_host_state); this machine's host process
+        on other code than Record's, said (check_host_code)."""
+        self.check_host_code()
         store = self.store
         for r in network().remotes():  # (the one picked, known by another key now: by that one)
             if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:
@@ -8068,6 +8090,72 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 self.list_notes(key)  # (back, or its notebooks written since they were listed: listed again; what
             self.host_up[key] = up  # it didn't take sent first)
         self.show_host_state()
+
+    def check_host_code(self):
+        """This machine's host process on other code than Record (widgets.HostApart, as Baude's): looked at, and said
+        in the banner under the header once it's lasted, with the restart that puts them on the same code."""
+        if (app := self.get_application()) is not None:
+            host_apart(app).look(local_remote())
+
+    def show_host_apart(self):
+        """The banner as HostApart says it now (nothing, or what an Update bar says already: Record's, the host's)."""
+        said = self.host_apart_said()
+        if said is not None:
+            self.apart_banner.set_title(said[1])
+            self.apart_banner.set_button_label(said[2])
+        self.apart_banner.set_revealed(said is not None)
+
+    def host_apart_said(self):
+        app = self.get_application()
+        if app is None or not _HOST_APART:
+            return None
+        u = getattr(app, "updater", None)
+        return _HOST_APART[0].now(local_remote(), "Record", u is not None and bool(u.ready))
+
+    def act_host_apart(self):
+        if (said := self.host_apart_said()) is not None:
+            _HOST_APART[0].act(said[0], self.restart, self.restart_host)
+
+    def restart_host(self, then=None, waited=0):
+        """This machine's host process stopped and started again, as Baude's Restart Daemon does: once no command's
+        running there (quit if_idle; asked again every 5 s till then), said once it's back, or that it isn't. then:
+        what's done once it's back (Record restarted too)."""
+        r = local_remote()
+        if r is None:
+            return self.start_host(then)
+
+        def answered(reply):
+            if reply.get("op") == "busy":
+                n = len(reply.get("sessions") or []) or 1
+                if not waited:
+                    self.toast(f"Restarting the daemon once {n} session{'s finish' if n > 1 else ' finishes'} running "
+                               "a command")
+                GLib.timeout_add_seconds(5, lambda: self.restart_host(then, waited + 5) and False)
+                return
+            end = time.monotonic() + 15
+
+            def gone():  # (the old one gone: a new one started, as Baude starts it)
+                if r.state == "alive" and time.monotonic() < end:
+                    return True
+                self.start_host(then)
+                return False
+            GLib.timeout_add(250, gone)
+        r.request({"op": "quit", "if_idle": True}, answered)
+
+    def start_host(self, then=None):
+        def start():
+            ok = baudelib.hosts.start_here()
+            GLib.idle_add(lambda: done(ok) and False)
+
+        def done(ok):
+            if not ok:
+                self.toast(f"The daemon didn't start again: {widgets.pretty_path(baudelib.hosts.log_path())} may say why")
+                return
+            network().here()  # (its socket's there: no need to wait for the next look)
+            self.toast("Daemon restarted")
+            if then is not None:
+                then()
+        threading.Thread(target=start, daemon=True, name="start-host").start()
 
     def rekey_host(self, old, new):
         store = self.store

@@ -155,6 +155,7 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
 LIST_ITEM_RE = re.compile(r"(\s*)([-*+]|\d+[.)])(\s+)(?:\[([ xX])\]\s+)?")  # (an item: its marker, its box)
 MD_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s]+)\)")
 URL_RE = re.compile(r"\bhttps?://[^\s<>\"]+[^\s<>\".,;:!?)]")
+LINKING_RE = re.compile(r"(?:^|(?<=\s))\+([\w.\-:]*)$")  # +, and what's typed after it: +'s list of pages
 SUBPAGE_RE = re.compile(r"(?:^|(?<=\s))\+(\w[\w.\-]*(?::\w[\w.\-]*)*)$")  # +Ideas just typed, at the caret
 
 
@@ -2885,9 +2886,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         tags = self.buf.get_tag_table()  # (the @'s unseen, though "ref" colours the rest of its @name)
         tags.lookup("logo-at").set_priority(tags.get_size() - 1)
         self.buf.connect("changed", self._changed)
-        self.typed_at = None  # (where an @ or a # was just typed: their searches start only there, _token_changed)
-        self.buf.connect("insert-text", lambda _b, at, text, _n: ("@" in text or "#" in text) and len(text) <= 2 and
-                         setattr(self, "typed_at", at.get_offset() + max(text.rfind("@"), text.rfind("#"))))
+        self.typed_at = None  # (where an @, # or + was just typed: their searches start only there, _token_changed)
+        self.buf.connect("insert-text", lambda _b, at, text, _n: any(c in text for c in "@#+") and len(text) <= 2 and
+                         setattr(self, "typed_at", at.get_offset() + max(text.rfind(c) for c in "@#+")))
         self.caret_was = None  # (where the caret was: which way it went, _caret_in_marker)
         self.snapping = None  # (the caret's snap out of a list item's marker, waiting: _caret_moved)
         self.buf.connect("notify::cursor-position", lambda *_: self.loading or (self._caret_moved(),
@@ -4244,17 +4245,24 @@ class DiaryEditor(Gtk.Box, FindInText):
             typed = self.buf.get_slice(self.buf.get_iter_at_offset(self.token[0]), ins, True)
             if typed.startswith("#") and "\n" not in typed:
                 return self._issue_search(before, self.token[0] - start, start)
+            if typed.startswith("+") and LINKING_RE.fullmatch(typed) and self.notebook is not None:
+                self.token = (self.token[0], typed[1:])
+                self.token_far = max(self.token_far or 0, offset)
+                self._mark_token()
+                return self._fill_pop()
             if typed.startswith("@") and "\n" not in typed:
                 self.token = (self.token[0], typed[1:].lstrip("{"))
                 self.token_far = max(self.token_far or 0, offset)
                 self._mark_token()
                 return self._fill_pop()
-        m = re.search(r"(?<![\w@])@(\{[^}\n]*|[\w./:\-]*)$", before) or re.search(r"#[\w./:\-]*$", before)
+        m = re.search(r"(?<![\w@])@(\{[^}\n]*|[\w./:\-]*)$", before) or re.search(r"#[\w./:\-]*$", before) or \
+            (plus if self.notebook is not None and (plus := LINKING_RE.search(before)) and
+             not (not plus.group(1) and not before[:plus.start()].strip()) and not self._in_code(offset) else None)
         if not m or offset - len(m.group(0)) != self.typed_at:  # (only an @ just typed: the caret come
             return self._hide_pop()  # back to an @name's end doesn't start its search again, to take in what's next)
         if m.group(0).startswith("#"):
             return self._issue_search(before, m.start(), start)
-        self.token = (offset - len(m.group(0)), m.group(1).lstrip("{"))
+        self.token = (offset - len(m.group(0)), m.group(1).lstrip("{") if m.group(0).startswith("@") else m.group(1))
         self.token_far = offset
         self._mark_token()
         self._fill_pop()
@@ -4312,24 +4320,58 @@ class DiaryEditor(Gtk.Box, FindInText):
         """Whether the list up is #'s."""
         return self.token is not None and self.buf.get_iter_at_offset(self.token[0]).get_char() == "#"
 
+    def _link_list(self):
+        """Whether the list up is +'s: the notebook's pages, to link to."""
+        return self.token is not None and self.buf.get_iter_at_offset(self.token[0]).get_char() == "+"
+
+    def link_items(self, query):
+        """What +'s list lists for what's typed after the +: this page's sub-pages first, then the notebook's other
+        pages, each word typed found in the name, in any order (the pages list's names: PagesList.names); last, a new
+        sub-page of that name while no page is named it, in any case. Each is written as a link from here is (page_link:
+        +Ideas for a sub-page)."""
+        pages = self.notebook["pages"]
+        names = set(self.win.pages.names()[0]) if self.notebook is self.win.current else \
+            {n for n, text in pages.items() if text.strip()} | {HOME}
+        names.discard(self.page)
+        words = query.lower().replace(":", " ").split()
+        found = [n for n in names if n and all(w in n.lower() for w in words)]
+        mine = self.page + ":"
+        found.sort(key=lambda n: (not n.startswith(mine), n.count(":"), n.lower()))
+        items = [{"surface": n, "label": page_link(self.page, n), "link": page_link(self.page, n), "icon": "page",
+                  "what": "Sub-page" if n.startswith(mine) else "Page",
+                  "summary": next((line.strip().lstrip("#>-*+ ").strip()[:60] for line in pages.get(n, "").split("\n")
+                                   if line.strip().lstrip("#>-*+ ").strip()), "nothing in it yet")}
+                 for n in found]
+        new = page_target(self.page, "+" + query) if re.fullmatch(r"\w[\w.\-]*(?::\w[\w.\-]*)*", query) else None
+        if new and new.lower() not in {n.lower() for n in names}:
+            items.append({"surface": new, "label": "+" + query, "link": "+" + query, "icon": "page",
+                             "what": "New sub-page", "summary": f"of {short_page(self.page)}"})
+        return items
+
     def _exact(self):
         """Whether #'s list's first is the number typed: what's been typed means that one (issues: it's first)."""
         return bool(self.pop_shown) and self.pop_shown[0].get("label") == self.token[1].strip()
 
     def _fill_pop(self):
         space = self.win.space()
-        issues = self._issue_list()
+        issues, linking = self._issue_list(), self._link_list()
         kept = self.pop_selected() if self.pop_moved and self.pop_query == self.token[1] else None
-        self.pop_shown, matched = ([], 0) if space is None else \
-            space.issues(self.token[1]) if issues else space.search(self.token[1])  # (all of them)
+        if linking:
+            self.pop_shown = self.link_items(self.token[1])
+            matched = sum(1 for it in self.pop_shown if it["what"] != "New sub-page")
+        else:
+            self.pop_shown, matched = ([], 0) if space is None else \
+                space.issues(self.token[1]) if issues else space.search(self.token[1])  # (all of them)
         if issues and not self.pop_shown:  # (a # is an ordinary thing to type: no list, and nothing said)
             return self._hide_pop()
         self.pop_query = self.token[1]
         at = next((i for i, it in enumerate(self.pop_shown) if kept and it["surface"] == kept["surface"]), None)
         self.pop_moved = at is not None  # (the same search, listed again: what's picked stays picked)
-        if at is None and (not issues or self._exact()):  # (# picks nothing it wasn't asked to: Enter's a new line)
-            at = 0
-        if space is None:
+        if at is None and (not issues or self._exact()) and not (linking and not self.token[1]):
+            at = 0  # (# picks nothing it wasn't asked to, nor a + with nothing after it yet: Enter's a new line)
+        if linking:
+            note = f"{matched} page{'s' if matched != 1 else ''}" if matched else "No page named that yet"
+        elif space is None:
             note = "Nothing found"
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
@@ -4341,7 +4383,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, loc.x, loc.y)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = x, y, 1, loc.height
-        self.picks.show(len(self.pop_shown), at, note, rect, coming=space is not None and space.busy)
+        self.picks.show(len(self.pop_shown), at, note, rect, coming=not linking and space is not None and space.busy)
 
     def _catalogued(self):
         space = self.win.space()  # (a folder's in, another's on its way: waited for in turn, the list up or not)
@@ -4379,7 +4421,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         if self._edits_green(keyval, state):
             return True  # (what's proposed isn't the page's: nothing typed into it)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab) and \
-                self.pop.get_visible() and self._issue_list() and not self.pop_moved and not self._exact():
+                self.pop.get_visible() and not self.pop_moved and (
+                    self._issue_list() and not self._exact() or self._link_list() and not self.token[1]):
             # (#'s list, and nothing asked of it: what was typed stays as typed. Enter's a new line, as it always is)
             self._hide_pop()
             if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -4400,7 +4443,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
             self._em_dash()  # (and the space or Enter goes in after it, as typed)
-        if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self._sub_page() and keyval == Gdk.KEY_space:
+        if (keyval == Gdk.KEY_space or keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not self.pop.get_visible()) and \
+                self._sub_page() and keyval == Gdk.KEY_space:
             return False  # (the space follows the link, as typed; Enter's the Enter it would have been: a list goes on)
         if keyval == Gdk.KEY_BackSpace and (self._unbullet() or self._unbreak()):
             return True
@@ -4438,6 +4482,9 @@ class DiaryEditor(Gtk.Box, FindInText):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Tab) and self.pop_selected() is not None:
             if self._issue_list() and not self.pop_moved:
                 self.pop_sel.set_selected(0)  # (the number typed: not whatever the pointer's over)
+            if self._link_list() and keyval != Gdk.KEY_Tab:
+                self._insert_ref(after="")  # (+'s link, then the Enter it was: a list goes on)
+                return self._continue_item() if state & Gdk.ModifierType.SHIFT_MASK else self._list_enter()
             self._insert_ref()
             return True
         return False
@@ -4677,7 +4724,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self.buf.place_cursor(self.buf.get_iter_at_offset(to))
                 return
 
-    def _insert_ref(self):
+    def _insert_ref(self, after=" "):
         item = self.pop_selected()
         if item is None or self.token is None:
             return
@@ -4686,7 +4733,8 @@ class DiaryEditor(Gtk.Box, FindInText):
         self._hide_pop()
         self.buf.begin_user_action()
         self.buf.delete(start, end)
-        self.buf.insert_at_cursor(ref_text(item["surface"], item.get("label")) + " ")
+        self.buf.insert_at_cursor((f"[[{item['link']}]]" if "link" in item else ref_text(item["surface"], item.get("label")))
+                                  + after)
         self.buf.end_user_action()
         self.view.grab_focus()
         self._hide_pop()

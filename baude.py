@@ -8983,7 +8983,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.body.add_css_class("zoomable")
         self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                         visible=False))  # (nothing over its box till something's asked)
-        self.inside.append(self.scroll)
+        self.chat_find = widgets.ChatFind(self.body, self.scroll, pane=self.inside)  # (⌘F / Ctrl+F in it)
+        self.inside.append(self.chat_find.wrap())
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
         self.writing = widgets.Composer()
@@ -10272,9 +10273,14 @@ class SidePanel(Gtk.Box):
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
-        self.detail_holder = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
-            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, margin_top=6)), start=False)
-        detail.append(self.detail_holder)
+        # (and ⌘F / Ctrl+F in the subagent shown, its find bar inside it: its box, the holder's child)
+        self.detail_holder = natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
+            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.agent_find = widgets.ChatFind(lambda: getattr(self.detail_holder.get_child(), "get_child", lambda: None)(),
+                                           self.detail_holder)
+        self.detail_inside = widgets.inside(self.agent_find.wrap(), start=False)
+        self.detail_inside.set_margin_top(6)
+        detail.append(self.detail_inside)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
         page.set_icon_name("system-users-symbolic")
@@ -10665,8 +10671,9 @@ class SidePanel(Gtk.Box):
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
+        self.agent_find.refresh()
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
-            self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+            self.agent_expand.open("detail", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                    across=self.agent_list)
         else:
             self.agent_stack.set_visible_child_name("detail")
@@ -10700,7 +10707,7 @@ class SidePanel(Gtk.Box):
         if row is None:
             self.agent_stack.set_visible_child_name("list")
             return
-        self.agent_expand.close("list", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
+        self.agent_expand.close("list", row, self.detail_inside, **self.expand_parts(row), within=self.agent_scroll,
                                 across=self.agent_list)
 
     # ---- background processes
@@ -12489,7 +12496,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
         self.banner.connect("button-clicked", lambda *_: self.banner_kind == "missing" and self.new_chat_on_host())
         root.append(self.banner)
-        root.append(self.scroller)
+        self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
@@ -12591,10 +12599,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # Ctrl+B the sessions on the left, as an editor's sidebar. Ctrl+F: the find bar of the code the focus is in
         # (the Kubernetes view's YAML or logs), else the Kubernetes view's filter while it's open (it covers the
         # window, so not the find bar of a Code page under it), else the Code page's find bar if that's showing. Both
-        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward
+        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward. ⌘F on a Mac
+        # too; and past those, the chat the focus is in (Meta, a side question, a subagent), else the main chat
         widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
-                                  ("<Control>f", lambda: find_in_focus(self) or self.kube.find() or
-                                                         self.schema.start_find() or self.find_in_code())))
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS),
+                                   lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
+                                   self.find_in_chat())))
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)
@@ -15983,6 +15993,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         pages = [c for c in self.tabs.children() if isinstance(c, CodePage)]
         current = self.tabs.current()
         return current if current in pages else pages[-1] if pages else None
+
+    def find_in_chat(self):
+        """⌘F / Ctrl+F: find in the chat the focus is in (Meta's, a side question's, a subagent's: widgets.ChatFind),
+        else in the code tab shown, else in the main chat."""
+        find = widgets.ChatFind.for_focus(self)
+        if find is not None:
+            return find.open()
+        if self.find_in_code():
+            return True
+        return self.chat_find.open() if self.tabs.current() is self.tabs.get("chat") else False
 
     def find_in_code(self):
         """Ctrl+F: find in the code tab shown, if one is; False (not handled) if not."""

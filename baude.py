@@ -10,7 +10,7 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
     python3 baude.py [--cwd DIR] [--model MODEL] [--resume SESSION_ID]
     python3 baude.py --install | --uninstall   # app-menu launcher (per user)
 
-Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
+Keys: Ctrl+Enter (⌘Enter) sends, Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
 Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused, or
 closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
@@ -6842,10 +6842,9 @@ class SlashCompleter:
 
 
 class ChatRefCompleter(meta.RefCompleter):
-    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), where Enter sends: not in code (an @ there
-    is a decorator's, an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @
-    is one word, or once the arrows have moved to it; else it sends, as Ctrl+Enter always does, and Shift+Enter is a
-    new line. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
+    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), not in code (an @ there is a decorator's,
+    an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @ is one word, or
+    once the arrows have moved to it; else it's a new line. Ctrl+Enter (⌘Enter) always sends, past the list. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
 
     def __init__(self, space, view, anchor, slash):
         self.slash = slash
@@ -6862,7 +6861,7 @@ class ChatRefCompleter(meta.RefCompleter):
         if not self.visible():
             return False
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (
-                state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) or
+                widgets.sends(state) or state & Gdk.ModifierType.SHIFT_MASK or
                 not self.moved and " " in (self.word() or (0, ""))[1].strip()):
             self.forget()
             return False
@@ -9021,15 +9020,14 @@ class SideQuestion(Gtk.ListBoxRow):
         return self.writing.text()
 
     def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line; Esc stops the answer:
-        as in Meta's box."""
+        """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item); Esc stops the answer: as in Meta's
+        box."""
         if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
@@ -10194,7 +10192,7 @@ class SidePanel(Gtk.Box):
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
         # empty)
-        self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
         self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
@@ -10289,15 +10287,14 @@ class SidePanel(Gtk.Box):
     ASK_HEIGHT = 63  # (px: the box's least)
 
     def _ask_key(self, _c, keyval, _code, state):
-        """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
-        code block, is a new line: as in a side question's own box."""
+        """Ctrl+Enter (⌘Enter) asks what's typed in the box over the list (nothing, while it's empty); Enter is a
+        new line: as in a side question's own box."""
         if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
             self.ask_typed()
             return True
         return False
@@ -12192,7 +12189,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter\n"
+            send_tip=f"Send ({widgets.SEND_KEY})\nNew line: Enter\n"
                      "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
@@ -13857,10 +13854,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK:
             return self.paste_attachment()
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            if state & Gdk.ModifierType.CONTROL_MASK:  # Ctrl+Enter always sends
-                self.on_send()
-                return True
-            if state & Gdk.ModifierType.SHIFT_MASK or self.composer_md.code_state()[0]:
+            if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
                 return self.composer_md.newline()  # False: the TextView inserts a plain newline
             self.on_send()
             return True

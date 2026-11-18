@@ -1851,6 +1851,9 @@ class RefCompleter:
             if self.shown:
                 self.picks.move(steps[keyval])
                 self.moved = True
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+            self.forget()  # (Ctrl/⌘+Enter sends, past the list)
+            return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
@@ -2161,8 +2164,8 @@ class MetaChat(Gtk.Box):
         level = effort()
         name = model_name() + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
         name += ", runs commands" if runs_commands() else ""
-        self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) (Enter)\n" \
-                                "New line: Shift+Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
+        self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) ({widgets.SEND_KEY})\n" \
+                                "New line: Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         agent = self.agent
@@ -2240,7 +2243,7 @@ class MetaChat(Gtk.Box):
         self.render()
 
     def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line, as in Baude; a selection
+        """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item), as in Baude; a selection
         and * ` or / is made bold, code or italic; @'s list, while it's up, has the arrows, Enter, Tab and Esc
         (RefCompleter); Esc stops the reply."""
         if self.refs.handle_key(keyval, state):
@@ -2255,9 +2258,8 @@ class MetaChat(Gtk.Box):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return markdown.newline()  # (a list's next item; False: the TextView's own new line)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.ask:

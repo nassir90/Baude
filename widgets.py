@@ -3282,6 +3282,15 @@ class ComposerMarkdown:
         return True
 
 
+SEND_KEY = "⌘Enter" if sys.platform == "darwin" else "Ctrl+Enter"  # (what sends from a box: Enter is a new line)
+
+
+def sends(state):
+    """Whether Enter with these modifiers sends what's written: Ctrl+Enter, or ⌘Enter on a Mac (either works on
+    both). Plain Enter is a new line (a list's next item), as Shift+Enter is."""
+    return bool(state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SUPER_MASK))
+
+
 class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
     written: ComposerMarkdown) in a card, at least two lines tall and scrolling past nine, with its buttons in its
@@ -3289,7 +3298,7 @@ class Composer(Gtk.Overlay):
     any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
     as it needs (Record's quote). Its owner connects the send button and the keys."""
 
-    def __init__(self, buttons=(), send_tip="Send (Enter)\nNew line: Shift+Enter"):
+    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter"):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
         self.input.add_css_class("zoomable")

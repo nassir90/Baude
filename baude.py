@@ -125,6 +125,7 @@ import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; se
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
 )
+import thumbs  # noqa: E402  (files' thumbnails, the system's)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
@@ -6520,9 +6521,19 @@ def attachment_widget(att, size, on_remove=None):
         make_image_interactive(thumb, att.data, att.path, att.name)
         box.append(thumb)
     else:
-        box.append(Gtk.Image.new_from_gicon(att.icon()))
+        icon = Gtk.Image.new_from_gicon(att.icon())
+        box.append(icon)
         name = Gtk.Label(label=att.name, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=22)
         box.append(name)
+        if att.path and thumbs.wanted(att.path):  # (a PDF, a video: the system's thumbnail of it, as it has one)
+            side = size * 2 // 3
+
+            def shown(tex):
+                if tex is not None:
+                    icon.set_from_paintable(tex)
+                    icon.set_pixel_size(side)
+                    icon.add_css_class("attach-thumb")
+            thumbs.thumbnail(att.path, round(side * widgets.screen_scale()), shown)
     if on_remove:
         rm = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Remove", valign=Gtk.Align.CENTER)
         rm.add_css_class("flat")

@@ -43,6 +43,8 @@ from widgets import (  # noqa: E402,F401
 )
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
+import thumbs  # noqa: E402
+import widgets  # noqa: E402
 
 
 CODE_LIMIT = 4 * 1024 * 1024  # bigger files open in the editor instead
@@ -703,6 +705,9 @@ class FilesPage(Gtk.Box):
     down to the folder or file asked for. A folder link opens here, not in your file manager; a file opens on the
     Code page (or in its app, if it isn't text). Right-click a row to copy its path or open it in the file manager."""
 
+    THUMB = 20  # (a file's thumbnail in its row: a little over an icon, as the rows have room for)
+    PREVIEW = 240  # (and in its tooltip)
+
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.root, self.tree, self.selection = win, None, None, None
@@ -737,9 +742,11 @@ class FilesPage(Gtk.Box):
     def _setup(self, _factory, item):
         exp = Gtk.TreeExpander(indent_for_icon=True)
         box = Gtk.Box(spacing=6)
-        box.append(Gtk.Image())
+        box.append(Gtk.Image(width_request=self.THUMB))  # (an icon in the middle of a thumbnail's room)
         box.append(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
         exp.set_child(box)
+        exp.set_has_tooltip(True)
+        exp.connect("query-tooltip", self._tooltip)
         click = Gtk.GestureClick(button=3)
         click.connect("pressed", lambda _g, _n, x, y: self.menu(exp, x, y))
         exp.add_controller(click)
@@ -752,12 +759,52 @@ class FilesPage(Gtk.Box):
         icon, label = exp.get_child().get_first_child(), exp.get_child().get_last_child()
         name = os.path.basename(node.path)
         icon.set_from_gicon(Gio.ThemedIcon.new("folder-symbolic") if node.is_dir else file_icon(name))
+        icon.set_pixel_size(-1)
+        icon.remove_css_class("file-thumb")
+        if not node.is_dir and thumbs.wanted(node.path):  # (the system's thumbnail in its place, once it's made)
+            def shown(tex, exp=exp, node=node):
+                if tex is not None and getattr(exp, "node", None) is node:
+                    icon = exp.get_child().get_first_child()
+                    icon.set_from_paintable(tex)
+                    icon.set_pixel_size(self.THUMB)
+                    icon.add_css_class("file-thumb")
+            thumbs.thumbnail(node.path, round(self.THUMB * widgets.screen_scale(self)), shown)
         label.set_label(name)
         if getattr(exp, "dim", None) is not None:
             exp.dim.unbind()
         exp.dim = node.bind_property("ignored", exp, "opacity", GObject.BindingFlags.SYNC_CREATE,
                                      lambda _b, ignored: 0.55 if ignored else 1.0)
-        exp.set_tooltip_text(pretty_path(node.path))
+
+    def _tooltip(self, exp, _x, _y, _keyboard, tip):
+        """A row's path, and over it a file's thumbnail large (made when it's first asked for: shown on the next)."""
+        node = getattr(exp, "node", None)
+        if node is None:
+            return False
+        text = pretty_path(node.path)
+        if node.is_dir or not thumbs.wanted(node.path):
+            tip.set_text(text)
+            return True
+        big = getattr(exp, "big", None)
+        if big is None or big[0] is not node:
+            exp.big = (node, None)
+
+            def made(tex, exp=exp, node=node):
+                if tex is not None and getattr(exp, "big", (None,))[0] is node:
+                    exp.big = (node, tex)
+                    exp.trigger_tooltip_query()
+            thumbs.thumbnail(node.path, round(self.PREVIEW * widgets.screen_scale(self)), made)
+            tip.set_text(text)
+            return True
+        if big[1] is None:
+            tip.set_text(text)
+            return True
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        w, h = widgets.fit_size(big[1].get_width(), big[1].get_height(), self.PREVIEW)
+        box.append(Gtk.Picture(paintable=big[1], width_request=w, height_request=h, can_shrink=False,
+                               content_fit=Gtk.ContentFit.CONTAIN))
+        box.append(Gtk.Label(label=text, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=40))
+        tip.set_custom(box)
+        return True
 
     def _activate(self, _view, pos):
         row = self.tree.get_row(pos)

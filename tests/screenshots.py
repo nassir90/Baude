@@ -113,6 +113,35 @@ def _(app):
     return win
 
 
+@scene("15-question-asking", "claude's AskUserQuestion: its questions and options, one picked, Other typed")
+def _(app):
+    win = app.window(opts())
+    T.type_and_send(win, "QUESTION where to keep categories")
+    T.wait_for(lambda: T.button(win, "Answer") or T.button(win, "Allow"), "the question")
+    form = next(iter(win.waiting_cards)).asking if T.button(win, "Answer") else None
+    if form is not None:
+        q = form.get_first_child()
+        q.picks[0][1][0][1].set_active(True)
+        q.picks[1][2].set_active(True)
+        q.picks[1][3].set_text("Games")
+    return win
+
+
+@scene("16-question-answered", "claude's AskUserQuestion answered: the card folds, its answers sent and said back")
+def _(app):
+    win = app.window(opts())
+    T.type_and_send(win, "QUESTION where to keep categories")
+    T.wait_for(lambda: T.button(win, "Answer"), "the question")
+    q = next(iter(win.waiting_cards)).asking.get_first_child()
+    q.picks[0][1][0][1].set_active(True)
+    q.picks[1][1][1][1].set_active(True)
+    T.button(win, "Answer").emit("clicked")
+    T.wait_for(lambda: not win.busy, "turn end")
+    card = next(c for c in win.tool_cards.values() if c.name == "AskUserQuestion")
+    card.output_toggle.set_expanded(True)
+    return win
+
+
 @scene("11-permission-edit", "Manual mode: an Edit asking (path + red/green diff)")
 def _(app):
     win = app.window(opts())

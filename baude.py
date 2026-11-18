@@ -5535,6 +5535,13 @@ def summarize_tool(name, inp):
     what it touches (a path, a pattern, a URL). A command without a description gets nothing."""
     if not isinstance(inp, dict):
         return ""
+    if name == "AskUserQuestion" and isinstance(inp.get("questions"), list) and inp["questions"] \
+            and isinstance(inp["questions"][0], dict):
+        qs = inp["questions"]
+        if isinstance(inp.get("answers"), dict) and inp["answers"]:  # (answered: what was picked, by header)
+            return " · ".join(f"{q.get('header') or q.get('question')}: {inp['answers'][q.get('question')]}"
+                              for q in qs if isinstance(q, dict) and q.get("question") in inp["answers"])
+        return _first_line(str(qs[0].get("question", ""))) + (f" (+{len(qs) - 1} more)" if len(qs) > 1 else "")
     if isinstance(inp.get("command"), str) and not (inp.get("description") or "").strip():
         return ""  # nothing rather than our own words: a description on this line is always Claude's
     for key in ("description", "command", "file_path", "notebook_path", "pattern", "url", "query",
@@ -5675,6 +5682,20 @@ def tool_input_view(name, inp):
     elif base in ("Task", "Agent") and "prompt" in inp:
         add(MarkdownView(inp["prompt"]))
         rest = _kv_rows(inp, skip=("prompt", "description"))
+    elif base == "AskUserQuestion" and isinstance(inp.get("questions"), list):
+        answers = inp.get("answers") if isinstance(inp.get("answers"), dict) else {}
+        for q in inp["questions"]:
+            if not isinstance(q, dict):
+                continue
+            add(sel_label(f"<b>{html.escape(str(q.get('question', '')))}</b>"))
+            for o in q.get("options") or []:
+                o = o if isinstance(o, dict) else {"label": str(o)}
+                desc = o.get("description") or ""
+                add(sel_label(f"  •  {html.escape(str(o.get('label', '')))}" +
+                              (f"  <span alpha='60%'>{html.escape(desc)}</span>" if desc else "")))
+            if q.get("question") in answers:
+                add(sel_label(f"  →  {html.escape(str(answers[q['question']]))}"))
+        rest = None
     elif base == "TodoWrite" and isinstance(inp.get("todos"), list):
         for t in inp["todos"]:
             mark = {"completed": "☑", "in_progress": "◐"}.get(t.get("status"), "☐")
@@ -5850,6 +5871,76 @@ def said_nothing(base, text, is_error):
         base == "Skill" and bool(SKILL_LAUNCHED.fullmatch(text))
 
 
+class QuestionForm(Gtk.Box):
+    """claude's AskUserQuestion: each question with its options (one picked, or several if it says so) and Other, to
+    type an answer of your own. Answer sends {question: label(s), comma-joined} back; Skip declines them all."""
+
+    def __init__(self, questions, on_answer, on_skip):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.picks = []  # per question: (question text, [(label, CheckButton)], Other's CheckButton, its Entry)
+        for q in questions:
+            if not isinstance(q, dict) or not q.get("question"):
+                continue
+            qbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            head = html.escape(str(q.get("header") or ""))
+            qbox.append(sel_label((f"<span alpha='60%'>{head}</span>  " if head else "") +
+                                  f"<b>{html.escape(str(q['question']))}</b>"))
+            multi, group, opts = bool(q.get("multiSelect")), None, []
+            for o in q.get("options") or []:
+                o = o if isinstance(o, dict) else {"label": str(o)}
+                label = str(o.get("label", ""))
+                b = Gtk.CheckButton()
+                text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                text.append(Gtk.Label(label=label, xalign=0, wrap=True))
+                if o.get("description"):
+                    d = Gtk.Label(label=str(o["description"]), xalign=0, wrap=True)
+                    d.add_css_class("dim-label")
+                    text.append(d)
+                b.set_child(text)
+                if not multi:
+                    b.set_group(group)
+                    group = group or b
+                b.connect("toggled", lambda *_: self.sync())
+                opts.append((label, b))
+                qbox.append(b)
+            other = Gtk.CheckButton(label="Other")
+            if not multi:
+                other.set_group(group)
+            entry = Gtk.Entry(placeholder_text="Your own answer", hexpand=True)
+            entry.set_visible(False)
+            other.connect("toggled", lambda b, e=entry: (e.set_visible(b.get_active()), b.get_active() and e.grab_focus(),
+                                                         self.sync()))
+            entry.connect("changed", lambda *_: self.sync())
+            entry.connect("activate", lambda *_: self.send.get_sensitive() and self.send.emit("clicked"))
+            qbox.append(other)
+            qbox.append(entry)
+            self.picks.append((str(q["question"]), opts, other, entry))
+            self.append(qbox)
+        row = Gtk.Box(spacing=6)
+        self.send = Gtk.Button(label="Answer")
+        self.send.add_css_class("suggested-action")
+        self.send.connect("clicked", lambda *_: on_answer(self.answers()))
+        skip = Gtk.Button(label="Skip")
+        skip.connect("clicked", lambda *_: on_skip())
+        row.append(self.send)
+        row.append(skip)
+        self.append(row)
+        self.sync()
+
+    def answers(self):
+        out = {}
+        for question, opts, other, entry in self.picks:
+            chosen = [label for label, b in opts if b.get_active()]
+            if other.get_active() and entry.get_text().strip():
+                chosen.append(entry.get_text().strip())
+            out[question] = ", ".join(chosen)
+        return out
+
+    def sync(self):
+        """Answer only once every question has one."""
+        self.send.set_sensitive(all(self.answers().values()))
+
+
 class ToolCard(Gtk.Box):
     """One tool call. state: running -> done | error, or running -> background -> done | error
     when the CLI runs it as a background task (its result only says it started); running -> interrupted when its turn
@@ -5924,7 +6015,7 @@ class ToolCard(Gtk.Box):
         self.asking = buttons
         self.add_css_class("asking")
         self.show_status()
-        if self.input_toggle.get_visible() and not self.input_toggle.get_expanded():
+        if self.input_toggle.get_visible() and not self.input_toggle.get_expanded() and self.base != "AskUserQuestion":
             self.opened_to_ask = True
             self.input_toggle.set_expanded(True)
         buttons.set_margin_top(8)
@@ -18011,13 +18102,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 "subtype": "error", "request_id": rid, "error": f"baude: unsupported {req.get('subtype')}"}})
             return
         name, inp = req.get("tool_name"), req.get("input", {})
-        if name in self.always_allow and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
+        if name in self.always_allow and name != "AskUserQuestion" and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
             self.proc.asks.pop(rid, None)  # (one held while its chat was left: answered now)
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             return
         self.proc.asks[rid] = msg  # (asked again here if the chat's left and opened again before it's answered)
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
-        self.tell_desktop(self.session_id, f"Waiting for your answer: {name or 'a tool'}")
+        self.tell_desktop(self.session_id, "Claude has a question for you" if name == "AskUserQuestion"
+                          else f"Waiting for your answer: {name or 'a tool'}")
 
     def sign_in(self, args=()):
         """/login (or Sign in on a turn that failed for want of it): claude auth login, as a card (LoginCard)."""
@@ -18078,9 +18170,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             card = None
         row = Gtk.Box(spacing=6)
         box = None
+        asking = name == "AskUserQuestion" and isinstance(inp.get("questions"), list)
         if card is None:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             box.add_css_class("perm-card")
+        if card is None and asking:
+            box.append(sel_label("<b>Claude has a question</b>"))
+            box.append(row)
+        elif card is None:
             title, source = tool_display(name)
             what = f"{source}: {title}" if source else title
             summary = summarize_tool(name, inp)
@@ -18095,8 +18192,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_session_state()
         proc = self.proc
 
-        def decide(_b, behavior, always=False):
-            if always:
+        def decide(_b, behavior, always=False):  # (answering: always is the answers)
+            if always is True:
                 self.always_allow.add(name)
                 if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not)
                     self.remote.request({"op": "always_allow", "session": self.session_id,
@@ -18104,6 +18201,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
+            elif behavior == "answer":
+                proc.respond(rid, {"behavior": "allow", "updatedInput": {**inp, "answers": always}})
+                if tool_use_id in self.tool_cards:  # (its card says what was answered)
+                    self.tool_cards[tool_use_id].set_input({**inp, "answers": always})
+                behavior, always = "allow", False
+            elif asking:
+                proc.respond(rid, {"behavior": "deny", "message": "The user chose not to answer. Carry on without "
+                                   "their answers, or ask in your reply."})
             else:
                 proc.respond(rid, {"behavior": "deny", "message": "The user denied this tool use."})
             if card is not None:
@@ -18112,7 +18217,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 box.get_parent() and box.get_parent().remove(box)
             self.waiting_cards.discard(waiting)
             self.update_session_state()
-            decision = ("always allowed" if always else "allowed") if behavior == "allow" else "denied"
+            decision = ("always allowed" if always else "allowed") if behavior == "allow" else \
+                "not answered" if asking else "denied"
             if tool_use_id in self.tool_cards:
                 self.tool_cards[tool_use_id].set_decision(decision)  # keeps tool groups together
             elif behavior != "allow":  # (allowed, it runs: nothing to say)
@@ -18123,6 +18229,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                    ("Deny", "deny", False, "destructive-action")]
         if model_program(self.model) != "claude":  # (Apple's model, or one on this Mac: each call asked, no always)
             del choices[1]
+        if asking:  # (claude's questions: answered in a form, sent back as the call's answers)
+            choices = []
+            row.set_orientation(Gtk.Orientation.VERTICAL)
+            row.append(QuestionForm(inp["questions"], lambda answers: decide(None, "answer", answers),
+                                    lambda: decide(None, "deny")))
         for label, beh, always, css in choices:
             b = Gtk.Button(label=label)
             if css:

@@ -781,10 +781,10 @@ class RemoteProc(claude.ClaudeProc):
             elif op == "deleted" and msg.get("session") == self.session:  # (gone from its host, for good)
                 self.code = "deleted"
                 break
-            elif op == "error":  # (what was sent went nowhere: said, and the turn's over; plain, as the server put it)
-                said = msg.get("error") if msg.get("plain") else f"the server: {msg.get('error')}"
-                self.dispatch(lambda e=said: self.on_msg(self, {
-                    "type": "result", "subtype": "error", "is_error": True, "result": e}))
+            elif op == "error":  # (what was sent went nowhere: said, and the turn's over; plain, as the server put it;
+                said = msg.get("error") if msg.get("plain") else f"the server: {msg.get('error')}"  # gone: a folder's)
+                self.dispatch(lambda e=said, g=msg.get("gone"): self.on_msg(self, {
+                    "type": "result", "subtype": "error", "is_error": True, "result": e, **({"gone": g} if g else {})}))
         self.ch.close()
         if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
             code = "lost" if self.code is None else self.code

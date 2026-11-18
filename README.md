@@ -196,14 +196,15 @@ Moving to them, from `baude_server.py`:
 
 The sidebar lists one host's sessions: the host picked beside New session, where a new session is made (`local`: this
 machine's own chats, Claude Code's and Claude Desktop's, and its host process's), kept across restarts. A host that's
-gone or deactivated stays picked, its chats as they were last seen, and says so over them. Right-click the host for
-Host Command… (one reached over ssh) and Deactivate or Activate. ⋮ beside its search → Groups picks
-which groups are listed: a click lists only that one, and Shift or Ctrl (⌘) and a click adds or takes away one, as the
-Git page's branch list does. A group is the label a session was started with.
+gone or deactivated stays picked, its chats as they were last seen, and says so over them. Right-click the host (or
+press and hold it) for Add Host…, and for another machine's, Host Command… (one reached over ssh) and Deactivate or
+Activate. ⋮ beside its search → Groups picks which groups are listed: a click lists only that one, and Shift or Ctrl
+(⌘) and a click adds or takes away one, as the Git page's branch list does. A group is the label a session was started with.
 
 Baude doesn't look for hosts on the network. This machine's host process it finds by its socket. Another machine's
-you give it by where ssh goes: ⋮ → Hosts → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh alias, a host or
-`user@host` (`user@name.local` on the local network, a Tailscale name on a tailnet), and it's kept from then on.
+you give it by where ssh goes: right-click New session's host → Add Host… (or `BAUDE_HOSTS=dest,…`) takes an ssh
+alias, a host or `user@host` (`user@name.local` on the local network, a Tailscale name on a tailnet), and it's kept
+from then on.
 
 Each host shares one ssh connection among Baude's sessions there (`ControlMaster`), so sshd's `MaxSessions` (10 by
 default) is how many can be open at once. A host process started over ssh, by `connect`, has that ssh session's

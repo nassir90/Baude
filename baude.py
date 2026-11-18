@@ -7508,7 +7508,7 @@ def on_main(fn):
 
 _NETWORK = []
 _LOCAL_SERVER = {"wanted": None}
-_HOST_SAID = {}  # (check_host_version's: the host process, by its pid and code, looked at or said to run other code)  # (local_server's: what waits for the server on this machine it's started)
+_HOST_APART = []  # (widgets.HostApart: this Mac's host process on other code than Baude's, said in the banner)  # (local_server's: what waits for the server on this machine it's started)
 
 
 def network():
@@ -7573,6 +7573,14 @@ def stopping_said(r):
 def local_host():
     """This machine's host process (its socket: Remote.mine), if it's there, which runs every chat of Baude's."""
     return next((r for r in network().alive() if r.mine), None)
+
+
+def host_apart(app):
+    """The app's widgets.HostApart, made as it's first wanted: what it says, in every window's banner."""
+    if not _HOST_APART:
+        _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [w.update_banner() for w in app.windows()
+                                                                          if not getattr(w, "let_go_done", False)]))
+    return _HOST_APART[0]
 
 
 def host_old():
@@ -12370,7 +12378,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         widgets.inside(self.tabs, under_bar=True)
         self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
-        self.banner.connect("button-clicked", lambda *_: self.banner_kind == "missing" and self.new_chat_on_host())
+        self.banner.connect("button-clicked", lambda *_: self.new_chat_on_host() if self.banner_kind == "missing" else
+                            self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
@@ -17126,47 +17135,22 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def check_host_version(self):
         """This Mac's host process on other code than Baude (an update one has picked up and the other hasn't; its
-        protocol, wire.VERSION, behind; or another checkout's): said once a host process, if it lasts APART_S (an
-        update the other picks up in its next look isn't), with the restart that puts them on the same code."""
-        r = local_host()
-        if r is None:
-            return
-        key = (r.info.get("pid"), r.info.get("commit"), r.info.get("version"))
-        if _HOST_SAID.get("looked") == key:
-            return
-        _HOST_SAID["looked"] = key
-        info = dict(r.info)
+        protocol, wire.VERSION, behind; or another checkout's): looked at (host_apart), and said in every window's
+        banner once it's lasted, with the restart that puts them on the same code."""
+        if (app := self.get_application()) is not None:
+            host_apart(app).look(local_host())
 
-        def look():
-            apart = baudelib.client.code_apart(info, update.STARTED)
-            if apart is not None:
-                GLib.timeout_add_seconds(0 if apart == "elsewhere" else baudelib.client.APART_S,
-                                         lambda: self.say_host_apart(key) and False)
-        threading.Thread(target=look, daemon=True, name="code-apart").start()
+    def host_apart_said(self):
+        """(apart, title, button label) for the banner, or None (widgets.HostApart.now)."""
+        app = self.get_application()
+        if app is None or not _HOST_APART:
+            return None
+        return _HOST_APART[0].now(local_host(), "Baude", app.updater is not None and bool(app.updater.ready))
 
-    def say_host_apart(self, key):
-        """(check_host_version's, once APART_S is up) Said, if it's still so: what's behind, and the restart for it.
-        An update waiting already (the sidebar's Update bar: Baude's, or the host process's) is left to that bar."""
-        r = local_host()
-        if r is None or (r.info.get("pid"), r.info.get("commit"), r.info.get("version")) != key or \
-                _HOST_SAID.get("said") == key or getattr(self, "let_go_done", False):
-            return
-        if (app := self.get_application()) is None:
-            return
-
-        def look():
-            apart = baudelib.client.code_apart(dict(r.info), update.STARTED)
-            GLib.idle_add(lambda: show(apart) and False)
-
-        def show(apart):
-            baude_waits = app.updater is not None and app.updater.ready
-            if apart == "both" and (baude_waits or r.info.get("update")):
-                apart = "host" if baude_waits else "head"
-            if apart is None or apart == "head" and baude_waits or apart == "host" and r.info.get("update"):
-                return
-            _HOST_SAID["said"] = key
-            self.toasts.add_toast(widgets.apart_toast(apart, "Baude", app.restart, self.restart_host))
-        threading.Thread(target=look, daemon=True, name="code-apart").start()
+    def act_host_apart(self):
+        if (said := self.host_apart_said()) is not None:
+            app = self.get_application()
+            _HOST_APART[0].act(said[0], app.restart, lambda then=None: self.restart_host(then=then))
 
     def restart_host(self, waited=0, then=None):
         """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
@@ -17422,7 +17406,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def banner_text(self, kind):
         """What the banner says (update_banner's kind), as markup: one waiting something out with its ellipsis."""
-        if kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
+        if kind == "apart":
+            text = (self.host_apart_said() or (None, ""))[1]
+        elif kind in ("gone", "drop") and (said := stopping_said(self.remote)) is not None:
             text = said
         elif kind == "gone":
             name = "daemon" if self.remote.mine else remote_name(self.remote)  # (this machine's: over its socket,
@@ -17466,14 +17452,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                             stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
+        apart = self.host_apart_said()  # (this Mac's host process on other code: said when nothing of the chat's is)
         kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
-            "retry" if self.retrying is not None else None
+            "retry" if self.retrying is not None else "apart" if apart is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
         if kind in ("drop", "retry") and self.banner_timer is None:
             self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
-        self.banner.set_button_label("New chat" if kind == "missing" else None)
+        self.banner.set_button_label("New chat" if kind == "missing" else apart[2] if kind == "apart" else None)
         self.banner.set_revealed(kind is not None)
         self.locked = live
         if hasattr(self, "composer_box"):

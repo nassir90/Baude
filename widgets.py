@@ -9175,16 +9175,83 @@ def _card_status(state):
     return None
 
 
-def apart_toast(apart, app, restart_app, restart_host):
-    """What's said of an app (Baude, Record) and this machine's host process on different code (baudelib.client's
-    code_apart: "head", the app behind; "host", the host process; "both"; "elsewhere", another checkout's), with the
-    restart that puts them on the same code: a toast that stays till it's closed."""
-    title, button, then = {
-        "head": (f"{app} is older than its daemon", f"Restart {app}", restart_app),
-        "host": (f"Daemon is older than {app}", "Restart Daemon", restart_host),
-        "both": (f"{app} and its daemon are out of date", "Restart Both", lambda: restart_host(then=restart_app)),
-        "elsewhere": ("Daemon runs another checkout's code", None, None)}[apart]
-    toast = Adw.Toast(title=title, timeout=0, **({"button_label": button} if button else {}))
-    if then is not None:
-        toast.connect("button-clicked", lambda *_: then())
-    return toast
+
+class HostApart:
+    """An app (Baude, Record) and this machine's host process on different code (baudelib.client.code_apart), for
+    the app's windows to say in a banner that stays till it's dealt with, with the restart that puts them on the same
+    code. One for the app: look, as the hosts change, at the host process (by its pid and code, once each; again
+    if git couldn't tell); said (changed: every window's banner as it is now) once it's lasted APART_S (an update the
+    other picks up in its next look at the checkout isn't), or at once for another checkout's code."""
+
+    def __init__(self, app, started, changed):
+        self.app, self.started, self.changed = app, started, changed
+        self.looking = self.looked = self.said = None
+
+    @staticmethod
+    def key(r):
+        return r.info.get("pid"), r.info.get("commit"), r.info.get("version")
+
+    def look(self, r):
+        if r is None or self.key(r) in (self.looked, self.looking):
+            return
+        key, info = self.key(r), dict(r.info)
+        self.looking = key
+        import baudelib.client
+
+        def work():
+            try:
+                apart, ok = baudelib.client.code_apart(info, self.started), True
+            except Exception:  # noqa: BLE001 (git gone wrong: looked at again as the hosts next change)
+                apart, ok = None, False
+            GLib.idle_add(lambda: self.looked_at(key, info, apart, ok) and False)
+        threading.Thread(target=work, daemon=True, name="code-apart").start()
+
+    def looked_at(self, key, info, apart, ok):
+        import baudelib.client
+        if self.looking == key:
+            self.looking = None
+        if not ok:
+            return
+        self.looked = key
+        if apart is not None:
+            GLib.timeout_add_seconds(0 if apart == "elsewhere" else baudelib.client.APART_S,
+                                     lambda: self.say(key, info, apart) and False)
+
+    def say(self, key, info, apart):
+        if self.looked == key:  # (not if it's restarted, or another's come, meanwhile)
+            self.said = {"key": key, "apart": apart, "checkout": info.get("checkout"), "done": False}
+            self.changed()
+
+    def now(self, r, name, app_waits):
+        """(apart, title, button label) to say now, or None: nothing, or what an Update bar says already (the app's
+        new version waiting, app_waits; the host process's, its info's update)."""
+        said = self.said
+        if said is None or said["done"] or r is None or self.key(r) != said["key"]:
+            return None
+        apart, host_waits = said["apart"], bool(r.info.get("update"))
+        if apart == "both" and (app_waits or host_waits):
+            apart = "host" if app_waits else "head"
+        if apart == "head" and app_waits or apart == "host" and host_waits:
+            return None
+        folder = said["checkout"]
+        return apart, *{
+            "head": (f"{name} is older than its daemon", f"Restart {name}"),
+            "host": (f"Daemon is older than {name}", "Restart Daemon"),
+            "both": (f"{name} and its daemon are out of date", "Restart Both"),
+            "elsewhere": (f"Daemon runs the code in {pretty_path(folder)}" if folder else
+                          "Daemon runs another checkout's code", "Dismiss")}[apart]
+
+    def act(self, apart, restart_app, restart_host):
+        """Its banner's button, on what it said (now's apart): the restart (or, for another checkout's, nothing), and
+        no more said of it."""
+        said = self.said
+        if said is None or said["done"]:
+            return
+        said["done"] = True
+        self.changed()
+        if apart == "head":
+            restart_app()
+        elif apart == "host":
+            restart_host()
+        elif apart == "both":
+            restart_host(then=restart_app)

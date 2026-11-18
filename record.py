@@ -86,6 +86,7 @@ from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
+import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 
 APP_ID = "dev.baude.Record"
 QUOTE_LIMIT = 6000
@@ -449,6 +450,7 @@ class Store:
         self.notebooks, saved_notes = [], None
         self.full_width = not os.path.exists(self.path)  # (☰ → Full-width text, as Baude's: on for a new installation)
         self.page_files, self.mirrored = {}, {}  # (each page's file, and what's been written in them: mirror_pages)
+        self.spell_check = True  # (☰ → Settings… → Check Spelling: the pages' squiggles, spelling.SpellCheck)
         self.backup_all = False  # (☰ → Settings…: the rolling zip with the glossary and the chats too: Window.roll_backup)
         self.unzipped = True  # (saved since that zip was made)
         self.reading = None  # (the chat last shown, whichever notebook's open: {path, title, cwd}; Window.open_chat)
@@ -470,6 +472,7 @@ class Store:
                 self.zoom_default = float(saved.get("zoom_default") or 1.0)  # (from before it was Baude's too)
                 self.books_width = saved.get("books_width")
                 self.backup_all = bool(saved.get("backup_all"))
+                self.spell_check = saved.get("spell_check") is not False
                 self.reading = saved.get("reading")
                 self.chats = [c for c in saved.get("chats") or ([self.reading] if self.reading else [])
                               if isinstance(c, dict) and c.get("path")]
@@ -771,7 +774,7 @@ class Store:
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
                        "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
-                       "meta": self.meta},
+                       "spell_check": self.spell_check, "meta": self.meta},
                       f, indent=1)
             f.flush()
             os.fsync(f.fileno())  # (on the disk before it takes the file's place)
@@ -2460,6 +2463,7 @@ class NotesView(Gtk.TextView):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.logos, self.marks, self.blocks = [], [], []
+        self.spell = None  # (the spelling's squiggles, drawn over the text: spelling.SpellCheck)
         self.restyled = None  # (told when its style's changed: the text's size or colour, DiaryEditor._heading_looks)
         self.resized, self.width_was = None, None  # (told when its width's changed)
         self.add_css_class("own-selection")  # (GTK's selection unseen: _snapshot_selection draws it)
@@ -2515,6 +2519,8 @@ class NotesView(Gtk.TextView):
         if layer != Gtk.TextViewLayer.ABOVE_TEXT:
             return
         self._snapshot_selection(snapshot, self.in_view())
+        if self.spell is not None:
+            self.spell.snapshot(snapshot)  # (a word misspelled, its squiggle; a grammar error's)
         if not (self.logos or self.marks):
             return
         buf = self.get_buffer()
@@ -2885,6 +2891,9 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.create_tag(name, **({**props, "scale": widgets.code_scale()} if name in ("verbatim", "pre") else props))
         for n in self.HEADING_SPACE:  # (a heading's space below, as the space above the line after it: _heading_looks)
             self.buf.create_tag(f"after-h{n}")
+        # (a word misspelled, a red squiggle under it; a grammar error, a blue one: NotesView draws them)
+        self.spell = self.view.spell = spelling.SpellCheck(self.view, self.view.char_rect,
+                                                          lambda: self.win.store.spell_check, skip=("proposal-old",))
         self.view.restyled = self._heading_looks
         self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
@@ -7170,6 +7179,9 @@ class Settings(Adw.PreferencesDialog):
         group.add(update.settings_row())  # (Baude's too: the one setting)
         self.version_row = update.version_row()
         group.add(self.version_row)
+        spell = widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
+        spelling.when_made(lambda: spell.set_subtitle(spelling.about()))  # (said once it's known)
+        group.add(spell)
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
@@ -7376,6 +7388,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         wide = Gio.SimpleAction.new_stateful("fullwidth", None, GLib.Variant.new_boolean(self.store.full_width))
         wide.connect("change-state", Window._full_width_toggled, weakref.ref(self))  # (no closure over the window)
         self.add_action(wide)
+        spell = Gio.SimpleAction.new_stateful("spellcheck", None, GLib.Variant.new_boolean(self.store.spell_check))
+        spell.connect("change-state", Window._spell_check_toggled, weakref.ref(self))
+        self.add_action(spell)
         back_up = Gio.SimpleAction.new_stateful("backupall", None, GLib.Variant.new_boolean(self.store.backup_all))
         back_up.connect("change-state", Window._backup_all_toggled, weakref.ref(self))
         self.add_action(back_up)
@@ -7809,6 +7824,16 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if isinstance(child, (Reader, DiaryEditor)):
                 child.clamp.set_maximum_size(100_000 if on else child.WIDTH)
                 child.clamp.set_tightening_threshold(100_000 if on else 400)
+
+    @staticmethod
+    def _spell_check_toggled(action, value, ref):
+        action.set_state(value)
+        if (win := ref()) is not None:
+            win.store.spell_check = value.get_boolean()
+            win.store.save_now()
+            for child in win.tabs.children():
+                if isinstance(child, DiaryEditor):
+                    child.spell.refresh()
 
     @staticmethod
     def _backup_all_toggled(action, value, ref):

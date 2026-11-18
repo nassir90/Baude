@@ -616,6 +616,14 @@ def find_in_focus(window):
     return True
 
 
+class GalleryRow(GObject.Object):
+    """A row of the Files page's gallery: its folders (folders), or pictures (tiles: (node, width, height) each)."""
+
+    def __init__(self, folders=(), tiles=()):
+        super().__init__()
+        self.folders, self.tiles = list(folders), list(tiles)
+
+
 class FileNode(GObject.Object):
     """A file or folder on the Files page; ignored (by git) comes in after it's listed (FileIgnores)."""
     ignored = GObject.Property(type=bool, default=False)
@@ -692,6 +700,13 @@ def file_icon(name):
     return Gio.ThemedIcon.new(FILE_ICON_KINDS.get(mime, "text-x-generic-symbolic"))
 
 
+def is_picture(path):
+    """A file the large view shows: an image (read at its own size, or as the system's large thumbnail where nothing
+    here reads it, as a HEIC photo: Lightbox.load_near)."""
+    mime = Gio.content_type_get_mime_type(Gio.content_type_guess(path, None)[0]) or ""
+    return mime.startswith("image/")
+
+
 def file_children(folder):
     """A folder's entries for the Files page: folders first, then files, by name. .git is left out; what git ignores
     is marked a moment later (FileIgnores; it's drawn dimmed)."""
@@ -734,14 +749,24 @@ class FilesPage(Gtk.Box):
         titles.append(self.title)
         titles.append(self.where)
         head.append(titles)
+        self.up_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Up a folder", visible=False)
+        self.up_btn.add_css_class("flat")
+        self.up_btn.connect("clicked", lambda *_: self.gallery_up())
+        head.prepend(self.up_btn)
+        self.mode_btn = Gtk.ToggleButton(icon_name="view-grid-symbolic", tooltip_text="Show as a gallery")
+        self.mode_btn.add_css_class("flat")
+        self.mode_btn.connect("toggled", lambda b: self.show_gallery(b.get_active()))
+        head.append(self.mode_btn)
         for icon, tip, fn in (("view-refresh-symbolic", "Read the folders again", self.refresh),
                               ("folder-open-symbolic", "Open in your file manager",
-                               lambda: self.root and self.launch(self.selected() or self.root))):
+                               lambda: self.root and self.launch(self.gallery_folder if self.in_gallery() else
+                                                                 self.selected() or self.root))):
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip)
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())
             head.append(btn)
         self.append(head)
+        self.gallery_folder, self.tiles = None, {}  # (tiles: path -> the tile's picture showing it now)
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._setup)
         factory.connect("bind", self._bind)
@@ -750,7 +775,29 @@ class FilesPage(Gtk.Box):
         self.view.add_css_class("file-tree")
         self.view.connect("activate", self._activate)
         self.scroll = Gtk.ScrolledWindow(child=self.view, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.append(self.scroll)
+        # the gallery: a folder's folders to go into, then its pictures in rows of one height, each as wide as its
+        # shape, across the page's width (laid out again as that changes); a click on one opens them all in the large
+        # view to go through (Lightbox.open_files)
+        self.gallery_rows = Gio.ListStore(item_type=GalleryRow)
+        rows = Gtk.SignalListItemFactory()
+        rows.connect("setup", self._row_setup)
+        rows.connect("bind", self._row_bind)
+        rows.connect("unbind", self._row_unbind)
+        self.grid = Gtk.ListView(model=Gtk.NoSelection(model=self.gallery_rows), factory=rows)
+        self.grid.add_css_class("gallery")
+        self.grid_scroll = Gtk.ScrolledWindow(child=self.grid, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.grid_scroll.get_hadjustment().connect("notify::page-size", lambda *_: self.relayout_soon())
+        self.gallery_entries, self.laid_out_at, self.layout_pending = [], 0, False
+        self.modes = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self.modes.add_named(self.scroll, "tree")
+        gallery = Gtk.Overlay(child=self.grid_scroll)
+        self.gallery_empty = empty_label("Nothing in this folder")
+        self.gallery_empty.set_visible(False)
+        self.gallery_empty.set_valign(Gtk.Align.START)
+        self.gallery_empty.set_can_target(False)
+        gallery.add_overlay(self.gallery_empty)
+        self.modes.add_named(gallery, "gallery")
+        self.append(self.modes)
 
     def _setup(self, _factory, item):
         exp = Gtk.TreeExpander(indent_for_icon=True)
@@ -828,11 +875,215 @@ class FilesPage(Gtk.Box):
         node = row.get_item()
         if node.is_dir:
             row.set_expanded(not row.get_expanded())
+        elif is_picture(node.path) and hasattr(self.win, "lightbox"):  # (large, with the folder's others to go to)
+            self.view_pictures(node.path)
         else:
             open_code(node.path, None, self.win)
 
+    # ---- the gallery
+    ROW = 120  # (its rows: this tall, a little more to fill one out)
+    GAP = 4
+
+    def in_gallery(self):
+        return self.modes.get_visible_child_name() == "gallery"
+
+    def show_gallery(self, on, folder=None, save=True):
+        """The gallery (of folder, or the folder picked in the tree, or the one the picked file's in, else the tree's
+        own), or the tree again. Which one it is stays (settings' "files_gallery"), for the next folder too."""
+        if self.mode_btn.get_active() != on:
+            self.gallery_asked = folder, save
+            self.mode_btn.set_active(on)  # (toggled: here again, with what was asked)
+            return
+        if getattr(self, "gallery_asked", None) is not None:
+            (folder, save), self.gallery_asked = self.gallery_asked, None
+        if save:
+            save_settings(files_gallery=on)
+        if on and self.root is not None:
+            picked = self.selected()
+            self.set_gallery(folder or (picked if picked and os.path.isdir(picked) else
+                                        os.path.dirname(picked) if picked else self.root))
+        else:
+            self.modes.set_visible_child_name("tree")
+            self.up_btn.set_visible(False)
+            self.mode_btn.set_tooltip_text("Show as a gallery")
+            self.mode_btn.set_icon_name("view-grid-symbolic")
+            if self.root is not None:
+                self.title.set_label(os.path.basename(self.root.rstrip(os.sep)) or self.root)
+                self.where.set_label(pretty_path(os.path.dirname(self.root.rstrip(os.sep))))
+
+    def set_gallery(self, folder, keep_place=False):
+        """folder's gallery: its entries read (the pictures' shapes from their headers, off the main thread), then
+        laid out. keep_place: where it was scrolled to stays (read again), else from the top."""
+        self.gallery_folder = folder
+        self.modes.set_visible_child_name("gallery")
+        self.mode_btn.set_tooltip_text("Show as a tree")
+        self.mode_btn.set_icon_name("view-list-symbolic")
+        self.up_btn.set_visible(True)
+        self.up_btn.set_sensitive(folder.rstrip(os.sep) != self.root.rstrip(os.sep))
+        self.title.set_label(os.path.basename(folder.rstrip(os.sep)) or folder)
+        self.where.set_label(pretty_path(os.path.dirname(folder.rstrip(os.sep))))
+        at = self.grid_scroll.get_vadjustment().get_value() if keep_place else 0
+        store = file_children(folder)
+        nodes = [store.get_item(i) for i in range(store.get_n_items())]
+
+        def shapes():
+            found = []
+            for node in nodes:
+                if node.is_dir:
+                    continue
+                shape = 1.0
+                if thumbs.wanted(node.path):
+                    try:
+                        with open(node.path, "rb") as f:
+                            dims = widgets.image_dims(f.read(65536))
+                        if dims and dims[0] and dims[1]:
+                            shape = max(0.25, min(4.0, dims[0] / dims[1]))
+                    except OSError:
+                        pass
+                found.append((node, shape))
+            return found
+
+        def read(found):
+            if self.gallery_folder != folder:
+                return GLib.SOURCE_REMOVE
+            # (its folders, then its pictures and other thumbnails, then the rest: each kind by name)
+            found.sort(key=lambda e: 0 if thumbs.wanted(e[0].path) else 1)
+            self.gallery_entries = [(n, None) for n in nodes if n.is_dir], found
+            self.relayout(at)
+            return GLib.SOURCE_REMOVE
+        widgets.IMAGE_POOL.submit(lambda: GLib.idle_add(read, shapes()))
+
+    def relayout_soon(self):
+        if not self.layout_pending and self.in_gallery():
+            self.layout_pending = True
+
+            def go():
+                self.layout_pending = False
+                if self.in_gallery() and abs(self.gallery_width() - self.laid_out_at) > 1:
+                    self.relayout(self.grid_scroll.get_vadjustment().get_value())
+                return GLib.SOURCE_REMOVE
+            GLib.idle_add(go)
+
+    def gallery_width(self):
+        return max(120, int(self.grid_scroll.get_hadjustment().get_page_size() or self.get_width()) - 16)
+
+    def relayout(self, at=0):
+        """The rows for the page's width now: as many pictures in each as make it at least ROW tall across it, then
+        all of them as tall as fills the width (the last one left at ROW)."""
+        if not self.gallery_entries:
+            return
+        folders, files = self.gallery_entries
+        self.gallery_empty.set_visible(not folders and not files)
+        width = self.laid_out_at = self.gallery_width()
+        rows = [GalleryRow(folders=[n for n, _ in folders])] if folders else []
+        line = []
+        for node, shape in files:
+            line.append((node, shape))
+            total = sum(sh for _n, sh in line)
+            if total * self.ROW + self.GAP * (len(line) - 1) >= width:
+                height = (width - self.GAP * (len(line) - 1)) / total
+                rows.append(GalleryRow(tiles=[(n, sh * height, height) for n, sh in line]))
+                line = []
+        if line:
+            rows.append(GalleryRow(tiles=[(n, sh * self.ROW, self.ROW) for n, sh in line]))
+        self.tiles = {}
+        self.gallery_rows.splice(0, self.gallery_rows.get_n_items(), rows)
+        GLib.idle_add(lambda: self.grid_scroll.get_vadjustment().set_value(at) and False)
+
+    def gallery_up(self):
+        if self.gallery_folder and self.gallery_folder.rstrip(os.sep) != self.root.rstrip(os.sep):
+            self.set_gallery(os.path.dirname(self.gallery_folder.rstrip(os.sep)))
+
+    def _row_setup(self, _factory, item):
+        item.set_child(Gtk.Box(spacing=self.GAP, margin_bottom=self.GAP))
+        item.set_activatable(False)
+
+    def _row_bind(self, _factory, item):
+        box, row = item.get_child(), item.get_item()
+        while (child := box.get_first_child()) is not None:
+            box.remove(child)
+        box.row = row
+        if row.folders:  # (the folders, each a button to go into, as many to a line as fit)
+            flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, hexpand=True, row_spacing=self.GAP,
+                               column_spacing=self.GAP, homogeneous=False, max_children_per_line=30)
+            for node in row.folders:
+                btn = Gtk.Button(tooltip_text=os.path.basename(node.path))
+                inner = Gtk.Box(spacing=6)
+                inner.append(Gtk.Image(icon_name="folder-symbolic"))
+                inner.append(Gtk.Label(label=os.path.basename(node.path), ellipsize=Pango.EllipsizeMode.MIDDLE,
+                                       max_width_chars=18))
+                btn.set_child(inner)
+                btn.add_css_class("gallery-folder")
+                btn.connect("clicked", lambda _b, p=node.path: self.set_gallery(p))
+                flow.append(btn)
+            box.append(flow)
+            return
+        scale = widgets.screen_scale(self)
+        for node, w, h in row.tiles:
+            name = os.path.basename(node.path)
+            btn = Gtk.Button(tooltip_text=name, width_request=int(w), height_request=int(h))
+            btn.add_css_class("gallery-tile")
+            btn.node = node
+            stack = Gtk.Overlay()
+            icon = Gtk.Image(gicon=file_icon(name), pixel_size=32)
+            icon.add_css_class("dim-label")
+            stack.set_child(icon)
+            if thumbs.wanted(node.path):
+                pic = Gtk.Picture(content_fit=Gtk.ContentFit.COVER, can_shrink=True, width_request=int(w),
+                                  height_request=int(h))
+                pic.add_css_class("gallery-tile-pic")
+                stack.add_overlay(pic)
+                self.tiles[node.path] = pic
+
+                def shown(tex, pic=pic, icon=icon):
+                    if tex is not None:
+                        pic.set_paintable(tex)
+                        icon.set_visible(False)
+                thumbs.thumbnail(node.path, round(max(w, h) * scale), shown,
+                                 lambda box=box, row=row: getattr(box, "row", None) is row)
+            else:  # (no thumbnail: its name under its icon)
+                inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER)
+                stack.set_child(inner)
+                inner.append(icon)
+                label = Gtk.Label(label=name, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=10)
+                label.add_css_class("caption")
+                inner.append(label)
+            btn.set_child(stack)
+            btn.connect("clicked", lambda _b, n=node: self._tile_activate(n))
+            box.append(btn)
+
+    def _row_unbind(self, _factory, item):
+        box = item.get_child()
+        row = getattr(box, "row", None)
+        for node, _w, _h in (row.tiles if row is not None else ()):
+            pic = self.tiles.get(node.path)
+            if pic is not None and pic.is_ancestor(box):
+                del self.tiles[node.path]
+        box.row = None
+
+    def _tile_activate(self, node):
+        if node.is_dir:
+            self.set_gallery(node.path)
+        elif is_picture(node.path) and hasattr(self.win, "lightbox"):
+            self.view_pictures(node.path)
+        else:
+            open_code(node.path, None, self.win)
+
+    def view_pictures(self, path):
+        """path large, and the other pictures in its folder (by name, as they're listed) to go through."""
+        folder = os.path.dirname(path)
+        paths = [n.path for n in file_children(folder) if not n.is_dir and is_picture(n.path)]
+        if path not in paths:
+            paths.append(path)
+
+        def shown_in(p):  # (the gallery's tile showing it, if that's in sight)
+            pic = self.tiles.get(p) if self.in_gallery() and self.gallery_folder == folder else None
+            return pic if pic is not None and pic.get_paintable() is not None else None
+        self.win.lightbox.open_files(paths, paths.index(path), shown_in, thumbs.thumbnail)
+
     def set_root(self, root, expanded=()):
         """Show root's tree, with the folders in expanded opened again."""
+        new = self.root != root
         self.root = root
         self.tree = Gtk.TreeListModel.new(file_children(root), False, False,
                                           lambda n: file_children(n.path) if n.is_dir else None)
@@ -843,6 +1094,8 @@ class FilesPage(Gtk.Box):
         for path in expanded:  # (in the tree's order: a folder's parent is open by the time it's reached)
             if (pos := self.find(path)) is not None:
                 self.tree.get_row(pos).set_expanded(True)
+        if new and getattr(self, "modes", None) is not None and load_settings().get("files_gallery"):
+            self.show_gallery(True, root, save=False)  # (shown as it was left: another folder's gallery)
 
     def ensure(self):
         """Something to show when the page is opened: the folder the chat works in, the first time."""
@@ -852,6 +1105,9 @@ class FilesPage(Gtk.Box):
     def refresh(self):
         """Read the folders again (as they are now), keeping the open ones open and the selection."""
         if self.root is None:
+            return
+        if self.in_gallery() and self.gallery_folder:
+            self.set_gallery(self.gallery_folder, keep_place=True)
             return
         picked = self.selected()
         self.set_root(self.root, [self.tree.get_row(i).get_item().path for i in range(self.tree.get_n_items())
@@ -881,6 +1137,8 @@ class FilesPage(Gtk.Box):
     def reveal(self, path, select=None):
         """Open the tree down to path (a folder is opened too), with select (or path) selected and scrolled to."""
         path = os.path.abspath(path).rstrip(os.sep) or os.sep
+        if self.in_gallery():  # (shown in the tree, this once)
+            self.show_gallery(False, save=False)
         root = self.root_for(path)
         if root != self.root:
             self.set_root(root)
@@ -912,8 +1170,11 @@ class FilesPage(Gtk.Box):
             return
         pop = Gtk.Popover(has_arrow=False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        for label, fn in (("Copy path", lambda: (self.get_clipboard().set(node.path), toast(self, "Path copied"))),
-                          ("Open in your file manager", lambda: self.launch(node.path))):
+        items = [("Copy path", lambda: (self.get_clipboard().set(node.path), toast(self, "Path copied"))),
+                 ("Open in your file manager", lambda: self.launch(node.path))]
+        if node.is_dir:
+            items.insert(0, ("Show as a gallery", lambda: self.show_gallery(True, node.path)))
+        for label, fn in items:
             btn = Gtk.Button(label=label)
             btn.add_css_class("flat")
             btn.get_child().set_xalign(0)

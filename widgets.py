@@ -3641,6 +3641,56 @@ class ImageActions:
             self.open()
 
 
+class FileImageActions(ImageActions):
+    """A picture in a folder (the Files page's gallery), as the lightbox steps through them: read from its file only
+    when it's shown (data, full), with a thumbnail meanwhile (preview); shown_in, the widget it's in on the page now, if
+    it's in one, to fly out of and back into."""
+
+    def __init__(self, widget, path, shown_in=None):
+        super().__init__(widget, None, path, os.path.basename(path))
+        self.full, self.preview, self.shown_in, self._data = None, None, shown_in, None
+        self.undecodable, self.full_is_thumb = False, False  # (no decoder here for it: the system's thumbnail, large)
+
+    @property
+    def data(self):
+        if self._data is None:
+            try:
+                with open(self.path, "rb") as f:
+                    self._data = f.read()
+            except OSError:
+                self._data = b""
+        return self._data
+
+    @data.setter
+    def data(self, value):
+        self._data = value
+
+    def size(self):
+        try:
+            return os.path.getsize(self.path)
+        except OSError:
+            return 0
+
+    def texture(self):
+        return self.full or self.decode() or self.preview
+
+    def copy(self):
+        tex = self.texture()
+        if tex is not None:
+            self.widget.get_clipboard().set(tex)
+        toast(self.widget, "Image copied" if tex is not None else "This image can't be copied")
+
+    def decode(self):
+        """The picture at its own size (off the main thread), or None."""
+        try:
+            return Gdk.Texture.new_from_filename(self.path)
+        except GLib.Error:
+            try:
+                return Gdk.Texture.new_for_pixbuf(GdkPixbuf.Pixbuf.new_from_file(self.path))
+            except GLib.Error:
+                return None
+
+
 def toast(widget, text):
     root = widget.get_root()
     if root is not None and hasattr(root, "toasts"):
@@ -4323,7 +4373,7 @@ class MainTabs(Gtk.Box):
 
 
 def image_description(data, tex):
-    kb = len(data) / 1024
+    kb = (data if isinstance(data, int) else len(data)) / 1024
     size = f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB"
     return f"{tex.get_width()}×{tex.get_height()} · {size}"
 
@@ -4414,6 +4464,9 @@ class Lightbox(Gtk.Box):
     ZOOM_KEY = 1.5  # (+ and −: this much at a time)
     ZOOM_WHEEL = 1.25  # (a mouse wheel's notch)
     MOST_PIXELS = 8  # (zoomed in as far as this many screen pixels to one of the image's)
+    STRIP = 56  # (a folder's pictures along the bottom: this tall)
+    STRIP_ITEM = STRIP + 10  # (and this wide each, with its padding and margins: widgets.CSS's .lightbox-strip)
+    PREVIEW_PX = 512  # (a folder's picture, till it's read: its thumbnail this big)
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False, focusable=True)
@@ -4464,8 +4517,23 @@ class Lightbox(Gtk.Box):
         self.next_btn = self._arrow("go-next-symbolic", Gtk.Align.END, 1)
         stage.add_overlay(self.prev_btn)
         stage.add_overlay(self.next_btn)
-        self.chrome = (handle, self.prev_btn, self.next_btn)  # (what fades as it flies)
         self.append(stage)
+        # a folder's pictures (open_files): all of them along the bottom, the one shown picked, a click going to one
+        self.strip_paths = Gtk.StringList()
+        self.strip_pick = Gtk.SingleSelection(model=self.strip_paths, autoselect=False)
+        self.strip_pick.connect("notify::selected", self.on_strip_pick)
+        factory = Gtk.SignalListItemFactory()
+        factory.connect("setup", self._strip_setup)
+        factory.connect("bind", self._strip_bind)
+        self.strip_view = Gtk.ListView(model=self.strip_pick, factory=factory, orientation=Gtk.Orientation.HORIZONTAL,
+                                       single_click_activate=False)
+        self.strip_view.add_css_class("lightbox-strip")
+        self.strip = Gtk.ScrolledWindow(child=self.strip_view, vscrollbar_policy=Gtk.PolicyType.NEVER,
+                                        hscrollbar_policy=Gtk.PolicyType.EXTERNAL, visible=False,
+                                        height_request=self.STRIP + 16, margin_bottom=8, halign=Gtk.Align.CENTER)
+        self.append(self.strip)
+        self.thumb = None  # (open_files': a thumbnailer, thumbs.thumbnail)
+        self.chrome = (handle, self.prev_btn, self.next_btn, self.strip)  # (what fades as it flies)
         twice = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
         twice.connect("pressed", self.on_press)
         self.picture.add_controller(twice)
@@ -4492,10 +4560,69 @@ class Lightbox(Gtk.Box):
         if widget not in self.items:
             self.items.append(widget)
         self.index = self.items.index(widget)
+        self.strip.set_visible(False)
+        self.strip_paths.splice(0, self.strip_paths.get_n_items(), [])
         self.show_current()
         self.set_visible(True)
         self.grab_focus()
         self.fly(True)
+
+    def open_files(self, paths, index, shown_in, thumb):
+        """A folder's pictures (paths), from paths[index]: each read from its file as it's shown (and the ones either
+        side of it, to go on to at once), with all of them along the bottom. shown_in(path): the widget it's in on the
+        page, if it's in one; thumb(path, px, done): its thumbnail."""
+        self.thumb, self.items = thumb, []
+        for path in paths:
+            holder = Gtk.Picture()  # (stands for it: the lightbox's items are widgets)
+            acts = holder.image_actions = FileImageActions(self, path, lambda p=path: shown_in(p))
+            self.items.append(holder)
+        self.index = index
+        acts = self.items[index].image_actions
+        tile = shown_in(paths[index])  # (its tile's thumbnail at once: it flies out of it, and shows till it's read)
+        acts.preview = tile.get_paintable() if tile is not None else None
+        if acts.preview is None:
+            def made(tex, acts=acts):
+                if tex is not None and acts.preview is None:
+                    acts.preview = tex
+                    if self.items and self.current() is acts and acts.full is None:
+                        self.picture.set_paintable(tex)
+                        self.picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+                        self.picture.queue_draw()
+            thumb(paths[index], round(self.PREVIEW_PX * screen_scale(self)), made)
+        self.strip_paths.splice(0, self.strip_paths.get_n_items(), paths)
+        self.strip.set_visible(len(paths) > 1)
+        wide = len(paths) * self.STRIP_ITEM  # (centred while they fit; past that, the whole width to scroll along)
+        self.strip.set_halign(Gtk.Align.CENTER if wide < 900 else Gtk.Align.FILL)
+        self.strip.set_size_request(wide if wide < 900 else -1, self.STRIP + 16)
+        self.show_current()
+        self.set_visible(True)
+        self.grab_focus()
+        self.fly(True)
+
+    def _strip_setup(self, _factory, item):
+        pic = Gtk.Picture(content_fit=Gtk.ContentFit.COVER, width_request=self.STRIP, height_request=self.STRIP,
+                          can_shrink=True)
+        pic.add_css_class("lightbox-thumb")
+        item.set_child(pic)
+
+    def _strip_bind(self, _factory, item):
+        pic, path = item.get_child(), item.get_item().get_string()
+        pic.path = path
+        pic.set_paintable(None)
+        acts = self.items[item.get_position()].image_actions if item.get_position() < len(self.items) else None
+
+        def made(tex, pic=pic, path=path):
+            if tex is not None and pic.path == path:
+                pic.set_paintable(tex)
+                if acts is not None and acts.preview is None:
+                    acts.preview = tex
+        if self.thumb is not None:
+            self.thumb(path, round(self.STRIP * 2 * screen_scale(self)), made, lambda: pic.path == path)
+
+    def on_strip_pick(self, *_):
+        pos = self.strip_pick.get_selected()
+        if pos != Gtk.INVALID_LIST_POSITION and pos != self.index and pos < len(self.items):
+            self.step(pos - self.index)
 
     def do_snapshot(self, snap):
         """What's behind it dimmed, here and not in the CSS: it fades by itself, the image over it at full strength."""
@@ -4505,11 +4632,19 @@ class Lightbox(Gtk.Box):
         snap.append_color(shade, Graphene.Rect().init(0, 0, self.get_width(), self.get_height()))
         Gtk.Box.do_snapshot(self, snap)
 
+    def source_widget(self):
+        """The widget the image shown is in on the page (a folder's picture: the gallery's tile showing it now)."""
+        if not self.items:
+            return None
+        widget = self.items[self.index]
+        shown_in = getattr(widget.image_actions, "shown_in", None)
+        return shown_in() if shown_in is not None else widget
+
     def where_from(self):
         """Where the image shown sits in the window, to fly out of and back into: the (x, y, width, height) of the image
         as it's painted there and of the part of it in sight. None if none of it is (scrolled away, or on a page not
         shown), or it's gone."""
-        tex, widget = self.picture.get_paintable(), self.items[self.index] if self.items else None
+        tex, widget = self.picture.get_paintable(), self.source_widget()
         if tex is None or widget is None or not widget.get_mapped() or widget.get_root() is not self.win:
             return None
         ok, bounds = widget.compute_bounds(self.win)
@@ -4545,7 +4680,7 @@ class Lightbox(Gtk.Box):
         self.show_source()
         self.source = self.where_from()
         if self.source is not None:
-            widget = self.items[self.index]
+            widget = self.source_widget()
             holder = widget.get_parent()  # (image_widget's overlay)
             self.hidden = holder if getattr(holder, "image_actions", None) is not None else widget
             self.hidden.set_opacity(0.0)
@@ -4596,20 +4731,30 @@ class Lightbox(Gtk.Box):
             self.picture.set_paintable(None)  # (a full-size image: let it go)
             self.let_go()
             self.items = []
+            self.strip_paths.splice(0, self.strip_paths.get_n_items(), [])
 
     def current(self):
         return self.items[self.index].image_actions
 
     def show_current(self):
         """The image as it is here at once, then its original at full size if there is one (ImageActions.original),
-        read off the main thread and put in its place: the same picture, so it stays where it is, only sharper."""
+        read off the main thread and put in its place: the same picture, so it stays where it is, only sharper. A
+        folder's picture (open_files): its thumbnail, then the file read (load_near)."""
         acts = self.current()
-        self.let_go(acts)
-        tex = acts.full[1] if acts.full else acts.texture()
+        if isinstance(acts, FileImageActions):  # (a folder's: read as it's shown, its thumbnail meanwhile)
+            tex = acts.full or acts.preview
+            self.load_near()
+        else:
+            self.let_go(acts)
+            tex = acts.full[1] if acts.full else acts.texture()
         self.picture.set_paintable(tex)
         self.move_to(1.0, 0.0, 0.0, animate=False)  # (each image from fitted)
-        self.fit(tex)
-        if acts.full is None and acts.path and not acts.no_original and not acts.looking:
+        if isinstance(acts, FileImageActions) and acts.full is None:
+            self.picture.set_content_fit(Gtk.ContentFit.CONTAIN)  # (its thumbnail, filling it as a photo will)
+        elif tex is not None:
+            self.fit(tex)
+        if not isinstance(acts, FileImageActions) and acts.full is None and acts.path and not acts.no_original \
+                and not acts.looking:
             acts.looking = True
 
             def done(found, acts=acts):
@@ -4620,6 +4765,9 @@ class Lightbox(Gtk.Box):
                     self.sharpen(found[1])
                 return GLib.SOURCE_REMOVE
             IMAGE_POOL.submit(lambda: GLib.idle_add(done, acts.original()))
+        if self.strip.get_visible() and self.strip_pick.get_selected() != self.index:
+            self.strip_pick.set_selected(self.index)
+            self.strip_view.scroll_to(self.index, Gtk.ListScrollFlags.NONE, None)
         self.show_title(acts)
 
     def let_go(self, keep=None):
@@ -4649,14 +4797,78 @@ class Lightbox(Gtk.Box):
         self.buttons["browser"].set_visible(bool(acts.url))
         self.zoom_shown()
 
+    def near(self, acts):
+        """Whether acts is the picture shown or one either side of it (read at its own size, to step to at once)."""
+        n = len(self.items)
+        if not n or self.closing:
+            return False
+        return any(self.items[(self.index + d) % n].image_actions is acts for d in (0, 1, -1))
+
+    def load_near(self):
+        """A folder's pictures read at their own size: the one shown and those either side (stepped to next, they're
+        there at once); the others let go (a folder of photos, each tens of megabytes decoded). Stepped past before
+        it's read, one isn't (the latest asked for is read next)."""
+        for widget in self.items:
+            acts = widget.image_actions
+            if not self.near(acts):
+                acts.full = None
+                acts._data = None
+                acts.full_is_thumb = False
+            elif acts.full is None and not getattr(acts, "loading", False):
+                acts.loading = True
+
+                def done(tex, acts=acts):
+                    acts.loading = False
+                    if tex is None and not self.near(acts):
+                        return GLib.SOURCE_REMOVE
+                    if tex is None:  # (no decoder here for it: the system's thumbnail of it, large)
+                        acts.undecodable = True
+                        if self.thumb is not None:
+                            self.thumb(acts.path, round(2048 * screen_scale(self)),
+                                       lambda t, acts=acts: self.shown_full(acts, t, True))
+                        return GLib.SOURCE_REMOVE
+                    self.shown_full(acts, tex, False)
+                    return GLib.SOURCE_REMOVE
+
+                def work(acts=acts, done=done):
+                    if not self.near(acts) or acts.undecodable:  # (stepped past already, or there's no reading it)
+                        GLib.idle_add(done, None)
+                        return
+                    GLib.idle_add(done, acts.decode())
+                IMAGE_POOL.submit(work)
+
+    def shown_full(self, acts, tex, thumb):
+        """acts read (tex; thumb: the system's thumbnail of it, all there is), in place of its thumbnail if it's
+        shown: the same picture, so where it was. Let go if it's been stepped away from meanwhile."""
+        if tex is None or not self.near(acts):
+            if tex is None and self.items and self.current() is acts:
+                self.zoom_shown()
+            return
+        acts.full, acts.full_is_thumb = tex, thumb
+        if self.current() is acts:
+            fitted = self.picture.get_paintable() is not None and self.picture.get_width() and self.picture.fitted()
+            self.picture.set_paintable(tex)
+            self.fit(tex)
+            if not fitted or self.picture.fitted() != fitted:
+                self.move_to(1.0, 0.0, 0.0, animate=False)
+            self.picture.queue_draw()
+            self.zoom_shown()
+
     def zoom_shown(self):
         """What says how far it's zoomed: the size in the bar, the arrows (they step between images, so not while it's
         zoomed in) and the pointer."""
-        n, zoom = len(self.items), self.target[0]
-        acts = self.current()
-        self.info.set_text(image_description(acts.full[0] if acts.full else acts.data, self.picture.get_paintable()) +  # (not decoded again)
-                           (f"  ·  {self.index + 1} / {n}" if n > 1 else "") +
-                           (f"  ·  {round(zoom * 100)}%" if self.zoomed() else ""))
+        n, zoom, acts = len(self.items), self.target[0], self.current()
+        if isinstance(acts, FileImageActions):  # (its own size, not its thumbnail's; nothing until it's read)
+            kb = acts.size() / 1024
+            failed = acts.undecodable and not getattr(acts, "loading", False)
+            what = (image_description(acts.size(), acts.full) if not acts.full_is_thumb else
+                    f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB") if acts.full is not None else \
+                "Can't be shown here: Open opens it in its app" if failed else ""
+        else:  # (not decoded again)
+            what = image_description(acts.full[0] if acts.full else acts.data, self.picture.get_paintable())
+        self.info.set_text("  ·  ".join(part for part in (
+            what,
+            f"{self.index + 1} / {n}" if n > 1 else "", f"{round(zoom * 100)}%" if self.zoomed() else "") if part))
         self.prev_btn.set_visible(n > 1 and not self.zoomed())
         self.next_btn.set_visible(n > 1 and not self.zoomed())
         pointers.set_pointer(self.picture, "grab" if self.zoomed() else None)
@@ -4778,7 +4990,11 @@ class Lightbox(Gtk.Box):
         return ix <= point[0] <= ix + iw and iy <= point[1] <= iy + ih
 
     def on_click(self, gesture, _n, x, y):
-        """A click that isn't on the image (or a button, which handles its own) closes the view."""
+        """A click that isn't on the image (or a button, or the pictures along the bottom, which handle their own)
+        closes the view."""
+        hit = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if hit is not None and (hit is self.strip or hit.is_ancestor(self.strip)):
+            return
         if not self.on_image(self, x, y):
             self.close()
 
@@ -7959,6 +8175,16 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }
+.lightbox-strip, .lightbox-strip > row { background: none; }
+.lightbox-strip > row { padding: 3px; margin: 0 2px; border-radius: 6px; }
+.lightbox-strip > row:selected { background: alpha(white, 0.85); }
+.lightbox-strip > row:hover:not(:selected) { background: alpha(white, 0.25); }
+.lightbox-thumb { border-radius: 4px; }
+.gallery { background: none; padding: 6px 8px; }
+.gallery > row { padding: 0; background: none; }
+.gallery-tile { padding: 0; border-radius: 6px; min-width: 0; min-height: 0; background: alpha(currentColor, 0.06); }
+.gallery-tile-pic { border-radius: 6px; }
+.gallery-folder { padding: 4px 10px; }
 .md-table-scroll { margin: 2px 0; }
 .md-table { border: 1px solid @baude_rule; border-radius: 8px; }
 .md-table .md-head { background: @baude_raised; padding: 5px 12px;

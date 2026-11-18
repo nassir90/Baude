@@ -4919,11 +4919,14 @@ class PaneSlide(SideSlide):
 INSIDE_GAP = 6  # (the inside, set this far into the frame: from the panes beside it and the window's edge)
 
 
-def inside(widget, start=True, end=True):
+def inside(widget, start=True, end=True, under_bar=False):
     """widget made the inside of the window (the box the work's read and written in, square, set into the frame:
     CSS's .baude-inside), its edges INSIDE_GAP in (start, end: on that side; a pane beside it has its own gap), its
-    contents kept inside it. Returns it."""
+    contents kept inside it. under_bar: right under the window's bar, where it's INSIDE_GAP down too under a theme
+    whose bar isn't the frame's colour (_probe_title_bar). Returns it."""
     widget.add_css_class("baude-inside")
+    if under_bar:
+        widget.add_css_class("baude-under-bar")
     widget.set_overflow(Gtk.Overflow.HIDDEN)
     widget.set_margin_start(INSIDE_GAP if start else 0)
     widget.set_margin_end(INSIDE_GAP if end else 0)
@@ -7468,7 +7471,9 @@ dropdown.choice popover listview > row, menubutton.choice popover modelbutton, .
 .one-provider { opacity: 0.55; }
 banner label.heading { font-weight: normal; }
 .session-sidebar .sidebar-folder { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
-/* the Files page's tree: as compact as the sessions list */
+/* the Files page's tree: on the frame, as compact as the sessions list (a list view is a .view, which a GTK theme fills
+   with its views' white, edge to edge of the panel and the window) */
+listview.file-tree { background: none; }
 listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1px; margin-top: 1px; margin-bottom: 0; }
 .session-sidebar .sidebar-folder.current { opacity: 1; color: @accent_color; }
 .session-sidebar .fork-title { opacity: 0.85; }
@@ -7904,6 +7909,7 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
 .baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
+.baude-frame-probe { color: @baude_frame; }  /* (bar_on_frame: never shown) */
 """
 # Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
 # theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
@@ -8034,6 +8040,10 @@ def _probe_corners(window):
 # - its title bar is an image a pixel or two wide and as tall as the bar, tiled across it (XP's): GTK clips that to the
 #   bar less its top padding, and the bar's plain colour shows above it. The image is stretched across the bar instead,
 #   the same picture with nothing cut off.
+# And where the inside meets the bar: the frame's round it at the sides and bottom; at the top, the bar is the frame
+# when it's drawn in the frame's colour (libadwaita's, a theme's like it), and the inside's edge is enough there. A bar
+# of another colour (XP's blue, Windows 95's navy) ran straight into the inside, white on blue: there the frame shows
+# above it too (.baude-under-bar), as it does round the rest of it.
 _title_bar = {"tries": 0}
 
 
@@ -8053,6 +8063,8 @@ def _probe_title_bar(window):
         css += f"window.csd {{ padding-top: 0; margin-top: {pad}px; }}\n"
     if cut:
         css += "headerbar { background-size: 100% 100%; }\n"
+    if not bar_on_frame(bar):
+        css += f".baude-inside.baude-under-bar {{ margin-top: {INSIDE_GAP}px; }}\n"
     if css:
         provider = Gtk.CssProvider()
         provider.load_from_string(css)
@@ -8060,6 +8072,30 @@ def _probe_title_bar(window):
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         window.get_display().baude_title_bar_css = provider
     return False
+
+
+def bar_on_frame(bar):
+    """Whether bar, as it's drawn, is the frame's colour where the inside meets it (a few pixels up from its foot, clear
+    of its buttons and its bottom edge's line): the colour most of the way across it, or see-through there."""
+    w, h = bar.get_width(), bar.get_height()
+    native = bar.get_native()
+    snap = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(bar).snapshot(snap, w, h)
+    node = snap.to_node()
+    if node is None or native is None or native.get_renderer() is None or w < 8 or h < 8:
+        return True
+    texture = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, w, h))
+    down = Gdk.TextureDownloader.new(texture)
+    down.set_format(Gdk.MemoryFormat.R8G8B8A8)
+    data, stride = down.download_bytes()
+    data = data.get_data()
+    y = texture.get_height() - 1 - max(2, texture.get_height() // 10)
+    row = [data[y * stride + x * 4:y * stride + x * 4 + 4] for x in range(0, texture.get_width(), 3)]
+    r, g, b, a = (sorted(p[i] for p in row)[len(row) // 2] for i in range(4))
+    if a < 128:
+        return True
+    frame = Gtk.Label(css_classes=["baude-frame-probe"]).get_color()
+    return max(abs(r / 255 - frame.red), abs(g / 255 - frame.green), abs(b / 255 - frame.blue)) < 0.12
 
 
 def title_bar_cut(bar):

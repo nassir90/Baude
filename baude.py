@@ -12203,6 +12203,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         menu.append_item(item)
         menu.append("Ongoing Feedback", "win.fixes")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         self.main_menu = menu
         menu.append("Restart Baude", "win.restart")
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
@@ -12241,6 +12242,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         feedback = Gio.SimpleAction.new("feedback", None)
         feedback.connect("activate", lambda *_: self.open_feedback())
         self.add_action(feedback)
+        report = Gio.SimpleAction.new("copyreport", None)
+        report.connect("activate", lambda *_: (self.get_clipboard().set(self.report()),
+                                               widgets.toast(self, "Transcript copied")))
+        self.add_action(report)
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
@@ -13362,6 +13367,26 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         goes unsaid)."""
         if self.proc:
             self.pending[self.proc.control(req)] = (callback, refused)
+
+    REPORT_LIMIT = 400_000  # (characters of a transcript copied for an issue: its end, if it's longer)
+
+    def report(self):
+        """The open chat as text for an issue (Copy Transcript for an Issue): its model, effort, mode, where it runs
+        and its context, as the header shows them, then its transcript (meta.transcript_text: each tool call a line)."""
+        ctx, here = self.ctx_box, self.chat_host() == HERE_HOST
+        tip = (ctx.get_tooltip_text() or "").split("\n")[1:]
+        head = [("App", "Baude"), ("Session", self.session_id or "new"),
+                ("Model", self.model or "default"), ("Effort", self.effort or "default"), ("Mode", self.mode),
+                ("Host", THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                ("Folder", self.cwd or ""),
+                ("Context", ctx.label.get_text() + (f" ({', '.join(tip)})" if tip else "")),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        width = max(len(k) for k, _ in head)
+        lines = [f"{k + ':':<{width + 1}} {v}" for k, v in head if v]
+        info = find_session(self.session_id) if self.session_id and here else None
+        body = meta.transcript_text(info["path"], self.REPORT_LIMIT) if info else \
+            "(nothing said yet)" if here else "(its transcript is on its host: not read here)"
+        return "\n".join(lines) + "\n\n" + body + "\n"
 
     def refresh_context(self):
         self.request({"subtype": "get_context_usage"}, self.show_context)

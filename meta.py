@@ -440,6 +440,40 @@ def transcript_text(path, limit=REF_LIMIT):
         text[-limit:]
 
 
+def report_text(head, messages, limit=4000):
+    """A conversation as text to paste into an issue (Copy, under the box): head, [(name, value)], the lines over it
+    (the app, the model and what runs it, its effort and modes, its tools, its context); then who said what, each
+    tool call with its input and what it gave back (each as far as limit), each error said as one."""
+    width = max((len(k) for k, _ in head), default=0)
+    out = [f"{k + ':':<{width + 1}} {v}" for k, v in head if v not in (None, "")]
+    for m in messages:
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["t"])) if m.get("t") else ""
+        who = "User" if m.get("role") == "user" else NAME + (" (error)" if m.get("error") else "")
+        out.append(f"\n## {who}" + (f" · {when}" if when else ""))
+        if m.get("role") == "user":
+            if m.get("quote"):
+                out.append("> " + "\n> ".join(m["quote"].splitlines()))
+            out.append(m.get("text") or "")
+            continue
+        for text in m.get("warned") or ():
+            out.append(f"({text})")
+        items = m.get("items")
+        if items is None:
+            items = [{"kind": "text", "text": m["text"]}] if m.get("text") else []
+        for it in items:
+            if it["kind"] == "text":
+                if it.get("text", "").strip():
+                    out.append(it["text"].strip())
+                continue
+            inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
+            out.append(f"[tool {it.get('name') or '?'} · {it.get('state') or '?'}]\n{trimmed(inp, limit)}")
+            if it.get("result"):
+                out.append("[result]\n" + trimmed(str(it["result"]), limit))
+        if m.get("error") and m.get("text"):
+            out.append(m["text"])
+    return "\n".join(out).strip() + "\n"
+
+
 def earlier_said(messages, limit=EARLIER_LIMIT, where=lambda m: ""):
     """What was said before this session (a new one: the app started again, another model), the newest as far back
     as limit; where(m): what goes before a message's text (Record's: the notebook it was asked in)."""
@@ -2049,6 +2083,11 @@ class MetaChat(Gtk.Box):
         clear.add_css_class("flat")
         clear.connect("clicked", lambda *_: self._clear())
         foot.append(clear)
+        copy = Gtk.Button(label="Copy", tooltip_text="Copy the conversation, with its model, tools and context, to "
+                                                     "paste into an issue")
+        copy.add_css_class("flat")
+        copy.connect("clicked", lambda *_: self.copy_report())
+        foot.append(copy)
         self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
         foot.append(self.dots)
         self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
@@ -2200,7 +2239,7 @@ class MetaChat(Gtk.Box):
         done (the box's stop button kept till then)."""
         agent = self.agent
         if usage.get("maxTokens") or usage.get("showWithoutLimit"):
-            self.used = usage.get("totalTokens") or 0
+            self.used, self.last_usage = usage.get("totalTokens") or 0, usage
             if agent is None or agent.model != model():
                 usage = {"totalTokens": self.used, "maxTokens": window(model())}
             self.ctx.set_usage(usage)
@@ -2209,6 +2248,43 @@ class MetaChat(Gtk.Box):
             self.ctx.bar.set_value(1)
         if available():
             self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
+
+    def report_head(self):
+        """The lines over a copied conversation (report_text): the app, Meta's model and what runs it, its effort, its
+        modes, the tools it's given, its context as its session last said it."""
+        agent, value = self.agent, model()
+        level = agent.effort if agent is not None else effort()
+        tools = list(READ_TOOLS) + (list(COMMAND_TOOLS) if runs_commands() else [])
+        tools += ["run_python", *[t["name"] for t in SETUP_TOOLS]] if code_mode() else \
+            [t["name"] for t in self.all_tools()]
+        usage = getattr(self, "last_usage", None) or {}
+        if self.used is not None:
+            total = usage.get("maxTokens") or (agent.window if agent else window(value))
+            context = f"{self.used:,} / {total:,} tokens" if total else f"{self.used:,} tokens"
+            parts = [f"{c['name']} {c.get('tokens', 0):,}" for c in usage.get("categories") or []
+                     if c.get("tokens") and c.get("kind") != "deferred"]
+            context += f" ({', '.join(parts)})" if parts else ""
+        else:
+            shown = self.ctx.label.get_text().removeprefix("context").strip(" :—")
+            context = "no session yet" if agent is None else shown or "not said by its session yet"
+        return [("App", f"{self.APP} ({NAME})"), ("Model", f"{model_name()} ({value})"),
+                ("Runs on", agent.runs if agent is not None else ""),
+                ("Effort", EFFORT_LABELS.get(level, level) if level else "default"),
+                ("Code mode", said_value(code_mode())), ("Runs commands", said_value(runs_commands())),
+                ("Mode", agent.started_mode if agent is not None else ""),
+                ("Context", context), ("Tools", ", ".join(dict.fromkeys(tools))),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+
+    def report(self):
+        """The conversation as text for an issue (report_text), what's being said now too."""
+        messages = list(self.messages()) if self.ready() else []
+        if self.ask is not None and self.ask.turn is not None and self.ask.turn.get("items"):
+            messages.append({"role": "meta", "items": self.ask.turn["items"], "warned": ["still replying"]})
+        return report_text(self.report_head(), messages)
+
+    def copy_report(self):
+        self.get_clipboard().set(self.report())
+        widgets.toast(self, "Conversation copied")
 
     def close_agent(self):
         """Its session stopped (the conversation cleared, the window gone): the next message starts another, told what

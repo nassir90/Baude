@@ -1275,14 +1275,13 @@ def test_effort(app):
 def test_context_usage(app):
     win = app.window()
     try:
-        wait_for(lambda: "24k" in win.ctx_label.get_text(), "context after start")
-        assert "200k" in win.ctx_label.get_text() and "12%" in win.ctx_label.get_text(), win.ctx_label.get_text()
+        wait_for(lambda: "24k" in win.ctx_bar.text, "context after start")
         assert abs(win.ctx_bar.get_value() - 0.12) < 0.01
         assert "System tools: 17k" in win.ctx_box.get_tooltip_text()
         type_and_send(win, "hi")
         wait_for(lambda: button(win, "Allow"), "permission")
         button(win, "Allow").emit("clicked")
-        wait_for(lambda: "25.5k" in win.ctx_label.get_text(), "context refreshed after the turn")
+        wait_for(lambda: "25.5k" in win.ctx_bar.text, "context refreshed after the turn")
     finally:
         close(win)
 
@@ -6432,18 +6431,15 @@ def test_chat_goes_narrow(app):
     try:
         win.sidebar.set_visible(True)
         win.panel.set_visible(True)
-        win.ctx_label.set_text("context 24k / 200k · 12%")
         pump(0.5)
         bar_width = win.ctx_bar.measure(Gtk.Orientation.HORIZONTAL, -1).natural
-        assert win.ctx_bar.get_width() == bar_width > 0 and not win.ctx_label.get_layout().is_ellipsized(), \
-            (win.ctx_bar.get_width(), bar_width)
+        assert win.ctx_bar.get_width() == bar_width > 0, (win.ctx_bar.get_width(), bar_width)
         win.capture_bar.set_reveal_child(True)
         pump(0.4)
         win.capture_bar.set_reveal_child(False)
         wait_for(lambda: not win.capture_bar.get_child_revealed(), "the Capture bar gone", 3)
         win.split.set_position(200)  # (narrow, and wider than all it has at its least)
         pump(0.3)
-        assert win.ctx_label.get_layout().is_ellipsized()
         win.split.set_position(0)  # (as far as it goes: the chat at its least)
         pump(0.3)
         chat, panel = (w.compute_bounds(win)[1] for w in (win.tabs, win.panel))

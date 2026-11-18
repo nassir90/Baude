@@ -1691,29 +1691,71 @@ def fmt_tokens(n):
 
 
 class ContextMeter(Gtk.LevelBar):
-    """The context bar: WIDTH wide given the room, narrower as its column is (a width_request held it open)."""
+    """The context bar, its count ("24k / 200k") drawn in it: over the fill in the window's background colour, after
+    it in its text colour, so each part reads against what's under it. WIDTH wide given the room, narrower as its
+    column is (a width_request held it open)."""
 
-    WIDTH = 90  # px
+    WIDTH = 110  # px
 
     def __init__(self, **kw):
         super().__init__(**kw)
+        self.text = ""
+        self.add_css_class("context-meter")
         self.set_layout_manager(WidthLayout())
 
     def width_of(self, least, natural):
         return least, max(natural, self.WIDTH)
 
+    def set_text(self, text):
+        self.text = text
+        self.update_property([Gtk.AccessibleProperty.DESCRIPTION], [text])
+        self.queue_draw()
+
+    def do_snapshot(self, snapshot):
+        Gtk.LevelBar.do_snapshot(self, snapshot)
+        width, height = self.get_width(), self.get_height()
+        if not self.text or width <= 0:
+            return
+        layout = self.create_pango_layout(self.text)
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_scale_new(0.8))
+        attrs.insert(Pango.attr_font_features_new("tnum"))
+        layout.set_attributes(attrs)
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        layout.set_width((width - 6) * Pango.SCALE)
+        text_w, text_h = (v / Pango.SCALE for v in layout.get_size())
+        origin = Graphene.Point().init(max(3, (width - text_w) / 2), (height - text_h) / 2)
+        fill = math.floor(width * (self.get_value() - self.get_min_value()) / ((self.get_max_value() - self.get_min_value()) or 1))
+        if self.get_direction() == Gtk.TextDirection.RTL:
+            spans = ((width - fill, width, True), (0, width - fill, False))
+        else:
+            spans = ((0, fill, True), (fill, width, False))
+        found, bg = self.get_style_context().lookup_color("window_bg_color")
+        for start, end, on_fill in spans:
+            if end <= start:
+                continue
+            snapshot.push_clip(Graphene.Rect().init(start, 0, end - start, height))
+            snapshot.save()
+            snapshot.translate(origin)
+            snapshot.append_layout(layout, bg if on_fill and found else self.get_color())
+            snapshot.restore()
+            snapshot.pop()
+
 
 class ContextUsage(Gtk.Box):
-    """How much of its context window a session's used, Baude's chat's and Meta's alike: "context 24k / 200k · 12%" and
-    a bar, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's answer). Past the
-    window ("context 12.4k / 8.2k · 151%"), the bar's full: over."""
+    """How much of its context window a session's used, Baude's chat's and Meta's alike: "context" and a bar with
+    "24k / 200k" in it, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's
+    answer). Past the window ("12.4k / 8.2k"), the bar's full: over."""
 
     def __init__(self, **kw):
-        super().__init__(spacing=8, tooltip_text="Context window usage", **kw)
+        super().__init__(spacing=6, tooltip_text="Context window usage", **kw)
         self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
-        self.bar.add_offset_value("ctx-mid", 0.6)
-        self.bar.add_offset_value("ctx-high", 0.85)
+        for name in ("low", "high", "full"):
+            self.bar.remove_offset_value(name)
+        self.bar.add_offset_value("ctx-low", 0.6)
+        self.bar.add_offset_value("ctx-mid", 0.85)
+        self.bar.add_offset_value("ctx-high", 1.0)
         self.append(self.label)
         self.append(self.bar)
         self.reset()
@@ -1730,16 +1772,18 @@ class ContextUsage(Gtk.Box):
             return
         self.bar.set_visible(True)
         self.over = used > total
-        self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {used / total:.0%}")
+        self.label.set_text("context")
+        self.bar.set_text(f"{fmt_tokens(used)} / {fmt_tokens(total)}")
         self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
                  if c.get("tokens") and c.get("kind") != "deferred"]
-        self.set_tooltip_text("Context window usage\n" + "\n".join(lines))
+        self.set_tooltip_text(f"Context window usage: {used / total:.0%}\n" + "\n".join(lines))
 
     def reset(self):
         """No session's: nothing used yet."""
         self.over = False
-        self.label.set_text("context —")
+        self.label.set_text("context")
+        self.bar.set_text("—")
         self.bar.set_visible(True)
         self.bar.set_value(0)
         self.set_tooltip_text("Context window usage")
@@ -7180,6 +7224,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 levelbar block.filled { background-color: @accent_bg_color; }
 levelbar block.ctx-mid { background-color: @warning_color; }
 levelbar block.ctx-high { background-color: @error_color; }
+levelbar.context-meter trough, levelbar.context-meter block { min-height: 16px; border-radius: 4px; }
 .session-row { padding: 6px 4px; }
 /* a compact list: rows 28px apart instead of libadwaita's 38 */
 .session-sidebar list.navigation-sidebar > row { min-height: 26px; padding-top: 1px; padding-bottom: 1px;

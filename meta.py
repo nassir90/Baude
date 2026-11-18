@@ -55,7 +55,8 @@ from baudelib.models import model_program  # noqa: E402
 NAME = "Meta"
 MODEL = "haiku"  # its model, unless Settings → Meta → Intelligence says another (settings.json meta_model)
 MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers till claude's listed its own)
-MODEL_KEYS = ("value", "displayName", "supportsEffort", "supportedEffortLevels")  # (what's kept of each: models)
+MODEL_KEYS = ("value", "displayName", "resolvedModel", "description", "supportsEffort",
+              "supportedEffortLevels")  # (what's kept of each: models; what it resolves to, to tell it's the same one)
 CODE_LINES = 10  # the most lines of Python run_python runs
 READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # Claude Code's own that act, given on Claude's models (runs_commands), in its Auto mode: what its classifier holds back
@@ -126,6 +127,9 @@ def codex_catalog():
     return _codex_catalog or []
 
 
+_CLAUDE_SAID = {}  # (claude's models as models() last read them, by value: what each resolves to, its description)
+
+
 def models(live=False):
     """What Intelligence offers, as (value, label, effort levels or None, provider or None): the models this machine's
     claude listed last (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude),
@@ -137,6 +141,8 @@ def models(live=False):
     Meta's own, if it's none of these (unavailable), unless live."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
+    _CLAUDE_SAID.clear()
+    _CLAUDE_SAID.update((m["value"], m) for m in listed)  # (for model_entry: no settings read for each it's asked)
     out = [(m["value"], m.get("displayName") or m["value"],
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
@@ -179,12 +185,21 @@ def listed_models(offered=None):
     gone and no other has it. Where two of a name aren't the same, each is told apart (providers.told_apart)."""
     offered = models() if offered is None else offered
     known = providerslib.entries()
-    by_value = {m[0]: m for m in offered}
-    out = [m for m in offered if m[3] is None] + \
-        [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
+    by_value = {}
+    for m in offered:
+        by_value.setdefault(m[0], m)
+    out = [m for m in by_value.values() if m[3] is None] + [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
     others = [described(m, known) for m in out if m[3] is not None]
     return [(m[0], providerslib.told_apart(described(m, known), others), *m[2:]) if m[3] is not None else m
             for m in out]
+
+
+def claude_described(offered):
+    """Entries of models() without a provider (Claude's, codex's) as claude listed them: {value, displayName}, and what
+    each resolves to and its description where claude said them (_CLAUDE_SAID, as models() last read them): to tell
+    which row a model said another way is (models.claude_match: claude-opus-5-5 is opus, "Opus 5.5 · …")."""
+    return [{k: v for k, v in (_CLAUDE_SAID.get(m[0]) or {}).items() if k in ("resolvedModel", "description")} |
+            {"value": m[0], "displayName": m[1]} for m in offered]
 
 
 def described(m, known=None):
@@ -207,20 +222,30 @@ def alike(offered=None, known=None):
 
 def listed(found, seed=False):
     """claude's initialize listed its models (found): those claude runs, kept as what Intelligence offers (models).
-    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet."""
+    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet, or while those
+    kept lack what claude says of each now (an older version's: no description, so claude-opus-5-5 isn't told to be
+    opus)."""
     keep = [{k: m[k] for k in MODEL_KEYS if k in m} for m in found or []
             if isinstance(m, dict) and m.get("value") and m["value"] != "default" and model_program(m["value"]) == "claude"]
     had = widgets.load_settings().get("claude_models")
-    if keep and keep != had and not (seed and had):
+    said = {k for m in keep for k in m}  # (a list kept by an older version, without what claude says now of each,
+    old = isinstance(had, list) and said - {k for m in had if isinstance(m, dict) for k in m}  # its description:
+    if keep and keep != had and (not (seed and had) or old):  # replaced, seed or not)
         widgets.save_settings(claude_models=keep)
 
 
 def model_entry(value, offered=None):
-    """The entry of offered (models()) for a model value: its own, else, for an alias (haiku), the first listed model
-    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if neither."""
+    """The entry of offered (models()) for a model value: its own; else Claude's that's the same one said another way
+    (models.claude_match: opus, "Opus 5.5 · …", for claude-opus-5-5; while claude's listed none, the one alias in
+    its id); else, for an alias (haiku), the first listed model
+    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if none."""
     offered = models() if offered is None else offered
     family = re.compile(rf"(^|-){re.escape(value)}(-|\[|$)")
-    return next((m for m in offered if m[0] == value), None) or \
+    if hit := next((m for m in offered if m[0] == value), None):
+        return hit
+    same = modelslib.claude_match(value, claude_described([m for m in offered if m[3] is None]),
+                                  fallback=not _CLAUDE_SAID)  # (none listed yet: MODELS_OFFERED's aliases)
+    return next((m for m in offered if same and m[0] == same["value"]), None) or \
         (next((m for m in offered if family.search(m[0])), None) if value in dict(MODELS) else None)
 
 

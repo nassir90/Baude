@@ -7359,10 +7359,12 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .tool-group > box > box > label { opacity: 0.8; }
 /* a tool card's Command / Output: small toggle buttons after its name, only a little rounded */
 .tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
-/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed (and a sidebar's
-   host state, an island as they are: HostState) */
+/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed, and so are a
+   sidebar's host state (an island as they are: HostState) and the box a side question's asked in (inside its edge, as
+   theirs is: as tall as an empty list, it lines up with one) */
 .side-panel { background: transparent; }
-.side-panel .boxed-list, .boxed-list.host-state { box-shadow: none; border: 1px solid @baude_rule; }
+.side-panel .boxed-list, .boxed-list.host-state, .side-panel .composer-box.side-question-ask {
+  box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its

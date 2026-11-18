@@ -84,7 +84,7 @@ class ViewerHost:
             self.git_page.ensure()
 
     def viewer_folder_changed(self):
-        """Another folder to show (Record's notebook changed): the Files page's tree and the Git page's history
+        """Another folder to show (Record's chat read changed): the Files page's tree and the Git page's history
         read again from it (as they're shown)."""
         self.files_page.root = None
         self.git_page.chat_changed()

@@ -1254,9 +1254,9 @@ def said_names(text, space):
 attr, trimmed = meta.attr, meta.trimmed
 
 
-def notebook_said(notebook, store, space, folders=(), limit=NOTES_LIMIT):
+def notebook_said(notebook, store, space, chat=None, limit=NOTES_LIMIT):
     """A session's first words: the notebook open, its pages (each one's file, and its text as far as limit, its
-    @names said) and the folders it reads (Window.read_folders: the chat read's)."""
+    @names said) and the folder it reads: the chat read's (Window.chat_read), or why there's none."""
     files = page_paths(store.notebooks)
     root = pages_root()
     pages = sorted(notebook["pages"], key=lambda p: (p != HOME, p.lower()))
@@ -1272,7 +1272,10 @@ def notebook_said(notebook, store, space, folders=(), limit=NOTES_LIMIT):
             left -= len(text)
         else:
             parts.append(f'<page name="{attr(name)}" file="{attr(file)}">(not put here: Read its file)</page>')
-    parts.append("The chat read's folder: " + (", ".join(folders) if folders else "none (no chat read)"))
+    cwd = (chat or {}).get("cwd")
+    parts.append("The chat read's folder: " + (
+        "none (no chat read)" if not chat else "none (the chat read has none)" if not cwd else
+        os.path.realpath(cwd) if os.path.isdir(cwd) else f"none ({cwd}, the chat read's, isn't there any more)"))
     parts.append("</notebook>")
     return "\n".join(parts)
 
@@ -4318,11 +4321,12 @@ class DiaryEditor(Gtk.Box, FindInText):
         if at is None and (not issues or self._exact()):  # (# picks nothing it wasn't asked to: Enter's a new line)
             at = 0
         if space is None:
-            note = "Open a chat to @ what's in its folder"
+            note = "Nothing found"
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
                 self.waiting = space.refresh(self._catalogued)
-            note = f"{matched} found" if matched else "Nothing found"
+            note = f"{matched} found" if matched else "Nothing found" if self.win.read_folders() else \
+                "Nothing found · open a chat for its folder's names"
         it = self.buf.get_iter_at_offset(self.token[0])
         loc = self.view.char_rect(it)
         x, y = self.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, loc.x, loc.y)
@@ -6011,7 +6015,7 @@ class RecordChat(meta.MetaChat):
                 parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
                              if notebook is not None else f"(The user closed the {book().lower()} since: none is "
                              "open now.)")
-            parts.append(notebook_said(notebook, store, space, self.win.read_folders()) if notebook is not None
+            parts.append(notebook_said(notebook, store, space, self.win.chat_read()) if notebook is not None
                          else none_open_said(store))
         agent.seen = notebook
         if (place := self.win.place()) != getattr(agent, "seen_place", None):  # (host / notebook / page, as it changes)
@@ -7344,7 +7348,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if state.get("right"):  # (the right bar's width, once the window's laid out)
             GLib.idle_add(lambda: self.paned.set_position(max(0, self.paned.get_width() - state["right"])) and False)
         if state.get("right_page") and self.right_stack.get_child_by_name(state["right_page"]) is not None:
-            self.right_stack.set_visible_child_name(state["right_page"])  # (one that's gone, Folders: Meta's left)
+            self.right_stack.set_visible_child_name(state["right_page"])  # (a page there's no longer: Meta's left)
         if state.get("record") and any(t["id"] == state["record"] for t in self.store.notebooks):
             self.select(state["record"])
             if state.get("fixes"):
@@ -7538,10 +7542,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         return areas
 
     def feedback_context(self):
-        """What a note sent from Record says it came from (feedback.save_feedback): the notebook, the chat open, its
-        first folder (else the chat's), and Record."""
-        t, folders = self.current or {}, self.read_folders()
-        chat = (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
+        """What a note sent from Record says it came from (feedback.save_feedback): the notebook, the chat read, its
+        folder, and Record."""
+        t, folders, chat = self.current or {}, self.read_folders(), self.chat_read() or {}
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
                 f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}",
@@ -7660,7 +7663,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def github_folders(self):
         """What GitHub's lists are read for (lookup.GitHub.look), as Baude's: the repository the chat read's folder is
         in."""
-        return [], self.read_folders()
+        return self.read_folders()
 
     @staticmethod
     def _github_changed(win):
@@ -7761,8 +7764,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.current = notebook
         self.show_title()
         if changed:
-            self.viewer_at = None
-            self.viewer_folder_changed()  # (the viewers on the chat read's folder, not where the last notebook left it)
+            self.git_page.chat_changed()  # (the Git page's state is the notebook's, git_chat; its folder's the same)
         if changed:  # (the notebook left's pages' tabs closed: its own come in, as it had them open)
             self.switching = True
             try:
@@ -8321,10 +8323,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         pop.popup()
 
     def viewer_folder(self):
-        """The folder the viewers show (viewers.ViewerHost): the one a name was last opened from (viewer_at), else
-        the chat open's; None without one."""
+        """The folder the viewers show (viewers.ViewerHost): the chat read's; None without one."""
         folders = self.read_folders()
-        return self.viewer_at if self.viewer_at in folders else folders[0] if folders else None
+        return folders[0] if folders else None
 
     def git_chat(self):
         """The chat the Git page keeps its state for (GitPage.chat_check): the notebook's."""
@@ -8397,10 +8398,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         """⌘K / Ctrl+K, as Baude's: every name the chat read's folder has, and the notebooks and their pages, searched
         as you type, a name opened where it is (open_item: its page, its file, the Git page, the Kubernetes view, the
         database diagram)."""
-        space = self.space()
-        if space is None:
-            return self.toast("Nothing to search yet")
-        widgets.RefPalette(self, space, self.open_item).present(self)
+        widgets.RefPalette(self, self.space(), self.open_item).present(self)
 
     def open_notes_item(self, item):
         """A notebook (shown) or a page (open, in its notebook) from @ or ⌘K."""
@@ -8419,9 +8417,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return self.open_chat(item["path"])
         if (listed := (item.get("entry") or {}).get("github")) is not None:  # (a pull request or an issue)
             return fixview.open_github(self, listed)
-        if (root := item.get("root")) and root != self.viewer_folder():  # (one of the notebook's other folders)
-            self.viewer_at = root
-            self.viewer_folder_changed()
         if viewers.ViewerHost.open_item(self, item):
             return
         if item.get("path") and os.path.exists(item["path"]):
@@ -8443,22 +8438,40 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         editor.view.grab_focus()
         editor.follow_soon()
 
+    def chat_read(self):
+        """The chat read: the one shown, else the one shown last ({path, title, cwd}), or None."""
+        return (self.reader.chat if self.reader is not None else None) or self.store.reading
+
     def read_folders(self, chat=None):
-        """The folder names are from (chat: the one shown, or last shown): the chat's own, [] without one. What @, ⌘K,
+        """The folder names are from (chat: else the one read, chat_read): the chat's own, [] without one. What @, ⌘K,
         the viewers, GitHub's lists and Meta's Read know besides the notes."""
-        chat = chat or (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
-        cwd = chat.get("cwd")
+        cwd = (chat or self.chat_read() or {}).get("cwd")
         return [os.path.realpath(cwd)] if cwd and os.path.isdir(cwd) else []
 
     def reading_changed(self):
-        """Another chat shown (Store.reading): if its folder's another, the viewers, the names in the notes and
-        GitHub's lists are that one's now."""
+        """Another chat read (Store.reading): if its folder's another, the viewers, the names in the notes and
+        GitHub's lists are that one's now, the notes' @names drawn again once it's catalogued."""
         folders = self.read_folders()
         if folders != getattr(self, "read_from", None):
-            self.viewer_at = None
             self.viewer_folder_changed()
             Window._github_changed(self)
+            if (waiting := getattr(self, "names_wait", None)) is not None:
+                GLib.source_remove(waiting)
+            self.names_wait = self.space().refresh(self._names_in)
+            if self.names_wait is None:
+                self._names_in()
         self.read_from = folders
+
+    def _names_in(self):
+        """The chat read's folder catalogued (reading_changed): the open pages' @names drawn with their logos, which
+        were left plain while it was being read (DiaryEditor._highlight)."""
+        self.names_wait = None
+        if (space := self.space()).busy:  # (one in, another on its way)
+            self.names_wait = space.refresh(self._names_in)
+            return
+        for child in self.tabs.children():
+            if isinstance(child, DiaryEditor):
+                child.github_changed()
 
     # ---- what's open: a tab each (a page of notes, a chat, a file's code)
     def open_pages(self):
@@ -8709,6 +8722,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if isinstance(child, DiaryEditor):
             self.pages.prune()
             self.pages.fill()
+        if isinstance(child, Reader) and (reader := self.reader) is not None and reader.chat:
+            self.store.reading = reader.chat  # (the chat read now: the one shown before it)
+            self.reading_changed()
         self._keep_open()
         self._tab_shown()
 

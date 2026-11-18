@@ -15399,7 +15399,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         elif st == "codex_turn_started":
             if not self.busy:
                 self.set_busy(True)
-        elif st == "codex_context":
+        elif st in ("codex_context", "baude_context"):  # (baude_context: pi-claude's, MLX's count of what it's sent)
             self.remember_context(self.model, msg["usage"])
             self.show_context(msg["usage"])
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)

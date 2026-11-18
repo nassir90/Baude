@@ -989,7 +989,8 @@ class Mesh:
         eps = [{"id": endpoint_id(m["id"], p["id"]), "name": f"{p['name']} on {m['name']}", "provider": p["id"],
                 "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
                 "url": f"{proxy['url']}/{m['id']}/{urllib.parse.quote(p['id'], safe='')}", "key": proxy["key"],
-                "models": [{k: x[k] for k in ("id", "displayName", "window", "digest", "tools", "input") if k in x}
+                "models": [{k: x[k] for k in ("id", "displayName", "window", "digest", "tools", "input", "thinking")
+                            if k in x}
                            for x in p["models"]]}
                for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
         agents = [{"provider": p["id"], "provider_name": p["name"], "host": m["id"], "host_name": m["name"],

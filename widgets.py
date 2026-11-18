@@ -1041,6 +1041,12 @@ def pr_title(p, repo, number):
     return " · ".join(x for x in (f"{repo}#{number}", said, (p or {}).get("title")) if x)
 
 
+def pill_code_scale():
+    """A pill's size of the text's: code's (code_scale), never more than the text's (a code font measured larger than
+    the prose's, as one can be, leaves pills the prose's size)."""
+    return min(1.0, code_scale())
+
+
 def chat_repo():
     """The GitHub repository (owner/name) the reply being drawn is in, what a bare #12 in it means: its Signal's (the
     chat's checkout's origin), else its folder's as GITHUB has read it. None if there's none."""
@@ -1054,7 +1060,7 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     pill, in where it stands once that's read, and a link's colour till then), with no gh or gh signed out, if
     nothing's been read of its pull requests (and not any_repo), or (known) if number isn't one of them as far as is
     known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered),
-    at code's size (code_markup_size: a number among `names` is as big as they are; LinkLabel's logo and patch follow)."""
+    at code's size (pill_code_scale: a number among `names` is as big as they are; LinkLabel's logo and patch follow)."""
     if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
         return None
     if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
@@ -1062,9 +1068,8 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     p = lookup.PULLS.pull(repo, number)
     if p is None and known:
         return None
-    inner = pr_numbered(inner, number)
-    if 'size="' not in inner:  # (code in a link's text has its size already)
-        inner = f'<span size="{code_markup_size()}">{inner}</span>'
+    # (a size="…%" is a share of the label's own size, not of the span it's in: code in a link's text keeps its)
+    inner = f'<span size="{round(pill_code_scale() * 100)}%">{pr_numbered(inner, number)}</span>'
     return pr_pill_markup(inner,
                           href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
                           pr_title(p, repo, number), (p or {}).get("state"))
@@ -1913,8 +1918,8 @@ class LinkLabel(WrapLabel):
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
     def pill_ratio(self):
-        """A pill's size of the text's: pill_scale, else code's (code_scale), its number's."""
-        return self.pill_scale or code_scale()
+        """A pill's size of the text's: pill_scale, else its number's (pill_code_scale)."""
+        return self.pill_scale or pill_code_scale()
 
     def pill_px(self):
         """A pill's logo's size, px."""

@@ -3641,7 +3641,7 @@ class Composer(Gtk.Overlay):
     any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
     as it needs (Record's quote). Its owner connects the send button and the keys."""
 
-    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter"):
+    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter", follow_text=False):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
         self.input.add_css_class("zoomable")
@@ -3666,11 +3666,31 @@ class Composer(Gtk.Overlay):
             actions.append(button)
         actions.append(self.send)
         self.add_overlay(actions)
+        if follow_text:  # (a box taller than its text: the buttons level with its last line, at most at the bottom)
+            self.actions = actions
+            self.connect("get-child-position", self._place_actions)
+            self.input.get_buffer().connect("changed", lambda *_: self.queue_allocate())
+            scroll.get_vadjustment().connect("value-changed", lambda *_: self.queue_allocate())
         self.add_css_class("card")
         self.add_css_class("composer-box")
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.gates, self.busy = set(), False  # (what keeps what's written from being sent now: gate)
         self.set_busy(False)
+
+    def _place_actions(self, _overlay, child, rect):
+        """follow_text's buttons: in the bottom right, but no lower than centred on the text's last line."""
+        if child is not getattr(self, "actions", None):
+            return False
+        nat = child.get_preferred_size()[1]  # (its margins in it: the buttons are its top part)
+        rect.width, rect.height = nat.width, nat.height
+        rect.x, rect.y = self.get_width() - nat.width, self.get_height() - nat.height
+        line = self.input.get_iter_location(self.input.get_buffer().get_end_iter())
+        wy = self.input.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, 0, line.y + line.height // 2)[1]
+        ok, at = self.input.compute_point(self, Graphene.Point().init(0, wy))
+        if ok:
+            buttons = nat.height - child.get_margin_top() - child.get_margin_bottom()
+            rect.y = max(0, min(rect.y, round(at.y - buttons / 2 - child.get_margin_top())))
+        return True
 
     def gate(self, name, on):
         """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),

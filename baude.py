@@ -9117,7 +9117,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.inside.append(self.chat_find.wrap())
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
-        self.writing = widgets.Composer()
+        self.writing = widgets.Composer(follow_text=True)  # (its button by the text's last line)
         self.composer = self.writing.input
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._key)
@@ -10484,7 +10484,7 @@ class SidePanel(Gtk.Box):
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
         # empty)
-        self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter")
+        self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter", follow_text=True)
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         # (at least as tall as the other pages' empty lists, whatever the theme and text size: over one, unseen, the
         # box filling it; taller as more's typed. Its text fills the box, so a click anywhere in it is in the text)

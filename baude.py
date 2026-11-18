@@ -7826,7 +7826,7 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
+        self.host_banner = widgets.HostState()  # (its titles: show_host_state's markup)
         self.append(self.host_banner)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")

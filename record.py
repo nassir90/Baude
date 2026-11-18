@@ -7045,7 +7045,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
         # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
-        self.host_banner = Adw.Banner(use_markup=True)
+        self.host_banner = widgets.HostState()
         books.append(self.host_banner)
         books.append(self.pages)
         self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,

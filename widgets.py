@@ -8581,24 +8581,47 @@ def rounded_css(display, sheet):
         fit_corners(display, display.baude_corner_radius)
 
 
+def selector_parts(sel):
+    """A selector list's selectors: split at its own commas, not those in a :not(…) or :is(…) in it."""
+    parts, depth, start = [], 0, 0
+    for i, c in enumerate(sel):
+        depth += (c == "(") - (c == ")")
+        if c == "," and depth == 0:
+            parts.append(sel[start:i].strip())
+            start = i + 1
+    return [p for p in (*parts, sel[start:].strip()) if p]
+
+
 def theme_text_fields_css():
     """The GTK theme's own rules for its text fields' corners (an entry's, a search entry's, a spin button's), as GTK
-    has them: one selector list's parts that end in one, with their border-radius. "": no theme, or none."""
+    has them: a selector list's selectors that end in one, or that could reach one in a linked group (.linked >
+    :first-child, which squares where it joins its neighbour), with their border-radius. Read once (kept: a theme's
+    errors, if it has any, aren't said again each time). "": no theme, or none."""
+    if (kept := _corners.get("fields")) is not None:
+        return kept
     name, _, variant = os.environ.get("GTK_THEME", "").partition(":")
-    if not name:
-        return ""
-    theme = Gtk.CssProvider()
-    with warnings.catch_warnings():  # (load_named is deprecated, with nothing in its place: it's how GTK loads it)
-        warnings.simplefilter("ignore", DeprecationWarning)
-        theme.load_named(name, variant or None)
-    rules, sheet = [], re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", theme.to_string(), flags=re.S))
-    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
-        fields = [p.strip() for p in sel.split(",")
-                  if re.match(r"(entry|spinbutton)\b", re.split(r"[\s>+~]+", p.strip())[-1])]
-        radii = re.findall(r"(border(?:-[a-z]+)*-radius:\s*[^;}]+)", body)
-        if fields and radii:
-            rules.append(f"{', '.join(fields)} {{ {'; '.join(radii)}; }}")
-    return "\n".join(rules)
+    rules = []
+    if name:
+        theme = Gtk.CssProvider()
+        theme.connect("parsing-error", lambda *_: None)  # (GTK said them as it loaded the theme itself)
+        with warnings.catch_warnings():  # (load_named is deprecated, with nothing in its place: it's how GTK loads it)
+            warnings.simplefilter("ignore", DeprecationWarning)
+            theme.load_named(name, variant or None)
+        sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", theme.to_string(), flags=re.S))
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+            fields = []
+            for part in selector_parts(sel):
+                bare = part
+                while bare != (bare := re.sub(r"\([^()]*\)", "", bare)):  # (what's in a :not(…), out of the way)
+                    pass
+                last = re.split(r"[\s>+~]+", bare)[-1]
+                if re.match(r"(entry|spinbutton)\b", last) or (".linked" in part and re.match(r"[*.:]", last)):
+                    fields.append(part)
+            radii = re.findall(r"(border(?:-[a-z]+)*-radius:\s*[^;}]+)", body)
+            if fields and radii:
+                rules.append(f"{', '.join(fields)} {{ {'; '.join(radii)}; }}")
+    _corners["fields"] = "\n".join(rules)
+    return _corners["fields"]
 
 
 def fit_corners(display, radius):
@@ -8606,8 +8629,7 @@ def fit_corners(display, radius):
     theme's text fields (theme_text_fields_css) held to radius, above them. Again: what was held before, replaced."""
     def held(value):
         return re.sub(r"(\d+(?:\.\d+)?)px", lambda m: f"{min(float(m.group(1)), radius):g}px", value)
-    if (fields := getattr(display, "baude_theme_fields", None)) is None:
-        fields = display.baude_theme_fields = theme_text_fields_css()
+    fields = theme_text_fields_css()
     theirs, ours = [], []
     for sheet, into in ((fields, theirs), *((sheet, ours) for sheet in _corners["sheets"])):
         sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", sheet, flags=re.S))  # (comments, @define-colors)

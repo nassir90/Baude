@@ -49,7 +49,7 @@ STALE_S = ROUND_TIMEOUT_S + 5 * 60  # (a round said to be running for longer tha
 # (all it has: nothing that runs anything or goes out. None pre-approved, as a bare rule would approve every path: edits
 # in its folder are acceptEdits', and asking for anything outside it, with nobody to ask, is refused)
 TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
-from baudelib.claude import HOST_SESSION_ENV  # noqa: E402  (what claude_env leaves out: baudelib's, and so ours)
+from baudelib.claude import HOST_SESSION_ENV, claude_exe  # noqa: E402  (what claude_env leaves out: baudelib's, and so ours)
 # (no prompt: no terminal, no password asked of a terminal or a window; as update.py's)
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
 MARK = re.compile(r"<!-- baude-fix (\{.*?\}) -->", re.S)
@@ -512,7 +512,9 @@ def running_here(number):
 
 
 def start_fix(number, reply=None, claude=None):
-    """A round of number's fix started, a process of its own (it outlives this one), its output in the fix's log."""
+    """A round of number's fix started, a process of its own (it outlives this one), its output in the fix's log.
+    claude: one its user chose (RECORD_CLAUDE's), as its BAUDE_CLAUDE; never one found (a desktop build's path, which
+    goes as the app updates, and would go on in whatever the round starts, a host process too)."""
     if running_here(number):
         return None
     os.makedirs(fix_dir(number), exist_ok=True)
@@ -694,8 +696,7 @@ def shot_bytes(path):
 # --------------------------------------------------------------------- a round --
 
 def claude_args(session):
-    exe = os.environ.get("BAUDE_CLAUDE") or shutil.which("claude") or "claude"
-    return [exe, "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+    return [claude_exe(), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
             "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "",
             "--tools", ",".join(TOOLS), "--append-system-prompt", SYSTEM,
             *(("--resume", session) if session else ())]

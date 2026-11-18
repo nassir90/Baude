@@ -15,7 +15,13 @@ import threading
 # claude_env leaves it out (fixes.py's claude runs too)
 HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID",
                     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-                    "CLAUDE_PID", "CLAUDE_CODE_DESKTOP_APP_VERSION", "CLAUDE_CODE_SESSION_ATTENDED")
+                    "CLAUDE_PID", "CLAUDE_CODE_DESKTOP_APP_VERSION", "CLAUDE_CODE_SESSION_ATTENDED",
+                    # (the host's login: with these a claude asks the program that started it to refresh its token,
+                    # which Baude never does, and takes the host's account for its own)
+                    "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH", "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS",
+                    "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH", "CLAUDE_CODE_SDK_HAS_SESSIONS_OAUTH_REFRESH",
+                    "CLAUDE_CODE_OAUTH_SCOPES", "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ORGANIZATION_UUID",
+                    "CLAUDE_CODE_USER_EMAIL")
 
 
 # (value, label). MODELS is only a fallback: the CLI's initialize response lists the real
@@ -54,19 +60,29 @@ def has_flag(exe, flag):
         return False
 
 
-def claude_exe():
-    """The claude binary: BAUDE_CLAUDE, else claude on PATH, else (macOS) the newest one the Claude desktop app
-    keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH."""
-    exe = os.environ.get("BAUDE_CLAUDE") or shutil.which("claude")
+def claude_exe(var="BAUDE_CLAUDE"):
+    """The claude binary: var's (BAUDE_CLAUDE; Record's RECORD_CLAUDE), else claude on PATH, else (macOS) the newest
+    one the Claude desktop app keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH.
+    Looked for again each time: a var naming one that's gone (an old desktop build, removed as the app updated) is
+    passed over, not run."""
+    exe = os.environ.get(var)
+    if exe and shutil.which(exe):
+        return exe
+    exe = shutil.which("claude")
     if exe or sys.platform != "darwin":
         return exe or "claude"
+    return desktop_claude() or "claude"
+
+
+def desktop_claude():
+    """(macOS) The newest claude the Claude desktop app keeps, or None."""
+    root = os.path.expanduser(MACOS_DESKTOP_CLAUDE)
     found = []
-    for path in glob.glob(os.path.join(os.path.expanduser(MACOS_DESKTOP_CLAUDE),
-                                       "*", "*", "claude.app", "Contents", "MacOS", "claude")):
-        version = os.path.relpath(path, os.path.expanduser(MACOS_DESKTOP_CLAUDE)).split(os.sep)[0]
+    for path in glob.glob(os.path.join(root, "*", "*", "claude.app", "Contents", "MacOS", "claude")):
+        version = os.path.relpath(path, root).split(os.sep)[0]
         if os.access(path, os.X_OK) and re.fullmatch(r"\d+(\.\d+)*", version):
             found.append((tuple(int(n) for n in version.split(".")), os.path.getmtime(path), path))
-    return max(found)[2] if found else "claude"
+    return max(found)[2] if found else None
 
 
 _CLAUDE_VERSION = []

@@ -96,7 +96,8 @@ def open_github(win, listed):
 
 class FixesPage(Gtk.Box):
     """The tab. Everything's read off the main loop (refresh) while it's shown; what's done (run) too, then read again.
-    win: its toasts, for what happened; claude: the claude a round runs (baude.claude_exe's)."""
+    win: its toasts, for what happened; claude: the claude a round runs, if one was set (RECORD_CLAUDE): else fixes.py
+    finds it each round, as Baude does."""
 
     def __init__(self, win, claude=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)

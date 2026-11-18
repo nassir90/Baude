@@ -545,8 +545,12 @@ def test_claude_exe():
             f.write("#!/bin/sh\n")
         os.chmod(path, 0o755)
     try:
-        os.environ.update(BAUDE_CLAUDE="/opt/my/claude", HOME=home)
-        assert baude.claude_exe() == "/opt/my/claude", "BAUDE_CLAUDE first"
+        mine = os.path.join(home, "my-claude")
+        with open(mine, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(mine, 0o755)
+        os.environ.update(BAUDE_CLAUDE=mine, HOME=home)
+        assert baude.claude_exe() == mine, "BAUDE_CLAUDE first"
         del os.environ["BAUDE_CLAUDE"]
         bin_dir = os.path.join(TMP, "claude-exe-bin")
         os.makedirs(bin_dir, exist_ok=True)
@@ -5595,7 +5599,7 @@ def test_fixes_tab(app):
         fixes.write_state(3, error=None)
         page.fix_btn.emit("clicked")
         wait_for(lambda: started, "a round started")
-        assert started[0] == (3, None, baude.claude_exe()), started
+        assert started[0] == (3, None, None), started
         wait_for(lambda: page.fix_btn.get_sensitive(), "done with it")
 
 

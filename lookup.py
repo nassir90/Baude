@@ -12,6 +12,7 @@ name is. Nothing here needs GTK: it reads files and runs git, kubectl, docker (a
 and gh, to read.
 """
 import collections
+import datetime
 import hashlib
 import itertools
 import json
@@ -893,15 +894,51 @@ def ref_palette_word(name, canon, extra, w):
     return None
 
 
+def item_when(item):
+    """When an item was last touched, as epoch seconds, or None: a chat's last use, a pull request's or issue's last
+    update, a file's (or a name's file's) last change. Kept on the item once looked for (its file's stat, once)."""
+    if "_when" in item:
+        return item["_when"]
+    when = item.get("at") if isinstance(item.get("at"), (int, float)) else None
+    listed = (item.get("entry") or {}).get("github")
+    if when is None and listed and listed.get("updated"):
+        try:
+            when = datetime.datetime.fromisoformat(listed["updated"].replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    if when is None and item.get("path"):
+        try:
+            when = os.stat(item["path"]).st_mtime
+        except (OSError, ValueError, TypeError):
+            pass
+    item["_when"] = when
+    return when
+
+
+RECENT_STEPS = (3600, 86400, 7 * 86400, 30 * 86400)  # (s: within the hour, the day, the week, the month)
+
+
+def recency(item, now=None):
+    """How lately an item was touched, in steps (RECENT_STEPS: 0 within the hour … 4 longer ago), 5 not known."""
+    when = item_when(item)
+    if when is None:
+        return len(RECENT_STEPS) + 1
+    age = (now or time.time()) - when
+    return next((i for i, step in enumerate(RECENT_STEPS) if age < step), len(RECENT_STEPS))
+
+
 def ref_palette_rank(item, q):
-    """How well a name matches what's typed (lower is better), or None. Each word typed must match (in any order:
-    "relay job" finds relay_gen_job), the worst-matching word decides, then all of them together, then the typed words
-    being in the name's order, then the shorter name. (A pull request or an issue goes by its number, its label: its
-    repository's name is in every one of them, and any letters typed would find them all.)"""
+    """How well a name matches what's typed (lower is better), or None. Nothing typed: the latest touched first
+    (item_when), those with no time after, the shorter name first among them. Typed: each word must match (in any
+    order: "relay job" finds relay_gen_job), the worst-matching word decides, then all of them together, then the typed
+    words being in the name's order, then how lately it was touched (recency, in steps: a close match isn't passed
+    by a looser one for being newer), then the shorter name. (A pull request or an issue goes by its number, its
+    label: its repository's name is in every one of them, and any letters typed would find them all.)"""
     name = (item.get("label") or item["surface"]).lower()
     words = q.split()
     if not words:
-        return (0, 0, 0, len(name))
+        when = item_when(item)
+        return (0, 0, when is None, -(when or 0), len(name))
     # (a chat's summary says how long ago too, which isn't what it's searched by: its "where", its folder)
     canon, extra = item["canonical"].lower(), f"{item.get('where', item['summary'])} {item['what']}".lower()
     ranks = []
@@ -912,7 +949,7 @@ def ref_palette_rank(item, q):
         ranks.append(r)
     at = [name.find(w) for w in words]
     in_order = all(x >= 0 for x in at) and at == sorted(at)
-    return (max(ranks), sum(ranks), 0 if in_order else 1, len(name))
+    return (max(ranks), sum(ranks), 0 if in_order else 1, recency(item), len(name))
 
 
 def find_spans(text, words, letters=False):

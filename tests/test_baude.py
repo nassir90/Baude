@@ -10994,14 +10994,16 @@ def test_git_avatars(app):
             subject = find(long, Gtk.Label, lambda l: l.get_text() == _AVATAR_LONG)[0]
             assert subject.get_layout().is_ellipsized(), "a long subject's cut short"
             assert long.get_width() <= page.list.get_width() and long.get_height() == row.get_height()
-            lane = row.avatar.get_parent().get_first_child()
-            assert isinstance(lane, baude.GitLane) and lane.get_next_sibling() is row.avatar, "beside the line"
+            framed = row.avatar.get_parent()  # (its shade over it: shaded_picture)
+            lane = framed.get_parent().get_first_child()
+            assert isinstance(lane, baude.GitLane) and lane.get_next_sibling() is framed, "beside the line"
             assert " · Naza · +1 −0 in 1 file" in labels_text(row), labels_text(row)
             assert row.get_tooltip_text().endswith("· Start"), row.get_tooltip_text()
             # a faint row's faint all over
             c = page.commits[0]
-            assert abs(page.row(c, baude.git_lanes([c])[0], 1, dim=True).avatar.get_opacity() - 0.55) < 0.01
-            assert page.row(c, baude.git_lanes([c])[0], 1).avatar.get_opacity() == 1
+            faint = page.row(c, baude.git_lanes([c])[0], 1, dim=True).avatar.get_parent()
+            assert abs(faint.get_opacity() - 0.55) < 0.01
+            assert page.row(c, baude.git_lanes([c])[0], 1).avatar.get_parent().get_opacity() == 1
 
             # rows drawn again, a page more, a chat's commits, the times said again: no flicker, nothing read again
             page.chat = {"commits": {page.commits[0]["sha"][:7]: {"subject": "Mine"}}}

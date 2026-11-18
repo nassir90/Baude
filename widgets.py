@@ -3464,6 +3464,22 @@ def toast(widget, text):
         root.toasts.add_toast(Adw.Toast(title=text, timeout=2))
 
 
+def shaded_picture(picture):
+    """picture (an Adw.Avatar: someone's picture; a bot's, a Gtk.Picture...) set into the page: a shade over it, darker
+    to its rim, as if pressed in (.picture-shade), so a photo isn't a flat cut-out on the grey. In a Gtk.Overlay
+    (returned: what goes in the layout, and what's dimmed to dim it all); the shade's only over a picture, not over
+    an avatar's initials on their colour."""
+    frame = Gtk.Overlay(css_classes=["picture-frame"], halign=picture.get_halign(), valign=picture.get_valign())
+    frame.set_child(picture)
+    shade = Gtk.Box(css_classes=["picture-shade"], can_target=False)
+    frame.add_overlay(shade)
+    if isinstance(picture, Adw.Avatar):  # (its picture can come later, or go)
+        shown = lambda *_: shade.set_visible(picture.get_custom_image() is not None)  # noqa: E731
+        picture.connect("notify::custom-image", shown)
+        shown()
+    return frame
+
+
 def make_image_interactive(widget, data, path=None, name=None, url=None):
     acts = widget.image_actions = ImageActions(widget, data, path, name, url)
     group = Gio.SimpleActionGroup()
@@ -7342,6 +7358,11 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .artifact-chip .artifact-icon { color: @accent_color; }
 .tasks-indicator { padding: 0 8px; min-height: 0; font-size: 0.95em; }
 .ref-kind { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
+/* (shaded_picture: someone's picture pressed into the page, its rim in shadow, its middle as it is. Round as the
+   avatar; under a square theme both square) */
+.picture-frame avatar, .picture-shade { border-radius: 9999px; }
+.picture-shade { background-image: radial-gradient(circle closest-side, transparent 55%, alpha(black, 0.22));
+  box-shadow: inset 0 1px 2px alpha(black, 0.45), inset 0 0 0 1px alpha(black, 0.16); }
 .git-log { background: transparent; }
 .git-log row { padding: 0 8px 0 2px; }
 .git-ref { font-size: 0.78em; padding: 0 5px; border-radius: 4px; background: alpha(@accent_bg_color, 0.14); color: @accent_color; }

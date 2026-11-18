@@ -1766,7 +1766,7 @@ class Server:
                     continue
             entry = it.get("entry")
             if entry is not None:  # (what a list shows of it: its first source, and GitHub's)
-                entry = {k: entry[k] for k in ("kind", "hint", "github") if k in entry} | \
+                entry = {k: entry[k] for k in ("kind", "hint", "github", "at") if k in entry} | \
                     {"sources": list(entry.get("sources") or ())[:1]}
             item = {**it, "entry": entry}
             try:

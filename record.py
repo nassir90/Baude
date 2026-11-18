@@ -1947,6 +1947,14 @@ class NotesNames(lookup.SearchSpace):
         mine = self.current()
         return (mine or {}).get("id"), tuple((t.get("id"), t["name"], tuple(t["pages"])) for t in self.store.notebooks)
 
+    def changed(self, notebook, page):
+        """When a page's file was last written (⌘K's and @'s order: lookup.item_when), or None."""
+        path = self.store.page_files.get(("" if not notebook.get("host") else self.store.host, notebook.get("id"), page))
+        try:
+            return os.path.getmtime(path) if path else None
+        except OSError:
+            return None
+
     def make_items(self):
         mine, out = self.current(), []
         books = ([mine] if mine else []) + [t for t in self.store.notebooks if t is not mine]
@@ -1955,7 +1963,8 @@ class NotesNames(lookup.SearchSpace):
             for page in pages:
                 out.append({"surface": page if t is mine else f"{name}/{page}", "canonical": "", "icon": "page",
                             "what": "Page", "kind": "page", "summary": name, "where": name, "notebook": t.get("id"),
-                            "page": page, "mine": t is mine, "line": None, "entry": None, "faint": False})
+                            "page": page, "mine": t is mine, "line": None, "entry": None, "faint": False,
+                            "at": self.changed(t, page)})
             out.append({"surface": name, "canonical": "", "icon": "notebook", "what": "Notebook", "kind": "notebook",
                         "summary": f"{len(pages)} page{'s' if len(pages) != 1 else ''}", "where": "",
                         "notebook": t.get("id"), "mine": t is mine, "line": None, "entry": None, "faint": False})

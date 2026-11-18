@@ -1807,6 +1807,7 @@ def install_css(display):
         provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         _CSS.append(provider)
+        widgets.rounded_css(display, CSS)  # (a form's corners, its rows', as Baude's under a GTK theme)
 
 
 MARK_STRENGTH = {"archived": 4, "added": 3, "moved": 2, "edited": 1}  # (a row a change marks twice, after the

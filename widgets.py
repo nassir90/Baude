@@ -25,6 +25,7 @@ import time
 import traceback
 import queue
 import urllib.parse
+import warnings
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "vendor"))  # (Pygments: vendor/README.md)
 
@@ -8620,7 +8621,7 @@ def theme_dark():
 def theme_css(*app_css):
     """As an app starts, once: the parts of Baude's stylesheet that depend on whose stylesheet it's drawn over
     (libadwaita's, or a GTK_THEME's). app_css: the app's own stylesheets besides CSS (Record's), whose corners go
-    square with Baude's under a square theme (square_corners). Under a theme, light or dark is the theme's: what
+    square with Baude's under a square theme (fit_corners; one installed later: rounded_css). Under a theme, light or dark is the theme's: what
     Baude draws in its own colours (code's, the accent's shade, a diagram's) is then drawn for the theme's background,
     not for the system's light or dark."""
     display = Gdk.Display.get_default()
@@ -8643,7 +8644,7 @@ def theme_css(*app_css):
         # (the system's accent changed: what's drawn here follows it, and so does the CSS)
         Adw.StyleManager.get_default().connect("notify::accent-color",
                                                lambda *_: below.load_from_string(below_gtk_theme_css(dark)))
-        display.baude_rounded_sheets = (CSS, *app_css)
+        _corners["sheets"].extend(app_css)
         _corners["hook"] = GObject.add_emission_hook(Gtk.Window, "map", _first_window_mapped)
 
 
@@ -8652,8 +8653,9 @@ def theme_css(*app_css):
 # its buttons is drawn as the theme draws it, its corner's radius read off what's drawn (how far along the diagonal from
 # the corner it's clear), and every border-radius in Baude's stylesheets is held to it: 0 under Windows 95, Redmond,
 # CDE, NeXT; a few pixels under XP or Clearlooks; as it was under a theme as round as libadwaita. No theme is named:
-# it's what the theme draws.
-_corners = {"hook": None, "tries": 0, "done": False}
+# it's what the theme draws. So are the theme's own text fields' (an entry's, a search entry's, a spin button's: many
+# themes keep Adwaita's pill-shaped search entry when their buttons are square), Baude's being in them.
+_corners = {"hook": None, "tries": 0, "done": False, "sheets": [CSS]}
 
 
 def _first_window_mapped(window):
@@ -8795,24 +8797,85 @@ def corner_radius(widget):
     return round(clear / (1 - 0.5 ** 0.5))
 
 
+def rounded_css(display, sheet):
+    """sheet, a stylesheet installed after theme_css (Meta's), held to the theme's corners as Baude's are (fit_corners):
+    at once if they're known, else when they are."""
+    if sheet in _corners["sheets"]:
+        return
+    _corners["sheets"].append(sheet)
+    if display is not None and getattr(display, "baude_corner_radius", None) is not None:
+        fit_corners(display, display.baude_corner_radius)
+
+
+def selector_parts(sel):
+    """A selector list's selectors: split at its own commas, not those in a :not(…) or :is(…) in it."""
+    parts, depth, start = [], 0, 0
+    for i, c in enumerate(sel):
+        depth += (c == "(") - (c == ")")
+        if c == "," and depth == 0:
+            parts.append(sel[start:i].strip())
+            start = i + 1
+    return [p for p in (*parts, sel[start:].strip()) if p]
+
+
+def theme_text_fields_css():
+    """The GTK theme's own rules for its text fields' corners (an entry's, a search entry's, a spin button's), as GTK
+    has them: a selector list's selectors that end in one, or that could reach one in a linked group (.linked >
+    :first-child, which squares where it joins its neighbour), with their border-radius. Read once (kept: a theme's
+    errors, if it has any, aren't said again each time). "": no theme, or none."""
+    if (kept := _corners.get("fields")) is not None:
+        return kept
+    name, _, variant = os.environ.get("GTK_THEME", "").partition(":")
+    rules = []
+    if name:
+        theme = Gtk.CssProvider()
+        theme.connect("parsing-error", lambda *_: None)  # (GTK said them as it loaded the theme itself)
+        with warnings.catch_warnings():  # (load_named is deprecated, with nothing in its place: it's how GTK loads it)
+            warnings.simplefilter("ignore", DeprecationWarning)
+            theme.load_named(name, variant or None)
+        sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", theme.to_string(), flags=re.S))
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
+            fields = []
+            for part in selector_parts(sel):
+                bare = part
+                while bare != (bare := re.sub(r"\([^()]*\)", "", bare)):  # (what's in a :not(…), out of the way)
+                    pass
+                last = re.split(r"[\s>+~]+", bare)[-1]
+                if re.match(r"(entry|spinbutton)\b", last) or (".linked" in part and re.match(r"[*.:]", last)):
+                    fields.append(part)
+            radii = re.findall(r"(border(?:-[a-z]+)*-radius:\s*[^;}]+)", body)
+            if fields and radii:
+                rules.append(f"{', '.join(fields)} {{ {'; '.join(radii)}; }}")
+    _corners["fields"] = "\n".join(rules)
+    return _corners["fields"]
+
+
 def fit_corners(display, radius):
-    """Every border-radius in Baude's stylesheets (and the app's: theme_css) held to radius, above them."""
+    """Every border-radius in Baude's stylesheets (the app's: theme_css; one installed later: rounded_css) and in the
+    theme's text fields (theme_text_fields_css) held to radius, above them. Again: what was held before, replaced."""
     def held(value):
         return re.sub(r"(\d+(?:\.\d+)?)px", lambda m: f"{min(float(m.group(1)), radius):g}px", value)
-    rules = []
-    for sheet in getattr(display, "baude_rounded_sheets", (CSS,)):
+    fields = theme_text_fields_css()
+    theirs, ours = [], []
+    for sheet, into in ((fields, theirs), *((sheet, ours) for sheet in _corners["sheets"])):
         sheet = re.sub(r"@[\w-]+[^;{}]*;", "", re.sub(r"/\*.*?\*/", "", sheet, flags=re.S))  # (comments, @define-colors)
         for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", sheet):
-            for value in re.findall(r"border-radius:\s*([^;}]+)", body):
-                if held(value) != value:
-                    rules.append(f"{' '.join(sel.split())} {{ border-radius: {held(value).strip()}; }}")
+            for prop, value in re.findall(r"(border(?:-[a-z]+)*-radius):\s*([^;}]+)", body):
+                into.append((f"{' '.join(sel.split())} {{ {prop}: {held(value).strip()}; }}", held(value) != value))
+    # (the theme's text fields', every one held or not, so they're as specific over each other as the theme has
+    # them; Baude's own above them, every one then too, as they were above the theme's)
+    theirs = [rule for rule, _ in theirs] if any(changed for _, changed in theirs) else []
+    ours = [rule for rule, changed in ours if changed or theirs]
     display.baude_corner_radius = radius
-    if not rules:
-        return
-    css = Gtk.CssProvider()
-    css.load_from_string("\n".join(rules))
-    Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
-    display.baude_corners_css = css
+    for name, rules, above in (("baude_fields_css", theirs, 1), ("baude_corners_css", ours, 2)):
+        if (old := getattr(display, name, None)) is not None:
+            Gtk.StyleContext.remove_provider_for_display(display, old)
+        setattr(display, name, None)
+        if rules:
+            css = Gtk.CssProvider()
+            css.load_from_string("\n".join(rules))
+            Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + above)
+            setattr(display, name, css)
 
 
 # ---- popovers on X11 under picom. A popover's window is its box with GTK's own shadow round it (transparent, ~20px a

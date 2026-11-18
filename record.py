@@ -6006,18 +6006,25 @@ class RecordChat(meta.MetaChat):
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection"), "notebook": self.notebook}
 
+    def first_said(self, agent):
+        return [self.open_said()]
+
+    def open_said(self):
+        """The notebook open (notebook_said), or, with none, the notebooks there are."""
+        store = self.win.store
+        return notebook_said(self.notebook, store, self.space(), self.win.chat_read()) if self.notebook is not None \
+            else none_open_said(store)
+
     def context(self, agent, msg):
-        """The notebook open, with a new session's first message and once another's opened; what's become of the
+        """The notebook open, once another's opened (a new session's: first_said); what's become of the
         changes proposed; what's referenced (ref_said, of Window.space), the passage quoted from a chat (its names,
         the chat's) or selected on a page."""
         notebook, store, space, parts = self.notebook, self.win.store, self.space(), []
-        if agent.fresh or getattr(agent, "seen", notebook) is not notebook:
-            if not agent.fresh:
-                parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
-                             if notebook is not None else f"(The user closed the {book().lower()} since: none is "
-                             "open now.)")
-            parts.append(notebook_said(notebook, store, space, self.win.chat_read()) if notebook is not None
-                         else none_open_said(store))
+        if not agent.fresh and getattr(agent, "seen", notebook) is not notebook:  # (a new session's: first_said)
+            parts.append(f"(The user opened another {book().lower()} since: your tools work on it now.)"
+                         if notebook is not None else f"(The user closed the {book().lower()} since: none is "
+                         "open now.)")
+            parts.append(self.open_said())
         agent.seen = notebook
         if (place := self.win.place()) != getattr(agent, "seen_place", None):  # (host / notebook / page, as it changes)
             parts.append(f"(Open: {place})")

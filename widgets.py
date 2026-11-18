@@ -1139,6 +1139,36 @@ def ref_markup(ref, inner, icon=True):
     return f'{slot}<a href="{href}" title="{html.escape(title)}">{inner}</a>'
 
 
+# Well-known cloud, hosting and platform providers: named in replies all the time, and a link to "an outside product"
+# (or to the one config file that mentions it) tells you nothing, so Signal never links them, nor their own products
+# (a provider's name and a word after it: AWS Lambda, Cloudflare R2, Supabase Auth)
+CLOUD_PROVIDERS = frozenset(n.casefold() for n in (
+    "Cloudflare", "Vercel", "Netlify", "Supabase", "Firebase", "Shopify",
+    "AWS", "Amazon Web Services", "GCP", "Google Cloud", "Google Cloud Platform", "Azure", "Microsoft Azure",
+    "Heroku", "DigitalOcean", "Digital Ocean", "Fly.io", "Linode", "Akamai", "Fastly", "Hetzner", "OVH", "OVHcloud",
+    "Render.com", "Railway.app", "PlanetScale", "Upstash", "Appwrite", "Auth0", "Okta", "Stripe", "Twilio", "SendGrid",
+    "Mailgun", "Sentry", "Datadog", "New Relic", "GitHub Pages", "Oracle Cloud", "IBM Cloud", "Alibaba Cloud",
+    "Backblaze"))
+
+
+def ref_cloud_provider(surface):
+    """Whether a name is one of CLOUD_PROVIDERS, or one of them and a word after it (a product of theirs): never a
+    link. Written with a capital, in any case past that (AWS, Aws, Firebase); all in lower case (sentry, aws,
+    stripe) it's as likely this code's own: a package, a module, a Deployment."""
+    name = surface.strip()
+    if name == name.lower():
+        return False
+    name = name.casefold()
+    if name in CLOUD_PROVIDERS:
+        return True
+    head = name.rpartition(" ")[0]
+    while head:  # (AWS Lambda, Google Cloud Storage: a provider's name, and words after it)
+        if head in CLOUD_PROVIDERS:
+            return True
+        head = head.rpartition(" ")[0]
+    return False
+
+
 REF_BARE_NUMBER = re.compile(r"#\d+")  # (in code it's no link: a colour, a comment; owner/name#12 says what it is)
 
 
@@ -1149,6 +1179,8 @@ def ref_code_markup(code, message=None):
         return None
 
     def markup(s, inner):
+        if ref_cloud_provider(s):
+            return None
         if (dec := SIGNAL.decision(message, s)) is not None:  # (no logos in code: its columns stay put)
             return ref_decision_markup(s, dec, inner, icon=False) if dec["verdict"] != "plain" else None
         r = SIGNAL.refs.get(s)  # (a plain word: not in code blocks, where nothing decides it)
@@ -1178,6 +1210,8 @@ def ref_link(text, inner, backticked):
     if SIGNAL is None:
         return None
     key = ref_key(text)
+    if ref_cloud_provider(key):  # (Cloudflare, Vercel…: noise as a link)
+        return None
     if backticked and REF_BARE_NUMBER.fullmatch(key):  # (code: a colour's #333 as like as not)
         return None
     git = SIGNAL.refs.get(key)
@@ -1827,6 +1861,50 @@ class ContextUsage(Gtk.Box):
         self.bar.set_visible(True)
         self.bar.set_value(0)
         self.set_tooltip_text("Context window usage")
+
+
+class UserTurn(Gtk.Box):
+    """A message of yours in a conversation (Baude's chat, a side question's, Meta's): the whole width of it is its row,
+    its bubble at the right. With the pointer anywhere in the row, a revert button fades in just outside the bubble,
+    level with its last line, and fades out as it leaves (win: what it's in, its revert_to: this message and
+    everything after it taken back, and what it said put back in the box; its can_revert: whether it can be now)."""
+
+    def __init__(self, win, bubble, text, uuid):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
+                                 tooltip_text="Revert: take back this message and everything after it, and put it "
+                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
+        self.revert.add_css_class("circular")
+        self.revert.add_css_class("revert-turn")
+        self.revert.connect("clicked", lambda *_: win.revert_to(self))
+        self.append(self.revert)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_revert(True))
+        hover.connect("leave", lambda *_: self.show_revert(False))
+        self.add_controller(hover)
+
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
+
+    def show_revert(self, on):
+        on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
+        self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
 
 
 class Exhausted:
@@ -4841,11 +4919,14 @@ class PaneSlide(SideSlide):
 INSIDE_GAP = 6  # (the inside, set this far into the frame: from the panes beside it and the window's edge)
 
 
-def inside(widget, start=True, end=True):
+def inside(widget, start=True, end=True, under_bar=False):
     """widget made the inside of the window (the box the work's read and written in, square, set into the frame:
     CSS's .baude-inside), its edges INSIDE_GAP in (start, end: on that side; a pane beside it has its own gap), its
-    contents kept inside it. Returns it."""
+    contents kept inside it. under_bar: right under the window's bar, where it's INSIDE_GAP down too under a theme
+    whose bar isn't the frame's colour (_probe_title_bar). Returns it."""
     widget.add_css_class("baude-inside")
+    if under_bar:
+        widget.add_css_class("baude-under-bar")
     widget.set_overflow(Gtk.Overflow.HIDDEN)
     widget.set_margin_start(INSIDE_GAP if start else 0)
     widget.set_margin_end(INSIDE_GAP if end else 0)
@@ -5364,12 +5445,26 @@ class ExpandStack(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+def natural_height(scroller):
+    """scroller's child at its natural height, kept so for each child it's given later (each gets a viewport of its
+    own). At its minimum, GTK's default once it's taller than the view, every code block in it is squashed to what its
+    own scroller needs at least, a line or less, its text cut off at the bottom: as soon as the text's size (Settings
+    → Size, the zoom) makes what's there outgrow the pane. Returns scroller."""
+    def natural(*_):
+        if isinstance(child := scroller.get_child(), Gtk.Scrollable):
+            child.set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    natural()
+    if not getattr(scroller, "natural_height", False):
+        scroller.natural_height = True
+        scroller.connect("notify::child", natural)
+    return scroller
+
+
 def markdown_scroller(child, **kw):
     """The scrolled window markdown (MarkdownView) is read in: Baude's chat, Record's Read and its Record's answers.
-    Its child at its natural height (at its minimum, GTK's default, a code block is squashed to a line), nothing
-    scrolled sideways, and a long code block a pane of at most 2/3 of what's visible (CodeBlock.set_max_height)."""
-    scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw)
-    scroller.get_child().set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    Its child at its natural height (natural_height), nothing scrolled sideways, and a long code block a pane of at
+    most 2/3 of what's visible (CodeBlock.set_max_height)."""
+    scroller = natural_height(Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw))
     scroller.get_vadjustment().connect("notify::page-size", lambda adj, _p: adj.get_page_size() > 0 and
                                        CodeBlock.set_max_height(adj.get_page_size() * 2 / 3))
     return scroller
@@ -6704,6 +6799,54 @@ def code_attrs(text, spans, dark, skip=()):
     return attrs
 
 
+START_PROMPT_HEIGHT = 260  # (past this, the prompt a session was started with scrolls in its own box)
+
+
+def start_prompt_view(text, above=None):
+    """The prompt a session was started with from outside, at the top of its chat (Baude's and Record's): a dim
+    heading, the prompt as markdown (under above, its images, if any) in a box that scrolls once it's long, and a rule
+    under it."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    head = Gtk.Label(label="Started with this prompt", xalign=0)
+    head.add_css_class("dim-label")
+    head.add_css_class("caption-heading")
+    box.append(head)
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    if above is not None:
+        inner.append(above)
+    inner.append(MarkdownView(text))
+    scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, max_content_height=START_PROMPT_HEIGHT,
+                                propagate_natural_height=True, child=inner)
+    pass_edge_scroll(scroll)
+    box.append(scroll)
+    box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+    return box
+
+
+def pass_edge_scroll(scroll):
+    """A scrolling box inside the chat's that doesn't keep the wheel at its ends: scrolled up at its top (or down at
+    its bottom, or when it has nothing to scroll), the chat scrolls instead."""
+    ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL,
+                                    propagation_phase=Gtk.PropagationPhase.CAPTURE)
+
+    def on_scroll(ctl, _dx, dy):
+        adj = scroll.get_vadjustment()
+        value, top, end = adj.get_value(), adj.get_lower(), adj.get_upper() - adj.get_page_size()
+        if not (dy < 0 and value <= top or dy > 0 and value >= end - 0.5 or end <= top):
+            return False  # (its own to scroll)
+        outer = scroll.get_parent()
+        while outer is not None and not isinstance(outer, Gtk.ScrolledWindow):
+            outer = outer.get_parent()
+        if outer is None:
+            return False
+        oadj = outer.get_vadjustment()
+        step = dy if ctl.get_unit() == Gdk.ScrollUnit.SURFACE else dy * oadj.get_page_size() ** (2 / 3)
+        oadj.set_value(min(max(oadj.get_value() + step, oadj.get_lower()), oadj.get_upper() - oadj.get_page_size()))
+        return True
+
+    ctl.connect("scroll", on_scroll)
+    scroll.add_controller(ctl)
+
 class LineGutter(Gtk.Widget):
     """Line numbers beside a TextView (its left gutter), the marked line's in bold."""
 
@@ -7328,7 +7471,9 @@ dropdown.choice popover listview > row, menubutton.choice popover modelbutton, .
 .one-provider { opacity: 0.55; }
 banner label.heading { font-weight: normal; }
 .session-sidebar .sidebar-folder { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
-/* the Files page's tree: as compact as the sessions list */
+/* the Files page's tree: on the frame, as compact as the sessions list (a list view is a .view, which a GTK theme fills
+   with its views' white, edge to edge of the panel and the window) */
+listview.file-tree { background: none; }
 listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1px; margin-top: 1px; margin-bottom: 0; }
 .session-sidebar .sidebar-folder.current { opacity: 1; color: @accent_color; }
 .session-sidebar .fork-title { opacity: 0.85; }
@@ -7359,10 +7504,12 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .tool-group > box > box > label { opacity: 0.8; }
 /* a tool card's Command / Output: small toggle buttons after its name, only a little rounded */
 .tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
-/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed (and a sidebar's
-   host state, an island as they are: HostState) */
+/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed, and so are a
+   sidebar's host state (an island as they are: HostState) and the box a side question's asked in (inside its edge, as
+   theirs is: as tall as an empty list, it lines up with one) */
 .side-panel { background: transparent; }
-.side-panel .boxed-list, .boxed-list.host-state { box-shadow: none; border: 1px solid @baude_rule; }
+.side-panel .boxed-list, .boxed-list.host-state, .side-panel .composer-box.side-question-ask {
+  box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its
@@ -7762,6 +7909,7 @@ headerbar .title.baude-title { padding-left: 0; padding-right: 0; font-weight: i
 UNDER_GTK_THEME_CSS = """
 *:not(:focus-visible) { outline-style: none; }
 .baude-theme-probe { color: @view_bg_color; }  /* (theme_dark: never shown) */
+.baude-frame-probe { color: @baude_frame; }  /* (bar_on_frame: never shown) */
 """
 # Baude's stylesheets name libadwaita's colours (@view_bg_color, @sidebar_bg_color, @accent_bg_color...). A GTK 3-era
 # theme names its own (@theme_base_color, @theme_bg_color, @theme_selected_bg_color...), and what's drawn in a colour
@@ -7892,6 +8040,10 @@ def _probe_corners(window):
 # - its title bar is an image a pixel or two wide and as tall as the bar, tiled across it (XP's): GTK clips that to the
 #   bar less its top padding, and the bar's plain colour shows above it. The image is stretched across the bar instead,
 #   the same picture with nothing cut off.
+# And where the inside meets the bar: the frame's round it at the sides and bottom; at the top, the bar is the frame
+# when it's drawn in the frame's colour (libadwaita's, a theme's like it), and the inside's edge is enough there. Under
+# a bar of another colour (XP's blue, Windows 95's navy) the frame shows above the inside too (.baude-under-bar), so
+# the inside's set into it on all four sides.
 _title_bar = {"tries": 0}
 
 
@@ -7911,6 +8063,8 @@ def _probe_title_bar(window):
         css += f"window.csd {{ padding-top: 0; margin-top: {pad}px; }}\n"
     if cut:
         css += "headerbar { background-size: 100% 100%; }\n"
+    if not bar_on_frame(bar):
+        css += f".baude-inside.baude-under-bar {{ margin-top: {INSIDE_GAP}px; }}\n"
     if css:
         provider = Gtk.CssProvider()
         provider.load_from_string(css)
@@ -7918,6 +8072,22 @@ def _probe_title_bar(window):
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         window.get_display().baude_title_bar_css = provider
     return False
+
+
+def bar_on_frame(bar):
+    """Whether bar, as it's drawn, is the frame's colour where the inside meets it (a few pixels up from its foot, clear
+    of its buttons and its bottom edge's line): the colour most of the way across it, or see-through there."""
+    drawn = drawn_pixels(bar)
+    if drawn is None or drawn[2] < 8 or drawn[3] < 8:
+        return True
+    data, stride, w, h = drawn
+    y = h - 1 - max(2, h // 10)
+    row = [data[y * stride + x * 4:y * stride + x * 4 + 4] for x in range(0, w, 3)]
+    r, g, b, a = (sorted(p[i] for p in row)[len(row) // 2] for i in range(4))
+    if a < 128:
+        return True
+    frame = Gtk.Label(css_classes=["baude-frame-probe"]).get_color()
+    return max(abs(r / 255 - frame.red), abs(g / 255 - frame.green), abs(b / 255 - frame.blue)) < 0.12
 
 
 def title_bar_cut(bar):
@@ -7940,10 +8110,9 @@ def title_bar_cut(bar):
     return False
 
 
-def corner_radius(widget):
-    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
-    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
-    them). None: no solid top edge to tell by (a flat button)."""
+def drawn_pixels(widget):
+    """widget as it's drawn, rendered by its window's renderer: (RGBA bytes, stride, width, height) in the texture's
+    pixels, or None (not drawn yet, or no renderer)."""
     w, h = widget.get_width(), widget.get_height()
     snap = Gtk.Snapshot()
     Gtk.WidgetPaintable.new(widget).snapshot(snap, w, h)
@@ -7955,13 +8124,23 @@ def corner_radius(widget):
     down = Gdk.TextureDownloader.new(texture)
     down.set_format(Gdk.MemoryFormat.R8G8B8A8)
     data, stride = down.download_bytes()
-    data = data.get_data()
+    return data.get_data(), stride, texture.get_width(), texture.get_height()
+
+
+def corner_radius(widget):
+    """The radius, in pixels, of widget's top-left corner as the theme draws it: from the pixels along the diagonal
+    from the corner that are clear of the top edge's solidity (a circle of radius r leaves about r * (1 - 1/sqrt 2) of
+    them). None: no solid top edge to tell by (a flat button)."""
+    drawn = drawn_pixels(widget)
+    if drawn is None:
+        return None
+    data, stride, w, h = drawn
     alpha = lambda x, y: data[y * stride + x * 4 + 3]  # noqa: E731
-    edge = alpha(texture.get_width() // 2, 0)
+    edge = alpha(w // 2, 0)
     if edge < 128:
         return None
     clear = 0
-    while clear < min(texture.get_width(), texture.get_height()) // 2 and alpha(clear, clear) * 10 < edge * 9:
+    while clear < min(w, h) // 2 and alpha(clear, clear) * 10 < edge * 9:
         clear += 1
     return round(clear / (1 - 0.5 ** 0.5))
 
@@ -8059,6 +8238,17 @@ ZOOM_MODS = ("<Control>", "<Meta>") if sys.platform == "darwin" else ("<Control>
 SETTINGS_KEY = "<Meta>comma" if sys.platform == "darwin" else "<Control>comma"  # (⌘, as a Mac app's Settings…)
 FEEDBACK_KEY = "<Meta>period" if sys.platform == "darwin" else "<Control>period"  # (Send Feedback…, over whatever's open)
 META_KEY = "<Control>m"  # (Meta shown and focused, or closed if open; Control on macOS too: ⌘M is Minimize)
+
+
+def first_keys(window, keys):
+    """Window shortcuts (triggers, fn) taken in the capture phase, before the focused widget sees the key: for keys
+    macOS's text boxes bind themselves (Ctrl+B / Ctrl+F, Emacs's back / forward a character)."""
+    sc = Gtk.ShortcutController(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    for triggers, fn in keys:
+        for t in triggers.split():
+            sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
+                                             Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
+    window.add_controller(sc)
 
 
 def zoom_keys(*keys):

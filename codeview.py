@@ -603,6 +603,19 @@ def in_code(widget):
     return widget is not None
 
 
+def find_in_focus(window):
+    """Ctrl+F / ⌘F with the focus in a text that finds in itself (FindInText: a CodeView, as the Kubernetes view's YAML
+    or logs, or a page of Record's notes): its find bar. The windows ask here first, as they take the key before the
+    focused widget does (widgets.first_keys). False if the focus isn't in one."""
+    widget = window.get_focus()
+    while widget is not None and not isinstance(widget, FindInText):
+        widget = widget.get_parent()
+    if widget is None:
+        return False
+    widget.open_search()
+    return True
+
+
 class FileNode(GObject.Object):
     """A file or folder on the Files page; ignored (by git) comes in after it's listed (FileIgnores)."""
     ignored = GObject.Property(type=bool, default=False)

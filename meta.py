@@ -55,7 +55,8 @@ from baudelib.models import model_program  # noqa: E402
 NAME = "Meta"
 MODEL = "haiku"  # its model, unless Settings → Meta → Intelligence says another (settings.json meta_model)
 MODELS_OFFERED = list(reversed(MODELS))  # ((value, label): what Intelligence offers till claude's listed its own)
-MODEL_KEYS = ("value", "displayName", "supportsEffort", "supportedEffortLevels")  # (what's kept of each: models)
+MODEL_KEYS = ("value", "displayName", "resolvedModel", "description", "supportsEffort",
+              "supportedEffortLevels")  # (what's kept of each: models; what it resolves to, to tell it's the same one)
 CODE_LINES = 10  # the most lines of Python run_python runs
 READ_TOOLS = ("Read", "Grep", "Glob")  # Claude Code's own: those that only read
 # Claude Code's own that act, given on Claude's models (runs_commands), in its Auto mode: what its classifier holds back
@@ -126,6 +127,9 @@ def codex_catalog():
     return _codex_catalog or []
 
 
+_CLAUDE_SAID = {}  # (claude's models as models() last read them, by value: what each resolves to, its description)
+
+
 def models(live=False):
     """What Intelligence offers, as (value, label, effort levels or None, provider or None): the models this machine's
     claude listed last (settings.json's claude_models, as Meta's sessions and Baude's chats here have them from claude),
@@ -137,6 +141,8 @@ def models(live=False):
     Meta's own, if it's none of these (unavailable), unless live."""
     listed = [m for m in widgets.load_settings().get("claude_models") or []
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
+    _CLAUDE_SAID.clear()
+    _CLAUDE_SAID.update((m["value"], m) for m in listed)  # (for model_entry: no settings read for each it's asked)
     out = [(m["value"], m.get("displayName") or m["value"],
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
@@ -179,12 +185,21 @@ def listed_models(offered=None):
     gone and no other has it. Where two of a name aren't the same, each is told apart (providers.told_apart)."""
     offered = models() if offered is None else offered
     known = providerslib.entries()
-    by_value = {m[0]: m for m in offered}
-    out = [m for m in offered if m[3] is None] + \
-        [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
+    by_value = {}
+    for m in offered:
+        by_value.setdefault(m[0], m)
+    out = [m for m in by_value.values() if m[3] is None] + [by_value[first["value"]] for first, _ms in alike(offered, known)]  # (each where its kind's first is)
     others = [described(m, known) for m in out if m[3] is not None]
     return [(m[0], providerslib.told_apart(described(m, known), others), *m[2:]) if m[3] is not None else m
             for m in out]
+
+
+def claude_described(offered):
+    """Entries of models() without a provider (Claude's, codex's) as claude listed them: {value, displayName}, and what
+    each resolves to and its description where claude said them (_CLAUDE_SAID, as models() last read them): to tell
+    which row a model said another way is (models.claude_match: claude-opus-5-5 is opus, "Opus 5.5 · …")."""
+    return [{k: v for k, v in (_CLAUDE_SAID.get(m[0]) or {}).items() if k in ("resolvedModel", "description")} |
+            {"value": m[0], "displayName": m[1]} for m in offered]
 
 
 def described(m, known=None):
@@ -207,20 +222,30 @@ def alike(offered=None, known=None):
 
 def listed(found, seed=False):
     """claude's initialize listed its models (found): those claude runs, kept as what Intelligence offers (models).
-    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet."""
+    Meta's own sessions keep theirs; seed (a chat of Baude's here) keeps them while there are none yet, or while those
+    kept lack what claude says of each now (an older version's: no description, so claude-opus-5-5 isn't told to be
+    opus)."""
     keep = [{k: m[k] for k in MODEL_KEYS if k in m} for m in found or []
             if isinstance(m, dict) and m.get("value") and m["value"] != "default" and model_program(m["value"]) == "claude"]
     had = widgets.load_settings().get("claude_models")
-    if keep and keep != had and not (seed and had):
+    said = {k for m in keep for k in m}  # (a list kept by an older version, without what claude says now of each,
+    old = isinstance(had, list) and said - {k for m in had if isinstance(m, dict) for k in m}  # its description:
+    if keep and keep != had and (not (seed and had) or old):  # replaced, seed or not)
         widgets.save_settings(claude_models=keep)
 
 
 def model_entry(value, offered=None):
-    """The entry of offered (models()) for a model value: its own, else, for an alias (haiku), the first listed model
-    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if neither."""
+    """The entry of offered (models()) for a model value: its own; else Claude's that's the same one said another way
+    (models.claude_match: opus, "Opus 5.5 · …", for claude-opus-5-5; while claude's listed none, the one alias in
+    its id); else, for an alias (haiku), the first listed model
+    with it as a word of its name (claude-haiku-4-5, haiku[1m]); None if none."""
     offered = models() if offered is None else offered
     family = re.compile(rf"(^|-){re.escape(value)}(-|\[|$)")
-    return next((m for m in offered if m[0] == value), None) or \
+    if hit := next((m for m in offered if m[0] == value), None):
+        return hit
+    same = modelslib.claude_match(value, claude_described([m for m in offered if m[3] is None]),
+                                  fallback=not _CLAUDE_SAID)  # (none listed yet: MODELS_OFFERED's aliases)
+    return next((m for m in offered if same and m[0] == same["value"]), None) or \
         (next((m for m in offered if family.search(m[0])), None) if value in dict(MODELS) else None)
 
 
@@ -438,6 +463,122 @@ def transcript_text(path, limit=REF_LIMIT):
     text = "\n\n".join(lines)
     return text if len(text) <= limit else f"[… its first {len(text) - limit} characters not put here: Read {path}]\n" + \
         text[-limit:]
+
+
+REPORT_ITEM = 4000  # (characters of each tool call's input, and of its result, in a copied conversation)
+
+
+def report_most():
+    """How long a copied conversation is at most: what an issue's body holds, with room for the note around it."""
+    from feedback import ISSUE_BODY_MOST
+    return ISSUE_BODY_MOST - 5000
+
+
+def report_head_text(head):
+    """head, [(name, value)], as lines, the values in a column (those with none left out)."""
+    head = [(k, v) for k, v in head if v not in (None, "")]
+    width = max((len(k) for k, _ in head), default=0)
+    return "\n".join(f"{k + ':':<{width + 1}} {v}" for k, v in head)
+
+
+def capped_report(head, parts, most=None):
+    """head's lines, then the parts (each a message, as text), as many of the last as fit in most (report_most): its
+    end kept, as transcript_text keeps a transcript's, and how many were left out said."""
+    most = report_most() if most is None else most
+    top = report_head_text(head)
+    kept, size = [], len(top)
+    for part in reversed(parts):
+        if size + len(part) + 2 > most - 200:
+            if not kept:  # (the last by itself is too long: its end)
+                kept.append("[…]" + part[-(most - 200 - size):])
+            break
+        kept.append(part)
+        size += len(part) + 2
+    cut = len(parts) - len(kept)
+    return "\n\n".join([top] + ([f"[… the first {cut} message{'s' if cut != 1 else ''} left out: too long to "
+                                  "paste]"] if cut else []) + list(reversed(kept))).strip() + "\n"
+
+
+def report_text(head, messages, limit=REPORT_ITEM, most=None):
+    """A conversation as text to paste into an issue (Copy, under the box; a note sent with Send Feedback): head,
+    [(name, value)], the lines over it (the app, the model and what runs it, its effort and modes, its tools, its
+    context); then who said what (each reply with the model that said it), each tool call with its input and what it
+    gave back (each as far as limit), each error said as one; its end, if it's longer than most (capped_report)."""
+    parts = []
+    for m in messages:
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["t"])) if m.get("t") else ""
+        who = "User" if m.get("role") == "user" else NAME + (f" ({m['model']})" if m.get("model") else "") + \
+            (" (error)" if m.get("error") else "")
+        out = [f"## {who}" + (f" · {when}" if when else "")]
+        if m.get("role") == "user":
+            if m.get("quote"):
+                out.append("> " + "\n> ".join(m["quote"].splitlines()))
+            out.append(m.get("text") or "")
+            parts.append("\n".join(out))
+            continue
+        for text in m.get("warned") or ():
+            out.append(f"({text})")
+        items = m.get("items")
+        if items is None:  # (a reply kept from before its parts were, an error's too: its text is its one part)
+            items = [{"kind": "text", "text": m["text"]}] if m.get("text") else []
+        for it in items:
+            if it["kind"] == "text":
+                if it.get("text", "").strip():
+                    out.append(it["text"].strip())
+                continue
+            inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
+            out.append(f"[tool {it.get('name') or '?'} · {it.get('state') or '?'}]\n{trimmed(inp, limit)}")
+            if it.get("result"):
+                out.append("[result]\n" + trimmed(str(it["result"]), limit))
+        if m.get("error") and m.get("text") and m.get("items") is not None:
+            out.append(m["text"])
+        parts.append("\n".join(out))
+    return capped_report(head, parts, most)
+
+
+def transcript_report(head, path, limit=REPORT_ITEM, most=None):
+    """A Claude Code chat's transcript (path) as text for an issue, as report_text's: head's lines, then who said what,
+    each tool call with its whole input, its result and whether it failed (each as far as limit); its end, if it's
+    longer than most."""
+    parts, calls = [], {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                try:
+                    e = json.loads(raw)
+                except ValueError:
+                    continue
+                if e.get("type") not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
+                    continue
+                msg = e.get("message") or {}
+                content, out = msg.get("content"), []
+                for c in [{"type": "text", "text": content}] if isinstance(content, str) else content or []:
+                    if not isinstance(c, dict):
+                        continue
+                    if c.get("type") == "text" and (c.get("text") or "").strip():
+                        out.append(c["text"].strip())
+                    elif c.get("type") == "tool_use":
+                        calls[c.get("id")] = c.get("name")
+                        inp = json.dumps(c.get("input") or {}, ensure_ascii=False, indent=1)
+                        out.append(f"[tool {c.get('name')}]\n{trimmed(inp, limit)}")
+                    elif c.get("type") == "tool_result":
+                        res = c.get("content")
+                        res = res if isinstance(res, str) else "\n".join(
+                            b.get("text") or f"[{b.get('type')}]" for b in res or () if isinstance(b, dict))
+                        name = calls.get(c.get("tool_use_id")) or "tool"
+                        out.append(f"[{name} {'error' if c.get('is_error') else 'result'}]\n{trimmed(res, limit)}")
+                if not out:
+                    continue
+                results = e["type"] == "user" and all(isinstance(c, dict) and c.get("type") == "tool_result"
+                                                      for c in content or ()) and not isinstance(content, str)
+                who = "Tool results" if results else "User" if e["type"] == "user" else \
+                    "Claude" + (f" ({msg['model']})" if msg.get("model") and msg["model"] != "<synthetic>" else "") + \
+                    (" (API error)" if e.get("isApiErrorMessage") else "")
+                when = (e.get("timestamp") or "").replace("T", " ")[:19]
+                parts.append(f"## {who}" + (f" · {when}" if when else "") + "\n" + "\n".join(out))
+    except OSError as err:
+        parts.append(f"(transcript not read: {err})")
+    return capped_report(head, parts or ["(nothing said yet)"], most)
 
 
 def earlier_said(messages, limit=EARLIER_LIMIT, where=lambda m: ""):
@@ -2002,6 +2143,7 @@ class MetaChat(Gtk.Box):
         CHATS.add(self)
         self.win, self.ask, self.agent = win, None, None
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
+        self.reverting = None  # (a message of yours being reverted, not sent yet: {msg, draft}: revert_to)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
@@ -2048,6 +2190,11 @@ class MetaChat(Gtk.Box):
         clear.add_css_class("flat")
         clear.connect("clicked", lambda *_: self._clear())
         foot.append(clear)
+        copy = Gtk.Button(label="Copy", tooltip_text="Copy the conversation, with its model, tools and context, to "
+                                                     "paste into an issue")
+        copy.add_css_class("flat")
+        copy.connect("clicked", lambda *_: self.copy_report())
+        foot.append(copy)
         self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
         foot.append(self.dots)
         self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
@@ -2199,7 +2346,7 @@ class MetaChat(Gtk.Box):
         done (the box's stop button kept till then)."""
         agent = self.agent
         if usage.get("maxTokens") or usage.get("showWithoutLimit"):
-            self.used = usage.get("totalTokens") or 0
+            self.used, self.last_usage = usage.get("totalTokens") or 0, usage
             if agent is None or agent.model != model():
                 usage = {"totalTokens": self.used, "maxTokens": window(model())}
             self.ctx.set_usage(usage)
@@ -2208,6 +2355,49 @@ class MetaChat(Gtk.Box):
             self.ctx.bar.set_value(1)
         if available():
             self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
+
+    def report_head(self):
+        """The lines over a copied conversation (report_text): the app, Meta's model and what runs it, its effort, its
+        modes, the tools it's given, its context as its session last said it. The session's, while there's one (what
+        the conversation's had); Settings → Meta's, before there is."""
+        agent = self.agent
+        if agent is not None:
+            value, level, coded, commands = agent.model, agent.effort, agent.key[3], agent.commands
+        else:
+            value, level, coded, commands = model(), effort(), code_mode(), runs_commands()
+        tools = list(READ_TOOLS) + (list(COMMAND_TOOLS) if commands else [])
+        tools += ["run_python", *[t["name"] for t in SETUP_TOOLS]] if coded else [t["name"] for t in self.all_tools()]
+        usage = getattr(self, "last_usage", None) or {}
+        if self.used is not None:
+            total = usage.get("maxTokens") or (agent.window if agent else window(value))
+            context = f"{self.used:,} / {total:,} tokens" if total else f"{self.used:,} tokens"
+            parts = [f"{c['name']} {c.get('tokens', 0):,}" for c in usage.get("categories") or []
+                     if c.get("tokens") and c.get("kind") != "deferred"]
+            context += f" ({', '.join(parts)})" if parts else ""
+        else:
+            shown = self.ctx.label.get_text().removeprefix("context").strip(" :—")
+            context = "no session yet" if agent is None else shown or "not said by its session yet"
+        picked = model()
+        return [("App", f"{self.APP} ({NAME})"), ("Model", f"{model_name(value)} ({value})"),
+                ("Next message", f"{model_name(picked)} ({picked}), picked since" if picked != value else ""),
+                ("Runs on", agent.runs if agent is not None else ""),
+                ("Effort", EFFORT_LABELS.get(level, level) if level else "default"),
+                ("Code mode", said_value(bool(coded))), ("Runs commands", said_value(bool(commands))),
+                ("Mode", agent.started_mode if agent is not None else ""),
+                ("Context", context), ("Tools", ", ".join(dict.fromkeys(tools))),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+
+    def report(self, most=None):
+        """The conversation as text for an issue (report_text), what's being said now too; None if nothing's been."""
+        messages = list(self.messages()) if self.ready() else []
+        if self.ask is not None and self.ask.turn is not None and self.ask.turn.get("items"):
+            messages.append({"role": "meta", "items": self.ask.turn["items"], "warned": ["still replying"],
+                             "model": self.ask.model})
+        return report_text(self.report_head(), messages, most=most) if messages else None
+
+    def copy_report(self):
+        self.get_clipboard().set(self.report() or report_text(self.report_head(), []))
+        widgets.toast(self, "Conversation copied")
 
     def close_agent(self):
         """Its session stopped (the conversation cleared, the window gone): the next message starts another, told what
@@ -2241,6 +2431,10 @@ class MetaChat(Gtk.Box):
         return False
 
     def _clear(self):
+        if self.reverting is not None:  # (a revert pending: the box as it was before it)
+            rev, self.reverting = self.reverting, None
+            self.composer.get_buffer().set_text(rev["draft"])
+            self.put_held(rev["held"])
         self.close_agent()
         del self.messages()[:]
         self.save(now=True)
@@ -2269,13 +2463,83 @@ class MetaChat(Gtk.Box):
         if keyval == Gdk.KEY_Escape and self.ask:
             self.ask.stop()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None:
+            self.cancel_revert()
+            return True
         return False
+
+    # ---- revert (as Baude's chat's: revert_to there): a message of yours, and everything after it, taken back
+    def can_revert(self):
+        """Whether a message of yours can be reverted now: not while Meta's answering."""
+        return self.ask is None and self.ready()
+
+    def revert_to(self, turn):
+        """A message of yours reverted (UserTurn's button), tentatively: it and what came after it not shown, and what
+        it said in the box. Esc puts them back, and the draft that was there (cancel_revert); sending makes the revert
+        (commit_revert), then sends. Over the context window: the box on again meanwhile, as the revert's a way out."""
+        said = self.messages()
+        at = next((i for i, m in enumerate(said) if m is turn.message), None)
+        if not self.can_revert() or at is None:
+            return
+        buf = self.composer.get_buffer()
+        before = self.reverting
+        self.reverting = {"msg": turn.message, "gone": [id(m) for m in said[at:]],  # (what it takes back, as pressed)
+                          "draft": before["draft"] if before else buf.get_text(*buf.get_bounds(), True),
+                          "held": before["held"] if before else self.held()}
+        buf.set_text(turn.message["text"])
+        self.restored(turn.message)
+        if available():
+            self.exhausted.set(False)
+        self.render()
+        self.composer.grab_focus()
+
+    def cancel_revert(self):
+        """Esc on a revert not sent: what it hid shown again, and the box as it was before (what went with it too)."""
+        rev, self.reverting = self.reverting, None
+        self.composer.get_buffer().set_text(rev["draft"])
+        self.put_held(rev["held"])
+        self.render()
+        self.model_changed()  # (exhausted again, if it was)
+
+    def commit_revert(self):
+        """A revert sent (submit): the message and what came after it when it was pressed out of the conversation (what
+        another window's added since kept), and its sessions stopped, so the next message's is a new one told only
+        what's left (message_for). The actions its replies took stay, kept or undone as any are (the changes bar,
+        Meta's changelog); what they proposed goes with them (after_revert)."""
+        rev, self.reverting = self.reverting, None
+        said = self.messages()
+        if not any(m is rev["msg"] for m in said):  # (cleared, or another conversation shown, meanwhile)
+            return
+        gone = set(rev["gone"])
+        said[:] = [m for m in said if id(m) not in gone]
+        self.close_agents()
+        self.save(now=True)
+        self.after_revert()
+
+    def close_agents(self):
+        """The sessions the conversation's in stopped (a revert sent): Baude's, each window's."""
+        self.close_agent()
+
+    def held(self):
+        """What goes with what's in the box besides its text (Record's quote), kept while a revert's pending."""
+        return None
+
+    def put_held(self, held):
+        """held() put back (a revert put back, or cleared)."""
+
+    def restored(self, msg):
+        """A message put back in the box (revert_to): what went with it too (Record's quote), as taken let it go."""
+
+    def after_revert(self):
+        """A revert made: what the app shows of what was taken back, gone too (Record's proposed edits)."""
 
     def render(self):
         self.text_selection.forget()  # (its labels gone with what's drawn again)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         for m in self.messages() if self.ready() else ():
+            if self.reverting is not None and m is self.reverting["msg"]:
+                break  # (being reverted: it and what's after it not shown, till it's sent or put back)
             self.box.append(self._bubble(m))
         if self.ask is not None and self.live_widget is not None:  # (the reply coming, and what it's asking: kept)
             self.box.append(self.live_widget)
@@ -2310,14 +2574,15 @@ class MetaChat(Gtk.Box):
         order it came (each part of what it said, and each tool it called, as a tool card, with what that showed
         under it)."""
         if m["role"] == "user":
-            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.END, margin_start=28)
-            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.END)
             b.add_css_class("user-bubble")
             if (q := self.quote_said(m)) is not None:
                 b.append(label(q, css=("quote-in-bubble",), select=True))
             b.append(self._said(m))
-            outer.append(b)
-            outer.bubble = b
+            # (its row the conversation's width, its revert button fading in beside it as the chat's: UserTurn)
+            outer = widgets.UserTurn(self, b, m["text"], m.get("t", 0))
+            outer.set_margin_start(28)
+            outer.message = m
             return outer
         reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         reply.bubble, reply.prose = reply, None
@@ -3022,6 +3287,8 @@ class MetaChat(Gtk.Box):
         if text.lower() in self.CLEAR:
             buf.set_text("")
             return self._clear()
+        if self.reverting is not None:
+            self.commit_revert()
         self.before_ask()
         msg = self.make_message(text or self.empty_question())
         self.messages().append(msg)
@@ -3292,7 +3559,7 @@ class MetaChat(Gtk.Box):
         elif agent is self.agent:
             self._context_now()  # (at once: the box off before another's asked, if it's over)
         if error or text.strip() or self.worked(turn):
-            m = {"role": "meta", "text": text, "t": time.time(),
+            m = {"role": "meta", "text": text, "t": time.time(), "model": agent.model,
                  "items": [{k: v for k, v in it.items() if k != "ran"} for it in turn["items"]]}
             for it in m["items"]:
                 if it.get("state") == "running":  # (stopped before its result came)

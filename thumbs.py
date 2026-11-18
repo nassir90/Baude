@@ -2,19 +2,19 @@
 freedesktop thumbnail cache (~/.cache/thumbnails), filled by the thumbnailers installed for it (*.thumbnailer, as
 Nautilus runs them) when it doesn't have one yet. Baude and Record both use them (the Files page, attachments).
 
-thumbnail(path, px, done) calls done(texture or None) on the main loop: made off it, and kept (the latest few) until the
-file changes. Text and code get no thumbnail (a page of text that small says nothing): their icons stay."""
+thumbnail(path, px, done) calls done(texture or None) on the main loop: made off it (the latest asked for first), and
+kept (the latest, up to KEPT_BYTES) until the file changes. Pictures, video, audio and documents have them (wanted)."""
 
 import ctypes
 import ctypes.util
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
 import threading
-import urllib.parse
 from collections import OrderedDict
 
 import gi
@@ -25,12 +25,14 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib  # noqa: E402
 
 import widgets  # noqa: E402
 
-POOL = widgets.WorkerPool(2)
-KEPT = 400  # (textures kept, newest first)
-_kept, _lock = OrderedDict(), threading.Lock()
-_waiting = {}  # (key: the done callbacks of a thumbnail being made)
+KEPT_BYTES = 48 << 20  # (textures kept, newest first, up to this many bytes of pixels)
+_kept, _kept_bytes, _lock = OrderedDict(), [0], threading.Lock()
+_waiting = {}  # (key: the (done, alive) callbacks of a thumbnail being made)
+_jobs, _ready = [], threading.Condition(_lock)  # (a stack: what was asked for last, made first)
+WORKERS = 2
+_workers = []
 
-# the kinds that have one: a picture of the file says what's in it. Not text, code or archives
+# the kinds that have one, where a picture of the file says what's in it
 DOCUMENT_TYPES = ("application/pdf", "application/postscript", "application/epub+zip", "application/rtf",
                   "application/vnd.", "application/x-iwork", "application/msword", "application/x-krita",
                   "application/x-blender", "font/", "model/")
@@ -48,8 +50,19 @@ def wanted(path):
     return mime.split("/")[0] in ("image", "video", "audio") or mime.startswith(DOCUMENT_TYPES)
 
 
-def thumbnail(path, px, done):
-    """done(texture or None), on the main loop, for path's thumbnail at most px device pixels on its longest side."""
+def _work():
+    while True:
+        with _ready:
+            while not _jobs:
+                _ready.wait()
+            job = _jobs.pop()
+        job()
+
+
+def thumbnail(path, px, done, alive=None):
+    """done(texture or None), on the main loop, for path's thumbnail at most px device pixels on its longest side: at
+    once if it's been made. alive(): whether it's still wanted (a row scrolled past isn't); not made if nothing that
+    asked for it still wants it."""
     try:
         st = os.stat(path)
     except OSError:
@@ -57,17 +70,24 @@ def thumbnail(path, px, done):
         return
     key = (path, st.st_mtime_ns, st.st_size, px)
     with _lock:
-        if key in _kept:
+        tex = _kept.get(key)
+        if tex is not None:
             _kept.move_to_end(key)
-            tex = _kept[key]
-            GLib.idle_add(lambda: done(tex) and False)
+        elif key in _waiting:  # (asked for already: told too when it's made)
+            _waiting[key].append((done, alive))
             return
-        if key in _waiting:  # (asked for already: told too when it's made)
-            _waiting[key].append(done)
-            return
-        _waiting[key] = [done]
+        else:
+            _waiting[key] = [(done, alive)]
+    if tex is not None:
+        done(tex)
+        return
 
     def work():
+        with _lock:
+            wanted_still = any(a is None or a() for _d, a in _waiting.get(key, ()))
+            if not wanted_still:
+                _waiting.pop(key, None)
+                return
         try:
             tex = make(path, px, st)
         except Exception:  # (a thumbnailer's failure is no thumbnail: the icon stays)
@@ -75,16 +95,24 @@ def thumbnail(path, px, done):
 
         def tell():
             with _lock:
-                if tex is not None:
+                if tex is not None and key not in _kept:
                     _kept[key] = tex
-                    while len(_kept) > KEPT:
-                        _kept.popitem(last=False)
+                    _kept_bytes[0] += tex.get_width() * tex.get_height() * 4
+                    while _kept_bytes[0] > KEPT_BYTES and len(_kept) > 1:
+                        _k, old = _kept.popitem(last=False)
+                        _kept_bytes[0] -= old.get_width() * old.get_height() * 4
                 waiting = _waiting.pop(key, [])
-            for fn in waiting:
+            for fn, _alive in waiting:
                 fn(tex)
             return GLib.SOURCE_REMOVE
         GLib.idle_add(tell)
-    POOL.submit(work)
+    with _ready:
+        _jobs.append(work)
+        _ready.notify()
+        if len(_workers) < WORKERS:
+            t = threading.Thread(target=_work, daemon=True, name="thumbs")
+            _workers.append(t)
+            t.start()
 
 
 def make(path, px, st):
@@ -183,7 +211,8 @@ def cache_root():
 
 
 def file_uri(path):
-    return "file://" + urllib.parse.quote(os.path.abspath(path))
+    """As GLib (and so every file manager) writes it: the cache's names are this hashed."""
+    return Gio.File.new_for_path(os.path.abspath(path)).get_uri()
 
 
 def cached(path, uri, mtime, size_dirs):
@@ -237,12 +266,8 @@ def run_thumbnailer(exec_line, path, uri, px):
     """The thumbnailer's PNG (as a pixbuf) for path, px on its longest side, or None."""
     with tempfile.TemporaryDirectory(prefix="baude-thumb-") as tmp:
         out = os.path.join(tmp, "out.png")
-        subs = {"%i": path, "%u": uri, "%o": out, "%s": str(px), "%%": "%"}
-        args = []
-        for word in shlex.split(exec_line):
-            for code, value in subs.items():
-                word = word.replace(code, value)
-            args.append(word)
+        subs = {"i": path, "u": uri, "o": out, "s": str(px), "%": "%"}
+        args = [re.sub(r"%(.)", lambda m: subs.get(m.group(1), m.group(0)), word) for word in shlex.split(exec_line)]
         try:
             subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=30, check=False)

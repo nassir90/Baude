@@ -6527,6 +6527,7 @@ def attachment_widget(att, size, on_remove=None):
         box.append(name)
         if att.path and thumbs.wanted(att.path):  # (a PDF, a video: the system's thumbnail of it, as it has one)
             side = size * 2 // 3
+            icon.set_pixel_size(side)  # (its room from the start: a chat's history doesn't move when it comes)
 
             def shown(tex):
                 if tex is not None:

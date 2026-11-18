@@ -768,7 +768,8 @@ class FilesPage(Gtk.Box):
                     icon.set_from_paintable(tex)
                     icon.set_pixel_size(self.THUMB)
                     icon.add_css_class("file-thumb")
-            thumbs.thumbnail(node.path, round(self.THUMB * widgets.screen_scale(self)), shown)
+            thumbs.thumbnail(node.path, round(self.THUMB * widgets.screen_scale(self)), shown,
+                             lambda exp=exp, node=node: getattr(exp, "node", None) is node)
         label.set_label(name)
         if getattr(exp, "dim", None) is not None:
             exp.dim.unbind()
@@ -792,18 +793,21 @@ class FilesPage(Gtk.Box):
                 if tex is not None and getattr(exp, "big", (None,))[0] is node:
                     exp.big = (node, tex)
                     exp.trigger_tooltip_query()
-            thumbs.thumbnail(node.path, round(self.PREVIEW * widgets.screen_scale(self)), made)
+            thumbs.thumbnail(node.path, round(self.PREVIEW * widgets.screen_scale(self)), made,
+                             lambda exp=exp, node=node: getattr(exp, "big", (None,))[0] is node)
             tip.set_text(text)
             return True
         if big[1] is None:
             tip.set_text(text)
             return True
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        w, h = widgets.fit_size(big[1].get_width(), big[1].get_height(), self.PREVIEW)
-        box.append(Gtk.Picture(paintable=big[1], width_request=w, height_request=h, can_shrink=False,
-                               content_fit=Gtk.ContentFit.CONTAIN))
-        box.append(Gtk.Label(label=text, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=40))
-        tip.set_custom(box)
+        if len(big) < 3:  # (made once: it's asked for again as the pointer moves)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            w, h = widgets.fit_size(big[1].get_width(), big[1].get_height(), self.PREVIEW)
+            box.append(Gtk.Picture(paintable=big[1], width_request=w, height_request=h, can_shrink=False,
+                                   content_fit=Gtk.ContentFit.CONTAIN))
+            box.append(Gtk.Label(label=text, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=40))
+            big = exp.big = (*big, box)
+        tip.set_custom(big[2])
         return True
 
     def _activate(self, _view, pos):

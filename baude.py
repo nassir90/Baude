@@ -11895,7 +11895,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
-        self.version_row = update.version_row(self)  # (and the version, its changelog: Record's too)
+        self.version_row = update.version_row()  # (and the version; its changelog is ☰ → Changelog: Record's too)
         group.add(self.version_row)
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")
@@ -12096,6 +12096,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         menu.append_item(item)
+        menu.append("Changelog", "win.changelog")
         menu.append("Ongoing Feedback", "win.fixes")
         self.main_menu = menu
         menu.append("Restart Baude", "win.restart")
@@ -12138,6 +12139,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
+        changelog = Gio.SimpleAction.new("changelog", None)  # (☰ → Changelog, Record's too)
+        changelog.connect("activate", lambda *_: update.changelog_dialog().present(self))
+        self.add_action(changelog)
         self.feedback_draft = None
         restart = Gio.SimpleAction.new("restart", None)
         restart.connect("activate", lambda *_: self.restart_app())

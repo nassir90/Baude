@@ -828,7 +828,7 @@ def test_settings_rows_take_the_width(app):
 
 
 def test_settings_version_and_changelog(app):
-    """Settings has the version running and View Changelog, the commits that version has, newest first, as Baude's."""
+    """Settings has the version running and ☰ → Changelog, the commits that version has, newest first, as Baude's."""
     win = app.win
     select(win, "a")
     pump(0.2)
@@ -838,9 +838,11 @@ def test_settings_version_and_changelog(app):
         running = record.update.git(record.update.HERE, "log", "-1", "--format=%h", record.update.STARTED)
         has = record.update.git(record.update.HERE, "log", "--no-merges", "--format=%h", record.update.STARTED).split()
         assert running and running in settings.version_row.get_title() and has, settings.version_row.get_title()
-        settings.version_row.changelog_button.emit("clicked")
-        wait_for(lambda: [w for w in walk(settings) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
-        assert [w.commit for w in walk(settings) if hasattr(w, "commit")] == has
+        win.activate_action("win.changelog", None)
+        log = win.get_visible_dialog()
+        wait_for(lambda: [w for w in walk(log) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
+        assert [w.commit for w in walk(log) if hasattr(w, "commit")] == has
+        log.close()
     finally:
         settings.close()
         wait_for(lambda: win.get_visible_dialog() is None, "closed")

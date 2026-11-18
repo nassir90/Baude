@@ -167,19 +167,14 @@ def changelog(commit, root=HERE):
             (line.split("\x1f", 2) for line in (out or "").splitlines() if line.count("\x1f") == 2) if stamp.isdigit()]
 
 
-def version_row(dialog, commit=None, root=HERE):
-    """Settings → Version (Baude's and Record's): the commit this process's code is (STARTED), and when it was made;
-    View Changelog shows the commits it has, with their dates, as a page of dialog's (an Adw.PreferencesDialog)."""
+def version_row(commit=None, root=HERE):
+    """Settings → Version (Baude's and Record's): the commit this process's code is (STARTED), and when it was made. Its
+    changelog is ☰ → Changelog (changelog_dialog)."""
     commit = commit or STARTED
     made = git(root, "log", "-1", "--format=%h%x1f%ct", commit, timeout=5) if commit else None
     short, _, stamp = (made or "").partition("\x1f")
-    row = Adw.ActionRow(title=f"Version {short}" if stamp.isdigit() else "Version unknown",
-                        subtitle=made_when(int(stamp)) if stamp.isdigit() else "Not a git checkout")
-    button = Gtk.Button(label="View Changelog", valign=Gtk.Align.CENTER, sensitive=stamp.isdigit())
-    button.connect("clicked", lambda *_: dialog.push_subpage(changelog_page(commit, root)))
-    row.add_suffix(button)
-    row.changelog_button = button
-    return row
+    return Adw.ActionRow(title=f"Version {short}" if stamp.isdigit() else "Version unknown",
+                         subtitle=made_when(int(stamp)) if stamp.isdigit() else "Not a git checkout")
 
 
 def changelog_group(commit, root=HERE, limit=None):
@@ -206,10 +201,18 @@ def changelog_group(commit, root=HERE, limit=None):
     return group
 
 
-def changelog_page(commit, root=HERE):
-    """View Changelog: the commits the version has (changelog_group), as a page."""
+def changelog_dialog(commit=None, root=HERE):
+    """☰ → Changelog (Baude's and Record's): the commits the running version has (changelog_group), newest first, in a
+    dialog whose header names that version and when it was made."""
+    commit = commit or STARTED
+    made = git(root, "log", "-1", "--format=%h%x1f%ct", commit, timeout=5) if commit else None
+    short, _, stamp = (made or "").partition("\x1f")
     page, group = widgets.settings_page(), changelog_group(commit, root)
+    if not stamp.isdigit():
+        group.add(Adw.ActionRow(title="No changelog", subtitle="Not a git checkout"))
     page.add(group)
+    head = Adw.HeaderBar(title_widget=Adw.WindowTitle(
+        title="Changelog", subtitle=f"Version {short} · {made_when(int(stamp))}" if stamp.isdigit() else ""))
     view = Adw.ToolbarView(content=page)
-    view.add_top_bar(Adw.HeaderBar())
-    return Adw.NavigationPage(title="Changelog", child=view)
+    view.add_top_bar(head)
+    return Adw.Dialog(title="Changelog", content_width=640, content_height=720, child=view)

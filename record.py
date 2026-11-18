@@ -6948,7 +6948,7 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
-        self.version_row = update.version_row(self)  # (and the version, its changelog: Baude's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
@@ -7133,6 +7133,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
+        app_menu.append("Changelog", "win.changelog")
         item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
@@ -7147,7 +7148,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
-                         ("fixes", lambda: self.open_fixes())):
+                         ("fixes", lambda: self.open_fixes()),
+                         ("changelog", lambda: update.changelog_dialog().present(self))):
             a = Gio.SimpleAction(name=name)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)

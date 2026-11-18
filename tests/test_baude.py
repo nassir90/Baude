@@ -6213,7 +6213,7 @@ def test_settings_rows_take_the_width(app):
 
 
 def test_settings_version_and_changelog(app):
-    """Settings has the version running, the commit its code is, and View Changelog: a page of the commits that version
+    """Settings has the version running, the commit its code is, and ☰ → Changelog: a dialog of the commits that version
     has, newest first, merges left out."""
     win = app.window()
     settings = baude.SettingsDialog(win)
@@ -6223,10 +6223,12 @@ def test_settings_version_and_changelog(app):
         running = update.git(update.HERE, "log", "-1", "--format=%h", update.STARTED)
         has = update.git(update.HERE, "log", "--no-merges", "--format=%h", update.STARTED).split()
         assert running and running in settings.version_row.get_title() and has, settings.version_row.get_title()
-        settings.version_row.changelog_button.emit("clicked")
-        wait_for(lambda: [w for w in walk(settings) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
-        listed = [w.commit for w in walk(settings) if hasattr(w, "commit")]
-        assert listed == has, (listed[:3], has[:3])
+        win.activate_action("win.changelog", None)
+        log = win.get_visible_dialog()
+        wait_for(lambda: [w for w in walk(log) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
+        listed = [w.commit for w in walk(log) if hasattr(w, "commit")]
+        assert listed == has[:50], (listed[:3], has[:3])
+        log.close()
     finally:
         settings.close()
         close(win)

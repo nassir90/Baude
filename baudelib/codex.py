@@ -2,6 +2,7 @@
 import itertools
 import json
 import os
+import re
 import subprocess
 import threading
 from collections import deque
@@ -29,16 +30,61 @@ def permission_params(mode, *, turn=False, read_only=False):
     return params
 
 
-def visible_stderr(line):
+LEVELS = ("TRACE", "DEBUG", "INFO", "WARN", "ERROR")
+# (tracing's plain format: "2026-01-01T00:00:00.000000Z  WARN codex_core::x: message", colours stripped)
+PLAIN_LOG = re.compile(r"^\d{4}-\d\d-\d\dT\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+([\w:]+)(?:\{[^}]*\})?:\s?(.*)$")
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# Codex's own housekeeping (usage reporting, telemetry): nothing the user can do about it, at any level.
+QUIET_TARGETS = ("codex_analytics", "codex_otel", "codex_feedback")
+NOT_SUPPORTED = re.compile(r"The '([^']+)' model is not supported when using Codex with a ChatGPT account")
+
+
+def log_record(line):
+    """(level, target, message) of one line of Codex's tracing log, or None for any other line."""
     try:
         record = json.loads(line)
     except ValueError:
-        return True
-    if not isinstance(record, dict) or record.get("target") != "codex_skills::interface":
-        return True
+        match = PLAIN_LOG.match(ANSI.sub("", line).strip())
+        return match.groups() if match else None
+    if not isinstance(record, dict) or str(record.get("level", "")).upper() not in LEVELS:
+        return None
     fields = record.get("fields")
-    message = str(fields.get("message", "")) if isinstance(fields, dict) else ""
-    return not message.startswith(("ignoring interface.icon_small:", "ignoring interface.icon_large:"))
+    message = fields.get("message", "") if isinstance(fields, dict) else ""
+    return str(record["level"]).upper(), str(record.get("target", "")), str(message)
+
+
+def plain(message, limit=300):
+    """An error message on one line: an HTTP error's JSON body down to its own message, cut to a sentence's size."""
+    head, sep, body = message.partition(": {")
+    if sep:
+        try:
+            error = json.loads("{" + body).get("error")
+            inner = error.get("message") if isinstance(error, dict) else error
+            if isinstance(inner, str) and inner.strip():
+                message = f"{head}: {inner}"
+        except (ValueError, AttributeError):
+            pass
+    message = " ".join(message.split())
+    return message if len(message) <= limit else message[:limit - 1].rstrip() + "…"
+
+
+def stderr_notice(line):
+    """What the user should see of one line of Codex's stderr, or None. Its tracing log is for Codex's developers:
+    warnings and below are dropped, but for the few that say something the user can act on; errors are kept, as
+    one plain line. Lines that aren't its log (a crash, say) are shown as they are."""
+    line = ANSI.sub("", line).rstrip()
+    if not line.strip():
+        return None
+    record = log_record(line)
+    if record is None:
+        return line
+    level, target, message = record
+    unsupported = NOT_SUPPORTED.search(message)
+    if unsupported:
+        return f"Codex can't use {unsupported.group(1)} with a ChatGPT account. Choose another model."
+    if level != "ERROR" or target.startswith(QUIET_TARGETS) or not message.strip():
+        return None
+    return f"Codex: {plain(message)}"
 
 
 def user_input(content):
@@ -85,6 +131,7 @@ class AppServer(ClaudeProc):
         self.on_exit, self.stderr = on_exit, stderr
         self.lock = threading.RLock()
         self.ids, self.requests = itertools.count(1), {}
+        self.said = set()
         self.p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   text=True, bufsize=1, env=os.environ | (env or {}))
@@ -104,8 +151,15 @@ class AppServer(ClaudeProc):
 
     def read_stderr(self):
         for line in self.p.stderr:
-            if visible_stderr(line):
-                self.stderr(line.rstrip())
+            self.notice(line)
+
+    def notice(self, line):
+        notice = stderr_notice(line)
+        with self.lock:
+            if not notice or notice in self.said:  # (each once: Codex repeats its warnings for every request)
+                return
+            self.said.add(notice)
+        self.stderr(notice)
 
     def rpc(self, method, params, done, failed):
         with self.lock:
@@ -119,7 +173,7 @@ class AppServer(ClaudeProc):
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
-                    self.stderr(line.rstrip())
+                    self.notice(line)
                     continue
                 self.receive(msg)
         finally:

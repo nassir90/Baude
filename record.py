@@ -2887,7 +2887,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.create_tag(f"after-h{n}")
         # (a word misspelled, a red squiggle under it; a grammar error, a blue one: NotesView draws them)
         self.spell = self.view.spell = spelling.SpellCheck(self.view, self.view.char_rect,
-                                                          lambda: self.win.store.spell_check)
+                                                          lambda: self.win.store.spell_check, skip=("proposal-old",))
         self.view.restyled = self._heading_looks
         self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())

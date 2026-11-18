@@ -53,10 +53,15 @@ _SKIP = re.compile("|".join((
 )))
 
 
+_ANCHOR, _JOINER = "\ufffc", "\u2060"  # (an edit's controls in a page: its child anchor, and the joiner before it)
+
+
 def masked_lines(text):
-    """text's lines, what isn't to be checked in each blanked (_SKIP), a code block's lines all blank."""
-    lines = text.split("\n")
-    code = {n for first, last, _closed in widgets.fence_spans(lines) for n in range(first, last + 1)}
+    """text's lines, what isn't to be checked in each blanked (_SKIP), a code block's lines all blank. An edit's
+    controls (their anchor and word joiner, in the buffer's slice) are spaces, so offsets stay the buffer's."""
+    lines = text.replace(_ANCHOR, " ").replace(_JOINER, " ").split("\n")
+    bare = text.replace(_ANCHOR, "").replace(_JOINER, "").split("\n")
+    code = {n for first, last, _closed in widgets.fence_spans(bare) for n in range(first, last + 1)}
     return ["" if n in code else _SKIP.sub(lambda m: " " * len(m.group()), line) for n, line in enumerate(lines)]
 
 
@@ -428,8 +433,9 @@ class SpellCheck:
     """view's text checked as it's written (enabled(): whether to). The view draws the squiggles, in a layer over its
     text, by calling snapshot; rect_of(iter) is that character's box in the view."""
 
-    def __init__(self, view, rect_of, enabled=lambda: True):
+    def __init__(self, view, rect_of, enabled=lambda: True, skip=()):
         self.view, self.buf, self.enabled, self.rect_of = view, view.get_buffer(), enabled, rect_of
+        self.skip = skip  # (the names of tags whose text isn't checked: a proposed edit's old text, struck out)
         self.colors = {}
         for kind, color in COLORS.items():
             rgba = self.colors[kind] = Gdk.RGBA()
@@ -472,7 +478,7 @@ class SpellCheck:
             if self.asked:
                 self.soon()
             return False
-        text = self.buf.get_text(*self.buf.get_bounds(), True)
+        text = self._text()
         todo = sorted({line for line in masked_lines(text) if line.strip() and line not in _found})
         if not todo:
             self.draw()
@@ -493,6 +499,26 @@ class SpellCheck:
         worker().submit(job, done)
         return False
 
+    def _text(self):
+        """The buffer's text as its offsets count it (an edit's controls' anchors in it), the text of the tags in skip
+        blanked to spaces."""
+        text = self.buf.get_slice(*self.buf.get_bounds(), True)
+        table = self.buf.get_tag_table()
+        for name in self.skip:
+            tag = table.lookup(name)
+            if tag is None:
+                continue
+            it = self.buf.get_start_iter()
+            while True:
+                if it.starts_tag(tag):
+                    a = it.get_offset()
+                    it.forward_to_tag_toggle(tag)
+                    b = it.get_offset()
+                    text = text[:a] + "".join(c if c == "\n" else " " for c in text[a:b]) + text[b:]
+                elif not it.forward_to_tag_toggle(tag):
+                    break
+        return text
+
     def draw(self):
         """What's underlined (shown), from what's known of each line (a line typed in since: what it had that's still
         there), and the view drawn again."""
@@ -501,7 +527,7 @@ class SpellCheck:
         if not self.enabled() or backend() is None:
             self.was = []
             return
-        text = self.buf.get_text(*self.buf.get_bounds(), True)
+        text = self._text()
         lines, masked = text.split("\n"), masked_lines(text)
         was = self.was if len(self.was) == len(lines) else []
         now, pos = [], 0
@@ -645,7 +671,7 @@ class SpellCheck:
     def _fix(self, a, b, word, fix):
         """word (still there, from a to b) replaced with fix, as one edit, to undo."""
         start, end = self.buf.get_iter_at_offset(a), self.buf.get_iter_at_offset(b)
-        if self.buf.get_text(start, end, True) != word:
+        if self.buf.get_slice(start, end, True) != word:
             return
         self.buf.begin_user_action()
         if self.buf.delete_interactive(start, end, self.view.get_editable()):

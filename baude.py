@@ -12352,6 +12352,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.tabs.open("chat", lambda: root, "Chat", icon="baude-claude-symbolic", pinned=True)  # (Claude's logo)
         widgets.inside(self.tabs)  # (the chat: the inside, set into the frame the bar, the sessions and the panel are)
         self.banner = Adw.Banner(revealed=False, use_markup=True)  # (its titles: banner_text's markup)
+        self.banner.connect("button-clicked", lambda *_: self.banner_kind == "missing" and self.new_chat_on_host())
         root.append(self.banner)
         root.append(self.scroller)
         root.append(composer)
@@ -12362,6 +12363,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         # then, and the chat: drop)
         self.drop_timer = self.resume_reason = None  # (resume_reason: (chat, why) the next message resumes it)
         self.retrying, self.banner_kind = None, None  # (show_retry; what the banner says: update_banner)
+        self.missing_session = self.missing_reason = self.retaken = self.attach_said = None  # (a chat its host has
+        # no session for, why it couldn't be taken up again, and one taken up again for that: session_missing; the
+        # kind of attach failure last said: start_remote_proc)
         self.banner_timer, self.banner_dots = None, 0  # (its ellipsis going, while it's waiting something out)
         self.outgrown = False  # (a turn ended with claude saying the prompt's too long: exhausted, show_context)
         root.append(statusbar)
@@ -13580,10 +13584,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
                                        always_allow=sorted(self.always_allow))
             except OSError as e:
-                if isinstance(e, baudelib.client.Refused):  # (its host there, but the session not to be had: said,
-                    self.drop_running = self.drop_session = None  # not tried again)
-                if self.drop_running is None:  # (dropped: said under the chat already, and tried again: drop)
-                    self.note(f"couldn't reach {'daemon' if r.mine else remote_name(r)}: {e}")
+                refused = isinstance(e, baudelib.client.Refused)
+                if refused:  # (its host there, but the session not to be had)
+                    self.drop_running = self.drop_session = None
+                if refused and str(e).startswith("no session"):  # (its host doesn't know it: session_missing)
+                    return self.session_missing(r)
+                name = "daemon" if r.mine else remote_name(r)
+                kind = "refused" if refused else "unreachable"
+                # (dropped: said under the chat already. Each kind of failure said once a chat, however often it's
+                # tried again)
+                if self.drop_running is None and self.attach_said != (self.session_id, kind):
+                    self.note(f"{name} wouldn't open this chat: {e}" if refused else f"couldn't reach {name}: {e}")
+                    self.attach_said = (self.session_id, kind)
+        if self.proc is not None:
+            self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -13596,6 +13610,53 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.h_control_request(msg)
         self.update_status()
         self.update_banner()
+
+    def session_missing(self, r):
+        """A chat's host answered but has no such session (its state lost, a draft it dropped, ended there). Nothing
+        shown in the chat (a draft it dropped): a new chat in its place, the text box as it is. On this machine with a
+        Claude transcript here: taken up again by its id, as take_up does, and attached (once a loss: if that doesn't
+        hold, as below). Else it's marked missing: the banner says so, with New chat, send's off, and it isn't tried
+        again till its host lists it again (on_network)."""
+        sid = self.session_id
+        if r.mine and not self.shows_anything() and not getattr(self, "chat_sent", False):
+            self.restart_proc(resume=False)
+            return
+        info = find_session(sid) if r.mine and sid else None  # (Claude's transcripts only: a Codex chat, or pi's,
+        self.missing_reason = None                            # its host can't take up again)
+        if info is not None and self.retaken != sid:
+            self.retaken = sid
+            effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
+                if self.effort_dd.get_sensitive() else None
+            reply = r.call({"op": "start", "adopt": sid, "cwd": info.get("cwd") or self.run_cwd, "model": self.model,
+                            "effort": effort, "mode": self.mode, "env": claudelib.claude_env(), "group": ""},
+                           timeout=10)
+            if reply.get("op") == "started":
+                r.sessions[sid] = reply["session"]
+                return self.start_remote_proc()
+            self.missing_reason = reply.get("error") or "no answer"
+        r.sessions.pop(sid, None)  # (as its host has it: listed again, it's there again)
+        self.missing_session = sid
+        self.update_status()
+        self.update_banner()
+
+    def shows_anything(self):
+        """Whether the chat shows anything of a conversation: a turn drawn, or a transcript it's viewed from."""
+        if self.view_path and os.path.exists(self.view_path) and os.path.getsize(self.view_path):
+            return True
+        child = self.transcript.get_first_child()
+        while child is not None:
+            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None):
+                return True
+            child = child.get_next_sibling()
+        return False
+
+    def new_chat_on_host(self):
+        """New chat (the banner's, for a chat its host no longer has): one on that host."""
+        r = self.remote
+        if r is None or r.mine:
+            self.new_session()
+        else:
+            self.new_session_on(r)
 
     def side_question_proc(self, on_msg, on_exit):
         """(proc, forked) for a side question in a chat of Baude's: a session of the host process's, forked from the
@@ -16713,7 +16774,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):
             self.sync_remote(self.remote, self.session_id)
+        if listed and self.missing_session == self.session_id:  # (its host has it again: attached again, below)
+            self.missing_session = self.missing_reason = None
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                self.missing_session != self.session_id and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:
             self.start_remote_proc()  # (its server's there again, or at last: what it asks, its models)
         self.update_banner()
@@ -17203,6 +17267,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.update_banner()
             return False
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
+                self.missing_session != self.session_id and \
                 time.monotonic() - getattr(self, "remote_tried", 0.0) > 10:  # (a try waits seconds for its host, as
             # on_network's: on the main loop)
             self.start_remote_proc()
@@ -17227,6 +17292,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 "Looking for daemon…" if self.remote.mine else f"Looking for {name} on the network…"
         elif kind == "live":
             text = "This session is currently active elsewhere"
+        elif kind == "missing":  # (its host there, but with no such session: session_missing)
+            name = "Daemon" if self.remote.mine else remote_name(self.remote)
+            text = f"{name} couldn't take this chat up again: {self.missing_reason}" if self.missing_reason else \
+                f"{name} no longer has this chat"
         elif kind == "drop":
             text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
@@ -17257,19 +17326,20 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
                                             stopping_said(self.remote) is not None)  # (stopping: as good as gone)
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
-        kind = "gone" if gone else "live" if live else "drop" if dropped else \
+        missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
+        kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
             "retry" if self.retrying is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
         if kind in ("drop", "retry") and self.banner_timer is None:
             self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
-        self.banner.set_button_label(None)
+        self.banner.set_button_label("New chat" if kind == "missing" else None)
         self.banner.set_revealed(kind is not None)
         self.locked = live
         if hasattr(self, "composer_box"):
             self.composer_box.gate("network", dropped)
-            self.composer_box.gate("host", gone)
+            self.composer_box.gate("host", gone or missing)
         self.show_composer()
 
     def tail_lines(self, lines):

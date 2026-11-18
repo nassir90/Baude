@@ -800,7 +800,7 @@ class FilesPage(Gtk.Box):
         self.append(self.modes)
 
     def _setup(self, _factory, item):
-        exp = Gtk.TreeExpander(indent_for_icon=True)
+        exp = Gtk.TreeExpander(indent_for_icon=False, hide_expander=True)  # (a folder's open or closed icon says it)
         box = Gtk.Box(spacing=6)
         box.append(Gtk.Image(width_request=self.THUMB))  # (an icon in the middle of a thumbnail's room)
         box.append(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
@@ -818,7 +818,16 @@ class FilesPage(Gtk.Box):
         exp.set_list_row(row)
         icon, label = exp.get_child().get_first_child(), exp.get_child().get_last_child()
         name = os.path.basename(node.path)
-        icon.set_from_gicon(Gio.ThemedIcon.new("folder-symbolic") if node.is_dir else file_icon(name))
+        if getattr(exp, "opened", None) is not None:
+            exp.opened[0].disconnect(exp.opened[1])
+            exp.opened = None
+        if node.is_dir:  # (open or closed as its row is: a click on it opens it, so no arrow beside it)
+            def folder(*_a, row=row, icon=icon):
+                icon.set_from_icon_name("folder-open-symbolic" if row.get_expanded() else "folder-symbolic")
+            folder()
+            exp.opened = (row, row.connect("notify::expanded", folder))
+        else:
+            icon.set_from_gicon(file_icon(name))
         icon.set_pixel_size(-1)
         icon.remove_css_class("file-thumb")
         if not node.is_dir and thumbs.wanted(node.path):  # (the system's thumbnail in its place, once it's made)

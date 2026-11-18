@@ -10088,7 +10088,7 @@ def _ref_session(folder, sid, replies):
 
 def test_signal_per_chat(app):
     """Signal's switches are each chat's own, as Remote Control is: a chat keeps them, another chat has its own, a new
-    chat starts with the defaults (and keeps what you set once it has an id), and Use for new chats sets those. Two
+    chat starts with links shown and Signal not activated (and keeps what you set once it has an id). Two
     windows on one folder share its Signal: it runs while one's chat has it on, and the other's chat, off, looks
     nothing up and doesn't stop it."""
     repo = os.path.join(TMP, "perchat")
@@ -10125,22 +10125,10 @@ def test_signal_per_chat(app):
         win.h_system({"type": "system", "subtype": "init", "session_id": "c4a70000-0000-4000-8000-00000000000c"})
         assert baude.load_settings()["signal_chats"]["c4a70000-0000-4000-8000-00000000000c"] == [False, False]
         assert win.signal_pending is None
-        # Use for new chats
-        win.signal_show.set_active(True)
-        win.signal_run.set_active(True)
-        win.show_signal_default()
-        assert "New chats: links shown, not activated" in win.signal_default.get_label()
-        button(win.signal_btn.get_popover().get_child(), "Use for new chats").emit("clicked")
-        assert baude.load_settings().get("signal") is True and "activated" in win.signal_default.get_label()
-        win.resume_session(win.sidebar.find_info(b))  # (b: off; its window's Signal follows b, links only)
+        # an old saved default of Signal on: a new chat still starts with it off
+        baude.save_settings(signal=True, signal_links=False)
         win.new_session()
-        assert win.signal_run.get_active(), "a new chat now starts with Signal on"
-        assert ref.transcript is None and ref.agent is None or ref.agent.path is None, \
-            "a new chat with no transcript: the reader doesn't go on reading b"
-        win.h_system({"type": "system", "subtype": "init", "session_id": "c4a70000-0000-4000-8000-00000000000d"})
-        baude.save_settings(signal=False)
-        assert win.chat_signal("c4a70000-0000-4000-8000-00000000000d") == (True, True), \
-            "a chat keeps the switches it started with when the defaults change later"
+        assert not win.signal_run.get_active() and win.signal_show.get_active(), "a new chat: links shown, not on"
         save = baude.load_settings()
         baude.save_settings(signal=False, signal_chats={k: v for k, v in save["signal_chats"].items() if k in (a, b)})
         # two windows, one folder: a (on) here, b (off) there

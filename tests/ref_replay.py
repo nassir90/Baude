@@ -102,6 +102,7 @@ win.present()
 pump(lambda: win.proc is not None, 5)
 win.resume_session({"id": "replay", "path": args.transcript, "cwd": args.folder,
                     "title": os.path.basename(args.transcript)})
+win.signal_run.set_active(True)  # (a chat starts with Signal not activated)
 t0 = time.monotonic()
 ref = win.signal
 

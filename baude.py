@@ -13769,7 +13769,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
-        self.apply_chat_signal()  # (a new chat: the defaults for new chats)
+        self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -14985,7 +14985,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- Signal
     def signal_menu(self):
-        """The link button's dropdown: this chat's two Signal switches (shown links, and running), and no more."""
+        """The link button's dropdown: this chat's two Signal switches (shown links, and running)."""
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=8, margin_bottom=6, margin_start=10,
                       margin_end=10, width_request=310)
@@ -15011,17 +15011,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return pop
 
     # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with
-    # Signal not activated, its links shown unless "signal_links" in settings is false
+    # its links shown and Signal not activated
     SIGNAL_CHATS = 500  # chats whose switches are kept (the most recently changed)
 
     def chat_signal(self, sid):
-        """A chat's Signal switches, (on, links): its own if it has some, else a new chat's (not activated: an old
-        "signal" default in settings no longer turns it on)."""
+        """A chat's Signal switches, (on, links): its own if it has some, else a new chat's (not activated, links
+        shown)."""
         s = load_settings()
         kept = (s.get("signal_chats") or {}).get(sid) if sid else None
         if isinstance(kept, list) and len(kept) == 2:
             return bool(kept[0]), bool(kept[1])
-        return False, s.get("signal_links") is not False
+        return False, True
 
     def keep_chat_signal(self, sid, on, links):
         chats = {k: v for k, v in (load_settings().get("signal_chats") or {}).items() if k != sid}
@@ -15029,8 +15029,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         save_settings(signal_chats=dict(list(chats.items())[-self.SIGNAL_CHATS:]))
 
     def apply_chat_signal(self):
-        """The chat shown changed: its switches (a new chat's: the defaults, or what you set before it had an id), and
-        Signal as they say."""
+        """The chat shown changed: its switches (a new chat's: links shown and not activated, or what you set before
+        it had an id), and Signal as they say."""
         on, links = self.chat_signal(self.session_id) if self.session_id else \
             (self.signal_pending or self.chat_signal(None))
         for sw, value, handler in ((self.signal_run, on, self.signal_run_handler),

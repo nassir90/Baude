@@ -1140,10 +1140,10 @@ def ref_markup(ref, inner, icon=True):
 
 
 # Well-known cloud, hosting and platform providers: named in replies all the time, and a link to "an outside product"
-# (or to the one config file that mentions it) tells you nothing, so Signal never links them. Names that are also
-# English words or common identifiers (Neon, Render, Convex) are left out: one may be this code's own
+# (or to the one config file that mentions it) tells you nothing, so Signal never links them, nor their own products
+# (a provider's name and a word after it: AWS Lambda, Cloudflare R2, Supabase Auth)
 CLOUD_PROVIDERS = frozenset(n.casefold() for n in (
-    "Cloudflare", "Cloudflare Workers", "Cloudflare Pages", "Vercel", "Netlify", "Supabase", "Firebase", "Shopify",
+    "Cloudflare", "Vercel", "Netlify", "Supabase", "Firebase", "Shopify",
     "AWS", "Amazon Web Services", "GCP", "Google Cloud", "Google Cloud Platform", "Azure", "Microsoft Azure",
     "Heroku", "DigitalOcean", "Digital Ocean", "Fly.io", "Linode", "Akamai", "Fastly", "Hetzner", "OVH", "OVHcloud",
     "Render.com", "Railway.app", "PlanetScale", "Upstash", "Appwrite", "Auth0", "Okta", "Stripe", "Twilio", "SendGrid",
@@ -1152,8 +1152,21 @@ CLOUD_PROVIDERS = frozenset(n.casefold() for n in (
 
 
 def ref_cloud_provider(surface):
-    """Whether a name is one of CLOUD_PROVIDERS (as written, any case): never a link."""
-    return surface.strip().casefold() in CLOUD_PROVIDERS
+    """Whether a name is one of CLOUD_PROVIDERS, or one of them and a word after it (a product of theirs): never a
+    link. Written with a capital, in any case past that (AWS, Aws, Firebase); all in lower case (sentry, aws,
+    stripe) it's as likely this code's own: a package, a module, a Deployment."""
+    name = surface.strip()
+    if name == name.lower():
+        return False
+    name = name.casefold()
+    if name in CLOUD_PROVIDERS:
+        return True
+    head = name.rpartition(" ")[0]
+    while head:  # (AWS Lambda, Google Cloud Storage: a provider's name, and words after it)
+        if head in CLOUD_PROVIDERS:
+            return True
+        head = head.rpartition(" ")[0]
+    return False
 
 
 REF_BARE_NUMBER = re.compile(r"#\d+")  # (in code it's no link: a colour, a comment; owner/name#12 says what it is)

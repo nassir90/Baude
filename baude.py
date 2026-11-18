@@ -1875,7 +1875,7 @@ class Signal(Names):
                 row["why"] = why
                 refs.append(self._absent_entity(surface, row, old, st))
             elif verdict == "plain":
-                if ref_codeish(surface):
+                if ref_codeish(surface) and not widgets.ref_cloud_provider(surface):  # (Fly.io, DigitalOcean: plain)
                     rejected.append({"i": i, "name": name, "why": f"{surface!r} is written as code, not English: "
                                      "link it, or not_in_code with why proposed, external, elsewhere or not_found"})
                     continue
@@ -3905,8 +3905,9 @@ ideas, numbers and secrets.
 
 Every name gets a decision, including the ones that aren't in this repository: outside tools, products, \
 libraries, services and their commands (Postgres, Vite, FastAPI, Keycloak, Chrome, the Anthropic API, `npm ci`, \
-`uv sync`, `docker exec`) are not_in_code, why external, but for well-known cloud and hosting providers \
-(Cloudflare, Vercel, Supabase, Shopify, AWS…), which are plain and never linked; a name the conversation proposes that isn't written \
+`uv sync`, `docker exec`) are not_in_code, why external, except well-known cloud and hosting providers and \
+their products (Cloudflare, Vercel, Supabase, Shopify, AWS Lambda…), which need no decision: they're never \
+linked; a name the conversation proposes that isn't written \
 yet is proposed; one in another checkout or branch, on another machine, or only in a running system (a job id, \
 an org or app someone made, a container, a file in another repository) is elsewhere. Marking them tells the \
 person they won't find it in this code.
@@ -11551,7 +11552,8 @@ class SignalPage(Gtk.Stack):
         linked = {s for (_m, s), d in ref.decisions.items() if d["verdict"] == "link"}  # (the reader's own names too)
         for s in list(self.win.ref_surfaces) + sorted(linked - set(self.win.ref_surfaces)):
             r = ref.refs.get(s)
-            if r is None or (r.status in ("not_found", "pending") and s not in ref.strong) or r.data.get("plain"):
+            if r is None or (r.status in ("not_found", "pending") and s not in ref.strong) or r.data.get("plain") or \
+                    widgets.ref_cloud_provider(s):  # (never a link: not a name to list either)
                 continue
             if want and want not in s.lower() and want not in r.canonical.lower():
                 continue

@@ -160,6 +160,7 @@ from widgets import (  # noqa: E402,F401
     resolve_link, resolve_path, save_settings, scaled_texture, screen_scale, sel_label,
     set_markup_safe, themed_icon, time_ago, time_tip, toast, view_bar, walk,
 )
+import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
     file_children, file_icon, find_in_focus, git_ignored, in_code, python_context,
@@ -8619,6 +8620,8 @@ class SessionSidebar(Gtk.Box):
                 more.get_child().add_css_class("dim-label")
                 more.more_key = key
                 self.list.append(more)
+        if getattr(self.win, "panel", None) is not None:  # (the open chat a Bot or not: its Memory page)
+            self.win.panel.bot_changed(self.find_info(self.win.session_id) if self.win.session_id else None)
         if current is not None:
             self.list.select_row(current)
         self.watch_rows()
@@ -10565,6 +10568,11 @@ class SidePanel(Gtk.Box):
         self.meta = BaudeMeta(win)
         page = self.stack.add_titled(self.meta, "meta", meta.NAME)
         page.set_icon_name("baude-meta-symbolic")
+        # a Bot's memory (botmemory.BotMemory): there while the open chat's a Bot
+        self.memory = botmemory.BotMemory(win)
+        self.memory_page = self.stack.add_titled(self.memory, "memory", "Memory")
+        self.memory_page.set_icon_name("document-edit-symbolic")
+        self.memory_page.set_visible(False)
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
@@ -10882,6 +10890,14 @@ class SidePanel(Gtk.Box):
         else:
             self.artifact_list.prepend(chip)
         self.artifact_rows[info["url"]] = chip
+
+    def bot_changed(self, info):
+        """The open chat (info: the sidebar's, or None) a Bot or not: its Memory page shown, and read, or hidden."""
+        bot = bool(info and info.get("bot"))
+        if not bot and self.stack.get_visible_child_name() == "memory":
+            self.stack.set_visible_child_name("meta")
+        self.memory_page.set_visible(bot)
+        self.memory.show(info if bot else None)
 
     def reset(self):
         self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)
@@ -13581,6 +13597,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.busy = busy
         if not busy:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
+            if getattr(self, "panel", None) is not None and self.panel.memory_page.get_visible():
+                self.panel.memory.refresh()  # (a Bot's turn over: what it kept in its memory, shown)
             if getattr(self, "queue_upto", None) is not None:  # (queued messages to send now it's over)
                 GLib.idle_add(self.flush_queue)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:

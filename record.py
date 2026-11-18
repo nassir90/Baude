@@ -1498,16 +1498,26 @@ def pages_root():
 
 # ---------------------------------------------------------------- UI pieces
 
-CSS = """
-.reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
-.reader-assistant { padding: 4px 2px; }
-.reader-assistant label.prose { font-size: 1.02em; }
+# A page's editor's look (DiaryEditor, EditControls): Baude's Bot memory pane loads it too
+EDITOR_CSS = """
 button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 0; color: white; box-shadow: none; }
 button.edit-accept { background: #2ec27e; }
 button.edit-accept:hover { background: #26a269; }
 button.edit-reject { background: #e01b24; }
 button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reject, on its page: EditControls) */
 button.edit-card-control { min-width: 22px; min-height: 18px; }  /* (and on its card: RecordChat.card_extra) */
+.diary-title { font-size: 1.75em; font-weight: 800; }
+.diary { font-size: 1.05em; background: transparent; }
+/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
+textview.own-selection > text > selection { background-color: transparent; }
+entry.diary-title { background: none; }
+entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
+"""
+
+CSS = EDITOR_CSS + """
+.reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
+.reader-assistant { padding: 4px 2px; }
+.reader-assistant label.prose { font-size: 1.02em; }
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
 .pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
 .quote-in-bubble { border-left: 3px solid alpha(@view_fg_color, 0.25); padding-left: 8px; font-size: 0.92em;
@@ -1515,17 +1525,11 @@ button.edit-card-control { min-width: 22px; min-height: 18px; }  /* (and on its 
 .quote-in-bubble.quote-chip { border-left-color: @accent_bg_color; opacity: 1; color: alpha(@card_fg_color, 0.8); }
 /* (one to send, its bar as bright as the accent: RecordChat.quote_box) */
 button.quote-drop { min-width: 24px; min-height: 24px; padding: 0; border-radius: 0; }
-.diary-title { font-size: 1.75em; font-weight: 800; }
 dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
-.diary { font-size: 1.05em; background: transparent; }
-/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
-textview.own-selection > text > selection { background-color: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
-entry.diary-title { background: none; }
-entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
 paned.notes-split > separator { background: none; background-image: none; box-shadow: none; }
 .ref-card contents { padding: 6px 8px; }  /* (a name's card, just under the pointer: Window.ref_card) */
 .page-placeholder { font-style: italic; }

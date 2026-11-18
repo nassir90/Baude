@@ -14246,16 +14246,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def interrupt(self):
         """The turn interrupted (Esc, the stop button): asked of its claude once (pressed again meanwhile: nothing
-        more); not over within INTERRUPT_WAIT, its claude's stopped (stop_stuck), so the chat's usable again."""
+        more). Not over within INTERRUPT_WAIT, whatever runs the model, its claude's stopped (stop_stuck), so the chat's
+        usable again; at once if its host says nothing's running there to interrupt."""
         if not self.proc:
             return
         if self.interrupting is not None and self.interrupting[0] is self.proc:
             return  # (asked already: stopped outright if it doesn't end soon)
         self.drop_interrupting()
         proc = self.proc
-        proc.control({"subtype": "interrupt"})
+        self.pending[proc.control({"subtype": "interrupt"})] = (lambda r: self.interrupt_answered(proc, r), None)
         self.note("interrupt requested")
         self.interrupting = (proc, GLib.timeout_add(self.INTERRUPT_WAIT, lambda: self.stop_stuck(proc)))
+
+    def interrupt_answered(self, proc, response):
+        """An interrupt's answer: a host's, that its claude isn't running (or is being stopped), ends the turn now,
+        as no result's coming; claude's own, that it's stopping, waits for the turn's end (or INTERRUPT_WAIT)."""
+        if response.get("running") is False:
+            self.drop_interrupting()
+            self.stop_stuck(proc, ran=False)
 
     def drop_interrupting(self):
         """An interrupt's wait (interrupt) let go of: its turn's over, or its claude's gone."""
@@ -14263,21 +14271,29 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if it is not None:
             GLib.source_remove(it[1])
 
-    def stop_stuck(self, proc):
+    def stop_stuck(self, proc, ran=True):
         """An interrupted turn not over in time (its claude still starting on a resume, stuck, or gone without a
-        word): its claude stopped, the turn shown over. A host's session's, there, as Stop does it (its next message
-        starts it again); this process's own, killed and started again on the conversation."""
+        word), or with nothing running to end it (ran False: its host said so): its claude stopped, the turn shown
+        over. A host's session's, there, as Stop does it (its next message starts it again); this process's own,
+        killed and started again on the conversation."""
         self.interrupting = None
         if proc is not self.proc or not self.busy:
             return False
-        self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it")
+        self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it" if ran else
+                  f"{self.program_name()} wasn't running: turn ended")
         self.cut_short()
         if self.remote is not None:
-            self.remote.request({"op": "stop", "session": self.session_id})
+            if ran:
+                self.remote.request({"op": "stop", "session": self.session_id})
             self.blocks.clear()
-            self.set_busy(False)
+            for waiting in list(self.waiting_cards):  # (what it asked: nothing to answer now. A copy: answered()
+                if isinstance(waiting, ToolCard):  # takes the card out of waiting_cards as it goes)
+                    waiting.answered()
+            self.waiting_cards.clear()
         else:
+            self.restart_after_turn = False  # (started again now, on whatever sign-in there is)
             self.restart_proc(resume=True)
+        self.end_turn(proc)
         return False
 
     def model_said(self, value):
@@ -17314,18 +17330,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.outgrown = True
             if needs_login(msg.get("result")):
                 self.login_prompt(msg["result"])
+        self.end_turn()
+        self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
+                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
+
+    def end_turn(self, proc=None):
+        """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and
+        what waited for its end done."""
+        proc = self.proc if proc is None else proc
         self.set_busy(False)
         self.keep_chat_model()
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
             GLib.idle_add(lambda: self.restart_claude() and False)
         move, self.move_after_turn = getattr(self, "move_after_turn", None), None
-        if move is not None and move[0] is self.proc:  # (a model or provider picked while it ran: that model now)
+        if move is not None and move[0] is proc:  # (a model or provider picked while it ran: that model now)
             GLib.idle_add(lambda: self.on_model_changed(move[1]) and False)
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
-        self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
-                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning

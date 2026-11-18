@@ -137,7 +137,8 @@ class AppServer(ClaudeProc):
         self.said, self.said_lock = {}, threading.Lock()  # (notes shown: text → kind)
         self.p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, bufsize=1, env=os.environ | (env or {}))
+                                  text=True, bufsize=1, env=os.environ | (env or {}),
+                                  start_new_session=True)  # (a group of its own: what it runs, killed with it, kill_hard)
 
     def initialize(self, done, failed):
         def initialized(_):

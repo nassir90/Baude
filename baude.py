@@ -10,7 +10,7 @@ MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
     python3 baude.py [--cwd DIR] [--model MODEL] [--resume SESSION_ID]
     python3 baude.py --install | --uninstall   # app-menu launcher (per user)
 
-Keys: Enter sends, Shift+Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
+Keys: Ctrl+Enter (⌘Enter) sends, Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
 Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) shows Meta, its box focused, or
 closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
@@ -125,6 +125,7 @@ import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; se
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
 )
+import thumbs  # noqa: E402  (files' thumbnails, the system's)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
@@ -158,7 +159,7 @@ from widgets import (  # noqa: E402,F401
 )
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
-    file_children, file_icon, git_ignored, in_code, python_context,
+    file_children, file_icon, find_in_focus, git_ignored, in_code, python_context,
 )
 from kubeview import (  # noqa: E402,F401
     CERT_MANAGER_CERTIFICATE, CERT_MANAGER_ISSUER, KEDA_SCALED_JOB, KEDA_SCALED_OBJECT, KEDA_TRIGGER_AUTH, KUBE_CLIMB,
@@ -6520,9 +6521,20 @@ def attachment_widget(att, size, on_remove=None):
         make_image_interactive(thumb, att.data, att.path, att.name)
         box.append(thumb)
     else:
-        box.append(Gtk.Image.new_from_gicon(att.icon()))
+        icon = Gtk.Image.new_from_gicon(att.icon())
+        box.append(icon)
         name = Gtk.Label(label=att.name, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=22)
         box.append(name)
+        if att.path and thumbs.wanted(att.path):  # (a PDF, a video: the system's thumbnail of it, as it has one)
+            side = size * 2 // 3
+            icon.set_pixel_size(side)  # (its room from the start: a chat's history doesn't move when it comes)
+
+            def shown(tex):
+                if tex is not None:
+                    icon.set_from_paintable(tex)
+                    icon.set_pixel_size(side)
+                    icon.add_css_class("attach-thumb")
+            thumbs.thumbnail(att.path, round(side * widgets.screen_scale()), shown)
     if on_remove:
         rm = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Remove", valign=Gtk.Align.CENTER)
         rm.add_css_class("flat")
@@ -6831,6 +6843,9 @@ class SlashCompleter:
             if self.matches:
                 self.picks.move(steps[keyval])
                 self.moved = True
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+            self.hide()  # (Ctrl/⌘+Enter sends what's typed, past the list)
+            return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
@@ -6842,10 +6857,9 @@ class SlashCompleter:
 
 
 class ChatRefCompleter(meta.RefCompleter):
-    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), where Enter sends: not in code (an @ there
-    is a decorator's, an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @
-    is one word, or once the arrows have moved to it; else it sends, as Ctrl+Enter always does, and Shift+Enter is a
-    new line. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
+    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), not in code (an @ there is a decorator's,
+    an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @ is one word, or
+    once the arrows have moved to it; else it's a new line. Ctrl+Enter (⌘Enter) always sends, past the list. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
 
     def __init__(self, space, view, anchor, slash):
         self.slash = slash
@@ -6862,7 +6876,7 @@ class ChatRefCompleter(meta.RefCompleter):
         if not self.visible():
             return False
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (
-                state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK) or
+                widgets.sends(state) or state & Gdk.ModifierType.SHIFT_MASK or
                 not self.moved and " " in (self.word() or (0, ""))[1].strip()):
             self.forget()
             return False
@@ -7826,8 +7840,8 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
-        self.append(self.host_banner)
+        self.host_note = widgets.HostState()  # (its titles: show_host_state's markup)
+        self.append(self.host_note)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self.on_activate)
@@ -8021,7 +8035,7 @@ class SessionSidebar(Gtk.Box):
 
     def deactivate_host(self, key, off):
         """New session's host right-clicked → Deactivate (off), or Activate: Network.deactivate, its chats grayed and
-        the banner saying so while it is."""
+        the note over them saying so while it is."""
         if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
             network().deactivate(r, off)
             toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
@@ -8727,12 +8741,12 @@ class SessionSidebar(Gtk.Box):
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
-        """The host picked isn't there (or is deactivated): said in the banner over its chats, as they were last
+        """The host picked isn't there (or is deactivated): said in the note over its chats, as they were last
         seen."""
         said = self.host_state(self.shown_remote())
         if said is not None:
-            self.host_banner.set_title(GLib.markup_escape_text(said))
-        self.host_banner.set_revealed(said is not None)
+            self.host_note.set_title(GLib.markup_escape_text(said))
+        self.host_note.set_revealed(said is not None)
 
     def pick_host(self, key):
         """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
@@ -8749,6 +8763,24 @@ class SessionSidebar(Gtk.Box):
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
+    def new_group(self):
+        """The group a new chat's put in: the one group picked in ⋮; with several, the open chat's if it's one of them,
+        else none ("")."""
+        picked = self.group_filter()
+        if picked is None:
+            return ""
+        if len(picked) == 1:
+            return next(iter(picked))
+        win, sid = self.win, self.win.session_id
+        r = win.remote
+        if sid is None or r is not None and r.sessions.get(sid, {}).get("draft"):
+            group = getattr(win, "draft_group", "")  # (a new chat still: the group it was started in)
+        elif r is not None and sid in r.sessions:
+            group = chat_group(remote_info({**r.sessions[sid], "server": r}))
+        else:
+            group = chat_group({"id": sid})
+        return group if group in picked else ""
+
     def mine_listed(self):
         """Is a new chat here listed (this machine's host picked in New session's dropdown, and No group in ⋮: it's in
         no group till it's put in one)?"""
@@ -8756,9 +8788,10 @@ class SessionSidebar(Gtk.Box):
         return (hosts is None or HERE_HOST in hosts) and (groups is None or "" in groups)
 
     def new_chat(self):
-        """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here; or, while a new
-        one here isn't listed (⋮: only groups), one through this machine's host process (ask_remote_start: in the group
-        picked, if one is), so it's listed too."""
+        """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here. With groups
+        picked in ⋮, it's in one of them (new_group), a draft like any other till it's written in, so its folder and
+        model can still be changed (new_session's group); only while This Mac's host process is too old for drafts,
+        one through it (ask_remote_start)."""
         key = self.host_dd.value() or HERE_HOST
         if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
             # not known)
@@ -8766,7 +8799,12 @@ class SessionSidebar(Gtk.Box):
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
         elif self.mine_listed():
-            self.win.switch_to(self.win.new_session)
+            self.win.switch_to(lambda: self.win.new_session(group=""))
+        elif not host_old():
+            picked, group = self.group_filter(), self.new_group()
+            if picked is not None and group not in picked:  # (no group: listed in ⋮ too, as remote_started does)
+                self.filtered(sidebar_groups=sorted(picked | {group}))
+            self.win.switch_to(lambda: self.win.new_session(group=group))
         else:
             self.win.ask_remote_start(hosts=self.host_filter())
 
@@ -9021,15 +9059,14 @@ class SideQuestion(Gtk.ListBoxRow):
         return self.writing.text()
 
     def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line; Esc stops the answer:
-        as in Meta's box."""
+        """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item); Esc stops the answer: as in Meta's
+        box."""
         if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
@@ -10194,7 +10231,7 @@ class SidePanel(Gtk.Box):
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
         # empty)
-        self.btw_ask = widgets.Composer(send_tip="Ask (Enter)\nNew line: Shift+Enter")
+        self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
         self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
         self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
@@ -10289,15 +10326,14 @@ class SidePanel(Gtk.Box):
     ASK_HEIGHT = 63  # (px: the box's least)
 
     def _ask_key(self, _c, keyval, _code, state):
-        """Enter asks what's typed in the box over the list (nothing, while it's empty); Shift+Enter, or Enter in a
-        code block, is a new line: as in a side question's own box."""
+        """Ctrl+Enter (⌘Enter) asks what's typed in the box over the list (nothing, while it's empty); Enter is a
+        new line: as in a side question's own box."""
         if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.ask_typed()
             return True
         return False
@@ -11895,7 +11931,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
-        self.version_row = update.version_row(self)  # (and the version, its changelog: Record's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")
@@ -12088,6 +12124,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
         menu.append_item(item)
+        menu.append("Changelog", "win.changelog")
         menu.append("Full-width text", "win.fullwidth")
         menu.append("Read-only session", "win.readonly")
         menu.append("Database Schemas…", "win.dbschema")
@@ -12138,6 +12175,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
+        changelog = Gio.SimpleAction.new("changelog", None)  # (☰ → Changelog, Record's too)
+        changelog.connect("activate", lambda *_: update.changelog_dialog().present(self))
+        self.add_action(changelog)
         self.feedback_draft = None
         restart = Gio.SimpleAction.new("restart", None)
         restart.connect("activate", lambda *_: self.restart_app())
@@ -12188,7 +12228,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip="Send (Enter, or Ctrl+Enter inside a code block)\nNew line: Shift+Enter\n"
+            send_tip=f"Send ({widgets.SEND_KEY})\nNew line: Enter\n"
                      "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
@@ -12326,9 +12366,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.connect("notify::focus-widget", BaudeWindow._focus_moved)
         sc = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         for triggers, fn in (("<Control>n", lambda: self.sidebar.new_chat()), ("<Control>o", self.show_sessions),
-                             # (Ctrl+B the sessions on the left, as an editor's sidebar; the text box has no Emacs
-                             # Ctrl+B to lose. Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
-                             ("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                             # (Ctrl+Alt+B the panel on the right, as VS Code's secondary sidebar)
                              ("<Control><Alt>b", lambda: self.show_panel(not self.panel_slide.target)),
                              (widgets.META_KEY, self.toggle_meta),
                              # (⌘K / Ctrl+K: every name in the glossary, searched, as an editor's command palette)
@@ -12349,12 +12387,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             for t in triggers.split():
                 sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
                                                  Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
-        # Ctrl+F: the Kubernetes view's filter while it's open (it covers the window, so not the find bar of a Code
-        # page under it), else the Code page's find bar if that's showing
-        sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Control>f"),
-                                         Gtk.CallbackAction.new(lambda *_: self.kube.find() or self.schema.start_find() or
-                                                                                self.find_in_code())))
         self.add_controller(sc)
+        # Ctrl+B the sessions on the left, as an editor's sidebar. Ctrl+F: the find bar of the code the focus is in
+        # (the Kubernetes view's YAML or logs), else the Kubernetes view's filter while it's open (it covers the
+        # window, so not the find bar of a Code page under it), else the Code page's find bar if that's showing. Both
+        # before the focused widget: macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
+                                  ("<Control>f", lambda: find_in_focus(self) or self.kube.find() or
+                                                         self.schema.start_find() or self.find_in_code())))
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)
@@ -13456,7 +13496,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.resumed = resume
             if self.resume_reason and self.resume_reason[0] == self.session_id:  # (its last claude here exited: on_exit)
                 if run["resume"]:  # (Apple's model starts afresh: nothing resumed)
-                    self.note(f"— Resumed from {self.resume_reason[1]} —")
+                    self.note(f"— resumed from {self.resume_reason[1]} —")
                 self.resume_reason = None
             self.pending.clear()
         except OSError as e:
@@ -13604,7 +13644,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None
         reply = r.call({"op": "start", "draft": True, "prompt": "", "cwd": self.run_cwd, "model": self.model,
-                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env(), "group": ""}, timeout=10)
+                        "effort": effort, "mode": self.mode, "env": claudelib.claude_env(),
+                        "group": getattr(self, "draft_group", "")}, timeout=10)
         if reply.get("op") != "started":
             self.note(f"{THIS_MACHINE}'s host process didn't start a chat: {reply.get('error')}")
             self.update_status()
@@ -13638,8 +13679,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                   "env": claudelib.claude_env(), "group": ""}  # (Baude's own chats: in no group)
         if self.session_id and find_session(self.session_id):
             params["adopt"] = self.session_id
-        else:
-            params["prompt"] = ""
+        else:  # (a new chat: in the group it was started in, its draft not made: start_draft)
+            params["prompt"], params["group"] = "", getattr(self, "draft_group", "")
         reply = r.call(params, timeout=10)  # (on the main loop: this machine's socket, an answer in a moment)
         if reply.get("op") != "started":
             self.note(f"{THIS_MACHINE}'s host process didn't take this chat up: {reply.get('error')}")
@@ -13811,9 +13852,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """The chat's tab shown (from the Feedback tab, a file's code)."""
         self.tabs.show("chat")
 
-    def new_session(self, run_in=None):
+    def new_session(self, run_in=None, group=None):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
-        Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that."""
+        Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that. group:
+        the group it's started in (New session with one group picked in ⋮), kept while it's a draft (another folder or
+        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none."""
+        if group is not None or self.remote is None or not (self.remote.sessions.get(self.session_id) or {}).get(
+                "draft"):
+            self.draft_group = group or ""
         self.opening_remote = None  # (a network session still being fetched: not opened after all)
         run_in = self.norm_dir(run_in) if run_in else self.cwd if os.path.isdir(self.cwd) else self.run_cwd
         if run_in != self.run_cwd:
@@ -13830,7 +13876,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
-        self.apply_chat_signal()  # (a new chat: the defaults for new chats)
+        self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -13914,11 +13960,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK:
             return self.paste_attachment()
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            if state & Gdk.ModifierType.CONTROL_MASK:  # Ctrl+Enter always sends
-                self.on_send()
-                return True
-            if state & Gdk.ModifierType.SHIFT_MASK or self.composer_md.code_state()[0]:
-                return self.composer_md.newline()  # False: the TextView inserts a plain newline
+            if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
+                return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
             self.on_send()
             return True
         if keyval == Gdk.KEY_Escape and self.reverting is not None:
@@ -14190,7 +14233,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         rev["asked"] = (self.proc, rid)
 
     def revert_refused(self, rev, why):
-        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Enter asks again)."""
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
         rev["asked"] = None
         if self.reverting is rev:
             self.say_now(f"Couldn't revert: {why}")
@@ -14749,7 +14792,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
         if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)
-            self.update_status(f"{msg.get('model', '')}" + ("" if self.remote.mine else f"  ·  on {remote_name(self.remote)}"))
+            self.update_status("")
             return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
@@ -14765,7 +14808,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if msg.get("cwd") and self.norm_dir(msg["cwd"]) != self.run_cwd:
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
-            self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+            self.update_status(f"{len(msg.get('tools', []))} tools")
         elif st == "codex_turn_started":
             if not self.busy:
                 self.set_busy(True)
@@ -15046,8 +15089,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- Signal
     def signal_menu(self):
-        """The link button's dropdown: this chat's two Signal switches (shown links, and running), the defaults new
-        chats start with, and Signal's page."""
+        """The link button's dropdown: this chat's two Signal switches (shown links, and running)."""
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=8, margin_bottom=6, margin_start=10,
                       margin_end=10, width_request=310)
@@ -15069,43 +15111,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                              "Kubernetes objects, tools")
         self.signal_run = row("Activate Signal", "Look up the names in this chat's replies as they come, and let the "
                                                  "reader (a model session) read the chat")
-        line = Gtk.Box(spacing=8)
-        self.signal_default = Gtk.Label(xalign=0, wrap=True, hexpand=True, max_width_chars=30)
-        self.signal_default.add_css_class("dim-label")
-        self.signal_default.add_css_class("caption")
-        line.append(self.signal_default)
-        use = Gtk.Button(label="Use for new chats", valign=Gtk.Align.CENTER,
-                         tooltip_text="New chats start with these two switches as they are now")
-        use.add_css_class("flat")
-        use.connect("clicked", lambda *_: (save_settings(signal=self.signal_run.get_active(),
-                                                         signal_links=self.signal_show.get_active()),
-                                           self.show_signal_default()))
-        line.append(use)
-        box.append(line)
-        page = Gtk.Button(label="Signal Page", halign=Gtk.Align.END)
-        page.add_css_class("flat")
-        page.connect("clicked", lambda *_: (pop.popdown(), self.show_panel(True, "refs")))
-        box.append(page)
         pop.set_child(box)
-        pop.connect("show", lambda *_: self.show_signal_default())
         return pop
 
-    def show_signal_default(self):
-        on, links = self.chat_signal(None)
-        self.signal_default.set_label("For this chat. New chats: " + ("links shown" if links else "links hidden") +
-                                      (", activated" if on else ", not activated"))
-
-    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with the
-    # defaults ("signal" and "signal_links" in settings; the dropdown's Use for new chats sets them)
+    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with
+    # its links shown and Signal not activated
     SIGNAL_CHATS = 500  # chats whose switches are kept (the most recently changed)
 
     def chat_signal(self, sid):
-        """A chat's Signal switches, (on, links): its own if it has some, else the defaults for new chats."""
+        """A chat's Signal switches, (on, links): its own if it has some, else a new chat's (not activated, links
+        shown)."""
         s = load_settings()
         kept = (s.get("signal_chats") or {}).get(sid) if sid else None
         if isinstance(kept, list) and len(kept) == 2:
             return bool(kept[0]), bool(kept[1])
-        return bool(s.get("signal")), s.get("signal_links") is not False
+        return False, True
 
     def keep_chat_signal(self, sid, on, links):
         chats = {k: v for k, v in (load_settings().get("signal_chats") or {}).items() if k != sid}
@@ -15113,8 +15133,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         save_settings(signal_chats=dict(list(chats.items())[-self.SIGNAL_CHATS:]))
 
     def apply_chat_signal(self):
-        """The chat shown changed: its switches (a new chat's: the defaults, or what you set before it had an id), and
-        Signal as they say."""
+        """The chat shown changed: its switches (a new chat's: links shown and not activated, or what you set before
+        it had an id), and Signal as they say."""
         on, links = self.chat_signal(self.session_id) if self.session_id else \
             (self.signal_pending or self.chat_signal(None))
         for sw, value, handler in ((self.signal_run, on, self.signal_run_handler),
@@ -15471,9 +15491,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return rect
 
     def open_ref(self, surface, anchor, message=None):
-        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit /
-        branch / PR / tool shows its card, and everything else (several places, not found, stale, still looking)
-        gets a popover."""
+        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit or branch
+        shows in the Git page, a pull request or issue opens as ⌘K opens it (fixview.open_github: its page, or one of
+        Baude's own feedback issues on the Feedback tab), a tool shows its card, and everything else (several places,
+        not found, stale, still looking) gets a popover."""
         dec = self.signal.decision(message, surface) if self.signal else None
         if dec is not None and dec["verdict"] == "link" and dec.get("path"):
             full = os.path.join(self.signal.root, dec["path"])
@@ -15516,7 +15537,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if ref.status == "resolved" and ref.kind in ("commit", "branch"):  # (its place in the history: the Git page)
             self.show_git_ref(ref)
             return
-        if ref.status == "resolved" and (ref.kind in ("pr", "tool", "subagent", "skill") or ref.data.get("context")):
+        if ref.status == "resolved" and ref.kind == "pr" and ref.data.get("url"):  # (not its card: its page)
+            d = ref.data
+            return fixview.open_github(self, {"pr": not d.get("issue"), "repo": d["repo"], "number": d["number"],
+                                              "url": d["url"]})
+        if ref.status == "resolved" and (ref.kind in ("tool", "subagent", "skill") or ref.data.get("context")):
             self.show_ref(surface)
             return
         defs = [l for l in ref.locations if l["role"] != "used"]
@@ -16587,6 +16612,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         server (start_remote_proc) as Baude's own claude is. Its folder is this window's only when its server is on
         this machine: links to files elsewhere are fetched from it (open_remote_link)."""
         r = info["remote"]
+        self.draft_group = ""  # (a new chat's group: not another's)
         self.remember_own_writes()
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)
@@ -17006,8 +17032,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
         once it's written in, as a new chat here is."""
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
-        picked = self.sidebar.group_filter()
-        group = next(iter(picked)) if picked is not None and len(picked) == 1 else ""
+        group = self.sidebar.new_group()
         model = self.model if self.model and model_program(self.model) == "claude" else None
         self.note(f"a new session on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
@@ -17073,6 +17098,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def resume_session(self, info):
         if info.get("remote") is not None:
             return self.open_remote(info)
+        self.draft_group = ""  # (a new chat's group: not another's)
         self.remember_own_writes()  # before the view switches to the other session
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc; a host's chat's let go of, before it's not this one)
@@ -17275,7 +17301,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
         if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
-            self.note(f"— Resumed from {reason} —")
+            self.note(f"— resumed from {reason} —")
         elif self.resumed_note:
             self.note("— resumed —")
         self.resumed_note, self.resume_reason = False, None
@@ -17317,7 +17343,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
-                           f" · in {tok} / out {u.get('output_tokens', 0)} tok")
+                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning

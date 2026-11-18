@@ -167,25 +167,24 @@ def changelog(commit, root=HERE):
             (line.split("\x1f", 2) for line in (out or "").splitlines() if line.count("\x1f") == 2) if stamp.isdigit()]
 
 
-def version_row(dialog, commit=None, root=HERE):
-    """Settings → Version (Baude's and Record's): the commit this process's code is (STARTED), and when it was made;
-    View Changelog shows the commits it has, with their dates, as a page of dialog's (an Adw.PreferencesDialog)."""
-    commit = commit or STARTED
+def version(commit, root=HERE):
+    """The commit's short hash and when it was made, or None (not a git checkout)."""
     made = git(root, "log", "-1", "--format=%h%x1f%ct", commit, timeout=5) if commit else None
     short, _, stamp = (made or "").partition("\x1f")
-    row = Adw.ActionRow(title=f"Version {short}" if stamp.isdigit() else "Version unknown",
-                        subtitle=made_when(int(stamp)) if stamp.isdigit() else "Not a git checkout")
-    button = Gtk.Button(label="View Changelog", valign=Gtk.Align.CENTER, sensitive=stamp.isdigit())
-    button.connect("clicked", lambda *_: dialog.push_subpage(changelog_page(commit, root)))
-    row.add_suffix(button)
-    row.changelog_button = button
-    return row
+    return (short, int(stamp)) if stamp.isdigit() else None
 
 
-def changelog_group(commit, root=HERE, limit=None):
-    """The commits the version has (changelog), newest first, each its subject and when it was made, as rows; past
-    limit, a Show N more row (Meta's changelog, under its reply)."""
-    group, made = Adw.PreferencesGroup(), changelog(commit, root)
+def version_row(commit=None, root=HERE):
+    """Settings → Version (Baude's and Record's): the commit this process's code is (STARTED), and when it was made."""
+    made = version(commit or STARTED, root)
+    return Adw.ActionRow(title=f"Version {made[0]}" if made else "Version unknown",
+                         subtitle=made_when(made[1]) if made else "Not a git checkout")
+
+
+def changelog_group(commit, root=HERE, limit=None, made=None):
+    """The commits the version has (changelog, or made if given), newest first, each its subject and when it was made,
+    as rows; past limit, a Show N more row (Meta's changelog, under its reply)."""
+    group, made = Adw.PreferencesGroup(), changelog(commit, root) if made is None else made
 
     def add(short, stamp, subject):
         row = Adw.ActionRow(title=subject, subtitle=f"{made_when(stamp)} · {short}", use_markup=False)
@@ -206,10 +205,17 @@ def changelog_group(commit, root=HERE, limit=None):
     return group
 
 
-def changelog_page(commit, root=HERE):
-    """View Changelog: the commits the version has (changelog_group), as a page."""
-    page, group = widgets.settings_page(), changelog_group(commit, root)
+def changelog_dialog(commit=None, root=HERE):
+    """☰ → Changelog (Baude's and Record's): the commits the running version has (changelog_group), newest first, in a
+    dialog whose header names that version and when it was made."""
+    commit = commit or STARTED
+    made, entries = version(commit, root), changelog(commit, root)
+    page, group = widgets.settings_page(), changelog_group(commit, root, limit=50, made=entries)
+    if not entries:
+        group.add(Adw.ActionRow(title="No changelog", subtitle="No commits to list"))
     page.add(group)
+    head = Adw.HeaderBar(title_widget=Adw.WindowTitle(
+        title="Changelog", subtitle=f"Version {made[0]} · {made_when(made[1])}" if made else ""))
     view = Adw.ToolbarView(content=page)
-    view.add_top_bar(Adw.HeaderBar())
-    return Adw.NavigationPage(title="Changelog", child=view)
+    view.add_top_bar(head)
+    return Adw.Dialog(title="Changelog", content_width=640, content_height=720, child=view)

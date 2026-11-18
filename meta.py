@@ -1569,7 +1569,7 @@ class Agent:
         turn, self.turn = self.turn, None
         if turn is not None:
             error = None if turn.get("stopped") else \
-                ("\n".join(self.stderr[-6:]).strip() or f"claude exited with {code}")[-600:]
+                ("\n".join(self.stderr[-6:]).strip() or f"{self.runs} exited with {code}")[-600:]
             self.chat._done(self, "".join(turn["text"]).strip(), error, turn)
         self.chat.agent_gone(self)
         return False
@@ -1851,6 +1851,9 @@ class RefCompleter:
             if self.shown:
                 self.picks.move(steps[keyval])
                 self.moved = True
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+            self.forget()  # (Ctrl/⌘+Enter sends, past the list)
+            return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
             self.accept()
         elif keyval == Gdk.KEY_Escape:
@@ -2003,7 +2006,11 @@ class MetaChat(Gtk.Box):
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
                            margin_start=12, margin_end=12)
-        self.scroll = widgets.markdown_scroller(self.box, vexpand=True)
+        # (a selection across messages, yours and its replies, as Baude's chat has one: widgets.ChatSelection, its
+        # shading in an overlay over the conversation, under the forms pinned over it)
+        shaded = Gtk.Overlay(child=self.box)
+        self.scroll = widgets.markdown_scroller(shaded, vexpand=True)
+        self.text_selection = widgets.ChatSelection(self.box, self.scroll, shaded)
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
         # widgets.inside), all of the column's height theirs (clear, or /clear, asked: cleared, submit)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
@@ -2161,8 +2168,8 @@ class MetaChat(Gtk.Box):
         level = effort()
         name = model_name() + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
         name += ", runs commands" if runs_commands() else ""
-        self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) (Enter)\n" \
-                                "New line: Shift+Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
+        self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) ({widgets.SEND_KEY})\n" \
+                                "New line: Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         agent = self.agent
@@ -2240,7 +2247,7 @@ class MetaChat(Gtk.Box):
         self.render()
 
     def _key(self, _c, keyval, _code, state):
-        """Enter asks (Ctrl+Enter too); Shift+Enter, or Enter in a code block, is a new line, as in Baude; a selection
+        """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item), as in Baude; a selection
         and * ` or / is made bold, code or italic; @'s list, while it's up, has the arrows, Enter, Tab and Esc
         (RefCompleter); Esc stops the reply."""
         if self.refs.handle_key(keyval, state):
@@ -2255,9 +2262,8 @@ class MetaChat(Gtk.Box):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not state & Gdk.ModifierType.CONTROL_MASK and (state & Gdk.ModifierType.SHIFT_MASK
-                                                               or markdown.code_state()[0]):
-                return markdown.newline()
+            if not widgets.sends(state):
+                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.ask:
@@ -2266,6 +2272,7 @@ class MetaChat(Gtk.Box):
         return False
 
     def render(self):
+        self.text_selection.forget()  # (its labels gone with what's drawn again)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         for m in self.messages() if self.ready() else ():

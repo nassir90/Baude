@@ -1275,14 +1275,13 @@ def test_effort(app):
 def test_context_usage(app):
     win = app.window()
     try:
-        wait_for(lambda: "24k" in win.ctx_label.get_text(), "context after start")
-        assert "200k" in win.ctx_label.get_text() and "12%" in win.ctx_label.get_text(), win.ctx_label.get_text()
+        wait_for(lambda: "24k" in win.ctx_bar.text, "context after start")
         assert abs(win.ctx_bar.get_value() - 0.12) < 0.01
         assert "System tools: 17k" in win.ctx_box.get_tooltip_text()
         type_and_send(win, "hi")
         wait_for(lambda: button(win, "Allow"), "permission")
         button(win, "Allow").emit("clicked")
-        wait_for(lambda: "25.5k" in win.ctx_label.get_text(), "context refreshed after the turn")
+        wait_for(lambda: "25.5k" in win.ctx_bar.text, "context refreshed after the turn")
     finally:
         close(win)
 
@@ -6214,7 +6213,7 @@ def test_settings_rows_take_the_width(app):
 
 
 def test_settings_version_and_changelog(app):
-    """Settings has the version running, the commit its code is, and View Changelog: a page of the commits that version
+    """Settings has the version running, the commit its code is, and ☰ → Changelog: a dialog of the commits that version
     has, newest first, merges left out."""
     win = app.window()
     settings = baude.SettingsDialog(win)
@@ -6224,10 +6223,12 @@ def test_settings_version_and_changelog(app):
         running = update.git(update.HERE, "log", "-1", "--format=%h", update.STARTED)
         has = update.git(update.HERE, "log", "--no-merges", "--format=%h", update.STARTED).split()
         assert running and running in settings.version_row.get_title() and has, settings.version_row.get_title()
-        settings.version_row.changelog_button.emit("clicked")
-        wait_for(lambda: [w for w in walk(settings) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
-        listed = [w.commit for w in walk(settings) if hasattr(w, "commit")]
-        assert listed == has, (listed[:3], has[:3])
+        win.activate_action("win.changelog", None)
+        log = win.get_visible_dialog()
+        wait_for(lambda: [w for w in walk(log) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
+        listed = [w.commit for w in walk(log) if hasattr(w, "commit")]
+        assert listed == has[:50], (listed[:3], has[:3])
+        log.close()
     finally:
         settings.close()
         close(win)
@@ -6432,18 +6433,15 @@ def test_chat_goes_narrow(app):
     try:
         win.sidebar.set_visible(True)
         win.panel.set_visible(True)
-        win.ctx_label.set_text("context 24k / 200k · 12%")
         pump(0.5)
         bar_width = win.ctx_bar.measure(Gtk.Orientation.HORIZONTAL, -1).natural
-        assert win.ctx_bar.get_width() == bar_width > 0 and not win.ctx_label.get_layout().is_ellipsized(), \
-            (win.ctx_bar.get_width(), bar_width)
+        assert win.ctx_bar.get_width() == bar_width > 0, (win.ctx_bar.get_width(), bar_width)
         win.capture_bar.set_reveal_child(True)
         pump(0.4)
         win.capture_bar.set_reveal_child(False)
         wait_for(lambda: not win.capture_bar.get_child_revealed(), "the Capture bar gone", 3)
         win.split.set_position(200)  # (narrow, and wider than all it has at its least)
         pump(0.3)
-        assert win.ctx_label.get_layout().is_ellipsized()
         win.split.set_position(0)  # (as far as it goes: the chat at its least)
         pump(0.3)
         chat, panel = (w.compute_bounds(win)[1] for w in (win.tabs, win.panel))
@@ -10088,7 +10086,7 @@ def _ref_session(folder, sid, replies):
 
 def test_signal_per_chat(app):
     """Signal's switches are each chat's own, as Remote Control is: a chat keeps them, another chat has its own, a new
-    chat starts with the defaults (and keeps what you set once it has an id), and Use for new chats sets those. Two
+    chat starts with links shown and Signal not activated (and keeps what you set once it has an id). Two
     windows on one folder share its Signal: it runs while one's chat has it on, and the other's chat, off, looks
     nothing up and doesn't stop it."""
     repo = os.path.join(TMP, "perchat")
@@ -10125,22 +10123,10 @@ def test_signal_per_chat(app):
         win.h_system({"type": "system", "subtype": "init", "session_id": "c4a70000-0000-4000-8000-00000000000c"})
         assert baude.load_settings()["signal_chats"]["c4a70000-0000-4000-8000-00000000000c"] == [False, False]
         assert win.signal_pending is None
-        # Use for new chats
-        win.signal_show.set_active(True)
-        win.signal_run.set_active(True)
-        win.show_signal_default()
-        assert "New chats: links shown, not activated" in win.signal_default.get_label()
-        button(win.signal_btn.get_popover().get_child(), "Use for new chats").emit("clicked")
-        assert baude.load_settings().get("signal") is True and "activated" in win.signal_default.get_label()
-        win.resume_session(win.sidebar.find_info(b))  # (b: off; its window's Signal follows b, links only)
+        # an old saved default of Signal on: a new chat still starts with it off
+        baude.save_settings(signal=True, signal_links=False)
         win.new_session()
-        assert win.signal_run.get_active(), "a new chat now starts with Signal on"
-        assert ref.transcript is None and ref.agent is None or ref.agent.path is None, \
-            "a new chat with no transcript: the reader doesn't go on reading b"
-        win.h_system({"type": "system", "subtype": "init", "session_id": "c4a70000-0000-4000-8000-00000000000d"})
-        baude.save_settings(signal=False)
-        assert win.chat_signal("c4a70000-0000-4000-8000-00000000000d") == (True, True), \
-            "a chat keeps the switches it started with when the defaults change later"
+        assert not win.signal_run.get_active() and win.signal_show.get_active(), "a new chat: links shown, not on"
         save = baude.load_settings()
         baude.save_settings(signal=False, signal_chats={k: v for k, v in save["signal_chats"].items() if k in (a, b)})
         # two windows, one folder: a (on) here, b (off) there
@@ -11008,14 +10994,16 @@ def test_git_avatars(app):
             subject = find(long, Gtk.Label, lambda l: l.get_text() == _AVATAR_LONG)[0]
             assert subject.get_layout().is_ellipsized(), "a long subject's cut short"
             assert long.get_width() <= page.list.get_width() and long.get_height() == row.get_height()
-            lane = row.avatar.get_parent().get_first_child()
-            assert isinstance(lane, baude.GitLane) and lane.get_next_sibling() is row.avatar, "beside the line"
+            framed = row.avatar.get_parent()  # (its shade over it: shaded_picture)
+            lane = framed.get_parent().get_first_child()
+            assert isinstance(lane, baude.GitLane) and lane.get_next_sibling() is framed, "beside the line"
             assert " · Naza · +1 −0 in 1 file" in labels_text(row), labels_text(row)
             assert row.get_tooltip_text().endswith("· Start"), row.get_tooltip_text()
             # a faint row's faint all over
             c = page.commits[0]
-            assert abs(page.row(c, baude.git_lanes([c])[0], 1, dim=True).avatar.get_opacity() - 0.55) < 0.01
-            assert page.row(c, baude.git_lanes([c])[0], 1).avatar.get_opacity() == 1
+            faint = page.row(c, baude.git_lanes([c])[0], 1, dim=True).avatar.get_parent()
+            assert abs(faint.get_opacity() - 0.55) < 0.01
+            assert page.row(c, baude.git_lanes([c])[0], 1).avatar.get_parent().get_opacity() == 1
 
             # rows drawn again, a page more, a chat's commits, the times said again: no flicker, nothing read again
             page.chat = {"commits": {page.commits[0]["sha"][:7]: {"subject": "Mine"}}}

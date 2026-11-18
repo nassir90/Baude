@@ -118,9 +118,8 @@ def agents(path=None):
 def endpoints(path=None):
     """Other members' providers that serve HTTP, as OpenAI-compatible endpoints on this machine (its host process's
     Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, provider, provider_name, host
-    (the member's id), host_name, url, key, models: [{id, displayName, window, tools, input}]}], from the file this
-    machine's host process keeps in its runtime folder.
-    [] if it isn't running."""
+    (the member's id), host_name, url, key, models: [{id, displayName, window, digest, tools, input, thinking}]}], from
+    the file this machine's host process keeps in its runtime folder. [] if it isn't running."""
     try:
         with open(path or os.path.join(wire.runtime_dir(), ENDPOINTS), encoding="utf-8") as f:
             kept = json.load(f)
@@ -989,7 +988,8 @@ class Mesh:
         eps = [{"id": endpoint_id(m["id"], p["id"]), "name": f"{p['name']} on {m['name']}", "provider": p["id"],
                 "provider_name": p["name"], "host": m["id"], "host_name": m["name"],
                 "url": f"{proxy['url']}/{m['id']}/{urllib.parse.quote(p['id'], safe='')}", "key": proxy["key"],
-                "models": [{k: x[k] for k in ("id", "displayName", "window", "digest", "tools", "input") if k in x}
+                "models": [{k: x[k] for k in ("id", "displayName", "window", "digest", "tools", "input", "thinking")
+                            if k in x}
                            for x in p["models"]]}
                for m in view["members"] for p in m["providers"] if p.get("http") and proxy]
         agents = [{"provider": p["id"], "provider_name": p["name"], "host": m["id"], "host_name": m["name"],

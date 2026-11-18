@@ -153,7 +153,8 @@ def models(live=False):
     out += [(m["value"], m["displayName"], list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None,
              m.get("provider") or providerslib.provider_of(m["value"]))
             for m in modelslib.runnable_models(tools=True, wait=PROVIDERS_WAIT)]
-    out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"], None, f"openai/{e['id']}")
+    out += [(f"openai/{e['id']}/{m['id']}", m.get("displayName") or m["id"],
+             list(modelslib.EFFORT["supportedEffortLevels"]) if m.get("thinking") is True else None, f"openai/{e['id']}")
             for e in providerslib.mesh_endpoints() for m in e["models"] if m.get("tools", True)]
     out += [(m["value"], m["displayName"], None, m["provider"])
             for m in providerslib.mesh_agents() if m.get("tools", True)]  # (another host's that serves no API: run

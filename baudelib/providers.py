@@ -220,7 +220,7 @@ def elsewhere(p, member):
         pid = f"openai/{mesh.endpoint_id(member, p['id'])}"
         return pid, [{"value": f"{pid}/{m.get('id') or m['value']}", "provider": pid,
                       "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m} |
-                     served(m) for m in p.get("models") or []]
+                     served(m) | (EFFORT if m.get("thinking") is True else {}) for m in p.get("models") or []]
     pid = f"{modelslib.AGENT}{member}/{p['id']}"
     return pid, [{"value": f"{modelslib.AGENT}{member}/{m['value']}", "provider": pid,
                   "displayName": m.get("displayName") or m["value"]} | {k: m[k] for k in keep if k in m} |
@@ -372,6 +372,9 @@ def unreachable(url, e):
 
 # ---- Ollama
 
+EFFORT = modelslib.EFFORT  # (a thinking model's, Ollama's here or another host's: pi asks its server with
+# reasoning_effort, "none" for off)
+
 _SHOWN = {}  # (Ollama's /api/show of a model, by its digest: what it can do, its window)
 
 
@@ -421,7 +424,7 @@ def ollama_entry(name, shown, loaded=None, size=None):
              "provider": "ollama", "providerName": "Ollama", "tools": "tools" in caps,
              "input": ["text", "image"] if "vision" in caps else ["text"], "window": ollama_window(shown, loaded)}
     if "thinking" in caps:
-        entry |= {"thinking": True, "supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}
+        entry |= {"thinking": True} | EFFORT
     if size:
         entry["size"] = size
     return entry
@@ -802,7 +805,8 @@ def resolve(value, timeout=TIMEOUT):
             listed = next((m for m in there["models"] if m["resolvedModel"] == mid), {})
             error = there["error"] and f"{ep['name']} {there['error']}"
         return {"value": value, "repo": mid, "displayName": mid,
-                "input": listed.get("input") or ["text"], "thinking": False, "tools": listed.get("tools", True),
+                "input": listed.get("input") or ["text"], "thinking": listed.get("thinking") is True,
+                "tools": listed.get("tools", True),
                 "window": listed.get("window") or ep.get("window") or DEFAULT_WINDOW, "provider": pid, "kind": "openai",
                 "url": ep["url"], "baseUrl": ep["url"], "apiKey": key_of(ep) or "none", "error": error}
     return None

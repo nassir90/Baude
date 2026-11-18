@@ -392,6 +392,12 @@ def use_served():
     if model.get("error"):
         raise RuntimeError(model["error"])
     if kind != "ollama":
+        if window < SMALL_WINDOW and model.get("window"):  # (another host's Ollama, mostly: its window as it said)
+            host, name = providers.where(model.get("provider"))
+            say(f"{model['repo']} has {window:,} tokens at {name}" + (f" on {host}" if host else "") +
+                ", too few for pi's instructions and tools: give it a longer context length" +
+                (f" (Ollama's Settings on {host or 'its host'}, or OLLAMA_CONTEXT_LENGTH there)" if name == "Ollama"
+                 else ""))
         return
     loaded = providers.ollama_loaded(model["url"]).get(model["repo"])
     if not loaded:

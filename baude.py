@@ -14667,17 +14667,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             offered.append(info(shown))
         kinds = providerslib.alike(offered, [shown] if shown else [])
         own = [m for m in self.models_info.values() if m["value"] not in ("default", "codex/default") and
-               m["value"] not in seen and pid_of(m) is None]
-        if shown and pid is None and not any(m["value"] == shown for m in own):  # (Claude's, by a name claude didn't
-            own.append(info(shown))  # list: claude-opus-5-5, its server's say, for opus; the same one as it, or its own)
-        claudes = modelslib.claude_alike(own)  # (Claude's, one of each: opus, Opus 5.5, is claude-opus-5-5 too)
-        listed = [lead for lead, _ms in claudes] + [lead for lead, _ms in kinds]
-        pick = next((lead["value"] for lead, ms in claudes if any(m["value"] == shown for m in ms)), shown)
+               m["value"] not in seen and pid_of(m) is None]  # (Claude's as claude lists them, each its own row)
+        same = modelslib.claude_match(shown, own) if shown and pid is None else None  # (the chat's model said
+        if shown and pid is None and same is None:  # another way, claude-opus-5-5, its server's say: the row it is;
+            own.append(info(shown))  # else its own row, last)
+        pick = same["value"] if same else shown
+        listed = own + [lead for lead, _ms in kinds]
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
-        said = {lead["value"]: modelslib.claude_label(ms) for lead, ms in claudes}
-        names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else said[m["value"]])
-                 for m in listed]
-        self.model_names = {m["value"]: said[lead["value"]] for lead, ms in claudes for m in ms} | dict(names)
+        names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
+                  m.get("displayName") or m["value"]) for m in listed]
+        self.model_names = dict(names) | ({shown: dict(names)[pick]} if same else {})
         self.model_dd.set_choices(names or MODELS)
         if pick:
             self.model_dd.select(pick)
@@ -16933,9 +16932,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             f"{remote_name(r)} ({r.host})"  # noqa: E731
         def offered(r):
             host = r or local_host()
-            return [(lead["value"], modelslib.claude_label(ms)) for lead, ms in modelslib.claude_alike(  # (one of each)
-                [m for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"])] \
-                or MODELS
+            return [(m["value"], m.get("displayName") or m["value"])
+                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
         servers_dd = agent_dd = None
         if said:  # (the host it's to be on: said, not picked)
             field("Host", Gtk.Label(label=named(servers[0]), xalign=0))

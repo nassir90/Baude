@@ -71,7 +71,7 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
-from baudelib.transcripts import rewind_mark, task_notification  # noqa: E402  (a background task's ending, as said;
+from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification, transcript_model  # noqa: E402  (a background task's ending, as said;
 # a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
@@ -81,7 +81,7 @@ import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
-from codeview import FindInText  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
+from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 
@@ -793,10 +793,12 @@ class Store:
 # ---------------------------------------------------------------- transcripts
 
 def _text_of(content):
+    """A message's text, without the reminders a client put before what was typed (strip_reminders)."""
     if isinstance(content, str):
-        return content
+        return strip_reminders(content)
     if isinstance(content, list):
-        return "\n\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        return "\n\n".join(t for b in content if isinstance(b, dict) and b.get("type") == "text"
+                           and (t := strip_reminders(b.get("text", ""))).strip())
     return ""
 
 
@@ -810,7 +812,8 @@ def parse_records(lines, items, seen=None):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. A revert (rewind_mark) takes back the items after the record it
+    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
+    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
     keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
@@ -833,6 +836,11 @@ def parse_records(lines, items, seen=None):
         msg = d.get("message") or {}
         text = _text_of(msg.get("content")).strip()
         if kind == "user":
+            first = "\0first user" not in seen  # (kept with seen: the file's first user record is read once)
+            seen["\0first user"] = True
+            if first and started_outside(d) and not _is_noise(text):
+                items.append({"role": "start", "text": text, "id": d.get("uuid")})
+                continue
             if _is_noise(text) or d.get("toolUseResult") is not None:
                 continue
             if (note := task_notification(text)) is not None:
@@ -1491,6 +1499,8 @@ dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
 .diary { font-size: 1.05em; background: transparent; }
+/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
+textview.own-selection > text > selection { background-color: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
 entry.diary-title { background: none; }
@@ -1722,7 +1732,8 @@ def chat_text(path, title, cwd):
     with open(path, encoding="utf-8", errors="replace") as f:
         parse_records(f, items)
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
-    return "\n\n".join([head] + [f"**{'You' if it['role'] == 'user' else 'Claude'}:**\n\n{it['text']}" for it in items
+    who = {"user": "You", "start": "Started with"}
+    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
                                   if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
@@ -2525,6 +2536,7 @@ class NotesView(Gtk.TextView):
         self.logos, self.marks, self.blocks = [], [], []
         self.restyled = None  # (told when its style's changed: the text's size or colour, DiaryEditor._heading_looks)
         self.resized, self.width_was = None, None  # (told when its width's changed)
+        self.add_css_class("own-selection")  # (GTK's selection unseen: _snapshot_selection draws it)
 
     def do_size_allocate(self, width, height, baseline):
         Gtk.TextView.do_size_allocate(self, width, height, baseline)
@@ -2574,7 +2586,10 @@ class NotesView(Gtk.TextView):
             if self.blocks:
                 self._snapshot_blocks(snapshot, self.in_view())
             return
-        if layer != Gtk.TextViewLayer.ABOVE_TEXT or not (self.logos or self.marks):
+        if layer != Gtk.TextViewLayer.ABOVE_TEXT:
+            return
+        self._snapshot_selection(snapshot, self.in_view())
+        if not (self.logos or self.marks):
             return
         buf = self.get_buffer()
         first, last, _l1, _l2 = self.in_view()
@@ -2612,6 +2627,54 @@ class NotesView(Gtk.TextView):
             snapshot.translate(Graphene.Point().init(x, r.y + (r.height - logical.height) / 2))
             snapshot.append_layout(layout, color)
             snapshot.restore()
+
+    SELECTION_CAP = 1.5  # (a line's selection no taller than this many of the text's lines)
+    SELECTION_END = 0.35  # (a line's end inside a selection, its newline: this many of the text's line high, wide)
+
+    def _snapshot_selection(self, snapshot, view):
+        """What's selected, in view, a rectangle a line shrunk to its text: as wide as what's selected of the line; as
+        tall as a line of its style's text (the text's, or a heading's at its scale: the same for every line of it,
+        whatever's in it), no more than SELECTION_CAP text lines, at the bottom of the line. None of the space a
+        heading has above it, or between paragraphs. A line's end that's selected, a little more: a blank line in the
+        selection shows. Over the text, as a chat's selection is, so a code span's or a highlight's colour is under it."""
+        buf = self.get_buffer()
+        bounds = buf.get_selection_bounds()
+        if not bounds:
+            return
+        start, end = bounds
+        first, last = max(start.get_offset(), view[0]), min(end.get_offset(), view[1])
+        if first >= last:
+            return
+        fill = widgets.accent_rgba()
+        fill.alpha = 0.3  # (as ChatSelection shades a chat's)
+        text_h = self.create_pango_layout("Ag").get_pixel_size()[1]
+        cap, nub = text_h * self.SELECTION_CAP, round(text_h * self.SELECTION_END)
+        table = buf.get_tag_table()
+        headings = [(tag, tag.get_property("scale") if tag.get_property("scale-set") else 1)
+                    for n in range(1, 7) if (tag := table.lookup(f"h{n}")) is not None]
+        it = buf.get_iter_at_offset(first)
+        while it.get_offset() < last:
+            here = self.get_cursor_locations(it)[0]
+            nxt = it.copy()  # (the next display line's start: a wrapped line's or the next paragraph's)
+            if not self.forward_display_line(nxt) or nxt.get_offset() <= it.get_offset():
+                nxt = buf.get_end_iter()
+            extra = 0
+            if last < nxt.get_offset() or nxt.is_end():  # (the selection ends on this line)
+                x = self.get_cursor_locations(buf.get_iter_at_offset(last))[0].x
+            else:
+                ink = nxt.copy()
+                ink.backward_char()
+                if ink.get_char() == "\n":  # (its newline selected too)
+                    x, extra = self.get_cursor_locations(ink)[0].x, nub
+                else:  # (wrapped: to the end of its last character, whose caret's place is on the next line)
+                    x = self.char_rect(ink).x + self.get_iter_location(ink).width
+            line = buf.get_iter_at_line(it.get_line())[1]
+            scale = next((k for tag, k in headings if line.has_tag(tag)), 1)
+            height = min(text_h * scale, cap)
+            left, width = min(x, here.x), abs(x - here.x) + extra  # (a line right to left too)
+            if width:
+                snapshot.append_color(fill, Graphene.Rect().init(left, here.y + here.height - height, width, height))
+            it = nxt
 
     def _snapshot_blocks(self, snapshot, view):
         """Each code block's card in view (in_view): Baude's raised fill and one rule round it, the width of the text."""
@@ -2870,6 +2933,12 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.title = Gtk.Entry(has_frame=False, hexpand=True)
         self.title.add_css_class("diary-title")
         self.title.connect("activate", lambda *_: self._title_entered())
+        self.title.connect("changed", lambda *_: self._title_typed())
+        title_keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (before its text's IM)
+        title_keys.connect("key-pressed", lambda _c, kv, _k, state: kv == Gdk.KEY_Escape and not state & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK
+            | Gdk.ModifierType.SHIFT_MASK) and self._title_escaped())
+        self.title.add_controller(title_keys)
         leave = Gtk.EventControllerFocus()
         # (once what took the focus is done: it can be a page's row, being clicked, and renaming lists the pages again)
         leave.connect("leave", lambda *_: GLib.idle_add(self.rename_page))
@@ -3010,6 +3079,27 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.scroll.get_vadjustment().set_value(0)
         self.view.grab_focus()
 
+    def _title_typed(self):
+        """The title as it's typed in: the page's name in the pages' list and on its tab says what's typed, at once
+        (renamed only once it's kept: rename_page). Nothing typed, or only spaces: its own name, as it'd stay."""
+        win = self.win
+        if self.notebook is None or getattr(win, "pages", None) is None:
+            return
+        typed, own = self.title.get_text().strip(), short_page(self.page)
+        shown = typed if typed and self.page != HOME else own
+        win.pages.typed(self.notebook, self.page, None if shown == own else shown)
+        if win.tabs.get(("note", self.page)) is self:
+            win.tabs.retitle(("note", self.page), shown, tooltip=self.page)
+
+    def _title_escaped(self):
+        """Escape in the title: what's typed in it let go, its own name back (in the list and on its tab too), and
+        on to its text, the caret where it was (the find bar, open, closed too: as Escape in the text)."""
+        self.title.set_text(short_page(self.page))
+        if self.search_bar.get_search_mode():
+            FindInText.close_search(self)
+        self.view.grab_focus()
+        return True
+
     def rename_page(self):
         """The title edited (the page's own name: it stays under its parent): the page renamed with its sub-pages,
         and every [[link]] to any of them; a +link stays one where it still can (its page's sub-page). Their tabs
@@ -3032,6 +3122,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         pages.clear()  # (the same dict: the notebook keeps it)
         pages.update(renamed)
         self.win.store.save()
+        self.win.pages.typed(self.notebook, old, None)  # (kept: listed by its new name, in its place)
         self.win.note_renamed(moved)
 
     def reload(self):
@@ -4849,6 +4940,7 @@ class PagesList(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.notebook, self.listed = win, None, None
+        self.typing = {}  # (a page's title being typed in, not yet kept: {page: (its notebook, the name shown)}, typed)
         self.head = widgets.group_header("Pages", win.store.pages_folded, lambda: self.set_folded(not self.folded),
                                          plus=("list-add-symbolic", "New page (+Name in a page makes one under it)",
                                                self.new_page))
@@ -4942,7 +5034,7 @@ class PagesList(Gtk.Box):
         for name in order:
             depth = name.count(":")
             box = Gtk.Box(spacing=6, margin_start=6 + depth * widgets.TreeList.INDENT, margin_end=4)
-            lb = widgets.FadeLabel(label=short_page(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
+            lb = widgets.FadeLabel(label=self.shown_name(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
             if name in grey:
                 lb.add_css_class("dim-label")
                 lb.add_css_class("page-placeholder")
@@ -4961,6 +5053,31 @@ class PagesList(Gtk.Box):
             self.index.append(row)
             if name == shown:
                 self.index.select_row(row)
+
+    def shown_name(self, page):
+        """A page's name in the list: what's typed in its title as it's typed (typed), while its page is open;
+        else its own (and what was typed let go: its page closed, deleted or moved before the name was kept)."""
+        notebook, name = self.typing.get(page, (None, None))
+        editor = self.win.tabs.get(("note", page)) if notebook is not None else None
+        if editor is None or getattr(editor, "notebook", None) is not notebook:
+            self.typing.pop(page, None)
+            return short_page(page)
+        return name if notebook is self.notebook else short_page(page)
+
+    def typed(self, notebook, page, name):
+        """A page's title typed in (DiaryEditor._title_typed): its row named so at once, where it is (it's sorted
+        again once the name's kept); name None, its own name back."""
+        if name is None:
+            self.typing.pop(page, None)
+        else:
+            self.typing[page] = (notebook, name)
+        if notebook is not self.notebook:
+            return
+        i = 0
+        while (row := self.index.get_row_at_index(i)) is not None:
+            if row.page == page:
+                row.tree_anchor.set_label(self.shown_name(page))
+            i += 1
 
     def page_menu(self, row, x, y):
         """A page's menu (right-click on it in the list): New Page… (one under it), then Rename… (its title, to
@@ -5337,6 +5454,13 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "start":  # (what a session started from outside was asked: at its top, as Baude has it)
+            view = widgets.start_prompt_view(it["text"])
+            row.append(view)
+            row.prose, row.item = view, it
             self.rows.append(row)
             self.box.append(row)
             return
@@ -5951,6 +6075,23 @@ class RecordChat(meta.MetaChat):
     def taken(self, msg):
         self.set_quote("")
 
+    def held(self):
+        return self.quote, self.selection, self.quote_label.get_text()
+
+    def put_held(self, held):
+        if held is not None:
+            quote, selection, shown = held
+            self.set_quote(quote or "")
+            self.selection = selection
+            self.quote_label.set_text(shown)
+
+    def restored(self, msg):
+        sel, nb = msg.get("selection"), self.notebook
+        if sel and nb is not None and msg.get("notebook") == nb.get("id"):
+            self.set_selection(nb, sel["page"], sel.get("start"), sel.get("end"), msg.get("quote") or sel["text"])
+        else:
+            self.set_quote(msg.get("quote") or "")
+
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection"), "notebook": self.notebook}
 
@@ -6004,6 +6145,9 @@ class RecordChat(meta.MetaChat):
 
     def _clear(self):
         super()._clear()
+        self.after_revert()
+
+    def after_revert(self):
         for child in self.win.tabs.children():  # (and what it proposed, from the pages open)
             if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
                 child.show_pending()
@@ -6884,7 +7028,7 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
-        self.version_row = update.version_row(self)  # (and the version, its changelog: Baude's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
@@ -6981,8 +7125,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
         # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
-        self.host_banner = Adw.Banner(use_markup=True)
-        books.append(self.host_banner)
+        self.host_note = widgets.HostState()
+        books.append(self.host_note)
         books.append(self.pages)
         self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,
                                                lambda: self.fold_books(not self.store.books_folded),
@@ -7057,6 +7201,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         menu.append("Detach all", "win.detach")
         view = Gio.Menu()
         view.append("Full-width text", "win.fullwidth")
@@ -7069,6 +7214,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
+        app_menu.append("Changelog", "win.changelog")
         item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
@@ -7076,14 +7222,16 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         app_menu.append(f"Restart {noun()}", "win.restart")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
-        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("rename", self.rename),
+        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
+                         ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),
                          ("exportall", lambda: self.ask_export(self.store.notebooks, book(plural=True))),
                          ("detach", self.detach),
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
-                         ("fixes", lambda: self.open_fixes())):
+                         ("fixes", lambda: self.open_fixes()),
+                         ("changelog", lambda: update.changelog_dialog().present(self))):
             a = Gio.SimpleAction(name=name)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)
@@ -7111,8 +7259,12 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         self.add_action(launcher)
         self.meta_from = None  # (where the focus was last outside the right bar: close_meta)
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
-        for triggers, fn in (("<Control>b F9", lambda: self.left_slide.toggle()),
-                             ("<Control><Alt>b", lambda: self.right_slide.toggle()),
+        # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
+        # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
+        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or self.find_in_code()
+        widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
+                                  (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
+        for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
                              (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),
                              (widgets.NAV_KEYS["back"], lambda: self.tabs.back()),  # (⌥⌘ ← → ↑: a browser's
@@ -7120,8 +7272,6 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                              (widgets.NAV_KEYS["up"], lambda: self.go_up()),
                              (widgets.SETTINGS_KEY, lambda: Settings(self).present(self)),
                              (widgets.PALETTE_KEY, lambda: self.open_palette()),
-                             (" ".join(m + "f" for m in widgets.ZOOM_MODS),  # (as Baude's: what's over it first)
-                              lambda: self.kube.find() or self.schema.start_find() or self.find_in_code()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
                               lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
                              (widgets.zoom_keys("minus", "underscore", "KP_Subtract"),
@@ -7491,7 +7641,26 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         chat = (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
-                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}"]
+                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}",
+                *feedback.report_lines([("the chat", self.report), ("Meta", self.chat.report)])]
+
+    def report(self, most=None):
+        """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
+        and folder, then its transcript, each tool call with its input and result (meta.transcript_report); None if no
+        chat's open."""
+        chat = (self.reader.chat if self.reader is not None else None) or {}
+        if not (path := chat.get("path")) or not os.path.exists(path):
+            return None
+        head = [("App", "Record"), ("Chat", f"{os.path.splitext(os.path.basename(path))[0]} ({chat.get('title') or '-'})"),
+                ("Model", transcript_model(path) or ""), ("Folder", chat.get("cwd") or ""),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        return meta.transcript_report(head, path, most=most)
+
+    def copy_report(self):
+        if (text := self.report()) is None:
+            return widgets.toast(self, "No chat open")
+        self.get_clipboard().set(text)
+        widgets.toast(self, "Transcript copied")
 
     def apply_full_width(self, on):
         """☰ → Full-width text, as Baude's: the chat read and the diary across the whole pane, not a column. (Adw.Clamp
@@ -7817,18 +7986,20 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         r, name = self.host_remote(key), dict(self.note_hosts()).get(key, store.host_name)
         if r is None:
             return f"Looking for {name} on the network…"
+        if not r.deactivated and (said := r.said_stopping(name)) is not None:  # (stopping: said as it goes)
+            return said
         if self.reachable(r):
             return None
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
-        """The host shown isn't there (or is deactivated): said in the banner over the left bar, its notebooks as
+        """The host shown isn't there (or is deactivated): said in the note over the left bar, its notebooks as
         they were last listed; what's changed in them is sent once it's back."""
         said = self.host_state()
         if said is not None:
-            self.host_banner.set_title(GLib.markup_escape_text(said))
-        self.host_banner.set_revealed(said is not None)
+            self.host_note.set_title(GLib.markup_escape_text(said))
+        self.host_note.set_revealed(said is not None)
 
     def host_menu(self, x, y):
         """Right-click the notebooks' host (another machine's), as Baude's New session's: Host Command…, for one
@@ -7854,7 +8025,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 
     def deactivate_host(self, key, off):
         """The host right-clicked → Deactivate (off), or Activate: as Baude's (Network.deactivate, kept in
-        servers.json and by this machine's host process); the banner says so while it is."""
+        servers.json and by this machine's host process); the note over them says so while it is."""
         if (r := self.host_remote(key)) is not None:
             network().deactivate(r, off)
             self.toast(f"{remote_name(r)} {'deactivated' if off else 'activated'}")

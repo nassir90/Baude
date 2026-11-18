@@ -888,6 +888,24 @@ class FeedbackDialog(Adw.Dialog):
         return folder
 
 
+REPORT_MOST = ISSUE_BODY_MOST - 15000  # (what a note's copied conversations take of its issue's body, at most)
+
+
+def report_lines(sources):
+    """A note's Context lines for the conversations open as it's sent (feedback_context): sources, [(what it is,
+    report(most) -> text or None)], each that has one in a code fence under a heading, the room shared between them."""
+    lines, most = [], REPORT_MOST // max(1, len(sources))
+    for name, report in sources:
+        try:
+            text = report(most)
+        except Exception as e:  # (a note is still sent without it)
+            text = f"(not copied: {e})"
+        if text:
+            fence = "`" * max(3, max(map(len, re.findall(r"`+", text)), default=0) + 1)
+            lines += ["", f"Transcript of {name}:", "", fence + "text", text.rstrip("\n"), fence]
+    return lines
+
+
 def save_feedback(draft, renderer, win=None):
     """feedback/<time>/: feedback.md (what you wrote, where it came from and the text in each capture's regions, quoted,
     each capture), capture-N.png, capture-N-marked.png (regions drawn on) and capture-N.txt (the screen's text).
@@ -946,7 +964,7 @@ def feedback_items():
         except OSError:
             continue
         head, _, rest = md.partition("\n")
-        context = dict(re.findall(r"^- (session|folder): (.*)$", md, re.M))
+        context = dict(reversed(re.findall(r"^- (session|folder): (.*)$", md, re.M)))  # (the first: a transcript's after)
         chat = re.search(r"\((.*)\)$", context.get("session", ""))
         resolution = resolved_at = issue = None
         try:

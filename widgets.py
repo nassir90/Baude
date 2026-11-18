@@ -1041,6 +1041,12 @@ def pr_title(p, repo, number):
     return " · ".join(x for x in (f"{repo}#{number}", said, (p or {}).get("title")) if x)
 
 
+def pill_code_scale():
+    """A pill's size of the text's: code's (code_scale), never more than the text's (a code font measured larger than
+    the prose's, as one can be, leaves pills the prose's size)."""
+    return min(1.0, code_scale())
+
+
 def chat_repo():
     """The GitHub repository (owner/name) the reply being drawn is in, what a bare #12 in it means: its Signal's (the
     chat's checkout's origin), else its folder's as GITHUB has read it. None if there's none."""
@@ -1053,7 +1059,8 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     chat's (chat_repo: another's keeps its link as it was) unless any_repo (a link to one, whose shape says it is: its
     pill, in where it stands once that's read, and a link's colour till then), with no gh or gh signed out, if
     nothing's been read of its pull requests (and not any_repo), or (known) if number isn't one of them as far as is
-    known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered)."""
+    known: an issue, or nothing (a bare #12 may be either, or a colour). Its own #12 in inner reads 12 (pr_numbered),
+    at code's size (pill_code_scale: a number among `names` is as big as they are; LinkLabel's logo and patch follow)."""
     if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
         return None
     if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
@@ -1061,7 +1068,9 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     p = lookup.PULLS.pull(repo, number)
     if p is None and known:
         return None
-    return pr_pill_markup(pr_numbered(inner, number),
+    # (a size="…%" is a share of the label's own size, not of the span it's in: code in a link's text keeps its)
+    inner = f'<span size="{round(pill_code_scale() * 100)}%">{pr_numbered(inner, number)}</span>'
+    return pr_pill_markup(inner,
                           href or (p or {}).get("url") or f"https://github.com/{repo}/pull/{number}",
                           pr_title(p, repo, number), (p or {}).get("state"))
 
@@ -1130,6 +1139,36 @@ def ref_markup(ref, inner, icon=True):
     return f'{slot}<a href="{href}" title="{html.escape(title)}">{inner}</a>'
 
 
+# Well-known cloud, hosting and platform providers: named in replies all the time, and a link to "an outside product"
+# (or to the one config file that mentions it) tells you nothing, so Signal never links them, nor their own products
+# (a provider's name and a word after it: AWS Lambda, Cloudflare R2, Supabase Auth)
+CLOUD_PROVIDERS = frozenset(n.casefold() for n in (
+    "Cloudflare", "Vercel", "Netlify", "Supabase", "Firebase", "Shopify",
+    "AWS", "Amazon Web Services", "GCP", "Google Cloud", "Google Cloud Platform", "Azure", "Microsoft Azure",
+    "Heroku", "DigitalOcean", "Digital Ocean", "Fly.io", "Linode", "Akamai", "Fastly", "Hetzner", "OVH", "OVHcloud",
+    "Render.com", "Railway.app", "PlanetScale", "Upstash", "Appwrite", "Auth0", "Okta", "Stripe", "Twilio", "SendGrid",
+    "Mailgun", "Sentry", "Datadog", "New Relic", "GitHub Pages", "Oracle Cloud", "IBM Cloud", "Alibaba Cloud",
+    "Backblaze"))
+
+
+def ref_cloud_provider(surface):
+    """Whether a name is one of CLOUD_PROVIDERS, or one of them and a word after it (a product of theirs): never a
+    link. Written with a capital, in any case past that (AWS, Aws, Firebase); all in lower case (sentry, aws,
+    stripe) it's as likely this code's own: a package, a module, a Deployment."""
+    name = surface.strip()
+    if name == name.lower():
+        return False
+    name = name.casefold()
+    if name in CLOUD_PROVIDERS:
+        return True
+    head = name.rpartition(" ")[0]
+    while head:  # (AWS Lambda, Google Cloud Storage: a provider's name, and words after it)
+        if head in CLOUD_PROVIDERS:
+            return True
+        head = head.rpartition(" ")[0]
+    return False
+
+
 REF_BARE_NUMBER = re.compile(r"#\d+")  # (in code it's no link: a colour, a comment; owner/name#12 says what it is)
 
 
@@ -1140,6 +1179,8 @@ def ref_code_markup(code, message=None):
         return None
 
     def markup(s, inner):
+        if ref_cloud_provider(s):
+            return None
         if (dec := SIGNAL.decision(message, s)) is not None:  # (no logos in code: its columns stay put)
             return ref_decision_markup(s, dec, inner, icon=False) if dec["verdict"] != "plain" else None
         r = SIGNAL.refs.get(s)  # (a plain word: not in code blocks, where nothing decides it)
@@ -1169,6 +1210,8 @@ def ref_link(text, inner, backticked):
     if SIGNAL is None:
         return None
     key = ref_key(text)
+    if ref_cloud_provider(key):  # (Cloudflare, Vercel…: noise as a link)
+        return None
     if backticked and REF_BARE_NUMBER.fullmatch(key):  # (code: a colour's #333 as like as not)
         return None
     git = SIGNAL.refs.get(key)
@@ -1641,6 +1684,37 @@ class UpdateBar(Gtk.Box):
                                          "A new version is ready")
 
 
+class HostState(Gtk.Revealer):
+    """Over a sidebar's list: what's in the way of the host it lists (gone, deactivated), an island inset from the
+    sidebar's edges, as an empty list says it (the subagents' "No subagents yet"): a boxed-list with only its
+    placeholder (empty_label), outlined as the side panel's lists are. set_title: what it says (markup);
+    set_revealed: whether it's shown."""
+
+    def __init__(self):
+        super().__init__(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.label = empty_label("")
+        self.label.set_margin_top(12)
+        self.label.set_margin_bottom(12)
+        self.label.set_margin_start(12)
+        self.label.set_margin_end(12)
+        self.label.set_wrap(True)
+        self.label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)  # (a long host name, an address: broken too)
+        self.label.set_justify(Gtk.Justification.CENTER)
+        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, focusable=False, margin_start=8, margin_end=8,
+                          margin_top=6, margin_bottom=6, css_classes=["boxed-list", "host-state"])
+        box.set_placeholder(self.label)
+        self.set_child(box)
+
+    def set_title(self, markup):
+        self.label.set_markup(markup)
+
+    def set_revealed(self, on):
+        self.set_reveal_child(on)
+
+    def get_revealed(self):
+        return self.get_reveal_child()
+
+
 TASK_ENDINGS_SAID = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
 
 
@@ -1691,29 +1765,71 @@ def fmt_tokens(n):
 
 
 class ContextMeter(Gtk.LevelBar):
-    """The context bar: WIDTH wide given the room, narrower as its column is (a width_request held it open)."""
+    """The context bar, its count ("24k / 200k") drawn in it: over the fill in the window's background colour, after
+    it in its text colour, so each part reads against what's under it. WIDTH wide given the room, narrower as its
+    column is (a width_request held it open)."""
 
-    WIDTH = 90  # px
+    WIDTH = 110  # px
 
     def __init__(self, **kw):
         super().__init__(**kw)
+        self.text = ""
+        self.add_css_class("context-meter")
         self.set_layout_manager(WidthLayout())
 
     def width_of(self, least, natural):
         return least, max(natural, self.WIDTH)
 
+    def set_text(self, text):
+        self.text = text
+        self.update_property([Gtk.AccessibleProperty.DESCRIPTION], [text])
+        self.queue_draw()
+
+    def do_snapshot(self, snapshot):
+        Gtk.LevelBar.do_snapshot(self, snapshot)
+        width, height = self.get_width(), self.get_height()
+        if not self.text or width <= 0:
+            return
+        layout = self.create_pango_layout(self.text)
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_scale_new(0.8))
+        attrs.insert(Pango.attr_font_features_new("tnum"))
+        layout.set_attributes(attrs)
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        layout.set_width((width - 6) * Pango.SCALE)
+        text_w, text_h = (v / Pango.SCALE for v in layout.get_size())
+        origin = Graphene.Point().init(max(3, (width - text_w) / 2), (height - text_h) / 2)
+        fill = math.floor(width * (self.get_value() - self.get_min_value()) / ((self.get_max_value() - self.get_min_value()) or 1))
+        if self.get_direction() == Gtk.TextDirection.RTL:
+            spans = ((width - fill, width, True), (0, width - fill, False))
+        else:
+            spans = ((0, fill, True), (fill, width, False))
+        found, bg = self.get_style_context().lookup_color("window_bg_color")
+        for start, end, on_fill in spans:
+            if end <= start:
+                continue
+            snapshot.push_clip(Graphene.Rect().init(start, 0, end - start, height))
+            snapshot.save()
+            snapshot.translate(origin)
+            snapshot.append_layout(layout, bg if on_fill and found else self.get_color())
+            snapshot.restore()
+            snapshot.pop()
+
 
 class ContextUsage(Gtk.Box):
-    """How much of its context window a session's used, Baude's chat's and Meta's alike: "context 24k / 200k · 12%" and
-    a bar, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's answer). Past the
-    window ("context 12.4k / 8.2k · 151%"), the bar's full: over."""
+    """How much of its context window a session's used, Baude's chat's and Meta's alike: "context" and a bar with
+    "24k / 200k" in it, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's
+    answer). Past the window ("12.4k / 8.2k"), the bar's full: over."""
 
     def __init__(self, **kw):
-        super().__init__(spacing=8, tooltip_text="Context window usage", **kw)
+        super().__init__(spacing=6, tooltip_text="Context window usage", **kw)
         self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
-        self.bar.add_offset_value("ctx-mid", 0.6)
-        self.bar.add_offset_value("ctx-high", 0.85)
+        for name in ("low", "high", "full"):
+            self.bar.remove_offset_value(name)
+        self.bar.add_offset_value("ctx-low", 0.6)
+        self.bar.add_offset_value("ctx-mid", 0.85)
+        self.bar.add_offset_value("ctx-high", 1.0)
         self.append(self.label)
         self.append(self.bar)
         self.reset()
@@ -1730,19 +1846,65 @@ class ContextUsage(Gtk.Box):
             return
         self.bar.set_visible(True)
         self.over = used > total
-        self.label.set_text(f"context {fmt_tokens(used)} / {fmt_tokens(total)} · {used / total:.0%}")
+        self.label.set_text("context")
+        self.bar.set_text(f"{fmt_tokens(used)} / {fmt_tokens(total)}")
         self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
                  if c.get("tokens") and c.get("kind") != "deferred"]
-        self.set_tooltip_text("Context window usage\n" + "\n".join(lines))
+        self.set_tooltip_text(f"Context window usage: {used / total:.0%}\n" + "\n".join(lines))
 
     def reset(self):
         """No session's: nothing used yet."""
         self.over = False
-        self.label.set_text("context —")
+        self.label.set_text("context")
+        self.bar.set_text("—")
         self.bar.set_visible(True)
         self.bar.set_value(0)
         self.set_tooltip_text("Context window usage")
+
+
+class UserTurn(Gtk.Box):
+    """A message of yours in a conversation (Baude's chat, a side question's, Meta's): the whole width of it is its row,
+    its bubble at the right. With the pointer anywhere in the row, a revert button fades in just outside the bubble,
+    level with its last line, and fades out as it leaves (win: what it's in, its revert_to: this message and
+    everything after it taken back, and what it said put back in the box; its can_revert: whether it can be now)."""
+
+    def __init__(self, win, bubble, text, uuid):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
+                                 tooltip_text="Revert: take back this message and everything after it, and put it "
+                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
+                                 opacity=0, can_target=False)
+        self.revert.add_css_class("flat")
+        self.revert.add_css_class("circular")
+        self.revert.add_css_class("revert-turn")
+        self.revert.connect("clicked", lambda *_: win.revert_to(self))
+        self.append(self.revert)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_revert(True))
+        hover.connect("leave", lambda *_: self.show_revert(False))
+        self.add_controller(hover)
+
+    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
+    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
+    fade = None
+
+    def show_revert(self, on):
+        on = on and self.uuid is not None and self.win.can_revert()
+        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
+        self.revert.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
+        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
 
 
 class Exhausted:
@@ -1814,7 +1976,7 @@ class LinkLabel(WrapLabel):
     CHIP_PAD, CHIP_SCALE, CHIP_RADIUS = 5, 0.78, 4  # px either side of a chip's name, its size of the text's, and its
     # corners' px: .git-ref's, as a chip on its own had them (a pill's corners too)
     PILL_IN, PILL_OUT = 4, 5  # px: a pill's margin before its logo, and after its name
-    pill_scale = 1.0  # (a pill's size of the text's: a log row's are a chip's size)
+    pill_scale = None  # (a pill's size of the text's: code's, as pr_pill draws its number; a log row's a chip's)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -1833,9 +1995,13 @@ class LinkLabel(WrapLabel):
         m = self.get_pango_context().get_metrics(None, None)
         return m.get_ascent(), m.get_descent(), max(10, round((m.get_ascent() + m.get_descent()) / Pango.SCALE * 0.78))
 
+    def pill_ratio(self):
+        """A pill's size of the text's: pill_scale, else its number's (pill_code_scale)."""
+        return self.pill_scale or pill_code_scale()
+
     def pill_px(self):
         """A pill's logo's size, px."""
-        return max(8, round(self.icon_px * self.pill_scale))
+        return max(8, round(self.icon_px * self.pill_ratio()))
 
     def place_icons(self):
         """Find the places kept for logos, chips' and pills' ends, and make each its width (again, when the text's size
@@ -1905,7 +2071,7 @@ class LinkLabel(WrapLabel):
 
         def pixel(v, base):
             return round((base + v) * scale) / scale - base
-        small = (ascent - descent) / Pango.SCALE / 2 * (1 - self.pill_scale)  # (a smaller pill's middle: lower)
+        small = (ascent - descent) / Pango.SCALE / 2 * (1 - self.pill_ratio())  # (a smaller pill's middle: lower)
         for at, icon, pad, color, px, lower in [(at, icon, 0, fg, self.icon_px, 0) for at, icon in self.icons] + \
                 [(at, "merge", self.PILL_IN, pr_rgba(state, fg), self.pill_px(), small) for at, _end, state in self.pills]:
             size = max(8, round(px * scale))
@@ -1925,7 +2091,7 @@ class LinkLabel(WrapLabel):
         def chip_box(scale):  # (top, height) of a patch, from the baseline
             return -(ascent * scale + 1), (ascent + descent) * scale + 2
         tall = round((ascent + descent) * 0.86)
-        pill_box = chip_box(self.pill_scale) if self.pill_scale < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
+        pill_box = chip_box(self.pill_ratio()) if self.pill_ratio() < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
         patches = [(s, e, chip_colors(kind, fg)[1], chip_box(self.CHIP_SCALE)) for s, e, kind in self.chips]
         for s, e, state in self.pills:
             color = pr_rgba(state, fg)
@@ -2973,7 +3139,7 @@ class ComposerMarkdown:
     headings at the chat's sizes, bold/italic/inline code, shaded code blocks. Markdown
     symbols (#, **, `) are hidden except on the line being edited. Bullets are stored as
     "•" while editing and turned back into "-" by to_markdown() when the message is sent.
-    Also continues lists on Shift+Enter."""
+    Also continues lists on Enter."""
 
     def __init__(self, view):
         self.view, self.buf = view, view.get_buffer()
@@ -3056,7 +3222,7 @@ class ComposerMarkdown:
         return block is not None, bool(block and block[2])
 
     def newline(self):
-        """Enter/Shift+Enter handling. In a code block: a plain new line, and an unclosed block
+        """Enter's handling (a box's, not sending). In a code block: a plain new line, and an unclosed block
         gets its closing fence, so the new line is never the (unstylable) last line.
         On a list item: the next item. Returns False to let the TextView insert a newline."""
         block = self._block_here()
@@ -3186,7 +3352,7 @@ class ComposerMarkdown:
         return False
 
     def continue_list(self):
-        """Shift+Enter on a list item starts the next item (or ends the list if this one is
+        """Enter on a list item starts the next item (or ends the list if this one is
         empty). Returns False when the cursor isn't on a list item."""
         buf = self.buf
         cur = buf.get_iter_at_mark(buf.get_insert())
@@ -3207,6 +3373,22 @@ class ComposerMarkdown:
         return True
 
 
+SEND_KEY = "⌘Enter" if sys.platform == "darwin" else "Ctrl+Enter"  # (what sends from a box: Enter is a new line)
+
+
+def sends(state):
+    """Whether Enter with these modifiers sends what's written: Ctrl+Enter, or ⌘Enter on a Mac too. Plain Enter is a
+    new line (a list's next item); Shift+Enter a plain line break (newline_key)."""
+    return bool(state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)) if sys.platform == "darwin" \
+        else bool(state & Gdk.ModifierType.CONTROL_MASK)
+
+
+def newline_key(markdown, state):
+    """Enter not sending, in a box (ComposerMarkdown): Shift+Enter a plain line break (False: the TextView's own),
+    inside a list item too, as Record's pages have it; Enter a new line, a list's next item."""
+    return False if state & Gdk.ModifierType.SHIFT_MASK else markdown.newline()
+
+
 class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
     written: ComposerMarkdown) in a card, at least two lines tall and scrolling past nine, with its buttons in its
@@ -3214,7 +3396,7 @@ class Composer(Gtk.Overlay):
     any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
     as it needs (Record's quote). Its owner connects the send button and the keys."""
 
-    def __init__(self, buttons=(), send_tip="Send (Enter)\nNew line: Shift+Enter"):
+    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter"):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
         self.input.add_css_class("zoomable")
@@ -3387,6 +3569,30 @@ def toast(widget, text):
     root = widget.get_root()
     if root is not None and hasattr(root, "toasts"):
         root.toasts.add_toast(Adw.Toast(title=text, timeout=2))
+
+
+def shaded_picture(picture):
+    """picture (an Adw.Avatar: someone's picture; a bot's; a Gtk.Picture...) set into the page: a shade over it, darker
+    to its rim, as if pressed in (.picture-shade), so a photo isn't a flat cut-out on the grey. In a Gtk.Overlay
+    (returned: what goes in the layout, and what's dimmed to dim it all) that clips it and its shade to one shape,
+    round, or the theme's corners. Its place in the layout (alignment, margins, expanding) the frame's, so the shade
+    covers the picture and no more. Over an avatar, the shade's there only while it shows a picture, not initials."""
+    frame = Gtk.Overlay(css_classes=["picture-frame"], overflow=Gtk.Overflow.HIDDEN,
+                        halign=picture.get_halign(), valign=picture.get_valign(),
+                        hexpand=picture.get_hexpand(), vexpand=picture.get_vexpand())
+    for side in ("top", "bottom", "start", "end"):
+        getattr(frame, f"set_margin_{side}")(getattr(picture, f"get_margin_{side}")())
+        getattr(picture, f"set_margin_{side}")(0)
+    picture.set_halign(Gtk.Align.FILL)
+    picture.set_valign(Gtk.Align.FILL)
+    frame.set_child(picture)
+    shade = Gtk.Box(css_classes=["picture-shade"], can_target=False)
+    frame.add_overlay(shade)
+    if isinstance(picture, Adw.Avatar):  # (its picture can come later, or go)
+        shown = lambda *_: shade.set_visible(picture.get_custom_image() is not None)  # noqa: E731
+        picture.connect("notify::custom-image", shown)
+        shown()
+    return frame
 
 
 def make_image_interactive(widget, data, path=None, name=None, url=None):
@@ -5236,12 +5442,26 @@ class ExpandStack(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+def natural_height(scroller):
+    """scroller's child at its natural height, kept so for each child it's given later (each gets a viewport of its
+    own). At its minimum, GTK's default once it's taller than the view, every code block in it is squashed to what its
+    own scroller needs at least, a line or less, its text cut off at the bottom: as soon as the text's size (Settings
+    → Size, the zoom) makes what's there outgrow the pane. Returns scroller."""
+    def natural(*_):
+        if isinstance(child := scroller.get_child(), Gtk.Scrollable):
+            child.set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    natural()
+    if not getattr(scroller, "natural_height", False):
+        scroller.natural_height = True
+        scroller.connect("notify::child", natural)
+    return scroller
+
+
 def markdown_scroller(child, **kw):
     """The scrolled window markdown (MarkdownView) is read in: Baude's chat, Record's Read and its Record's answers.
-    Its child at its natural height (at its minimum, GTK's default, a code block is squashed to a line), nothing
-    scrolled sideways, and a long code block a pane of at most 2/3 of what's visible (CodeBlock.set_max_height)."""
-    scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw)
-    scroller.get_child().set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    Its child at its natural height (natural_height), nothing scrolled sideways, and a long code block a pane of at
+    most 2/3 of what's visible (CodeBlock.set_max_height)."""
+    scroller = natural_height(Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw))
     scroller.get_vadjustment().connect("notify::page-size", lambda adj, _p: adj.get_page_size() > 0 and
                                        CodeBlock.set_max_height(adj.get_page_size() * 2 / 3))
     return scroller
@@ -6576,6 +6796,54 @@ def code_attrs(text, spans, dark, skip=()):
     return attrs
 
 
+START_PROMPT_HEIGHT = 260  # (past this, the prompt a session was started with scrolls in its own box)
+
+
+def start_prompt_view(text, above=None):
+    """The prompt a session was started with from outside, at the top of its chat (Baude's and Record's): a dim
+    heading, the prompt as markdown (under above, its images, if any) in a box that scrolls once it's long, and a rule
+    under it."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    head = Gtk.Label(label="Started with this prompt", xalign=0)
+    head.add_css_class("dim-label")
+    head.add_css_class("caption-heading")
+    box.append(head)
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    if above is not None:
+        inner.append(above)
+    inner.append(MarkdownView(text))
+    scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, max_content_height=START_PROMPT_HEIGHT,
+                                propagate_natural_height=True, child=inner)
+    pass_edge_scroll(scroll)
+    box.append(scroll)
+    box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+    return box
+
+
+def pass_edge_scroll(scroll):
+    """A scrolling box inside the chat's that doesn't keep the wheel at its ends: scrolled up at its top (or down at
+    its bottom, or when it has nothing to scroll), the chat scrolls instead."""
+    ctl = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL,
+                                    propagation_phase=Gtk.PropagationPhase.CAPTURE)
+
+    def on_scroll(ctl, _dx, dy):
+        adj = scroll.get_vadjustment()
+        value, top, end = adj.get_value(), adj.get_lower(), adj.get_upper() - adj.get_page_size()
+        if not (dy < 0 and value <= top or dy > 0 and value >= end - 0.5 or end <= top):
+            return False  # (its own to scroll)
+        outer = scroll.get_parent()
+        while outer is not None and not isinstance(outer, Gtk.ScrolledWindow):
+            outer = outer.get_parent()
+        if outer is None:
+            return False
+        oadj = outer.get_vadjustment()
+        step = dy if ctl.get_unit() == Gdk.ScrollUnit.SURFACE else dy * oadj.get_page_size() ** (2 / 3)
+        oadj.set_value(min(max(oadj.get_value() + step, oadj.get_lower()), oadj.get_upper() - oadj.get_page_size()))
+        return True
+
+    ctl.connect("scroll", on_scroll)
+    scroll.add_controller(ctl)
+
 class LineGutter(Gtk.Widget):
     """Line numbers beside a TextView (its left gutter), the marked line's in bold."""
 
@@ -7130,6 +7398,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .composer-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
+.file-thumb { border-radius: 3px; }
 .attach-chip.image { background: none; padding: 0; }
 .codeblock { background: @baude_raised; border-radius: 6px; }
 .kube-error-fix { background: @baude_raised; border-radius: 6px; padding: 2px 2px 2px 10px; }
@@ -7180,6 +7449,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 levelbar block.filled { background-color: @accent_bg_color; }
 levelbar block.ctx-mid { background-color: @warning_color; }
 levelbar block.ctx-high { background-color: @error_color; }
+levelbar.context-meter trough, levelbar.context-meter block { min-height: 16px; border-radius: 4px; }
 .session-row { padding: 6px 4px; }
 /* a compact list: rows 28px apart instead of libadwaita's 38 */
 .session-sidebar list.navigation-sidebar > row { min-height: 26px; padding-top: 1px; padding-bottom: 1px;
@@ -7229,9 +7499,12 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .tool-group > box > box > label { opacity: 0.8; }
 /* a tool card's Command / Output: small toggle buttons after its name, only a little rounded */
 .tool-card button.tool-toggle { min-height: 0; min-width: 0; padding: 1px 7px; font-size: 0.85em; border-radius: 4px; }
-/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed */
+/* the side panel sits on the window background, split by a 1px rule; lists are outlined, not shadowed, and so are a
+   sidebar's host state (an island as they are: HostState) and the box a side question's asked in (inside its edge, as
+   theirs is: as tall as an empty list, it lines up with one) */
 .side-panel { background: transparent; }
-.side-panel .boxed-list { box-shadow: none; border: 1px solid @baude_rule; }
+.side-panel .boxed-list, .boxed-list.host-state, .side-panel .composer-box.side-question-ask {
+  box-shadow: none; border: 1px solid @baude_rule; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its
@@ -7265,6 +7538,11 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .artifact-chip .artifact-icon { color: @accent_color; }
 .tasks-indicator { padding: 0 8px; min-height: 0; font-size: 0.95em; }
 .ref-kind { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
+/* (shaded_picture: someone's picture pressed into the page, its rim in shadow, as evenly a square's as a circle's,
+   its middle as it is. The frame clips the picture and its shade to one shape: round, under a square theme square) */
+.picture-frame, .picture-frame avatar, .picture-frame picture, .picture-shade { border-radius: 9999px; }
+.picture-shade { box-shadow: inset 0 0 4px alpha(black, 0.3), inset 0 1px 2px alpha(black, 0.4),
+  inset 0 0 0 1px alpha(black, 0.16); }
 .git-log { background: transparent; }
 .git-log row { padding: 0 8px 0 2px; }
 .git-ref { font-size: 0.78em; padding: 0 5px; border-radius: 4px; background: alpha(@accent_bg_color, 0.14); color: @accent_color; }
@@ -7923,6 +8201,17 @@ ZOOM_MODS = ("<Control>", "<Meta>") if sys.platform == "darwin" else ("<Control>
 SETTINGS_KEY = "<Meta>comma" if sys.platform == "darwin" else "<Control>comma"  # (⌘, as a Mac app's Settings…)
 FEEDBACK_KEY = "<Meta>period" if sys.platform == "darwin" else "<Control>period"  # (Send Feedback…, over whatever's open)
 META_KEY = "<Control>m"  # (Meta shown and focused, or closed if open; Control on macOS too: ⌘M is Minimize)
+
+
+def first_keys(window, keys):
+    """Window shortcuts (triggers, fn) taken in the capture phase, before the focused widget sees the key: for keys
+    macOS's text boxes bind themselves (Ctrl+B / Ctrl+F, Emacs's back / forward a character)."""
+    sc = Gtk.ShortcutController(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    for triggers, fn in keys:
+        for t in triggers.split():
+            sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t),
+                                             Gtk.CallbackAction.new(lambda *_, fn=fn: fn() or True)))
+    window.add_controller(sc)
 
 
 def zoom_keys(*keys):

@@ -821,7 +821,7 @@ class FilesPage(Gtk.Box):
         if getattr(exp, "opened", None) is not None:
             exp.opened[0].disconnect(exp.opened[1])
             exp.opened = None
-        if node.is_dir:  # (open or closed as its row is: a click on it opens it, so no arrow beside it)
+        if node.is_dir:  # (open or closed as its row is)
             def folder(*_a, row=row, icon=icon):
                 icon.set_from_icon_name("folder-open-symbolic" if row.get_expanded() else "folder-symbolic")
             folder()

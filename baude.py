@@ -5718,6 +5718,18 @@ def track_commands(commands, msg):
             commands.pop(k)
 
 
+STOP_SAID_RE = re.compile(r"\W*(api error:\s*)?((the )?(request|operation) (was )?(aborted|interrupted|cancell?ed)"
+                          r"( by (the )?user)?|this operation was aborted|aborted|interrupted|cancell?ed"
+                          r"|\[request interrupted by user[^\]]*\])\W*", re.I)
+
+
+def ended_by_stop(msg):
+    """Whether a turn's end (its result), coming after Esc or the stop button, is what stopping it says: Claude Code's
+    error_during_execution, or its words (⚠ This operation was aborted, API Error: Request was aborted.), Codex's
+    too. Not another error that came meanwhile (a sign-in's, a full context's): that one's still said."""
+    return msg.get("subtype") == "error_during_execution" or bool(STOP_SAID_RE.fullmatch(msg.get("result") or ""))
+
+
 def api_error_label(text):
     """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
     colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: widgets.CSS), and
@@ -12960,6 +12972,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def set_busy(self, busy):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
+            if self.proc is not None:
+                self.proc.stop_asked = False  # (nor a stop asked of the last)
         self.busy = busy
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
@@ -14127,6 +14141,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         finally:
             if rev["turn"].is_ancestor(self.transcript):
                 self.reverting = rev
+        if self.busy:  # (the turn it stops ends as a stopped one: not an error, h_result)
+            self.proc.stop_asked = True
         rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": turn.uuid,
                                  "interrupt_if_running": True})
         self.pending[rid] = (lambda r: self.reverted(rev, r), lambda error: self.revert_refused(rev, error))
@@ -14194,9 +14210,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.fill_jobs.extend(kept)
 
     def interrupt(self):
+        """Esc, or the stop button: the turn stopped. Nothing said yet: its end says it, once (h_result)."""
         if self.proc:
+            self.proc.stop_asked = True
             self.proc.control({"subtype": "interrupt"})
-            self.note("interrupt requested")
 
     def model_said(self, value):
         """A model's name as a note says it: as the model picker lists it (Qwen3 4B)."""
@@ -14917,8 +14934,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
         if msg.get("is_api_error_message") or m.get("model") == "<synthetic>":
+            stopped = parent is None and getattr(self.proc, "stop_asked", False)
             for c in m.get("content", []):
-                if c.get("type") == "text":
+                if c.get("type") == "text" and not (stopped and STOP_SAID_RE.fullmatch(c["text"])):  # (a stop's
+                    # words, aborted: said once, as the turn ends, h_result)
                     self.add(api_error_label(c["text"]), parent)
             return
         self.render_assistant(m.get("content", []), parent, streamed=m.get("id") in self.streamed_ids)
@@ -17210,13 +17229,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc.cost_seen = self.recorded_cost(getattr(self.proc, "resumed", None))  # not as it started: the
         self.total_cost += spent_since(self.proc, msg)  # claude before writes its cost-state as it exits, after that)
         self.blocks.clear()
-        self.cut_short()
+        cut = self.cut_short()
         u = msg.get("usage", {})
         tok = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
                + u.get("cache_creation_input_tokens", 0))
         said, self.said_last = getattr(self, "said_last", None), None
-        if msg.get("is_error"):
-            if (msg.get("result") or "").strip() != said:
+        stop_asked = getattr(self.proc, "stop_asked", False)
+        if self.proc is not None:
+            self.proc.stop_asked = False
+        if msg.get("is_error") and stop_asked and ended_by_stop(msg):
+            if self.send_after_result is None and not cut:  # (one a revert stopped: gone from the chat, nothing to
+                self.note("interrupted")  # say of it; a call it stopped: its card says so)
+        elif msg.get("is_error"):
+            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said:
                 self.note(f"turn ended with error: {msg.get('result') or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
@@ -17237,7 +17262,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning
-        for ever. A background subagent's calls go on after the turn: left running."""
+        for ever. A background subagent's calls go on after the turn: left running. Whether any was."""
+        cut = False
         for tid, card in list(self.tool_cards.items()):
             if card.state != "running":
                 continue
@@ -17247,6 +17273,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if parent is None:
                 card.answered()  # (asked whether to allow it: nothing to answer now)
                 card.set_state("interrupted")
+                cut = True
+        return cut
 
     def goes_on(self, tool_id):
         """Whether a subagent's call goes on after its turn: run in the background (its card says so, or, its card

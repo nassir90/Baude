@@ -5442,12 +5442,26 @@ class ExpandStack(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
+def natural_height(scroller):
+    """scroller's child at its natural height, kept so for each child it's given later (each gets a viewport of its
+    own). At its minimum, GTK's default once it's taller than the view, every code block in it is squashed to what its
+    own scroller needs at least, a line or less, its text cut off at the bottom: as soon as the text's size (Settings
+    → Size, the zoom) makes what's there outgrow the pane. Returns scroller."""
+    def natural(*_):
+        if isinstance(child := scroller.get_child(), Gtk.Scrollable):
+            child.set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    natural()
+    if not getattr(scroller, "natural_height", False):
+        scroller.natural_height = True
+        scroller.connect("notify::child", natural)
+    return scroller
+
+
 def markdown_scroller(child, **kw):
     """The scrolled window markdown (MarkdownView) is read in: Baude's chat, Record's Read and its Record's answers.
-    Its child at its natural height (at its minimum, GTK's default, a code block is squashed to a line), nothing
-    scrolled sideways, and a long code block a pane of at most 2/3 of what's visible (CodeBlock.set_max_height)."""
-    scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw)
-    scroller.get_child().set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    Its child at its natural height (natural_height), nothing scrolled sideways, and a long code block a pane of at
+    most 2/3 of what's visible (CodeBlock.set_max_height)."""
+    scroller = natural_height(Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=child, **kw))
     scroller.get_vadjustment().connect("notify::page-size", lambda adj, _p: adj.get_page_size() > 0 and
                                        CodeBlock.set_max_height(adj.get_page_size() * 2 / 3))
     return scroller

@@ -138,7 +138,7 @@ from widgets import (  # noqa: E402,F401
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
     EXISTS_FOR, FILE_SCHEME, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
     HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
-    KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch,
+    KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch, natural_height,
     REF_ABSENT_WHY, REF_SCHEME, SETTINGS_RENAMED, SUB_BULLET, TableScroll, WEB_IMAGE_MAX,
     WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, _ARTIFACT_URL, _BARE_URL,
     _BOLD, _BOLD_ITALIC, _CODE_SPAN, _FENCE, _HEADING, _IMAGE,
@@ -8981,8 +8981,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=12, margin_end=12,
                             margin_top=12)
         self.body.add_css_class("zoomable")
-        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                         visible=False)  # (nothing over its box till something's asked)
+        self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                                        visible=False))  # (nothing over its box till something's asked)
         self.inside.append(self.scroll)
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
@@ -10130,7 +10130,7 @@ class ProcessRow(Gtk.ListBoxRow):
         self.command = None
         self.output = CodeBlock("(no output yet)", "output")
         self.body.append(self.output)
-        self.scroll = Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.inside.append(self.scroll)
         # (the row's fill under its line is the revealer's, so what goes to the page, and the square ExpandStack grows
         # for it, are on the panel's own, there and back)
@@ -10272,8 +10272,8 @@ class SidePanel(Gtk.Box):
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
-        self.detail_holder = widgets.inside(Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                                               margin_top=6), start=False)
+        self.detail_holder = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
+            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, margin_top=6)), start=False)
         detail.append(self.detail_holder)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
@@ -10422,7 +10422,8 @@ class SidePanel(Gtk.Box):
         child.set_margin_top(10)
         child.set_margin_bottom(10)
         child.set_valign(Gtk.Align.START)
-        return Gtk.ScrolledWindow(child=child, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        # (at its natural height: a page's chat, its code, isn't squashed as it outgrows the panel: natural_height)
+        return natural_height(Gtk.ScrolledWindow(child=child, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
 
     def show_page(self, name):
         self.stack.set_visible_child_name(name)
@@ -11508,8 +11509,9 @@ class SignalPage(Gtk.Stack):
         # the reader's chat: the parts it's given, what it says, the searches and lookups it runs, what it adds
         self.reader = Gtk.Expander(expanded=True)
         self.reader_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4)
-        self.reader_scroll = Gtk.ScrolledWindow(child=self.reader_box, max_content_height=420,
-                                                propagate_natural_height=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.reader_scroll = natural_height(Gtk.ScrolledWindow(child=self.reader_box, max_content_height=420,
+                                                               propagate_natural_height=True,
+                                                               hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.reader.set_child(self.reader_scroll)
         self.reader_shown, self.reader_cards = None, {}  # (the reader_chat drawn, and how much; its tool cards)
         top.append(self.reader)
@@ -11519,9 +11521,7 @@ class SignalPage(Gtk.Stack):
         top.append(self.empty)
         self.groups = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         top.append(self.groups)
-        page = SidePanel._scrolled(top)
-        # (at its natural height: at its minimum, the default, the reader's chat is squashed to a line or two)
-        page.get_child().set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+        page = SidePanel._scrolled(top)  # (at its natural height: the reader's chat isn't squashed to a line or two)
         self.add_named(page, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)

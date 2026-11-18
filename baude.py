@@ -17247,7 +17247,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.refresh_context()
         self.sidebar.refresh()  # the session file just changed (first save, newer time)
         self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
-                           f" · in {tok} / out {u.get('output_tokens', 0)} tok")
+                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
 
     def cut_short(self):
         """A turn's over (stopped with Esc, say) and its calls still running never will be: interrupted, not spinning

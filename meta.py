@@ -2523,6 +2523,8 @@ class MetaChat(Gtk.Box):
             return True
         if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
+        if widgets.tab_key(self.writing.markdown, keyval, state):
+            return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and state & Gdk.ModifierType.ALT_MASK and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK):
             return self.writing.markdown.move_item(-1 if keyval == Gdk.KEY_Up else 1)

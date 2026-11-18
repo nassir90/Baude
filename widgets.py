@@ -3547,6 +3547,52 @@ class ComposerMarkdown:
                     self._tag(hide, n, m.end() - mark, m.end())
         return False
 
+    def indent(self, step):
+        """Tab (step 1) or Shift+Tab (-1): each list item the caret or the selection is on in or out a level (a bullet
+        two spaces, its glyph the new level's; a number its marker's width), or, in a code block, its lines four
+        spaces. True if there was such a line."""
+        buf = self.buf
+        bounds = buf.get_selection_bounds() or (buf.get_iter_at_mark(buf.get_insert()),) * 2
+        first, last = bounds[0].get_line(), bounds[1].get_line()
+        if last > first and bounds[1].starts_line():
+            last -= 1  # (a selection ending at a line's start doesn't take that line)
+
+        def line_text(n):
+            start = buf.get_iter_at_line(n)[1]
+            end = start.copy()
+            if not end.ends_line():
+                end.forward_to_line_end()
+            return start, buf.get_slice(start, end, True)
+
+        in_code = self._block_here() is not None
+        items = [n for n in range(first, last + 1) if _LIST_ITEM.match(line_text(n)[1])]
+        if not items and not in_code:
+            return False
+        buf.begin_user_action()
+        for n in items or range(first, last + 1):
+            start, text = line_text(n)
+            m = _LIST_ITEM.match(text)
+            lead = len(text) - len(text.lstrip(" "))
+            unit = 4 if m is None else 2 if m.group(2) in "-*+•◦" else len(m.group(2)) + 1
+            new = lead + unit if step > 0 else max(0, lead - unit)
+            if new == lead:
+                continue
+            if m is not None and m.group(2) in "•◦":  # (the bullet the level's: • ◦ • ...)
+                at = buf.get_iter_at_line_offset(n, m.start(2))[1]
+                to = at.copy()
+                to.forward_char()
+                buf.delete(at, to)
+                buf.insert(buf.get_iter_at_line_offset(n, m.start(2))[1], bullet_for(new // 2))
+                start = buf.get_iter_at_line(n)[1]
+            if new > lead:
+                buf.insert(start, " " * (new - lead))
+            else:
+                end = start.copy()
+                end.forward_chars(lead - new)
+                buf.delete(start, end)
+        buf.end_user_action()
+        return True
+
     def continue_list(self):
         """Enter on a list item starts the next item (or ends the list if this one is
         empty). Returns False when the cursor isn't on a list item."""
@@ -3577,6 +3623,15 @@ def sends(state):
     new line (a list's next item); Shift+Enter a plain line break (newline_key)."""
     return bool(state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK)) if sys.platform == "darwin" \
         else bool(state & Gdk.ModifierType.CONTROL_MASK)
+
+
+def tab_key(markdown, keyval, state):
+    """Tab or Shift+Tab in a box (ComposerMarkdown), as on a Record page: list items in or out a level, a code block's
+    lines in or out four spaces. True if it did; elsewhere Tab is left to move the focus."""
+    if keyval not in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab) or \
+            state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.ALT_MASK):
+        return False
+    return markdown.indent(-1 if keyval == Gdk.KEY_ISO_Left_Tab or state & Gdk.ModifierType.SHIFT_MASK else 1)
 
 
 def newline_key(markdown, state):

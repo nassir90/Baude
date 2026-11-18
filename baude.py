@@ -7826,8 +7826,8 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = widgets.HostState()  # (its titles: show_host_state's markup)
-        self.append(self.host_banner)
+        self.host_note = widgets.HostState()  # (its titles: show_host_state's markup)
+        self.append(self.host_note)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self.on_activate)
@@ -8021,7 +8021,7 @@ class SessionSidebar(Gtk.Box):
 
     def deactivate_host(self, key, off):
         """New session's host right-clicked → Deactivate (off), or Activate: Network.deactivate, its chats grayed and
-        the banner saying so while it is."""
+        the note over them saying so while it is."""
         if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
             network().deactivate(r, off)
             toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
@@ -8727,12 +8727,12 @@ class SessionSidebar(Gtk.Box):
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
-        """The host picked isn't there (or is deactivated): said in the banner over its chats, as they were last
+        """The host picked isn't there (or is deactivated): said in the note over its chats, as they were last
         seen."""
         said = self.host_state(self.shown_remote())
         if said is not None:
-            self.host_banner.set_title(GLib.markup_escape_text(said))
-        self.host_banner.set_revealed(said is not None)
+            self.host_note.set_title(GLib.markup_escape_text(said))
+        self.host_note.set_revealed(said is not None)
 
     def pick_host(self, key):
         """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,

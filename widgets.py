@@ -1644,8 +1644,8 @@ class UpdateBar(Gtk.Box):
 class HostState(Gtk.Revealer):
     """Over a sidebar's list: what's in the way of the host it lists (gone, deactivated), an island inset from the
     sidebar's edges, as an empty list says it (the subagents' "No subagents yet"): a boxed-list with only its
-    placeholder (empty_label), outlined as the side panel's lists are. set_title (markup) and set_revealed, as
-    Adw.Banner's."""
+    placeholder (empty_label), outlined as the side panel's lists are. set_title: what it says (markup);
+    set_revealed: whether it's shown."""
 
     def __init__(self):
         super().__init__(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
@@ -1655,6 +1655,7 @@ class HostState(Gtk.Revealer):
         self.label.set_margin_start(12)
         self.label.set_margin_end(12)
         self.label.set_wrap(True)
+        self.label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)  # (a long host name, an address: broken too)
         self.label.set_justify(Gtk.Justification.CENTER)
         box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, focusable=False, margin_start=8, margin_end=8,
                           margin_top=6, margin_bottom=6, css_classes=["boxed-list", "host-state"])

@@ -2,28 +2,33 @@
 with a red squiggle, a grammar error with a blue one; a right-click on one offers the checker's suggestions, Ignore and
 Learn. Code (``` blocks, `code`), links, URLs, @names and code-like words (paths, snake_case, camelCase) aren't checked.
 
-What checks it is the system's, nothing to download:
-- macOS: NSSpellChecker (through the Objective-C runtime, with ctypes: there's no PyObjC), spelling and grammar, in
-  the languages System Settings has, the words learnt in any Mac app learnt here too.
-- elsewhere: Enchant 2 (libenchant-2, which GNOME's spell checking is built on, with the system's Hunspell or Nuspell
-  dictionaries), spelling only: there's no grammar checker on Linux that comes with the system.
-With neither, nothing's underlined and nothing else changes (backend is None).
+What checks it, whichever is there:
+- macOS: NSSpellChecker, through the Objective-C runtime with ctypes, spelling and grammar, in the languages System
+  Settings has, with the words learnt in any Mac app.
+- elsewhere: Enchant 2 (libenchant-2, with the system's Hunspell or Nuspell dictionaries) for spelling, and harper-ls
+  (Harper's language server, over LSP on stdio) for grammar, each when it's installed.
+With none, nothing's underlined and nothing else changes (backend is None).
 
 The checking is on a thread of its own (one for every view: _Worker), a line at a time, and what it finds is kept for
-each line's text (_found), so a page is checked once, and then only the lines that change, after a pause in typing."""
+each line's text (_found), so a page is checked once, and then only the lines that change, after a pause in typing; a
+right-click's guesses go ahead of any check waiting (Worker.FIRST)."""
 import ctypes
 import ctypes.util
 import json
 import os
 import queue
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gsk, Gtk, Pango  # noqa: E402
+gi.require_version("Gsk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gsk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 
@@ -42,7 +47,8 @@ _SKIP = re.compile("|".join((
     r"<?\b(?:https?://|www\.)[^\s<>\"]*>?",  # a URL
     r"[\w.+-]+@[\w-]+\.[\w.-]+",  # an email address
     r"@\{[^}\n]*\}?|[@#][\w./:-]+",  # @name, @{a name}, #123
-    r"\S*[_/\\]\S*",  # paths, snake_case
+    r"\S*[/\\]\S*",  # paths
+    r"\w*[^\W_]_[^\W_]\w*",  # snake_case (an underscore inside a word: _italic_'s are outside it)
     r"\b[a-z]+[A-Z]\w*|\b\w*\d\w*",  # camelCase, words with digits in
 )))
 
@@ -99,8 +105,8 @@ class _Mac:
         return self.checker
 
     def check(self, line):
-        """[(start, end, kind, fixes, what's wrong)] in line, in characters; a word's fixes None (guesses: asked for as
-        it's right-clicked, not for every word, the spell server's time for each)."""
+        """[(start, end, kind, fixes, what's wrong)] in line, in characters; a misspelled word's fixes None: its guesses
+        are asked for when it's right-clicked (guesses)."""
         pool = self.rt.objc_autoreleasePoolPush()
         try:
             checker, R = self._ready(), self.Range
@@ -165,7 +171,7 @@ class _Enchant:
 
     def __init__(self):
         name = ctypes.util.find_library("enchant-2") or "libenchant-2.so.2"
-        lib = self.lib = ctypes.CDLL(name)
+        lib = self.lib = ctypes.CDLL(name)  # (OSError if it isn't installed)
         lib.enchant_broker_init.restype = ctypes.c_void_p
         lib.enchant_broker_dict_exists.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         lib.enchant_broker_request_dict.restype = ctypes.c_void_p
@@ -211,32 +217,165 @@ class _Enchant:
         self.lib.enchant_dict_add(self.dict, raw, len(raw))  # (the personal word list, every Enchant app's)
 
 
-class _Worker:
-    """The checker's thread: jobs (a function, then what's told its result on the main loop) one at a time. The
-    checker's made on it, the first time it's asked for (backend: None, if there's none)."""
+class _Harper:
+    """harper-ls's grammar, over LSP on stdio: each line opened as a document of its own, its diagnostics what's wrong,
+    their code actions' edits the fixes. Its own spell check is off (Enchant's are the spelling's squiggles), and what
+    it says of a word Enchant has already underlined is left out (_Linux.check)."""
+    SETTINGS = {"harper-ls": {"linters": {"SpellCheck": False, "spell_check": False}}}
+    WAIT = 3  # (seconds for a line's diagnostics: past that, Harper's taken as gone, and the grammar with it)
+
+    def __init__(self, exe):
+        self.proc = subprocess.Popen([exe, "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL)
+        self.incoming, self.ids, self.docs, self.ok = queue.Queue(), 0, 0, True
+        threading.Thread(target=self._read, daemon=True, name="harper").start()
+        caps = {"general": {"positionEncodings": ["utf-32", "utf-16"]},
+                "textDocument": {"publishDiagnostics": {}, "codeAction": {"codeActionLiteralSupport": {
+                    "codeActionKind": {"valueSet": ["quickfix"]}}}},
+                "workspace": {"configuration": True}}
+        init = self.request("initialize", {"processId": os.getpid(), "rootUri": None, "capabilities": caps,
+                                           "initializationOptions": self.SETTINGS})
+        if init is None:
+            raise OSError("harper-ls didn't start")
+        self.utf32 = (init.get("capabilities") or {}).get("positionEncoding") == "utf-32"
+        self.notify("initialized", {})
+        self.notify("workspace/didChangeConfiguration", {"settings": self.SETTINGS})
+
+    def _send(self, message):
+        body = json.dumps({"jsonrpc": "2.0", **message}).encode()
+        self.proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+        self.proc.stdin.flush()
+
+    def _read(self):
+        """Harper's messages, as they come (its own thread), onto incoming; None once it's gone."""
+        out = self.proc.stdout
+        try:
+            while True:
+                length = None
+                while (line := out.readline()) not in (b"\r\n", b"\n"):
+                    if not line:
+                        raise EOFError
+                    if line.lower().startswith(b"content-length:"):
+                        length = int(line.split(b":", 1)[1])
+                self.incoming.put(json.loads(out.read(length)))
+        except (EOFError, OSError, ValueError, TypeError):
+            self.incoming.put(None)
+
+    def notify(self, method, params):
+        self._send({"method": method, "params": params})
+
+    def request(self, method, params):
+        self.ids += 1
+        self._send({"id": self.ids, "method": method, "params": params})
+        return self._wait(lambda m: m.get("id") == self.ids and "method" not in m, lambda m: m.get("result"))
+
+    def _wait(self, wanted, value):
+        """What wanted is, of what Harper sends in the next WAIT seconds (value of it); what it asks of the client meanwhile
+        answered. None if it doesn't come (and Harper's not asked again)."""
+        while True:
+            try:
+                m = self.incoming.get(timeout=self.WAIT)
+            except queue.Empty:
+                m = None
+            if m is None:
+                self.ok = False
+                return None
+            if "method" in m and "id" in m:  # (a request of Harper's: its settings, or nothing to say)
+                items = (m.get("params") or {}).get("items") or []
+                result = [self.SETTINGS["harper-ls"] for _ in items] if m["method"] == "workspace/configuration" else None
+                self._send({"id": m["id"], "result": result})
+                continue
+            if wanted(m):
+                return value(m)
+
+    def check(self, line):
+        self.docs += 1
+        uri = "file://" + os.path.join(tempfile.gettempdir(), f"record-spelling-{os.getpid()}-{self.docs}.md")
+        self.notify("textDocument/didOpen", {"textDocument": {"uri": uri, "languageId": "markdown", "version": 1,
+                                                              "text": line}})
+        try:
+            diagnostics = self._wait(lambda m: m.get("method") == "textDocument/publishDiagnostics" and
+                                     (m.get("params") or {}).get("uri") == uri,
+                                     lambda m: m["params"].get("diagnostics") or [])
+            chars = (lambda at: at) if self.utf32 else _chars(line)
+            out = []
+            for d in diagnostics or ():
+                a, b = (chars(d["range"][end]["character"]) for end in ("start", "end"))
+                actions = self.request("textDocument/codeAction", {"textDocument": {"uri": uri}, "range": d["range"],
+                                                                   "context": {"diagnostics": [d]}}) or []
+                fixes = [e["newText"] for act in actions if isinstance(act, dict)
+                         for e in ((act.get("edit") or {}).get("changes") or {}).get(uri, [])
+                         if e.get("range") == d["range"]]
+                out.append((a, max(b, a + 1), GRAMMAR, list(dict.fromkeys(fixes))[:GUESSES], d.get("message", "")))
+            return out
+        finally:
+            self.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+
+
+class _Linux:
+    """Enchant's spelling and Harper's grammar, whichever of them is installed (OSError: neither)."""
 
     def __init__(self):
-        self.jobs, self.checker, self.made = queue.Queue(), None, threading.Event()
+        self.spelling = self.harper = None
+        try:
+            self.spelling = _Enchant()
+        except (OSError, AttributeError) as e:
+            print(f"spelling: no spelling ({e})", file=sys.stderr)
+        if exe := shutil.which("harper-ls"):
+            try:
+                self.harper = _Harper(exe)
+            except (OSError, ValueError) as e:
+                print(f"spelling: no grammar ({e})", file=sys.stderr)
+        if self.spelling is None and self.harper is None:
+            raise OSError("neither Enchant 2 nor harper-ls")
+
+    @property
+    def grammar(self):
+        return self.harper is not None and self.harper.ok
+
+    def check(self, line):
+        out = self.spelling.check(line) if self.spelling is not None else []
+        if self.grammar:
+            words = {(a, b) for a, b, *_ in out}
+            out += [g for g in self.harper.check(line) if (g[0], g[1]) not in words]
+        return out
+
+    def guesses(self, word):
+        return self.spelling.guesses(word) if self.spelling is not None else []
+
+    def learn(self, word):
+        if self.spelling is not None:
+            self.spelling.learn(word)
+
+
+class _Worker:
+    """The checker's thread: jobs (a function, then what's told its result on the main loop) one at a time, FIRST's
+    before CHECK's. The checker's made on it, the first time it's asked for (backend: None, if there's none)."""
+    FIRST, CHECK = 0, 1  # (a right-click's guesses, a word learnt; a page's lines)
+
+    def __init__(self):
+        self.jobs, self.checker, self.made, self.order = queue.PriorityQueue(), None, threading.Event(), 0
         threading.Thread(target=self._run, daemon=True, name="spelling").start()
 
     def _run(self):
         try:
-            self.checker = _Mac() if sys.platform == "darwin" else _Enchant()
+            self.checker = _Mac() if sys.platform == "darwin" else _Linux()
         except (OSError, AttributeError) as e:
             print(f"spelling: not checked ({e})", file=sys.stderr)
         self.made.set()
         while True:
-            fn, done = self.jobs.get()
+            _first, _order, fn, done = self.jobs.get()
             try:
                 result = fn(self.checker) if self.checker is not None else None
             except Exception as e:  # (a thread: a line that can't be checked stays unchecked)
                 print(f"spelling: {e!r}", file=sys.stderr)
                 result = None
             if done is not None:
-                GLib.idle_add(lambda: done(result) and False)
+                GLib.idle_add(lambda done=done, result=result: done(result) and False)
 
-    def submit(self, fn, done=None):
-        self.jobs.put((fn, done))
+    def submit(self, fn, done=None, first=False):
+        self.order += 1  # (in its order, among its own lane's)
+        self.jobs.put((self.FIRST if first else self.CHECK, self.order, fn, done))
 
 
 _worker = None
@@ -260,36 +399,46 @@ def backend():
 
 
 def about():
-    """What checks, said for Settings."""
+    """What checks, said for Settings ("Starting…" till it's made: when_made says when)."""
     w = worker()
-    w.made.wait(2)  # (made as Record starts: long since, by the time Settings is open)
-    if w.checker is None:
-        return "Needs Enchant 2 and a dictionary (libenchant-2, hunspell-en-us)" if sys.platform != "darwin" else \
-            "macOS's spell checker isn't there"
-    return "Spelling and grammar, as macOS checks them" if w.checker.grammar else "Spelling, with Enchant"
+    checker = w.checker
+    if not w.made.is_set():
+        return "Starting…"
+    if sys.platform == "darwin":
+        return "Spelling and grammar, as macOS checks them" if checker else "macOS's spell checker couldn't be loaded"
+    if checker is None:
+        return "Needs Enchant 2 and a dictionary (libenchant-2, hunspell-en-us) for spelling, harper-ls for grammar"
+    if checker.spelling is None:
+        return "Grammar with Harper; spelling needs Enchant 2 and a dictionary (libenchant-2, hunspell-en-us)"
+    return "Spelling with Enchant, grammar with Harper" if checker.grammar else \
+        "Spelling with Enchant; grammar needs harper-ls"
+
+
+def when_made(fn):
+    """fn() on the main loop once what checks is made (or there's none): at once if it is."""
+    if worker().made.is_set():
+        fn()
+    else:
+        worker().submit(lambda _checker: None, lambda _r: fn(), first=True)  # (it runs once it's made)
 
 
 # ---------------------------------------------------------------- on a text view
 
 class SpellCheck:
-    """view's text checked as it's written (enabled(): whether to). Whoever takes every tag off its buffer (DiaryEditor's
-    _highlight) calls draw after: the squiggles are put back from what's known, nothing checked again. rect_of: the
-    view draws the squiggles itself, in a layer over the text (snapshot), rect_of(iter) its character's box (GTK's
-    own error underline is a faint dotted line); else they're the tags' Pango error underline."""
+    """view's text checked as it's written (enabled(): whether to). The view draws the squiggles, in a layer over its
+    text, by calling snapshot; rect_of(iter) is that character's box in the view."""
 
-    def __init__(self, view, enabled=lambda: True, rect_of=None):
+    def __init__(self, view, rect_of, enabled=lambda: True):
         self.view, self.buf, self.enabled, self.rect_of = view, view.get_buffer(), enabled, rect_of
-        self.tags, self.colors = {}, {}
+        self.colors = {}
         for kind, color in COLORS.items():
             rgba = self.colors[kind] = Gdk.RGBA()
             rgba.parse(color)
-            self.tags[kind] = self.buf.create_tag(f"spell-{kind}", **({} if rect_of else {
-                "underline": Pango.Underline.ERROR, "underline_rgba": rgba}))
         self.waiting, self.asked = None, False  # (the pause before a check; a check out)
         self.shown = []  # (what's underlined: (start, end, kind, word, fixes, what's wrong))
         self.was = []  # (each line's text and results the last time it was drawn: kept on it as it's typed in)
         self.typing = None  # (the caret's offset after a word's letter typed: that word's not underlined yet)
-        self.buf.connect("changed", lambda *_: self.soon())
+        self.buf.connect_after("changed", lambda *_: (self.draw(), self.soon()))
         self.buf.connect_after("insert-text", self._typed)
         self.buf.connect("notify::cursor-position", self._caret)
         click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY, propagation_phase=Gtk.PropagationPhase.CAPTURE)
@@ -345,17 +494,14 @@ class SpellCheck:
         return False
 
     def draw(self):
-        """The squiggles, from what's known of each line (a line typed in since: what it had that's still there)."""
-        start, end = self.buf.get_bounds()
-        for tag in self.tags.values():
-            self.buf.remove_tag(tag, start, end)
+        """What's underlined (shown), from what's known of each line (a line typed in since: what it had that's still
+        there), and the view drawn again."""
         self.shown = []
-        if self.rect_of is not None:
-            self.view.queue_draw()
+        self.view.queue_draw()
         if not self.enabled() or backend() is None:
             self.was = []
             return
-        text = self.buf.get_text(start, end, True)
+        text = self.buf.get_text(*self.buf.get_bounds(), True)
         lines, masked = text.split("\n"), masked_lines(text)
         was = self.was if len(self.was) == len(lines) else []
         now, pos = [], 0
@@ -371,21 +517,26 @@ class SpellCheck:
                         found.append((a + d, b + d, *rest))
             now.append((line, found) if found is not None else (None, None))
             for a, b, kind, fixes, said in found or ():
+                if kind == SPELLING:  # (the word itself, not the _ or * of its emphasis round it)
+                    while a < b and not line[a].isalnum():
+                        a += 1
+                    while b > a and not line[b - 1].isalnum():
+                        b -= 1
                 word = line[a:b]
+                if not word:
+                    continue
                 if word in _learnt or (word if kind == SPELLING else (word, said)) in _ignored:
                     continue
                 if kind == SPELLING and self.typing == pos + b:  # (being typed: not yet)
                     continue
-                self.buf.apply_tag(self.tags[kind], self.buf.get_iter_at_offset(pos + a),
-                                   self.buf.get_iter_at_offset(pos + b))
                 self.shown.append((pos + a, pos + b, kind, word, fixes, said))
             pos += len(line) + 1
         self.was = now
 
     def snapshot(self, snapshot):
-        """The squiggles in view (rect_of's view's ABOVE_TEXT layer): a wave under each, along each of the lines it's
-        on, wrapped."""
-        if not self.shown or self.rect_of is None:
+        """The squiggles in view (the view's ABOVE_TEXT layer): a wave under each, along each of the lines it's on,
+        wrapped."""
+        if not self.shown:
             return
         rect = self.view.get_visible_rect()
         first = self.view.get_line_at_y(rect.y)[0].get_offset()
@@ -457,7 +608,7 @@ class SpellCheck:
             _guessed[word] = guesses or []
             if self.view.get_root() is not None:
                 self._menu(hit, _guessed[word], x, y)
-        worker().submit(lambda checker: checker.guesses(word), done)
+        worker().submit(lambda checker: checker.guesses(word), done, first=True)
 
     def _menu(self, hit, fixes, x, y):
         """The menu a right-click on a squiggle shows: the fixes, Ignore, Learn (a word), the clipboard's."""
@@ -507,5 +658,5 @@ class SpellCheck:
 
     def _learn(self, word):
         _learnt.add(word)
-        worker().submit(lambda checker: checker.learn(word))
+        worker().submit(lambda checker: checker.learn(word), first=True)
         self.draw()

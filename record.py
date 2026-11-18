@@ -2885,9 +2885,9 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.create_tag(name, **({**props, "scale": widgets.code_scale()} if name in ("verbatim", "pre") else props))
         for n in self.HEADING_SPACE:  # (a heading's space below, as the space above the line after it: _heading_looks)
             self.buf.create_tag(f"after-h{n}")
-        # (a word misspelled, a red squiggle under it; a grammar error, a blue one: drawn again after _highlight's)
-        self.spell = self.view.spell = spelling.SpellCheck(self.view, lambda: self.win.store.spell_check,
-                                                          self.view.char_rect)
+        # (a word misspelled, a red squiggle under it; a grammar error, a blue one: NotesView draws them)
+        self.spell = self.view.spell = spelling.SpellCheck(self.view, self.view.char_rect,
+                                                          lambda: self.win.store.spell_check)
         self.view.restyled = self._heading_looks
         self._heading_looks()
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
@@ -3387,7 +3387,6 @@ class DiaryEditor(Gtk.Box, FindInText):
         self._mark_proposals()  # (and a proposed change's)
         if (chat := getattr(self.win, "chat", None)) is not None:
             chat.tint(self)  # (and Meta's, a page it added: all green)
-        self.spell.draw()  # (and the spelling's squiggles, as they were found)
         self._find_again()
 
 
@@ -7174,7 +7173,9 @@ class Settings(Adw.PreferencesDialog):
         group.add(update.settings_row())  # (Baude's too: the one setting)
         self.version_row = update.version_row()
         group.add(self.version_row)
-        group.add(widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck"))
+        spell = widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
+        spelling.when_made(lambda: spell.set_subtitle(spelling.about()))  # (said once it's known)
+        group.add(spell)
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))

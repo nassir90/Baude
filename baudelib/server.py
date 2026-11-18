@@ -290,6 +290,15 @@ class Session:
             pass
         return out
 
+    def bot_listing(self):
+        """A Bot's name, and when its picture last changed (None: no picture): what a head draws it with."""
+        bot = self.meta.get("bot")
+        if not bot:
+            return None
+        pic = os.path.join(bot_dir(self.server.state_dir, self.id), "picture")
+        return {"name": bot.get("name") or "Bot", "since": bot.get("since"),
+                "picture": os.path.getmtime(pic) if os.path.exists(pic) else None}
+
     def listing(self):
         info = self.info or {}
         size, mtime = self.stat or (0, None)
@@ -304,9 +313,28 @@ class Session:
                 "archived": bool(self.meta.get("archived")), "draft": bool(self.meta.get("draft")),
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
-                "commands": self.commands(), "cut": self.meta.get("cut"),
+                "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
+
+
+BOT_PICTURE_MAX = 2 << 20  # (bytes: a Bot's picture, as sent)
+
+
+def bot_dir(state_dir, sid):
+    """A Bot's own folder on its host: its memory (memory.md) and its picture."""
+    return os.path.join(state_dir, "bots", wire.safe_name(sid))
+
+
+def bot_system(name, memory_path, memory):
+    """What a Bot's agent is told at each start, after its harness's own instructions: who it is, and its memory."""
+    return (f"You are {name}, a Bot: a chat the user keeps coming back to, with a name and a memory that last.\n"
+            f"Your memory is the Markdown file {memory_path}. It is yours to keep: read it, and edit it with your "
+            "file tools when you learn something worth keeping (who the user is, what they want, how they like to "
+            "work, what's in progress), and take out what's no longer true. Keep it short and current; the user can "
+            "read and edit it too.\n\n"
+            + ("Your memory as this run starts:\n<memory>\n" + memory.strip() + "\n</memory>" if memory.strip()
+               else "Your memory is empty so far."))
 
 
 class AlreadyRunning(OSError):
@@ -946,7 +974,67 @@ class Server:
                 return reply("subagents", session=s.id, **self.read_subagents(s, msg.get("have"), msg.get("limit")))
             if op == "rename":
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
+            if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
+                return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "bot_picture":
+                return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
+            if op == "memory":  # (a Bot's memory: read, or, text given, written)
+                return reply("memory", session=s.id, **self.bot_memory(s, msg.get("text")))
         return reply("error", error=f"unknown op {op!r}")
+
+    def set_bot(self, s, bot):
+        """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
+        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again."""
+        folder = bot_dir(self.state_dir, s.id)
+        if bot is None:
+            s.meta.pop("bot", None)
+        else:
+            if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
+                raise ValueError("a Bot has a name")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
+                             "since": (s.meta.get("bot") or {}).get("since") or time.time()}
+            if not os.path.exists(os.path.join(folder, "memory.md")):
+                with open(os.path.join(folder, "memory.md"), "w") as f:
+                    f.write("")
+            pic = os.path.join(folder, "picture")
+            if bot.get("picture") == "":
+                if os.path.exists(pic):
+                    os.remove(pic)
+            elif bot.get("picture"):
+                data = base64.b64decode(bot["picture"])
+                if len(data) > BOT_PICTURE_MAX:
+                    raise ValueError("the picture is too big (2 MB at most)")
+                with open(pic + ".new", "wb") as f:
+                    f.write(data)
+                os.replace(pic + ".new", pic)
+        self.save(s)
+        self.changed()
+        return s.listing()
+
+    def bot_picture(self, s):
+        pic = os.path.join(bot_dir(self.state_dir, s.id), "picture")
+        if not os.path.exists(pic):
+            return None
+        with open(pic, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+
+    def bot_memory(self, s, text=None):
+        """A Bot's memory: {text, path, mtime}, after writing text if it's given."""
+        if not s.meta.get("bot"):
+            raise ValueError("not a Bot")
+        path = os.path.join(bot_dir(self.state_dir, s.id), "memory.md")
+        if text is not None:
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path + ".new", "w") as f:
+                f.write(str(text))
+            os.replace(path + ".new", path)
+        try:
+            with open(path) as f:
+                text = f.read()
+        except FileNotFoundError:
+            text = ""
+        return {"text": text, "path": path, "mtime": os.path.getmtime(path) if os.path.exists(path) else None}
 
     @staticmethod
     def makes_folder(msg):
@@ -1143,6 +1231,16 @@ class Server:
                     extra += [flag, *(value if isinstance(value, list) else [value])]
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
+        if s.meta.get("bot") and run["program"] in ("claude", "pi"):  # (who it is, and its memory, each start)
+            mem = self.bot_memory(s)
+            told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+            if run["program"] == "claude" and "--append-system-prompt" in extra:  # (one: its own system with it)
+                at = extra.index("--append-system-prompt") + 1
+                extra[at] = extra[at] + "\n\n" + told
+            else:
+                extra += ["--append-system-prompt", told]
+            if run["program"] == "claude":  # (its memory's folder its to edit, as the chat's own is)
+                extra += ["--add-dir", os.path.dirname(mem["path"])]
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it

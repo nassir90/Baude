@@ -96,6 +96,7 @@ RELAY = os.environ.get("BAUDE_PI_RELAY") == "1"  # (run on another host as an ag
 cwd = os.environ.get("BAUDE_TOOLS_CWD") or os.getcwd()  # (run on another host as an agent: the chat's folder
 # there, where its tools work, mcp__host__*; this one, os.getcwd(), an empty one of its own)
 system_prompt = flag("--system-prompt")
+append_prompt = flag("--append-system-prompt")  # (a Bot's: who it is and its memory, after pi's own)
 keep_session = "--no-session-persistence" not in sys.argv
 PI_TOOLS = {"Read": "read", "Bash": "bash", "Edit": "edit", "MultiEdit": "edit", "Write": "write", "Grep": "grep",
             "Glob": "find", "LS": "ls"}  # (Claude's tools as pi's)
@@ -691,7 +692,8 @@ class Engine:
             args += ["--system-prompt", os.path.join(self.agent_dir, "system.md"), "--no-context-files"]
         else:
             args += ["--append-system-prompt", f"The user's project is {cwd}, the working folder: the files they "
-                     "mention are there, not in pi's own documentation."]
+                     "mention are there, not in pi's own documentation."
+                     + (f"\n\n{append_prompt}" if append_prompt else "")]
         os.makedirs(os.path.join(HOME, "logs"), exist_ok=True)
         log = open(os.path.join(HOME, "logs", "pi.log"), "a")
         self.pi = subprocess.Popen(args, cwd=os.getcwd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,

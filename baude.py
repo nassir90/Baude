@@ -9163,6 +9163,7 @@ class SideQuestion(Gtk.ListBoxRow):
         actions = self.writing.send.get_parent()
         actions.set_margin_end(4 if on else 10)
         actions.set_margin_bottom(4 if on else 10)
+        self.composer.set_top_margin(10 if on else widgets.Composer.FOLLOW_TOP)  # (a line tall: the button beside it)
 
     def put_inside_row(self):
         """Its thread back under its line (from the whole page), as tall as it is, its box slimmer."""

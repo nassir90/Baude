@@ -3641,6 +3641,8 @@ class Composer(Gtk.Overlay):
     any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
     as it needs (Record's quote). Its owner connects the send button and the keys."""
 
+    FOLLOW_TOP = 20  # (follow_text's text top margin: its first line's middle level with the send button's)
+
     def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter", follow_text=False):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
@@ -3668,6 +3670,8 @@ class Composer(Gtk.Overlay):
         self.add_overlay(actions)
         if follow_text:  # (a box taller than its text: the buttons level with its last line, at most at the bottom)
             self.actions = actions
+            self.input.set_top_margin(self.FOLLOW_TOP)  # (the first line's middle level with the buttons', as far
+            #                                             from the top as they are from the side)
             self.connect("get-child-position", self._place_actions)
             self.input.get_buffer().connect("changed", lambda *_: self.queue_allocate())
             scroll.get_vadjustment().connect("value-changed", lambda *_: self.queue_allocate())
@@ -3689,7 +3693,8 @@ class Composer(Gtk.Overlay):
         ok, at = self.input.compute_point(self, Graphene.Point().init(0, wy))
         if ok:
             buttons = nat.height - child.get_margin_top() - child.get_margin_bottom()
-            rect.y = max(0, min(rect.y, round(at.y - buttons / 2 - child.get_margin_top())))
+            rect.y = max(child.get_margin_end() - child.get_margin_top(),
+                         min(rect.y, round(at.y - buttons / 2 - child.get_margin_top())))
         return True
 
     def gate(self, name, on):

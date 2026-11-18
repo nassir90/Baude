@@ -38,8 +38,8 @@ from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from widgets import (  # noqa: E402,F401
     LinkLabel, PR_COLORS, RefreshButton, WorkerPool, chip_markup, discard, draw_ref_icon, full_time, keep_times,
-    on_label_link, pr_pill_markup, pr_title, pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, themed_icon,
-    toast,
+    on_label_link, pr_pill_markup, pr_title, pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, shaded_picture,
+    themed_icon, toast,
 )
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
@@ -1795,7 +1795,7 @@ class GitPage(Gtk.Stack):
         # (their initials on a colour; their picture, already if it's known, so a redrawn row doesn't flicker)
         row.avatar = Adw.Avatar(size=AVATAR_SIZE, text=c["author"], show_initials=True, valign=Gtk.Align.CENTER,
                                 custom_image=AVATARS.pictures.get(c["email"].lower()))
-        box.append(row.avatar)
+        box.append(shaded_picture(row.avatar))
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=4, margin_bottom=4)
         # (one line of text, as a paragraph's: the branches' chips first, a pull request's pill before its branch's,
         # then the subject, its second line under the chips. Two lines, then …: a pull request's name is often what a
@@ -1825,7 +1825,7 @@ class GitPage(Gtk.Stack):
             box.append(btn)
         if dim:
             text.set_opacity(0.55)
-            row.avatar.set_opacity(0.55)
+            row.avatar.get_parent().set_opacity(0.55)  # (its shade too: shaded_picture)
         row.set_child(box)
         row.set_tooltip_text(f"{c['sha'][:9]} · {c['title']}" +
                              (f"\n{c['subject']}" if c["title"] != c["subject"] else "") +  # (a pull request's name)

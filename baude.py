@@ -15410,9 +15410,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return rect
 
     def open_ref(self, surface, anchor, message=None):
-        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit /
-        branch / PR / tool shows its card, and everything else (several places, not found, stale, still looking)
-        gets a popover."""
+        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit or branch
+        shows in the Git page, a PR opens its page (your browser), a tool shows its card, and everything else (several
+        places, not found, stale, still looking) gets a popover."""
         dec = self.signal.decision(message, surface) if self.signal else None
         if dec is not None and dec["verdict"] == "link" and dec.get("path"):
             full = os.path.join(self.signal.root, dec["path"])
@@ -15455,7 +15455,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if ref.status == "resolved" and ref.kind in ("commit", "branch"):  # (its place in the history: the Git page)
             self.show_git_ref(ref)
             return
-        if ref.status == "resolved" and (ref.kind in ("pr", "tool", "subagent", "skill") or ref.data.get("context")):
+        if ref.status == "resolved" and ref.kind == "pr" and ref.data.get("url"):  # (a pull request: its page)
+            fixview.web(self, ref.data["url"])
+            return
+        if ref.status == "resolved" and (ref.kind in ("tool", "subagent", "skill") or ref.data.get("context")):
             self.show_ref(surface)
             return
         defs = [l for l in ref.locations if l["role"] != "used"]

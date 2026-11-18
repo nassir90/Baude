@@ -1704,6 +1704,8 @@ class Agent:
             if self.commands and (self.started_mode != "auto") != (self.model in NO_AUTO):
                 (NO_AUTO.add if self.started_mode != "auto" else NO_AUTO.discard)(self.model)
                 sync_rows()
+        if t == "system" and msg.get("subtype") == "compact_boundary":  # (summarised: less of its window used now)
+            self.chat.context_soon(self)
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
             if msg.get("warn") and turn is not None:  # (its tools didn't reach the model's host: over the reply)
@@ -1736,6 +1738,7 @@ class Agent:
                 turn["streamed"] = True
                 self.chat._said_more(self, turn, delta["text"])
         elif t == "assistant":
+            self.chat.context_soon(self)  # (its request counted: what the window holds now, its tools' calls asked)
             for c in (msg.get("message") or {}).get("content") or []:
                 if c.get("type") == "tool_use":
                     self.chat._tool_started(self, turn, c)

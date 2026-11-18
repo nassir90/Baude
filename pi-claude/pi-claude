@@ -60,6 +60,8 @@ UNLOAD_AFTER = 600
 LEVELS = ("off", "minimal", "low", "medium", "high")
 MCP_TIMEOUT = 900  # (s an MCP tool's call may take: one of Meta's waits on a model loaded, or on the user's answer)
 SMALL_WINDOW = 8192  # (a served model's window with less than this has no room for pi's instructions and tools)
+RATIO_FROM = 2000  # (characters added between two counts of the server's, at least, for how many tokens they took to
+# be learned from: fewer, and the reply's own tokens, its thinking dropped, outweigh them)
 
 
 def flag(name):
@@ -185,6 +187,12 @@ def from_claude(name, inp, was):
                       "edits": [{"oldText": e.get("old_string"), "newText": e.get("new_string")}
                                 for e in i.get("edits") or []]}
     return was | i
+
+
+def usage_of(u):
+    """pi's usage as Claude's: the tokens a server read from its cache (and wrote to it) apart from the rest, as pi's."""
+    return {"input_tokens": u.get("input") or 0, "output_tokens": u.get("output") or 0,
+            "cache_read_input_tokens": u.get("cacheRead") or 0, "cache_creation_input_tokens": u.get("cacheWrite") or 0}
 
 
 def result_text(result):
@@ -460,6 +468,14 @@ class Engine:
         self.queue = []
         self.turn = None
         self.rewinds = {}  # uuid of a message being reverted -> Baude's request id (revert.ts answers)
+        # How full the window is, through a turn (context_used): pi counts what the session holds as the last reply's
+        # usage (the request's tokens, as the server counted them) and what's been added since at 4 characters a
+        # token. A model's tokenizer can take far more than that (Qwen's took 1.4 times as many for a file of numbers),
+        # so how many the server counted for what was added, against pi's estimate, is learned as the turn goes.
+        self.counted = None  # (the last reply's usage, all of it: what pi's count starts from)
+        self.added = 0  # (characters added since: messages sent, tools' results)
+        self.ratio = None  # (the server's tokens for what was added, over pi's estimate of them)
+        self.compacted = None  # (pi's estimate of what's left once it's summarised: it says nothing till a reply)
 
     # starting
 
@@ -577,6 +593,7 @@ class Engine:
             self.turn["error"] = self.failed
             self.end_turn()
             return
+        self.added += len(text)
         cmd = {"type": "prompt", "message": text}
         if images:
             cmd["images"] = images
@@ -607,6 +624,7 @@ class Engine:
         if self.failed or self.pi is None:
             return reply(rid, {"rewound": False, "error": self.failed or "pi isn't running"})
         self.deny_all("The user reverted this")
+        self.counted, self.compacted, self.added = None, None, 0  # (pi's count of what's left, as it is)
         self.rewinds[uuid] = rid
         self.send({"type": "clear_queue"})
         self.send({"type": "prompt", "message": "/baude-rewind " + json.dumps({"uuid": uuid, "index": index,
@@ -663,18 +681,53 @@ class Engine:
             elif e.get("type") in ("text_end", "thinking_end"):
                 self.stream({"type": "content_block_stop", "index": i})
         elif t == "message_end" and rec["message"].get("role") == "assistant":
+            self.measured(rec["message"])
             self.assistant_done(rec["message"])
         elif t == "tool_execution_end":
+            text = result_text(rec.get("result"))
+            self.added += len(text)
             emit({"type": "user", "parent_tool_use_id": None, "session_id": session_id,
                   "message": {"role": "user", "content": [{
                       "type": "tool_result", "tool_use_id": rec.get("toolCallId"),
-                      "content": result_text(rec.get("result")), "is_error": bool(rec.get("isError"))}]}})
+                      "content": text, "is_error": bool(rec.get("isError"))}]}})
         elif t == "extension_ui_request":
             self.on_dialog(rec)
         elif t == "compaction_end" and rec.get("result"):
+            self.counted, self.added = None, 0
+            self.compacted = rec["result"].get("estimatedTokensAfter")
             emit({"type": "system", "subtype": "compact_boundary", "session_id": session_id})
         elif t == "agent_settled":
             self.end_turn()
+
+    def measured(self, m):
+        """A reply's usage: the tokens its request held, as the server counted them (pi's count starts from them, as
+        it does from no reply it stopped or that failed). How many what was added since the last count took, over
+        pi's estimate of them, is learned from it (ratio), once enough was added to tell."""
+        if m.get("stopReason") in ("aborted", "error"):
+            return
+        u = m.get("usage") or {}
+        prompt = sum(u.get(k) or 0 for k in ("input", "cacheRead", "cacheWrite"))
+        total = u.get("totalTokens") or prompt + (u.get("output") or 0)
+        if not total:
+            return
+        if self.counted is not None and self.added >= RATIO_FROM and prompt > self.counted:
+            r = min(3.0, max(0.5, (prompt - self.counted) / (self.added / 4)))
+            self.ratio = r if self.ratio is None else (self.ratio + r) / 2
+        self.counted, self.compacted, self.added = total, None, 0
+
+    def context_used(self, u):
+        """How many tokens the session holds, from pi's contextUsage (u): what was added since the last reply's count
+        in the ratio the server's counted such things. Since pi summarised the session (it says null till a reply's
+        counted it), its estimate of what's left and what's come since."""
+        if not u:
+            return 0
+        r = self.ratio or 1
+        if u.get("tokens") is None:
+            return round(((self.compacted or 0) + self.added / 4) * r)
+        tokens = u["tokens"]
+        if self.counted is not None and tokens >= self.counted:
+            return round(self.counted + (tokens - self.counted) * r)
+        return tokens
 
     def stream(self, event):
         emit({"type": "stream_event", "event": event, "parent_tool_use_id": None, "session_id": session_id})
@@ -701,13 +754,13 @@ class Engine:
                           "content": content,
                           "stop_reason": {"length": "max_tokens", "toolUse": "tool_use", "stop": "end_turn"}.get(
                               m.get("stopReason")),  # (length: cut short, at MAX_OUT)
-                          "usage": {"input_tokens": u.get("input", 0), "output_tokens": u.get("output", 0)}}})
+                          "usage": usage_of(u)}})
         if self.turn:
             self.turn["messages"] += 1
             text = "".join(c["text"] for c in content if c["type"] == "text")
             if text:
                 self.turn["text"] = text
-            for k in ("input", "output"):
+            for k in ("input", "output", "cacheRead", "cacheWrite"):
                 self.turn["usage"][k] = self.turn["usage"].get(k, 0) + (u.get(k) or 0)
 
     def end_turn(self):
@@ -721,8 +774,7 @@ class Engine:
         emit({"type": "result", "subtype": "success", "is_error": bool(turn["error"]), "session_id": session_id,
               "result": turn["text"] or turn["error"] or "", "num_turns": max(1, turn["messages"]),
               "duration_ms": int((time.time() - turn["start"]) * 1000), "total_cost_usd": 0,
-              "usage": {"input_tokens": turn["usage"].get("input", 0),
-                        "output_tokens": turn["usage"].get("output", 0)}})
+              "usage": usage_of(turn["usage"])})
 
     # permission questions
 
@@ -802,7 +854,7 @@ def handle(msg):
         elif sub == "get_context_usage":
             def usage(r):
                 u = (r.get("data") or {}).get("contextUsage") or {}
-                used, size = u.get("tokens") or 0, u.get("contextWindow") or window
+                used, size = engine.context_used(u), u.get("contextWindow") or window
                 reply(rid, {"categories": [], "totalTokens": used, "maxTokens": size,
                             "percentage": used * 100 / size if size else 0})
             if engine.ready.is_set() and not engine.failed:

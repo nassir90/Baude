@@ -406,12 +406,135 @@ def save_settings(**changes):
 # The settings Baude and Record share, in settings.json (this machine's: they never go to another host). Changed in
 # one app, every other one running here takes it as it's written (watch_settings): the accent, the text's, the icons'
 # and the Global Scale, Auto restart on update and the code font (each read where it's used, the font at the next
-# start), and Meta's model, effort, Code mode and Run commands. A window's own zoom (Ctrl/⌘ + − 0) stays its own.
+# start), Meta's model, effort, Code mode and Run commands, and Notifications. A window's own zoom (Ctrl/⌘ + − 0) stays
+# its own.
 SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
-                   "meta_model", "meta_effort", "meta_code_mode", "meta_commands")
+                   "meta_model", "meta_effort", "meta_code_mode", "meta_commands", "notify")
 SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
 _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
 _following = weakref.WeakSet()  # (Settings rows up that show a shared setting: follow_setting)
+
+
+# ---- desktop notifications: a reply finished (or a question asked) where you aren't looking, said by the desktop's
+# own notifications: on Linux GLib's (Gio.Notification) or org.freedesktop.Notifications' over D-Bus (_gio_notifies),
+# on macOS Notification Center's, through osascript. Settings → Notifications, in Baude and Record both.
+_notified = {}  # (a notification's key: what a click on it does)
+_fdo = {"ids": {}, "keys": {}, "subscribed": False}  # (org.freedesktop.Notifications': key → its id, and back)
+FDO = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
+
+
+def notifications_on():
+    return load_settings().get("notify") is not False
+
+
+def _gio_notifies(app):
+    """Whether GLib's notifications reach the desktop for app: unique (its clicks come back to it: not Record, one
+    process per start), its .desktop entry installed (GNOME's org.gtk.Notifications turns away an app without one).
+    Otherwise org.freedesktop.Notifications is posted to itself."""
+    if app.get_flags() & Gio.ApplicationFlags.NON_UNIQUE or not app.get_application_id():
+        return False
+    name = f"{app.get_application_id()}.desktop"
+    return any(os.path.exists(os.path.join(d, "applications", name))
+               for d in (GLib.get_user_data_dir(), *GLib.get_system_data_dirs()))
+
+
+def _fdo_call(method, params, done=None):
+    """org.freedesktop.Notifications' method, on the session bus, done(the answer's values) when it answers; its
+    ActionInvoked and NotificationClosed heard from the first call on."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error:
+        return
+    if not _fdo["subscribed"]:
+        _fdo["subscribed"] = True
+        for signal in ("ActionInvoked", "NotificationClosed"):
+            bus.signal_subscribe(FDO[0], FDO[2], signal, FDO[1], None, Gio.DBusSignalFlags.NONE,
+                                 lambda _c, _s, _p, _i, sig, v: _fdo_signal(sig, *v.unpack()[:2]))
+
+    def answered(b, res):
+        try:
+            out = b.call_finish(res).unpack()
+        except GLib.Error:
+            return
+        if done is not None:
+            done(out)
+    bus.call(FDO[0], FDO[1], FDO[2], method, params, None, Gio.DBusCallFlags.NONE, -1, None, answered)
+
+
+def _fdo_signal(signal, nid, action=None):
+    """ActionInvoked (a click: its default action) or NotificationClosed, for one of ours."""
+    key = _fdo["keys"].pop(nid, None)
+    if key is None:
+        return
+    _fdo["ids"].pop(key, None)
+    fn = _notified.pop(key, None)
+    if signal == "ActionInvoked" and action == "default" and fn is not None:
+        fn()
+
+
+def desktop_notify(key, title, body="", clicked=None):
+    """A desktop notification, key's (one key, one notification: a newer one takes the older's place); clicked(), run
+    when it's clicked (Linux). Nothing when Notifications is off. On macOS osascript's, credited to Script Editor (the
+    apps run in Python's bundle, not one of their own): a click there opens Script Editor."""
+    if not notifications_on():
+        return
+    body = " ".join((body or "").split())
+    body = body[:157] + "…" if len(body) > 160 else body
+    if sys.platform == "darwin":
+        quote = lambda t: '"' + t.replace("\\", "\\\\").replace('"', '\\"') + '"'  # noqa: E731
+        script = f"display notification {quote(body)} with title {quote(GLib.get_application_name() or '')}" + \
+            f" subtitle {quote(title)}"
+        try:
+            subprocess.Popen(["osascript", "-e", script], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+        return
+    app = Gio.Application.get_default()
+    if app is None:
+        return
+    _notified[key] = clicked or (lambda: None)
+    if app.get_is_registered() and _gio_notifies(app):
+        if app.lookup_action("notification-clicked") is None:
+            act = Gio.SimpleAction.new("notification-clicked", GLib.VariantType.new("s"))
+            act.connect("activate", lambda _a, v: (fn := _notified.pop(v.get_string(), None)) and fn())
+            app.add_action(act)
+        n = Gio.Notification.new(title)
+        if body:
+            n.set_body(body)
+        n.set_default_action_and_target("app.notification-clicked", GLib.Variant.new_string(key))
+        app.send_notification(key, n)
+        return
+
+    def posted(out):
+        nid = out[0]
+        if _notified.get(key) is None:  # (taken back before it was up)
+            _fdo_call("CloseNotification", GLib.Variant("(u)", (nid,)))
+            return
+        _fdo["ids"][key], _fdo["keys"][nid] = nid, key
+    hints = {"urgency": GLib.Variant.new_byte(1)}
+    _fdo_call("Notify", GLib.Variant("(susssasa{sv}i)", (
+        GLib.get_application_name() or "", _fdo["ids"].get(key, 0), app.get_application_id() or "", title, body,
+        ["default", "Open"], hints, -1)), posted)
+
+
+def withdraw_notification(key):
+    """key's notification taken back (what it was about seen now), if one's up."""
+    if _notified.pop(key, None) is None:
+        return
+    if (nid := _fdo["ids"].pop(key, None)) is not None:
+        _fdo["keys"].pop(nid, None)
+        _fdo_call("CloseNotification", GLib.Variant("(u)", (nid,)))
+    elif sys.platform != "darwin" and (app := Gio.Application.get_default()) is not None:
+        app.withdraw_notification(key)
+
+
+def notifications_row():
+    """Settings → Notifications (Baude's and Record's, the one setting)."""
+    row = Adw.SwitchRow(title="Notifications", active=notifications_on(),
+                        subtitle="When a reply finishes, or asks you something, while you're elsewhere")
+    row.connect("notify::active", lambda r, _p: r.syncing or save_settings(notify=r.get_active()))
+    return follow_setting(row, "notify", lambda v: row.set_active(v is not False))
 
 
 def follow_setting(row, key, show):

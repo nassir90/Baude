@@ -3551,6 +3551,39 @@ class MetaChat(Gtk.Box):
         if name in COMMAND_TOOLS and agent.started_mode not in (None, "auto"):
             text = f"{auto_mode_note(agent.model)}, so each command is asked. {text}"
         self._ask_card(text, "Allow", lambda allow: agent.answer(rid, allow, name, inp), code)
+        self.tell_desktop(text)
+
+    def tell_desktop(self, body):
+        """A reply finished, or a question asked, while Meta's out of sight (its window not the one you're in, or its
+        page not shown), as a desktop notification (widgets.desktop_notify): a click brings its window up, Meta shown.
+        Taken back as Meta's shown, or its window's the one you're in with Meta in it (seen)."""
+        root = self.get_root()
+        if isinstance(root, Gtk.Window) and root.is_active() and self.get_mapped():
+            return
+        me = weakref.ref(self)
+        if getattr(self, "seen_root", None) is not root:  # (once a window, its own as it's moved to another)
+            if (old := getattr(self, "seen_handler", None)) is not None:
+                old[0].disconnect(old[1])
+                self.seen_handler = None
+            if isinstance(root, Gtk.Window):
+                self.seen_handler = (root, root.connect("notify::is-active",
+                                                        lambda *_: (c := me()) is not None and c.seen()))
+            self.seen_root = root
+        if getattr(self, "seen_mapped", None) is None:
+            self.seen_mapped = self.connect("map", lambda c: c.seen())
+
+        def clicked():
+            if (chat := me()) is not None and isinstance(win := chat.get_root(), Gtk.Window):
+                win.present()
+                if not chat.get_mapped() and hasattr(win, "show_meta"):
+                    win.show_meta()
+        widgets.desktop_notify(f"meta-{id(self)}", NAME, body, clicked)
+
+    def seen(self):
+        """Meta in sight: its notification gone."""
+        root = self.get_root()
+        if self.get_mapped() and isinstance(root, Gtk.Window) and root.is_active():
+            widgets.withdraw_notification(f"meta-{id(self)}")
 
     def _ask_card(self, text, yes, answered, code=None):
         """A question to the user at the conversation's end, as Baude asks in its Manual mode: Deny, or yes (its
@@ -3594,6 +3627,7 @@ class MetaChat(Gtk.Box):
             else:
                 box["card"] = self._ask_card(text, yes, lambda allow: (box.update(yes=allow), said.set()))
                 box["card"].confirm = True  # (dropped, however: a no, for the tool that waits on it)
+                self.tell_desktop(text)
             return False
         GLib.idle_add(ask)
         if not said.wait(CONFIRM_WAIT) and box.get("card") is not None:
@@ -3650,6 +3684,7 @@ class MetaChat(Gtk.Box):
             m = None
         if m is not None:
             self.store_reply(agent, m)
+            self.tell_desktop(f"Ended with an error: {error}" if error else text.strip() or "Finished")
         self.save(now=True)
         if self.showing(agent):
             self.render()

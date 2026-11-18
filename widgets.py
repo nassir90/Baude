@@ -1708,6 +1708,7 @@ class ContextMeter(Gtk.LevelBar):
 
     def set_text(self, text):
         self.text = text
+        self.update_property([Gtk.AccessibleProperty.DESCRIPTION], [text])
         self.queue_draw()
 
     def do_snapshot(self, snapshot):
@@ -1724,7 +1725,7 @@ class ContextMeter(Gtk.LevelBar):
         layout.set_width((width - 6) * Pango.SCALE)
         text_w, text_h = (v / Pango.SCALE for v in layout.get_size())
         origin = Graphene.Point().init(max(3, (width - text_w) / 2), (height - text_h) / 2)
-        fill = round(width * (self.get_value() - self.get_min_value()) / ((self.get_max_value() - self.get_min_value()) or 1))
+        fill = math.floor(width * (self.get_value() - self.get_min_value()) / ((self.get_max_value() - self.get_min_value()) or 1))
         if self.get_direction() == Gtk.TextDirection.RTL:
             spans = ((width - fill, width, True), (0, width - fill, False))
         else:
@@ -1750,8 +1751,11 @@ class ContextUsage(Gtk.Box):
         super().__init__(spacing=6, tooltip_text="Context window usage", **kw)
         self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
-        self.bar.add_offset_value("ctx-mid", 0.6)
-        self.bar.add_offset_value("ctx-high", 0.85)
+        for name in ("low", "high", "full"):
+            self.bar.remove_offset_value(name)
+        self.bar.add_offset_value("ctx-low", 0.6)
+        self.bar.add_offset_value("ctx-mid", 0.85)
+        self.bar.add_offset_value("ctx-high", 1.0)
         self.append(self.label)
         self.append(self.bar)
         self.reset()

@@ -16,7 +16,7 @@ Ctrl+. (⌘.) Send Feedback over whatever's open, Ctrl+M (Control on macOS too) 
 closes it. Images and PDFs can also be attached with the paperclip or dropped onto the window.
 
 Set BAUDE_CLAUDE=/path/to/claude to use a specific claude binary (else claude on PATH, else, on macOS,
-the Claude desktop app's).
+the Claude desktop app's newest). One that's gone (an old desktop build, removed) is passed over, said on stderr.
 """
 import argparse
 import array
@@ -16201,7 +16201,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def open_fixes(self, select=True):
         """☰ → Ongoing Feedback: its tab, opened or shown (fixview.FixesPage)."""
-        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self, claude_exe()), "Feedback",
+        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self), "Feedback",
                               icon="mail-send-symbolic", tooltip="The feedback on Baude, and where each stands",
                               select=select)
 

@@ -16,7 +16,16 @@ import threading
 # claude_env leaves it out (fixes.py's claude runs too)
 HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID",
                     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-                    "CLAUDE_PID", "CLAUDE_CODE_DESKTOP_APP_VERSION", "CLAUDE_CODE_SESSION_ATTENDED")
+                    "CLAUDE_PID", "CLAUDE_CODE_DESKTOP_APP_VERSION", "CLAUDE_CODE_SESSION_ATTENDED",
+                    # (the host's login: with these a claude asks the program that started it to refresh its token,
+                    # which Baude never does, and takes the host's account for its own)
+                    "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH", "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS",
+                    "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH", "CLAUDE_CODE_SDK_HAS_SESSIONS_OAUTH_REFRESH",
+                    "CLAUDE_CODE_OAUTH_SCOPES", "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ORGANIZATION_UUID",
+                    "CLAUDE_CODE_USER_EMAIL",
+                    # (the host session's own: its claude, a versioned build's path; its effort; and --bare, under
+                    # which a claude reads no login of its own, OAuth's or the keychain's)
+                    "CLAUDE_CODE_EXECPATH", "CLAUDE_EFFORT", "CLAUDE_CODE_SIMPLE")
 
 
 # (value, label). MODELS is only a fallback: the CLI's initialize response lists the real
@@ -55,36 +64,58 @@ def has_flag(exe, flag):
         return False
 
 
-def claude_exe():
-    """The claude binary: BAUDE_CLAUDE, else claude on PATH, else (macOS) the newest one the Claude desktop app
-    keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH."""
-    exe = os.environ.get("BAUDE_CLAUDE") or shutil.which("claude")
+_PASSED_OVER = set()  # ((var, its value): a claude named that isn't there, said once: claude_exe)
+
+
+def claude_exe(var="BAUDE_CLAUDE"):
+    """The claude binary: var's (BAUDE_CLAUDE; Record's RECORD_CLAUDE), else claude on PATH, else (macOS) the newest
+    one the Claude desktop app keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH.
+    Looked for again each time: a var naming one that's gone (an old desktop build, removed as the app updated) is
+    passed over, not run."""
+    exe = os.environ.get(var)
+    if exe and shutil.which(exe):
+        return exe
+    if exe and (var, exe) not in _PASSED_OVER:  # (said once, on stderr: the host process's in its host.log)
+        _PASSED_OVER.add((var, exe))
+        print(f"{var}={exe} isn't there to run: using the claude found without it", file=sys.stderr, flush=True)
+    exe = shutil.which("claude")
     if exe or sys.platform != "darwin":
         return exe or "claude"
+    return desktop_claude() or "claude"
+
+
+def desktop_claude():
+    """(macOS) The newest claude the Claude desktop app keeps, or None."""
+    root = os.path.expanduser(MACOS_DESKTOP_CLAUDE)
     found = []
-    for path in glob.glob(os.path.join(os.path.expanduser(MACOS_DESKTOP_CLAUDE),
-                                       "*", "*", "claude.app", "Contents", "MacOS", "claude")):
-        version = os.path.relpath(path, os.path.expanduser(MACOS_DESKTOP_CLAUDE)).split(os.sep)[0]
+    for path in glob.glob(os.path.join(root, "*", "*", "claude.app", "Contents", "MacOS", "claude")):
+        version = os.path.relpath(path, root).split(os.sep)[0]
         if os.access(path, os.X_OK) and re.fullmatch(r"\d+(\.\d+)*", version):
             found.append((tuple(int(n) for n in version.split(".")), os.path.getmtime(path), path))
-    return max(found)[2] if found else "claude"
+    return max(found)[2] if found else None
 
 
-_CLAUDE_VERSION = []
+_CLAUDE_VERSION = {}  # (a claude's resolved path: its version, asked once)
+
+
+def claude_path():
+    """The claude binary claude_exe gives, its links followed: what claude_version's are kept by."""
+    exe = claude_exe()
+    return os.path.realpath(shutil.which(exe) or exe)
 
 
 def claude_version():
-    """The installed Claude Code's version (2.1.300), or None."""
-    if not _CLAUDE_VERSION:
-        exe = claude_exe()
+    """The Claude Code's version (2.1.300) that claude_exe gives now, or None: another build's, once it's switched to."""
+    path = claude_path()
+    if path not in _CLAUDE_VERSION:
         try:
-            out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15,
+            out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15,
                                  stdin=subprocess.DEVNULL).stdout
         except (OSError, subprocess.TimeoutExpired):
             out = ""
         m = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", out)
-        _CLAUDE_VERSION.append(m.group(0) if m else None)
-    return _CLAUDE_VERSION[0]
+        _CLAUDE_VERSION[path] = m.group(0) if m else None
+    return _CLAUDE_VERSION[path]
 
 
 # what a claude started from inside another one inherits (baude run from a Claude Desktop or terminal

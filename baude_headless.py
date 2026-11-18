@@ -46,7 +46,8 @@ Linked to another machine's host process (link, or Add Host… in Baude), it's i
 the link's used both ways, so that machine reaches this one through it too, and every host either is linked to joins
 them. A member lists, starts and steers the others' chats, and runs their models, as a head on that machine does.
 
-It runs a model as Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude, else claude on PATH; Apple's in
+It runs a model as Baude does (baudelib/models.py): Claude's in BAUDE_CLAUDE's claude (passed over, said in host.log,
+if it's gone), else claude on PATH, else on macOS the Claude desktop app's newest; Apple's in
 apple-claude, once built; one on this machine in pi-claude, once pi and the model are here.
 
 It keeps itself up to date from git once that's asked for: --auto-update, or Settings → Auto restart on update in this

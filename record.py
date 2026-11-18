@@ -87,7 +87,6 @@ import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, besi
 
 APP_ID = "dev.baude.Record"
 QUOTE_LIMIT = 6000
-MACOS_DESKTOP_CLAUDE = "~/Library/Application Support/Claude/claude-code"
 
 
 def noun(plural=False):
@@ -110,17 +109,8 @@ def full_name(notebook):
 
 
 def claude_exe():
-    """RECORD_CLAUDE, else claude on PATH, else (macOS) the newest one the Claude desktop app keeps."""
-    exe = os.environ.get("RECORD_CLAUDE") or shutil.which("claude")
-    if exe or sys.platform != "darwin":
-        return exe or "claude"
-    found = []
-    root = os.path.expanduser(MACOS_DESKTOP_CLAUDE)
-    for path in glob.glob(os.path.join(root, "*", "*", "claude.app", "Contents", "MacOS", "claude")):
-        version = os.path.relpath(path, root).split(os.sep)[0]
-        if os.access(path, os.X_OK) and re.fullmatch(r"\d+(\.\d+)*", version):
-            found.append((tuple(int(n) for n in version.split(".")), os.path.getmtime(path), path))
-    return max(found)[2] if found else "claude"
+    """RECORD_CLAUDE, else claude on PATH, else (macOS) the newest one the Claude desktop app keeps (baudelib's)."""
+    return baudelib.claude.claude_exe("RECORD_CLAUDE")
 
 
 def child_env():
@@ -8825,7 +8815,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def open_fixes(self, select=True):
         """☰ → Ongoing Feedback, as Baude's: the feedback on Baude and Record and where each stands, in a tab of its own
         (fixview.FixesPage), opened or shown."""
-        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self, claude_exe()), "Feedback",
+        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self, os.environ.get("RECORD_CLAUDE")), "Feedback",
                               icon="mail-send-symbolic", tooltip="The feedback on Baude, and where each stands",
                               select=select)
 

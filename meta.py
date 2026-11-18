@@ -1706,6 +1706,8 @@ class Agent:
                 sync_rows()
         if t == "system" and msg.get("subtype") == "compact_boundary":  # (summarised: less of its window used now)
             self.chat.context_soon(self)
+        elif t == "system" and msg.get("subtype") == "baude_context" and self is self.chat.agent:  # (pi-claude's: the
+            self.chat.show_usage(msg.get("usage") or {})  # tokens of the request it's sent, as MLX's server says)
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
             if msg.get("warn") and turn is not None:  # (its tools didn't reach the model's host: over the reply)

@@ -33,6 +33,7 @@ import http.client
 import http.server
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -60,6 +61,8 @@ UNLOAD_AFTER = 600
 LEVELS = ("off", "minimal", "low", "medium", "high")
 MCP_TIMEOUT = 900  # (s an MCP tool's call may take: one of Meta's waits on a model loaded, or on the user's answer)
 SMALL_WINDOW = 8192  # (a served model's window with less than this has no room for pi's instructions and tools)
+IMAGE_CHARS = 4800  # (what pi counts an image as, in characters, estimating what it takes)
+FLIGHT_EVERY = 0.5  # (s between looks at the server's count of this chat's request in flight, through a turn)
 RATIO_FROM = 2000  # (characters added between two counts of the server's, at least, for how many tokens they took to
 # be learned from: fewer, and the reply's own tokens, its thinking dropped, outweigh them)
 
@@ -195,6 +198,41 @@ def usage_of(u):
             "cache_read_input_tokens": u.get("cacheRead") or 0, "cache_creation_input_tokens": u.get("cacheWrite") or 0}
 
 
+def chars(m):
+    """A message's characters as pi estimates its tokens from them (4 a token: estimateTokens), an image as 4800."""
+    def content(c):
+        if isinstance(c, str):
+            return len(c)
+        return sum(len(b.get("text") or "") if b.get("type") == "text" else
+                   IMAGE_CHARS if b.get("type") == "image" else 0 for b in c or [])
+
+    def block(b):
+        if b.get("type") == "toolCall":
+            return len(b.get("name") or "") + len(json.dumps(b.get("arguments"), separators=(",", ":")))
+        return len(b.get("text") or "") if b.get("type") == "text" else len(b.get("thinking") or "")
+
+    role = m.get("role")
+    if role == "system":
+        tools = m.get("toolsAdded")
+        return content(m.get("content")) + sum(len(v) for v in (m.get("sections") or {}).values() if v) + \
+            (len(json.dumps(tools, separators=(",", ":"))) if tools else 0)
+    if role == "assistant":
+        return sum(block(b) for b in m.get("content") or [])
+    if role == "bashExecution":
+        return len(m.get("command") or "") + len(m.get("output") or "")
+    if role in ("branchSummary", "compactionSummary"):
+        return len(m.get("summary") or "")
+    return content(m.get("content"))
+
+
+def counted_of(m):
+    """What a reply's usage says its request held and it said, as pi counts it (0: a reply pi doesn't count from)."""
+    if m.get("role") != "assistant" or m.get("stopReason") in ("aborted", "error"):
+        return 0
+    u = m.get("usage") or {}
+    return u.get("totalTokens") or sum(u.get(k) or 0 for k in ("input", "output", "cacheRead", "cacheWrite"))
+
+
 def result_text(result):
     parts = []
     for c in (result or {}).get("content") or []:
@@ -268,6 +306,61 @@ class Gate:
                 self.cond.notify_all()
 
 
+class Flight:
+    """The requests the server's working on, by the chat that sent each (its pid, from the path it's sent by: /c/<pid>):
+    the tokens of each one's prompt, as the server logs them before it reads them, and how many it's read. The log
+    doesn't say which request is whose: they're taken in the order they came, and when more than one came before the
+    server said what the first held, the order may be wrong, so those aren't sure."""
+
+    QUEUED = re.compile(r"(?:Generation queued|Prefill started): request=(\w+)\b.*?\bprompt_tokens=(\d+)")
+    PROGRESS = re.compile(r"Prefill progress: request=(\w+) tokens=(\d+)/(\d+)")
+    READ = re.compile(r"Prefill completed: request=(\w+) prompt_tokens=(\d+)")
+    GENERATES = ("/chat/completions", "/completions", "/responses", "/messages")  # (the server logs these as it
+    # queues them; its others, counting tokens and the like, it doesn't)
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.unsaid = []  # (the requests the server hasn't said it's queued yet, the oldest first)
+        self.ids = {}  # the server's id of a request -> its entry
+        self.chats = {}  # chat -> its entry (one in flight at a time: pi waits on each)
+
+    def start(self, chat):
+        e = {"prompt_tokens": None, "read": 0, "sure": True}
+        with self.lock:
+            if self.unsaid:
+                for other in self.unsaid:
+                    other["sure"] = False
+                e["sure"] = False
+            self.unsaid.append(e)
+            if chat:
+                self.chats[chat] = e
+        return chat, e
+
+    def end(self, started):
+        chat, e = started
+        with self.lock:
+            if e in self.unsaid:
+                self.unsaid.remove(e)
+            self.ids = {k: v for k, v in self.ids.items() if v is not e}
+            if self.chats.get(chat) is e:
+                del self.chats[chat]
+
+    def line(self, text):
+        if m := self.QUEUED.search(text):
+            with self.lock:
+                if m.group(1) not in self.ids and self.unsaid:
+                    e = self.ids[m.group(1)] = self.unsaid.pop(0)
+                    e["prompt_tokens"] = int(m.group(2))
+        elif m := self.PROGRESS.search(text) or self.READ.search(text):
+            with self.lock:
+                if e := self.ids.get(m.group(1)):
+                    e["read"] = int(m.group(2))
+
+    def of(self, chat):
+        with self.lock:
+            return dict(self.chats.get(chat) or {})
+
+
 def mlx_vlm_server():
     return providers.modelslib.mlx_server()
 
@@ -283,14 +376,31 @@ def serve():
     server = subprocess.Popen(
         ["sh", "-c", '"$@" & pid=$!; cat > /dev/null; kill $pid 2>/dev/null; wait $pid', "sh", mlx_vlm_server(),
          "--host", "127.0.0.1", "--port", str(inner), "--max-tokens", str(MAX_OUT)],
-        stdin=subprocess.PIPE, stdout=log, stderr=log, env=os.environ | {"HF_HUB_OFFLINE": "1"})
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+        env=os.environ | {"HF_HUB_OFFLINE": "1"})
     gate = Gate()
+    flight = Flight()
+
+    def read_log():  # (what the server says, to its log, and read for the tokens of what it's asked)
+        for text in server.stdout:
+            log.write(text)
+            log.flush()
+            flight.line(text)
+    threading.Thread(target=read_log, daemon=True).start()
 
     class Proxy(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def do_GET(self):
+            if self.path.startswith("/baude/flight?chat="):  # (how many tokens a chat's request in flight holds)
+                said = json.dumps(flight.of(self.path.partition("=")[2])).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(said)))
+                self.end_headers()
+                self.wfile.write(said)
+                return
             self.forward(None)
 
         def do_POST(self):
@@ -306,9 +416,12 @@ def serve():
                 self.forward(body)
 
         def forward(self, body):
+            m = re.match(r"/c/(\d+)(/.*)", self.path)  # (a chat's: /c/<its pid>/v1/...)
+            chat, path = (m.group(1), m.group(2)) if m else (None, self.path)
+            started = flight.start(chat) if body is not None and path.rstrip("/").endswith(Flight.GENERATES) else None
             up = http.client.HTTPConnection("127.0.0.1", inner, timeout=None)
             try:
-                up.request(self.command, self.path, body,
+                up.request(self.command, path, body,
                            {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")})
                 r = up.getresponse()
                 self.send_response(r.status)
@@ -324,6 +437,8 @@ def serve():
                 pass  # (the chat stopped it, or the server's gone)
             finally:
                 up.close()
+                if started:
+                    flight.end(started)
 
     proxy = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Proxy)
     proxy.daemon_threads = True
@@ -378,12 +493,34 @@ def use_server():
     while time.time() - t0 < 300:
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{PORT}/v1/models", timeout=2).read()
-            return
+            return find_route()
         except OSError:
             if not pid_alive(pid):
                 raise RuntimeError("the MLX server stopped (see ~/.local/share/baude/pi/logs/server.log)")
             time.sleep(0.25)
     raise RuntimeError("the MLX server didn't come up in 5 minutes (see ~/.local/share/baude/pi/logs/server.log)")
+
+
+ROUTE = ""  # (the path this chat's requests go by, /c/<its pid>, for the server's count of each in flight; none from a
+# server kept by a pi-claude from before that, till it's stopped)
+
+
+def find_route():
+    global ROUTE
+    try:
+        json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/baude/flight?chat={os.getpid()}", timeout=2))
+        ROUTE = f"/c/{os.getpid()}"
+    except (OSError, ValueError):
+        ROUTE = ""
+
+
+def in_flight():
+    """The server's count of this chat's request in flight ({prompt_tokens, read, sure}; {} if none or not known)."""
+    try:
+        return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/baude/flight?chat={os.getpid()}",
+                                                timeout=2)) or {}
+    except (OSError, ValueError):
+        return {}
 
 
 def leave_server():
@@ -433,7 +570,7 @@ def provider_config():
     cost = {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
     if kind == "mlx":
         return "mlx", {
-            "baseUrl": f"http://127.0.0.1:{PORT}/v1", "api": "openai-completions", "apiKey": "local",
+            "baseUrl": f"http://127.0.0.1:{PORT}{ROUTE}/v1", "api": "openai-completions", "apiKey": "local",
             "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False, "supportsStore": False,
                        "maxTokensField": "max_tokens"},
             "models": [{"id": model["repo"], "name": model["displayName"], "input": model["input"],
@@ -468,14 +605,24 @@ class Engine:
         self.queue = []
         self.turn = None
         self.rewinds = {}  # uuid of a message being reverted -> Baude's request id (revert.ts answers)
-        # How full the window is, through a turn (context_used): pi counts what the session holds as the last reply's
-        # usage (the request's tokens, as the server counted them) and what's been added since at 4 characters a
-        # token. A model's tokenizer can take far more than that (Qwen's took 1.4 times as many for a file of numbers),
-        # so how many the server counted for what was added, against pi's estimate, is learned as the turn goes.
-        self.counted = None  # (the last reply's usage, all of it: what pi's count starts from)
-        self.added = 0  # (characters added since: messages sent, tools' results)
+        # How full the window is, through a turn (context_used). pi counts what the session holds as the last reply's
+        # usage (the tokens of its request and of what it said, as the server counted them) and what's been added
+        # since at 4 characters a token. A model's tokenizer can take far more than that (Qwen's took 1.4 times as
+        # many for a file of numbers): MLX's server says how many tokens each request holds before it reads it
+        # (watch_flight), and for the others how many the server counted for what was added, against pi's estimate,
+        # is learned as the session goes (ratio).
+        self.tally = threading.Lock()
+        self.chars = 0  # (characters added to the session, all told: messages sent, tools' results; images as pi counts
+        # them. What was added since a count is how many more there are now than then)
+        self.counted, self.counted_at = None, 0  # (the last reply's usage, all of it: what pi's count starts from)
+        self.results_only = False  # (nothing but tools' results added since: what the ratio's learned from, a
+        # message of yours dropping what the model thought, from the next request, as Qwen's template does)
         self.ratio = None  # (the server's tokens for what was added, over pi's estimate of them)
-        self.compacted = None  # (pi's estimate of what's left once it's summarised: it says nothing till a reply)
+        self.estimated, self.estimated_at = None, 0  # (pi's estimate of what's left once it's summarised, or of a
+        # session taken up again: it says null for a summarised one till a reply's counted)
+        self.sent, self.sent_at = None, 0  # (the tokens of the request in flight, as MLX's server says)
+        self.compacting = False
+        self.last_prompt = None  # (the tokens of the last reply's request: still in flight a moment after it's said)
 
     # starting
 
@@ -552,6 +699,10 @@ class Engine:
                                                      "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
         self.reader = threading.Thread(target=self._read_pi, daemon=True)
         self.reader.start()
+        if kind == "mlx" and ROUTE:
+            threading.Thread(target=self.watch_flight, daemon=True).start()
+        if flag("--resume"):  # (taken up again: where pi's count of it starts)
+            self.recount()
 
     def stop(self):
         leave_server()
@@ -593,7 +744,9 @@ class Engine:
             self.turn["error"] = self.failed
             self.end_turn()
             return
-        self.added += len(text)
+        with self.tally:
+            self.chars += len(text) + IMAGE_CHARS * len(images or ())
+            self.results_only = False
         cmd = {"type": "prompt", "message": text}
         if images:
             cmd["images"] = images
@@ -624,7 +777,8 @@ class Engine:
         if self.failed or self.pi is None:
             return reply(rid, {"rewound": False, "error": self.failed or "pi isn't running"})
         self.deny_all("The user reverted this")
-        self.counted, self.compacted, self.added = None, None, 0  # (pi's count of what's left, as it is)
+        with self.tally:  # (counted again once it's done: recount)
+            self.counted = self.estimated = self.sent = None
         self.rewinds[uuid] = rid
         self.send({"type": "clear_queue"})
         self.send({"type": "prompt", "message": "/baude-rewind " + json.dumps({"uuid": uuid, "index": index,
@@ -632,6 +786,7 @@ class Engine:
 
     def rewound(self, said):
         rid = self.rewinds.pop(said.get("uuid"), None)
+        self.recount()
         if rid is not None:
             reply(rid, {"rewound": True} if said.get("ok") else {"rewound": False,
                                                                  "error": said.get("why") or "pi wouldn't revert"})
@@ -685,49 +840,104 @@ class Engine:
             self.assistant_done(rec["message"])
         elif t == "tool_execution_end":
             text = result_text(rec.get("result"))
-            self.added += len(text)
+            with self.tally:
+                self.chars += chars({"content": (rec.get("result") or {}).get("content")})
             emit({"type": "user", "parent_tool_use_id": None, "session_id": session_id,
                   "message": {"role": "user", "content": [{
                       "type": "tool_result", "tool_use_id": rec.get("toolCallId"),
                       "content": text, "is_error": bool(rec.get("isError"))}]}})
         elif t == "extension_ui_request":
             self.on_dialog(rec)
-        elif t == "compaction_end" and rec.get("result"):
-            self.counted, self.added = None, 0
-            self.compacted = rec["result"].get("estimatedTokensAfter")
-            emit({"type": "system", "subtype": "compact_boundary", "session_id": session_id})
+        elif t == "compaction_start":
+            with self.tally:  # (its own request, for the summary, isn't the session's)
+                self.compacting, self.sent = True, None
+        elif t == "compaction_end":
+            with self.tally:
+                self.compacting = False
+                if rec.get("result"):
+                    self.counted, self.sent = None, None
+                    self.estimated, self.estimated_at = rec["result"].get("estimatedTokensAfter"), self.chars
+            if rec.get("result"):
+                emit({"type": "system", "subtype": "compact_boundary", "session_id": session_id})
         elif t == "agent_settled":
             self.end_turn()
 
     def measured(self, m):
-        """A reply's usage: the tokens its request held, as the server counted them (pi's count starts from them, as
-        it does from no reply it stopped or that failed). How many what was added since the last count took, over
-        pi's estimate of them, is learned from it (ratio), once enough was added to tell."""
-        if m.get("stopReason") in ("aborted", "error"):
-            return
-        u = m.get("usage") or {}
-        prompt = sum(u.get(k) or 0 for k in ("input", "cacheRead", "cacheWrite"))
-        total = u.get("totalTokens") or prompt + (u.get("output") or 0)
+        """A reply's usage: the tokens its request held and it said, as the server counted them (pi's count starts from
+        them, as it does from no reply it stopped or that failed). How many what was added since the last count took,
+        over pi's estimate of them, is learned from it (ratio): once enough was added to tell, tools' results only."""
+        total = counted_of(m)
         if not total:
             return
-        if self.counted is not None and self.added >= RATIO_FROM and prompt > self.counted:
-            r = min(3.0, max(0.5, (prompt - self.counted) / (self.added / 4)))
-            self.ratio = r if self.ratio is None else (self.ratio + r) / 2
-        self.counted, self.compacted, self.added = total, None, 0
+        prompt = total - ((m.get("usage") or {}).get("output") or 0)
+        with self.tally:
+            added = self.chars - self.counted_at
+            if self.counted is not None and self.results_only and added >= RATIO_FROM and prompt > self.counted:
+                r = min(3.0, max(0.5, (prompt - self.counted) / (added / 4)))
+                self.ratio = r if self.ratio is None else (self.ratio + r) / 2
+            self.counted, self.counted_at, self.results_only = total, self.chars, True
+            self.estimated = self.sent = None
+            self.last_prompt = prompt
 
     def context_used(self, u):
-        """How many tokens the session holds, from pi's contextUsage (u): what was added since the last reply's count
-        in the ratio the server's counted such things. Since pi summarised the session (it says null till a reply's
-        counted it), its estimate of what's left and what's come since."""
-        if not u:
-            return 0
+        """How many tokens the session holds: the request in flight's, as MLX's server says, and what's been added since
+        it; else from pi's contextUsage (u), what was added since the last reply's count in the ratio the server's
+        counted such things. Since pi summarised the session (it says null till a reply's counted it), or once a
+        summarised session's taken up again, pi's estimate of what's left and what's come since, in that ratio too;
+        and pi's own estimate in it, when there's no count it starts from (a revert's, say)."""
         r = self.ratio or 1
-        if u.get("tokens") is None:
-            return round(((self.compacted or 0) + self.added / 4) * r)
-        tokens = u["tokens"]
-        if self.counted is not None and tokens >= self.counted:
-            return round(self.counted + (tokens - self.counted) * r)
-        return tokens
+        with self.tally:
+            if self.sent is not None:
+                return round(self.sent + (self.chars - self.sent_at) / 4 * r)
+            if not u:
+                return 0
+            tokens = u.get("tokens")
+            if tokens is None:
+                return round(((self.estimated or 0) + (self.chars - self.estimated_at) / 4) * r)
+            if self.counted is not None and tokens >= self.counted:
+                return round(self.counted + (tokens - self.counted) * r)
+            return round(tokens * r)
+
+    def recount(self):
+        """What pi's count of the session starts from, read from its messages: the last reply it counts and what came
+        after; and its estimate of all of them (a session taken up again, or reverted)."""
+        def got(r):
+            msgs = (r.get("data") or {}).get("messages") or []
+            last = max((i for i, m in enumerate(msgs) if counted_of(m)), default=None)
+            system = [m for m in msgs if m.get("role") == "system"][-1:]  # (pi counts the one that's current)
+            whole = sum(-(-chars(m) // 4) for m in system + [m for m in msgs if m.get("role") != "system"])
+            with self.tally:
+                self.estimated, self.estimated_at, self.sent = whole, self.chars, None
+                if last is None:
+                    self.counted = None
+                else:
+                    after = msgs[last + 1:]
+                    self.counted = counted_of(msgs[last])
+                    self.counted_at = self.chars - sum(chars(m) for m in after)
+                    self.results_only = all(m.get("role") == "toolResult" for m in after)
+        self.send({"type": "get_messages"}, got)
+
+    def watch_flight(self):
+        """Through a turn, MLX's server's count of the request in flight: said to Baude as it's known (baude_context),
+        what the window holds once the server's read it, the bar not standing still through a long read. A count
+        that may be another chat's (two at once, the order they came in not sure) is taken if it's near what's
+        expected."""
+        while self.pi is not None and self.pi.poll() is None:
+            time.sleep(FLIGHT_EVERY)
+            if self.turn is None or self.compacting:
+                continue
+            f = in_flight()
+            n = f.get("prompt_tokens")
+            with self.tally:
+                if not n or n == self.sent or n == self.last_prompt or self.compacting:
+                    continue
+                if not f.get("sure") and self.counted is not None:
+                    expected = self.counted + (self.chars - self.counted_at) / 4 * (self.ratio or 1)
+                    if abs(n - expected) > expected / 4:
+                        continue
+                self.sent, self.sent_at = n, self.chars
+            emit({"type": "system", "subtype": "baude_context", "session_id": session_id,
+                  "usage": {"categories": [], "totalTokens": n, "maxTokens": CONTEXT, "percentage": n * 100 / CONTEXT}})
 
     def stream(self, event):
         emit({"type": "stream_event", "event": event, "parent_tool_use_id": None, "session_id": session_id})

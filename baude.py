@@ -7852,19 +7852,18 @@ class SessionSidebar(Gtk.Box):
         by.append("Date", "sb.group::date")
         view.append_section("Group by", by)
         # (Groups: which sessions are listed, a list of its own in the menu (FilterList), filled by fill_filters; a
-        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter)
-        hosts, groups = Gio.Menu(), Gio.Menu()
+        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter; Add
+        # Host…: a right-click on it, host_menu)
+        groups = Gio.Menu()
         item = Gio.MenuItem.new(None, None)
         item.set_attribute_value("custom", GLib.Variant.new_string("groups"))
         groups.append_item(item)
-        hosts.append("Add Host…", "sb.add_server")  # (another machine, by where ssh goes: ask_add_host)
         item = Gio.MenuItem.new("New Group…", None)  # (no chat moved to it: ask_new_group)
         item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
         groups.append_item(item)
         every = Gio.MenuItem.new("Show All", "sb.show_all")  # (only while something's left out)
         every.set_attribute_value("hidden-when", GLib.Variant.new_string("action-disabled"))
         groups.append_item(every)
-        view.append_section("Hosts", hosts)
         view.append_section("Groups", groups)
         pop = Gtk.PopoverMenu.new_from_model(view)
         self.group_list = FilterList(lambda keys: self.filtered(sidebar_groups=keys), self.group_menu)
@@ -8058,18 +8057,20 @@ class SessionSidebar(Gtk.Box):
         # change what's picked)
 
     def host_menu(self, x, y):
-        """Right-click New session's host (another machine's): Host Command…, for one reached over ssh; Deactivate, or
-        Activate for one that's deactivated."""
-        if (r := self.shown_remote()) is None:
-            return
-        menu = Gio.Menu()
-        if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
-            item = Gio.MenuItem.new("Host Command…", None)
-            item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
-            menu.append_item(item)
-        item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
-        item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
-        menu.append_item(item)
+        """Right-click New session's host: Add Host…, always; and for another machine's, Host Command…, for one reached
+        over ssh; Deactivate, or Activate for one that's deactivated."""
+        menu, this, add = Gio.Menu(), Gio.Menu(), Gio.Menu()
+        if (r := self.shown_remote()) is not None:
+            if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
+                item = Gio.MenuItem.new("Host Command…", None)
+                item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
+                this.append_item(item)
+            item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
+            item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
+            this.append_item(item)
+            menu.append_section(None, this)
+        add.append("Add Host…", "sb.add_server")  # (another machine, by where ssh goes: ask_add_host)
+        menu.append_section(None, add)
         self.host_menu_shown = self.menu_at(menu, self.host_dd, x, y)
 
     def deactivate_host(self, key, off):
@@ -17322,7 +17323,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                          submit, verb="Add", said=False)
 
     def ask_add_host(self):
-        """⋮ → Hosts → Add Host…: another machine's host, by where ssh goes, as host_form has it."""
+        """New session's host right-clicked → Add Host…: another machine's host, by where ssh goes, as host_form has it."""
         form = self.host_form()
         dest, command = (w for _name, _takes, w in form.fields)
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="add",

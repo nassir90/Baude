@@ -48,12 +48,35 @@ def say(listing):
     return title, [line], [((s.get("title") or "(untitled)")[:48], words[s["state"]]) for s in shown[:12]]
 
 
+def say_stopping(quitting):
+    """(title, line) while it's stopping (Server.quitting; {} for Quit picked, before it's started on that): how many
+    of its claudes are still to stop."""
+    verb = "restarting" if quitting.get("restart") else "stopping"
+    left, total = quitting.get("left"), quitting.get("total")
+    if left is None:
+        line = f"Daemon {verb}…"
+    elif left > 0:
+        line = f"Daemon {verb} — {left} of {total} process{'es' if total != 1 else ''} to stop"
+    else:
+        line = f"Daemon {verb} — every process stopped" if total else f"Daemon {verb} — no processes to stop"
+    return f"Baude · {verb}", line
+
+
 class MenuBar:
     """The item, its menu built again as what's said changes (changed, from any thread: done on the main thread).
-    quit(): Quit picked (on the main thread)."""
+    quit(): Quit picked (on the main thread). quitting(): how far along stopping it is (Server.quitting), else None:
+    said in place of its sessions, from the moment Quit's picked, so the pick shows it's taken."""
 
-    def __init__(self, listing, quit):
-        self.listing, self.quit = listing, quit
+    def __init__(self, listing, quit, quitting=lambda: None):
+        self.listing, self.quitting, self.picked = listing, quitting, False
+
+        def picked():
+            if self.picked:  # (picked again while it's stopping: it's on it already)
+                return
+            self.picked = True
+            self.refresh()
+            quit()
+        self.quit = picked
         rt = self.rt = _runtime()
         self.app = objc_send(b"NSApplication", b"sharedApplication")
         objc_send(self.app, b"setActivationPolicy:", ACCESSORY, types=(ctypes.c_long,), ret=ctypes.c_bool)
@@ -90,6 +113,10 @@ class MenuBar:
         listing = self.listing()
         self.awake(any(s.get("state") in ("working", "waiting", "idle") for s in listing))
         title, lines, sessions = say(listing)
+        quitting = self.quitting()
+        if quitting is not None or self.picked:
+            title, line = say_stopping(quitting or {})
+            lines, sessions = [line], []
         objc_send(self.button, b"setTitle:", ns_string(title), types=(ctypes.c_void_p,))
         menu = objc_send(objc_send(b"NSMenu", b"alloc"), b"init")
         objc_send(menu, b"setAutoenablesItems:", False, types=(ctypes.c_bool,))
@@ -98,7 +125,9 @@ class MenuBar:
         for name, state in sessions:
             self._add(menu, f"{name} — {state}", indent=1)
         objc_send(menu, b"addItem:", objc_send(b"NSMenuItem", b"separatorItem"), types=(ctypes.c_void_p,))
-        self._add(menu, "Quit Baude's Host Process", action=b"quit:", key="q")
+        quit = self._add(menu, "Quit Baude's Host Process", action=b"quit:", key="q")
+        if quitting is not None or self.picked:  # (on it already: shown so, not picked again)
+            objc_send(quit, b"setEnabled:", False, types=(ctypes.c_bool,))
         objc_send(self.item, b"setMenu:", menu, types=(ctypes.c_void_p,))
         objc_send(menu, b"release")
 

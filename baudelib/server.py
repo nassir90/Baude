@@ -390,6 +390,9 @@ class Server:
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
+        # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
+        # for the menu bar's item to say; None while it isn't
+        self.quitting = None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
@@ -646,7 +649,7 @@ class Server:
             threading.Thread(target=self.serve, args=(sock,), daemon=True, name="client").start()
         self.listener.close()
 
-    def shutdown(self, if_idle=False, restart=None):
+    def shutdown(self, if_idle=False, restart=None, again=False):
         """Goodbye on the network, every claude stopped (asked to end, then made to: what it's written is kept, and
         resumed next time; one at a turn or asking marked cut, as that's cut short), the socket let go. Once. if_idle:
         not while a command's running (Session.commands: those are what's returned, [{session, what}], and nothing's
@@ -654,7 +657,7 @@ class Server:
         (restarting: baude_headless.py's serve does)."""
         busy, procs = self.halt(if_idle, restart)
         if procs is not None:
-            self.stop_procs(procs)
+            self.stop_procs(procs, again)
         return busy
 
     def halt(self, if_idle=False, restart=None):
@@ -686,9 +689,12 @@ class Server:
         s.meta["cut"] = time.time()
         self.save(s)
 
-    def stop_procs(self, procs):
-        """(shutdown's second half, once halt's stopped it) Its connections, claudes and socket let go of."""
+    def stop_procs(self, procs, again=False):
+        """(shutdown's second half, once halt's stopped it) Its connections, claudes and socket let go of. How far
+        along, kept (quitting) and said as it goes (on_change: the menu bar's item); the heads attached told first how
+        many it's stopping (stopping), as they lose it then. again: it's to start again (a head's restart of it)."""
         self.woken.set()
+        again = bool(again or self.restarting)
         try:  # (one starting meanwhile waits for this one to go: Server)
             open(self.state_dir + "/.stopping", "w").close()
         except OSError:
@@ -697,9 +703,12 @@ class Server:
         for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
             run.end()
         with self.lock:
-            for c in list(self.conns):
-                c.close()
             procs = procs + [s.proc for s in self.sessions.values() if s.proc is not None and s.proc not in procs]
+            for c in list(self.conns):  # (before it closes them: what a head says while it's gone)
+                c.send({"op": "stopping", "procs": len(procs), "restart": again})
+                c.close()
+        self.quitting = {"left": len(procs), "total": len(procs), "restart": again}
+        self.on_change()
         for p in procs:
             p.stopping = True
             p.close_stdin()  # (claude, its stdin closed, ends as it would at the end of a pipe)
@@ -709,6 +718,8 @@ class Server:
                 p.p.wait(timeout=max(0.1, end - time.monotonic()))
             except Exception:  # (one that doesn't, in time: made to)
                 p.kill()
+            self.quitting = {**self.quitting, "left": self.quitting["left"] - 1}
+            self.on_change()
         while time.monotonic() < end + 2:  # (what each said last, read and kept: its exit's handled once it's all read)
             with self.lock:
                 if not any(s.proc in procs for s in self.sessions.values()):
@@ -783,7 +794,8 @@ class Server:
                     return reply("busy", sessions=sorted({b["session"] for b in busy}), commands=busy)
                 reply("quitting")
             if procs is not None:
-                threading.Thread(target=self.stop_procs, args=(procs,), daemon=True, name="quit").start()
+                threading.Thread(target=self.stop_procs, args=(procs, bool(msg.get("if_idle") or msg.get("restart"))),
+                                 daemon=True, name="quit").start()
             return None
         if op == "start":
             return self.start(msg, conn, req)

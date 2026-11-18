@@ -7939,6 +7939,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return f"Looking for {name} on the network…"
         if self.reachable(r):
             return None
+        if not r.deactivated and (said := r.said_stopping(name)) is not None:
+            return said
         return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
             if r.state == "dead" else f"Looking for {name} on the network…"
 

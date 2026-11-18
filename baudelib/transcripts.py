@@ -75,6 +75,23 @@ def _prompt_texts(content):
     return [t for t in texts if t.strip() and not t.lstrip().startswith(_NOT_TYPED)]
 
 
+def start_prompt(rec):
+    """The prompt a session was started with from outside (another session, the desktop app, a script), when its
+    text sits after reminders the starter put first, so it isn't taken as typed: the transcript's first user record,
+    with those reminders cut off; None for any other record."""
+    if rec.get("parentUuid") is not None or rec.get("isMeta") or rec.get("isSidechain"):
+        return None
+    content = (rec.get("message") or {}).get("content")
+    texts = [content] if isinstance(content, str) else [
+        c.get("text", "") for c in content or [] if isinstance(c, dict) and c.get("type") == "text"]
+    rest = []
+    for t in texts:
+        t = re.sub(r"\A(?:\s*<system-reminder>.*?</system-reminder>)+", "", t, flags=re.S).strip()
+        if t and not t.startswith(_NOT_TYPED):
+            rest.append(t)
+    return "\n\n".join(rest) or None
+
+
 def task_notification(text):
     """What a <task-notification> says (Claude Code sends one as a user message when a background
     command or subagent ends): {'status', 'summary'}, or None for any other text."""
@@ -432,6 +449,8 @@ def history_item(line, sidechain=False):
             (c.get("text") for c in content or () if isinstance(c, dict) and c.get("type") == "text"), ""))):
         return "ci_event", event
     if rec["type"] == "user" and not _is_prompt(rec):
+        if (start := start_prompt(rec)) is not None:
+            return "start_prompt", start
         if isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "tool_result"
                                              for c in content):
             return "tool_results", content

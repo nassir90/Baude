@@ -16429,6 +16429,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             _adj, _before, expire = pending
             GLib.source_remove(expire) if GLib.MainContext.default().find_source_by_id(expire) else None
 
+    def start_prompt_view(self, text):
+        """What a session started from outside was asked first, at the top of its transcript: formatted, scrolling
+        inside its own box past a few lines, with a rule under it."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.add_css_class("start-prompt")
+        head = Gtk.Label(label="Started with this prompt", xalign=0)
+        head.add_css_class("dim-label")
+        head.add_css_class("caption-heading")
+        box.append(head)
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, max_content_height=260,
+                                    propagate_natural_height=True, child=MarkdownView(text))
+        box.append(scroll)
+        box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+        return box
+
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         for kind, content, *rest in items:
@@ -16448,6 +16463,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))
                 fold.add_css_class("sysnote")
                 self.add(fold)
+            elif kind == "start_prompt":
+                self.add(self.start_prompt_view(content))
             elif kind == "ci_event":  # (what the desktop app says of a pull request it's watching: folded)
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
                 fold.add_css_class("sysnote")

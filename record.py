@@ -6894,7 +6894,7 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
-        self.version_row = update.version_row()  # (and the version; its changelog is ☰ → Changelog: Baude's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
@@ -7079,10 +7079,10 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
+        app_menu.append("Changelog", "win.changelog")
         item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
-        app_menu.append("Changelog", "win.changelog")
         app_menu.append("Ongoing Feedback", "win.fixes")
         app_menu.append(f"Restart {noun()}", "win.restart")
         menu.append_section(None, app_menu)

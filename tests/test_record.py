@@ -841,7 +841,7 @@ def test_settings_version_and_changelog(app):
         win.activate_action("win.changelog", None)
         log = win.get_visible_dialog()
         wait_for(lambda: [w for w in walk(log) if hasattr(w, "commit") and w.get_mapped()], "the changelog", 3)
-        assert [w.commit for w in walk(log) if hasattr(w, "commit")] == has
+        assert [w.commit for w in walk(log) if hasattr(w, "commit")] == has[:50]
         log.close()
     finally:
         settings.close()

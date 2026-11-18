@@ -11895,7 +11895,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
-        self.version_row = update.version_row()  # (and the version; its changelog is ☰ → Changelog: Record's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")
@@ -12088,6 +12088,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
         menu.append_item(item)
+        menu.append("Changelog", "win.changelog")
         menu.append("Full-width text", "win.fullwidth")
         menu.append("Read-only session", "win.readonly")
         menu.append("Database Schemas…", "win.dbschema")
@@ -12096,7 +12097,6 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         menu.append_item(item)
-        menu.append("Changelog", "win.changelog")
         menu.append("Ongoing Feedback", "win.fixes")
         self.main_menu = menu
         menu.append("Restart Baude", "win.restart")

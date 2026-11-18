@@ -10160,8 +10160,8 @@ class SidePanel(Gtk.Box):
         # its chat set into the panel as the main chat is into the window (the inside: widgets.inside), the back
         # button, title and caption above it on the panel's own background. No gap of its own on the main chat's
         # side: the main chat's is the one between them, as thin as the window's edges are
-        self.detail_holder = widgets.inside(Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                                               margin_top=6), start=False)
+        self.detail_holder = widgets.inside(natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
+            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, margin_top=6)), start=False)
         detail.append(self.detail_holder)
         self.agent_stack.add_named(detail, "detail")
         page = self.stack.add_titled(self.agent_expand, "agents", "Subagents")
@@ -10546,7 +10546,6 @@ class SidePanel(Gtk.Box):
         if isinstance(old := self.detail_holder.get_child(), Gtk.Viewport):
             old.set_child(None)  # release the previous subagent's box so it can be shown again
         self.detail_holder.set_child(box)
-        natural_height(self.detail_holder)  # (its own code not squashed as it outgrows the panel: a new viewport's)
         if from_row and self.agent_stack.get_visible_child_name() == "list" and row is not None:  # (from its row, seen)
             self.agent_expand.open("detail", row, self.detail_holder, **self.expand_parts(row), within=self.agent_scroll,
                                    across=self.agent_list)

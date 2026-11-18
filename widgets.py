@@ -5341,12 +5341,17 @@ class ExpandStack(Gtk.Widget):
 
 
 def natural_height(scroller):
-    """scroller's child at its natural height, set again whenever it's given a new child (each gets a viewport of its
+    """scroller's child at its natural height, kept so for each child it's given later (each gets a viewport of its
     own). At its minimum, GTK's default once it's taller than the view, every code block in it is squashed to what its
     own scroller needs at least, a line or less, its text cut off at the bottom: as soon as the text's size (Settings
     → Size, the zoom) makes what's there outgrow the pane. Returns scroller."""
-    if isinstance(child := scroller.get_child(), Gtk.Scrollable):
-        child.set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    def natural(*_):
+        if isinstance(child := scroller.get_child(), Gtk.Scrollable):
+            child.set_vscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    natural()
+    if not getattr(scroller, "natural_height", False):
+        scroller.natural_height = True
+        scroller.connect("notify::child", natural)
     return scroller
 
 

@@ -16505,7 +16505,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
+                if kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
+                    row = Gtk.Box(spacing=6)
+                    for a in atts:
+                        row.append(attachment_widget(a, 96))
+                    self.add(widgets.start_prompt_view(text, row if atts else None))
+                else:
+                    self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever
         for tid, card in self.tool_cards.items():
             if final and tid not in made and card.state == "running" and tid not in self.orphan_results:
@@ -17202,7 +17208,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """Draw what other programs appended to the viewed session."""
         if not (self.resume_pending and self.view_path):
             return
-        items = history_items(lines)
+        items = history_items(lines, first=self.history.first if self.history is not None else None)
         if items:
             if self.history is not None:
                 self.history.shown += len(items)

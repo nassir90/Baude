@@ -10515,8 +10515,8 @@ def test_tool_card(app):
             with open(os.path.join(cache, name), "w") as f:
                 f.write(text)
         return True, "the sample"
-    saved, fetched, orig_fetch = (baude._CLAUDE_VERSION[:], set(baude.TOOL_NAMES)), [], baude.tool_fetch
-    baude._CLAUDE_VERSION[:] = ["2.1.300"]
+    saved, fetched, orig_fetch = (dict(baude._CLAUDE_VERSION), set(baude.TOOL_NAMES)), [], baude.tool_fetch
+    baude._CLAUDE_VERSION[baude.claudelib.claude_path()] = "2.1.300"
     baude.TOOLS.__init__()
     baude.TOOL_NAMES.clear()  # (other tests' tool cards add theirs: Agent, Task...)
     baude.tool_fetch = fetch
@@ -10612,7 +10612,8 @@ def test_tool_card(app):
     finally:
         close(win)
         baude.tool_fetch = orig_fetch
-        baude._CLAUDE_VERSION[:] = saved[0]
+        baude._CLAUDE_VERSION.clear()
+        baude._CLAUDE_VERSION.update(saved[0])
         baude.TOOL_NAMES.clear()
         baude.TOOL_NAMES.update(saved[1])
         baude.TOOLS.__init__()

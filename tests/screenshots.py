@@ -708,7 +708,7 @@ def _(app):
                        ("sdk-version", "0.3.300")):
         with open(os.path.join(cache, name), "w") as f:
             f.write(text)
-    baude._CLAUDE_VERSION[:] = ["2.1.300"]
+    baude._CLAUDE_VERSION[baude.claudelib.claude_path()] = "2.1.300"
     baude.TOOLS.__init__()
     baude.save_settings(signal_tool_schemas=False, signal_mcp_schemas=False)
     win = app.window(opts(cwd=proj))

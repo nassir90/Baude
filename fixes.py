@@ -512,9 +512,9 @@ def running_here(number):
 
 
 def start_fix(number, reply=None, claude=None):
-    """A round of number's fix started, a process of its own (it outlives this one), its output in the fix's log.
-    claude: one its user chose (RECORD_CLAUDE's), as its BAUDE_CLAUDE; never one found (a desktop build's path, which
-    goes as the app updates, and would go on in whatever the round starts, a host process too)."""
+    """A round of number's fix started, a process of its own (it outlives this one), its output in the fix's log. It
+    runs with this process's environment; claude, if given (Record's RECORD_CLAUDE), as its BAUDE_CLAUDE, else its
+    claude's found each round as Baude finds it (claude_exe)."""
     if running_here(number):
         return None
     os.makedirs(fix_dir(number), exist_ok=True)

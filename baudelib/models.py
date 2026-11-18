@@ -3,6 +3,7 @@ or an OpenAI-compatible server serves on this machine in pi-claude (pi-claude/: 
 claude's stream-json on stdin and stdout, and each is started, given an id and carried on differently: PROGRAMS says
 how, for Baude and the headless server alike (launch). Where the models besides Claude's are, and which there are:
 baudelib.providers."""
+import contextlib
 import glob
 import json
 import os
@@ -476,6 +477,58 @@ def window_of(value):
         next((m.get("window") for e in providers.mesh_endpoints() for m in e["models"]
               if f"openai/{e['id']}/{m['id']}" == value), None) or \
         next((m.get("window") for m in providers.mesh_agents() if m["value"] == value), None)
+
+
+# what each model's sessions last said its window was (get_context_usage's maxTokens), by its value (a Baude chat's on
+# another host: "<value>@<host>", BaudeWindow.window_key; claude's own default: "default"), for its next session's
+# before it says: claude's for a model depends on the account, and Apple's on the OS
+SAID_WINDOWS = {"at": None, "windows": {}}
+
+
+def said_windows_path():
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "baude", "windows.json")
+
+
+def said_windows():
+    """{model value: tokens}, as said_windows_path has them (read again once it's changed)."""
+    path = said_windows_path()
+    try:
+        st = os.stat(path)
+        at = (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        at = None
+    if at != SAID_WINDOWS["at"]:
+        try:
+            with open(path) as f:
+                got = json.load(f)
+        except (OSError, ValueError):
+            got = {}
+        SAID_WINDOWS["windows"] = {k: v for k, v in got.items() if isinstance(v, int) and v > 0} \
+            if isinstance(got, dict) else {}
+        SAID_WINDOWS["at"] = at
+    return SAID_WINDOWS["windows"]
+
+
+def said_window(value):
+    """The window a session of a model last said it had; None if none's said."""
+    return said_windows().get(value) if isinstance(value, str) else None
+
+
+def remember_window(value, tokens):
+    """A session of a model's said its window (tokens): kept, for its next one's before it says (said_window)."""
+    if not isinstance(value, str) or not value or not isinstance(tokens, int) or tokens <= 0 \
+            or said_window(value) == tokens:
+        return
+    path = said_windows_path()
+    part = f"{path}.{os.getpid()}"  # (written whole, then put in its place: Baude and Record both keep it)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(part, "w") as f:
+            json.dump(said_windows() | {value: tokens}, f)
+        os.replace(part, path)
+    except (OSError, TypeError, ValueError):
+        with contextlib.suppress(OSError):
+            os.remove(part)  # (none left half written)
 
 
 def launch(model, mode, effort, session_id=None, resumed=False):

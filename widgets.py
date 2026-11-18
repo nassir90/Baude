@@ -3525,18 +3525,91 @@ def _image_ext(data):
     return ".png"
 
 
+def same_picture(small, data, w, h):
+    """Whether data, scaled down to w×h, is the picture small is (its pixels within a little of small's, on a grid
+    across it: a file rewritten since with another picture of the same size isn't)."""
+    a = _pixbuf(small)
+    b = _pixbuf(data, w, h)
+    if b.get_width() != w or b.get_height() != h:
+        b = b.scale_simple(w, h, GdkPixbuf.InterpType.BILINEAR)
+    pa, pb = a.get_pixels(), b.get_pixels()
+    na, nb, ra, rb = a.get_n_channels(), b.get_n_channels(), a.get_rowstride(), b.get_rowstride()
+    total = count = 0
+    for gy in range(24):
+        y = min(h - 1, int((gy + 0.5) * h / 24))
+        for gx in range(24):
+            x = min(w - 1, int((gx + 0.5) * w / 24))
+            ia, ib = y * ra + x * na, y * rb + x * nb
+            total += sum(abs(pa[ia + c] - pb[ib + c]) for c in range(3))
+            count += 3
+    return total / count < 14
+
+
+def _pixbuf(data, w=None, h=None):
+    loader = GdkPixbuf.PixbufLoader()
+    if w:
+        loader.connect("size-prepared", lambda ld, _w, _h: ld.set_size(w, h))
+    loader.write(data)
+    loader.close()
+    return loader.get_pixbuf()
+
+
 class ImageActions:
     """What the image click / right-click menu does. One per image widget."""
 
     def __init__(self, widget, data, path=None, name=None, url=None):
         self.widget, self.data, self.name, self.url = widget, data, name, url
         self.path = path if path and os.path.isfile(path) else None
+        self.full, self.no_original, self.looking = None, False, False  # (the lightbox's: Lightbox.show_current)
 
     def file(self):
         return Gio.File.new_for_path(self.path or image_cache_path(self.data))
 
     def texture(self):
         return Gdk.Texture.new_from_bytes(GLib.Bytes.new(self.data))
+
+    def original(self):
+        """The image from the file it came from, if that's a better copy of it than the bytes here (a Read's image and
+        an attachment are scaled down, or recompressed, for the model): more pixels, or as many in more bytes, and
+        still the same picture (scaled down to this one's size, it matches it). (bytes, texture), or None. Read and
+        decoded here: call it off the main thread."""
+        if not self.path or not image_dims(self.data):
+            return None
+        try:
+            with open(self.path, "rb") as f:
+                head = f.read(65536)
+            sw, sh = image_dims(self.data)
+            dims = image_dims(head)
+            kind = Gio.content_type_get_mime_type(Gio.content_type_guess(self.path, None)[0]) or ""
+            if dims is None and not kind.startswith("image/"):
+                return None  # (a notebook's or a PDF's picture: the file isn't it)
+            with open(self.path, "rb") as f:
+                data = f.read()
+            if data == self.data:
+                return None
+            dims = dims or image_dims(data)
+            if dims and (dims[0] < sw or (dims[0] == sw and len(data) <= len(self.data))):
+                return None
+            if not same_picture(self.data, data, sw, sh):
+                return None
+            tex = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+        except (OSError, GLib.Error, ValueError, ZeroDivisionError):
+            return None
+        if tex.get_width() < sw or abs(tex.get_width() / tex.get_height() - sw / sh) > 0.02 * sw / sh:
+            return None
+        return data, tex
+
+    def best(self, then):
+        """then(texture): the original if there's a better one (ImageActions.original), else these bytes' own.
+        Looked for once, off the main thread; kept only while the lightbox shows it (full)."""
+        if self.full:
+            then(self.full[1])
+            return
+
+        def done(found):
+            then(found[1] if found else self.texture())
+            return GLib.SOURCE_REMOVE
+        IMAGE_POOL.submit(lambda: GLib.idle_add(done, None if self.no_original else self.original()))
 
     def view(self):
         root = self.widget.get_root()
@@ -3546,8 +3619,10 @@ class ImageActions:
             self.open()
 
     def copy(self):
-        self.widget.get_clipboard().set(self.texture())
-        toast(self.widget, "Image copied")
+        def put(tex):
+            self.widget.get_clipboard().set(tex)
+            toast(self.widget, "Image copied")
+        self.best(put)
 
     def open(self):
         Gtk.FileLauncher(file=self.file()).launch(self.widget.get_root(), None, None)
@@ -4247,8 +4322,8 @@ class MainTabs(Gtk.Box):
         return True  # (handled: finished here)
 
 
-def image_description(acts, tex):
-    kb = len(acts.data) / 1024
+def image_description(data, tex):
+    kb = len(data) / 1024
     size = f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB"
     return f"{tex.get_width()}×{tex.get_height()} · {size}"
 
@@ -4260,6 +4335,7 @@ class ZoomPicture(Gtk.Picture):
     frame, nothing decoded or rescaled for it."""
 
     FROM_MIDDLE = 0.08  # (with nowhere to come from: this much smaller, as it starts to show)
+    PIXELS_FROM = 3  # (zoomed in this far, screen pixels to one of the image's: its pixels shown sharp, not blurred)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -4309,10 +4385,16 @@ class ZoomPicture(Gtk.Picture):
         if room is not None:
             snap.push_clip(Graphene.Rect().init(*room))
             snap.push_opacity(opacity)
-        snap.save()
-        snap.translate(Graphene.Point().init(x, y))
-        tex.snapshot(snap, w, h)
-        snap.restore()
+        if isinstance(tex, Gdk.Texture):  # (filtered for how far it's scaled, as a viewer does)
+            k = w / tex.get_width() * screen_scale(self)
+            how = (Gsk.ScalingFilter.TRILINEAR if k < 1 else Gsk.ScalingFilter.NEAREST if k >= self.PIXELS_FROM
+                   else Gsk.ScalingFilter.LINEAR)
+            snap.append_scaled_texture(tex, how, Graphene.Rect().init(x, y, w, h))
+        else:
+            snap.save()
+            snap.translate(Graphene.Point().init(x, y))
+            tex.snapshot(snap, w, h)
+            snap.restore()
         if room is not None:
             snap.pop()
             snap.pop()
@@ -4512,19 +4594,57 @@ class Lightbox(Gtk.Box):
                 self.anim.pause()
                 self.anim = None
             self.picture.set_paintable(None)  # (a full-size image: let it go)
+            self.let_go()
             self.items = []
 
     def current(self):
         return self.items[self.index].image_actions
 
     def show_current(self):
+        """The image as it is here at once, then its original at full size if there is one (ImageActions.original),
+        read off the main thread and put in its place: the same picture, so it stays where it is, only sharper."""
         acts = self.current()
-        tex = acts.texture()
+        self.let_go(acts)
+        tex = acts.full[1] if acts.full else acts.texture()
         self.picture.set_paintable(tex)
         self.move_to(1.0, 0.0, 0.0, animate=False)  # (each image from fitted)
+        self.fit(tex)
+        if acts.full is None and acts.path and not acts.no_original and not acts.looking:
+            acts.looking = True
+
+            def done(found, acts=acts):
+                acts.looking = False
+                acts.no_original = found is None
+                if found and self.get_visible() and self.items and self.current() is acts:
+                    acts.full = found
+                    self.sharpen(found[1])
+                return GLib.SOURCE_REMOVE
+            IMAGE_POOL.submit(lambda: GLib.idle_add(done, acts.original()))
+        self.show_title(acts)
+
+    def let_go(self, keep=None):
+        """The originals read for the images not shown (each tens of megabytes decoded): read again if shown again."""
+        for widget in self.items:
+            if widget.image_actions is not keep:
+                widget.image_actions.full = None
+
+    def fit(self, tex):
         # big images fill the window; small ones aren't blown up into a blur
         big = max(tex.get_width(), tex.get_height()) >= 400
         self.picture.set_content_fit(Gtk.ContentFit.CONTAIN if big else Gtk.ContentFit.SCALE_DOWN)
+
+    def sharpen(self, tex):
+        """tex, the original, where the smaller one was: zoomed and moved as that was (a small one that was shown at its
+        own size, now big, is fitted)."""
+        fitted = self.picture.get_width() and self.picture.fitted()
+        self.picture.set_paintable(tex)
+        self.fit(tex)
+        if fitted and self.picture.fitted() != fitted:
+            self.move_to(1.0, 0.0, 0.0, animate=False)
+        self.picture.queue_draw()
+        self.zoom_shown()
+
+    def show_title(self, acts):
         self.title.set_text(os.path.basename(acts.path) if acts.path else (acts.name or acts.url or "Image"))
         self.buttons["browser"].set_visible(bool(acts.url))
         self.zoom_shown()
@@ -4533,7 +4653,8 @@ class Lightbox(Gtk.Box):
         """What says how far it's zoomed: the size in the bar, the arrows (they step between images, so not while it's
         zoomed in) and the pointer."""
         n, zoom = len(self.items), self.target[0]
-        self.info.set_text(image_description(self.current(), self.picture.get_paintable()) +  # (not decoded again)
+        acts = self.current()
+        self.info.set_text(image_description(acts.full[0] if acts.full else acts.data, self.picture.get_paintable()) +  # (not decoded again)
                            (f"  ·  {self.index + 1} / {n}" if n > 1 else "") +
                            (f"  ·  {round(zoom * 100)}%" if self.zoomed() else ""))
         self.prev_btn.set_visible(n > 1 and not self.zoomed())

@@ -9217,9 +9217,10 @@ def themed_icon():
             with open(path, "w") as f:
                 f.write(ICON_SVG)
     except OSError:
-        return
+        return None
     Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
     Gtk.Window.set_default_icon_name(APP_ID)
+    return path
 
 
 # ---------------------------------------------------------------- in the list of apps
@@ -9421,7 +9422,7 @@ class App(Adw.Application):
             except Exception as e:
                 print("record: no Dock icon:", e, file=sys.stderr)
         else:
-            themed_icon()
+            widgets.notify_as(themed_icon())
         try:  # (first: a change from another machine's Record waits for the window, not written under it: notes.write)
             self.server = listen(self.request)
         except OSError as e:

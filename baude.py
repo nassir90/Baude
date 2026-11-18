@@ -6328,8 +6328,9 @@ def logo_icon():
             with open(path, "w") as f:
                 f.write(ICON_SVG)
     except OSError:
-        return
+        return None
     Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
+    return path
 
 
 def launch_command(*args):
@@ -18366,7 +18367,7 @@ class BaudeApp(Adw.Application):
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
         else:
-            logo_icon()
+            widgets.notify_as(logo_icon())
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)

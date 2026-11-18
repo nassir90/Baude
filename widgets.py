@@ -423,6 +423,14 @@ _fdo = {"ids": {}, "keys": {}, "subscribed": False}  # (org.freedesktop.Notifica
 FDO = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
 
 
+_identity = {}  # (notify_as's: the logo notifications show)
+
+
+def notify_as(svg):
+    """The app's logo as an SVG file: its notifications' icon (Linux)."""
+    _identity["svg"] = svg
+
+
 def notifications_on():
     return load_settings().get("notify") is not False
 
@@ -500,6 +508,8 @@ def desktop_notify(key, title, body="", clicked=None):
             act.connect("activate", lambda _a, v: (fn := _notified.pop(v.get_string(), None)) and fn())
             app.add_action(act)
         n = Gio.Notification.new(title)
+        if _identity.get("svg"):
+            n.set_icon(Gio.FileIcon.new(Gio.File.new_for_path(_identity["svg"])))
         if body:
             n.set_body(body)
         n.set_default_action_and_target("app.notification-clicked", GLib.Variant.new_string(key))
@@ -513,8 +523,11 @@ def desktop_notify(key, title, body="", clicked=None):
             return
         _fdo["ids"][key], _fdo["keys"][nid] = nid, key
     hints = {"urgency": GLib.Variant.new_byte(1)}
+    if app.get_application_id():  # (the desktop entry, which servers take the app's name and icon from)
+        hints["desktop-entry"] = GLib.Variant.new_string(app.get_application_id())
     _fdo_call("Notify", GLib.Variant("(susssasa{sv}i)", (
-        GLib.get_application_name() or "", _fdo["ids"].get(key, 0), app.get_application_id() or "", title, body,
+        GLib.get_application_name() or "", _fdo["ids"].get(key, 0),
+        GLib.filename_to_uri(_identity["svg"]) if _identity.get("svg") else app.get_application_id() or "", title, body,
         ["default", "Open"], hints, -1)), posted)
 
 

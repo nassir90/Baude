@@ -133,7 +133,7 @@ from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
-from widgets import UserTurn  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
+from widgets import QueuedTurn, UserTurn  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
 from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
@@ -12527,7 +12527,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.transcript = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                                   margin_top=12, margin_bottom=12, margin_start=16, margin_end=16)
         self.transcript.add_css_class("zoomable")
-        over = Gtk.Overlay(child=self.transcript)
+        # (messages written while the agent works, not sent yet, under the conversation: queue_message)
+        self.queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, visible=False,
+                                 margin_bottom=12, margin_start=16, margin_end=16)
+        self.queue_box.add_css_class("zoomable")
+        self.queued, self.queue_upto = [], None  # (QueuedTurns, oldest first; the last to send once the turn's ended)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(self.transcript)
+        column.append(self.queue_box)
+        over = Gtk.Overlay(child=column)
         self.clamp = Adw.Clamp(child=over)
         # (at its natural height, its code blocks at most 2/3 of it: widgets.markdown_scroller, Record's Read's too)
         self.scroller = widgets.markdown_scroller(self.clamp, vexpand=True)
@@ -12576,8 +12584,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         keys.connect("key-pressed", self.on_key)
         self.input.add_controller(keys)
         self.input.connect("paste-clipboard", self.on_paste)  # (⌘V, Ctrl+V, Shift+Insert, the menu's Paste)
-        self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy and self.reverting is not None
-                              else self.on_send())  # (the stop button, at a turn: stops it, a revert pending or not)
+        self.send_btn.connect("clicked", lambda *_: self.interrupt() if self.busy else self.on_send())
+        # (the stop button, at a turn: stops it, a revert pending or not; Enter queues what's written: on_send)
         self.attach_row = Gtk.Box(spacing=6)
         self.attach_strip = Gtk.ScrolledWindow(child=self.attach_row, visible=False, vexpand=False,
                                                vscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -13356,6 +13364,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.busy = busy
         if not busy:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
+            if getattr(self, "queue_upto", None) is not None:  # (queued messages to send now it's over)
+                GLib.idle_add(self.flush_queue)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
             self.exhausted.set(False)  # (a turn claude started itself: its stop button; exhausted again as it ends)
         if not busy and self.proc is not None:
@@ -14291,6 +14301,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
+        self.unqueue(list(self.queued))  # (another chat: this one's queue gone with it)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None
@@ -14487,7 +14498,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.commit_revert()  # (sent: the revert made, then this sent, reverted)
             return
         if self.busy:
-            self.interrupt()
+            if (typed or self.attachments) and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
+                self.queue_message()  # (written mid-turn: queued, sent as the turn ends or with its ↑)
+            else:
+                self.interrupt()
             return
         if self.live_elsewhere():  # the input is off meanwhile; this is just the Enter key
             return
@@ -14510,6 +14524,79 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.change_cwd(text[3:].strip() or "~")
             return
         self.send_text(text)
+
+    # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
+    # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
+    # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
+    # box; its ✕ drops it. They're the open chat's: another chat opened, they're gone (clear_transcript)
+    def queue_message(self):
+        buf = self.input.get_buffer()
+        text = ComposerMarkdown.to_markdown(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)).strip()
+        atts, self.attachments = self.attachments, []
+        self.refresh_attach_strip()
+        buf.set_text("")
+        self.completer.hide()
+        turn = QueuedTurn(self, self.user_bubble(text, atts), text, atts)
+        self.queued.append(turn)
+        self.queue_box.append(turn)
+        self.queue_box.set_visible(True)
+        self.stick_bottom, self.restore_scroll = True, None
+
+    def unqueue(self, turns):
+        for t in turns:
+            if t in self.queued:
+                self.queued.remove(t)
+            if t.get_parent() is self.queue_box:
+                self.queue_box.remove(t)
+            if self.queue_upto is t:  # (what was to be sent up to: the one before it, if any's left before it)
+                self.queue_upto = None
+        self.queue_box.set_visible(bool(self.queued))
+
+    def queue_drop(self, turn):
+        self.unqueue([turn])
+
+    def queue_edit(self, turn):
+        """Its revert: out of the queue and into the box, before what's written there; sent (or queued again) as any."""
+        buf = self.input.get_buffer()
+        draft = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
+        self.unqueue([turn])
+        buf.set_text(turn.text + ("\n\n" + draft if draft else ""))
+        buf.place_cursor(buf.get_iter_at_offset(len(turn.text)))
+        self.attachments = list(turn.atts) + self.attachments
+        self.refresh_attach_strip()
+        self.input.grab_focus()
+
+    def queue_send(self, turn):
+        """Its ↑: it and the queued messages before it sent together: now, or once the interrupted turn's ended."""
+        if turn not in self.queued:
+            return
+        if self.busy:
+            if self.queue_upto is None or self.queued.index(turn) > self.queued.index(self.queue_upto):
+                self.queue_upto = turn
+            self.interrupt()
+        else:
+            self.queue_upto = turn
+            self.flush_queue()
+
+    def flush_queue(self):
+        """The queue sent up to queue_upto (all of it: "all"), as one message (send_text), once no turn's going."""
+        upto, self.queue_upto = self.queue_upto, None
+        if upto is None or self.busy or not self.queued:
+            return False
+        turns = self.queued if upto == "all" else self.queued[:self.queued.index(upto) + 1]
+        turns = list(turns)
+        self.unqueue(turns)
+        text = "\n\n".join(t.text for t in turns if t.text)
+        buf = self.input.get_buffer()  # (sent from the box, as anything is: on_send; what was written there kept)
+        draft, draft_atts = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(), self.attachments
+        buf.set_text(text)
+        self.attachments = [a for t in turns for a in t.atts]
+        self.on_send()
+        left = widgets.typed_text(self.input).strip()
+        buf.set_text("\n\n".join(p for p in (left, draft) if p))  # (not sent yet, or at all: still there, to send)
+        self.attachments = self.attachments + draft_atts
+        self.refresh_attach_strip()
+        return False
 
     def recorded_cwd(self):
         """Where the open chat ran, for the host process to take it up in: its worktree even if it's gone (made again
@@ -18001,6 +18088,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
+        if self.queued and self.send_after_result is None and not getattr(self.proc, "stop_asked", False) and \
+                self.queue_upto is None:
+            self.queue_upto = "all"  # (a turn that ended on its own: what was queued sent, once it's over)
         if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
             GLib.idle_add(self.send_reverted)
         GLib.idle_add(lambda: self.follow_checkout() and False)  # (the turn may have moved into a worktree)

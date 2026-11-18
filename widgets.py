@@ -2043,6 +2043,52 @@ class UserTurn(Gtk.Box):
         self.fade.play()
 
 
+
+class QueuedTurn(Gtk.Box):
+    """A message of yours written while the agent's at a turn, not sent yet (Baude's chat: its queue, under the
+    conversation): grey, and with the pointer on its row, ✕ (dropped), ↑ (sent: the turn interrupted, then it and every
+    queued message before it sent, together) and the revert button (put back in the box to edit) fade in beside it, as
+    a sent message's revert does. Its bubble's narrower by the buttons. win: its queue_send, queue_edit, queue_drop."""
+
+    def __init__(self, win, bubble, text, atts):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.text, self.atts = win, bubble, text, atts
+        bubble.add_css_class("queued-bubble")
+        self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
+                               can_target=False)
+        for icon, tip, act in (("window-close-symbolic", "Delete this queued message", win.queue_drop),
+                               ("↑", "Send now: interrupt the agent, then send this and the queued "
+                                "messages before it", win.queue_send),
+                               ("view-refresh-symbolic", "Edit: put this message back in the box", win.queue_edit)):
+            b = Gtk.Button(child=Gtk.Label(label="↑", css_classes=["queue-arrow"]) if icon == "↑" else
+                           Gtk.Image(icon_name=icon, pixel_size=12), tooltip_text=tip)  # (an arrow, shaft and head)
+            for c in ("flat", "circular", "revert-turn"):
+                b.add_css_class(c)
+            b.connect("clicked", lambda _b, act=act: act(self))
+            self.buttons.append(b)
+        self.append(self.buttons)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: self.show_buttons(True))
+        hover.connect("leave", lambda *_: self.show_buttons(False))
+        self.add_controller(hover)
+
+    fade = None
+
+    def show_buttons(self, on):
+        if on:  # (level with its last line, as UserTurn's revert)
+            metrics = self.bubble.get_pango_context().get_metrics(None, None)
+            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+            self.buttons.set_margin_bottom(max(0, round(UserTurn.PADDING + line / 2 - UserTurn.BUTTON / 2)))
+        self.buttons.set_can_target(on)
+        if self.fade is None:
+            self.fade = Adw.TimedAnimation.new(self.buttons, 0.0, 1.0, UserTurn.FADE_MS,
+                                               Adw.PropertyAnimationTarget.new(self.buttons, "opacity"))
+            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)
+        self.fade.set_value_from(self.buttons.get_opacity())
+        self.fade.set_value_to(1.0 if on else 0.0)
+        self.fade.play()
+
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
     over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
@@ -8163,6 +8209,9 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
 .revert-turn { min-width: 24px; min-height: 24px; padding: 0; color: alpha(@view_fg_color, 0.6); }  /* (beside a
    message of yours, on hover: small, and the grey of the chat's notes, .sysnote's) */
+.queue-arrow { font-weight: bold; font-size: 13px; }
+.user-bubble.queued-bubble { background: alpha(@view_fg_color, 0.07); color: alpha(@view_fg_color, 0.55); }  /* (a
+   message queued while the agent works: grey, QueuedTurn) */
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }

@@ -6069,6 +6069,23 @@ class RecordChat(meta.MetaChat):
     def taken(self, msg):
         self.set_quote("")
 
+    def held(self):
+        return self.quote, self.selection, self.quote_label.get_text()
+
+    def put_held(self, held):
+        if held is not None:
+            quote, selection, shown = held
+            self.set_quote(quote or "")
+            self.selection = selection
+            self.quote_label.set_text(shown)
+
+    def restored(self, msg):
+        sel, nb = msg.get("selection"), self.notebook
+        if sel and nb is not None and msg.get("notebook") == nb.get("id"):
+            self.set_selection(nb, sel["page"], sel.get("start"), sel.get("end"), msg.get("quote") or sel["text"])
+        else:
+            self.set_quote(msg.get("quote") or "")
+
     def turn_extra(self, msg):
         return {"proposals": [], "selection": msg.get("selection"), "notebook": self.notebook}
 
@@ -6122,6 +6139,9 @@ class RecordChat(meta.MetaChat):
 
     def _clear(self):
         super()._clear()
+        self.after_revert()
+
+    def after_revert(self):
         for child in self.win.tabs.children():  # (and what it proposed, from the pages open)
             if isinstance(child, DiaryEditor) and child.notebook is self.notebook:
                 child.show_pending()

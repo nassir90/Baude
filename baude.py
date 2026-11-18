@@ -8943,6 +8943,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.win, self.busy, self.answer, self.proc, self.answers = win, False, None, None, {}
         self.stopped = None  # (the answer stopped: Esc, or the box's stop button)
         self.reverting = None  # (a follow-up being reverted, not sent yet: {turn, hidden, draft, asked}: revert_to)
+        self.model = win.model
         rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_child(rows)
         head = Gtk.Box(spacing=12, margin_start=12, margin_end=6, margin_top=8, margin_bottom=8)
@@ -9128,6 +9129,7 @@ class SideQuestion(Gtk.ListBoxRow):
                 self.proc = None
         if self.proc is None:
             return False
+        self.model = win.model  # (what it was started on: whether it can revert, can_revert)
         self.title.set_label(question)
         self.win.panel.side_question_titled(self)
         self.ask(question, first=True)
@@ -9140,8 +9142,7 @@ class SideQuestion(Gtk.ListBoxRow):
         if not text or self.busy or self.proc is None:
             return
         said = str(uuid.uuid4())  # (its claude keeps it as the message's: what a revert names, revert_to)
-        if not first:  # (a follow-up: in a bubble, as the chat has what you wrote, its revert button beside it; the
-            # answer in none. The first question's the row's title: reverting it would be asking another side question)
+        if not first:
             self.body.append(UserTurn(self, self.win.user_bubble(text, []), text, said))
         self.answer = MarkdownView()
         self.body.append(self.answer)
@@ -9151,8 +9152,10 @@ class SideQuestion(Gtk.ListBoxRow):
 
     # ---- revert (as the chat's: Baude's revert_to): a follow-up, and everything after it, taken back
     def can_revert(self):
-        """Whether a follow-up of its can be reverted now: its claude there, and not answering."""
-        return self.proc is not None and not self.busy and self.writing.get_sensitive()
+        """Whether a follow-up of its can be reverted now: its claude there, and not answering. Not on Codex's models,
+        whose program has no rewind."""
+        return self.proc is not None and not self.busy and self.writing.get_sensitive() and \
+            model_program(self.model) != "codex"
 
     def revert_to(self, turn):
         """A follow-up reverted (UserTurn's button), tentatively: it and what came after it hidden, and what it said in
@@ -9563,6 +9566,15 @@ class BaudeMeta(meta.MetaChat):
 
     def told(self):
         return meta_store().setdefault("told", [])
+
+    def can_revert(self):
+        """Not while any window's Meta is answering: the conversation's theirs too."""
+        return super().can_revert() and all(o.ask is None for o in list(BaudeMeta.every))
+
+    def close_agents(self):
+        """Every window's session stopped (a revert sent): each one's next message starts one told what's left."""
+        for other in list(BaudeMeta.every):
+            other.close_agent()
 
     def space(self):
         return self.names

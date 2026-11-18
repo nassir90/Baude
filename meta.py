@@ -2242,7 +2242,10 @@ class MetaChat(Gtk.Box):
         return False
 
     def _clear(self):
-        self.reverting = None
+        if self.reverting is not None:  # (a revert pending: the box as it was before it)
+            rev, self.reverting = self.reverting, None
+            self.composer.get_buffer().set_text(rev["draft"])
+            self.put_held(rev["held"])
         self.close_agent()
         del self.messages()[:]
         self.save(now=True)
@@ -2285,35 +2288,61 @@ class MetaChat(Gtk.Box):
         """A message of yours reverted (UserTurn's button), tentatively: it and what came after it not shown, and what
         it said in the box. Esc puts them back, and the draft that was there (cancel_revert); sending makes the revert
         (commit_revert), then sends. Over the context window: the box on again meanwhile, as the revert's a way out."""
-        if not self.can_revert() or not any(m is turn.message for m in self.messages()):
+        said = self.messages()
+        at = next((i for i, m in enumerate(said) if m is turn.message), None)
+        if not self.can_revert() or at is None:
             return
         buf = self.composer.get_buffer()
-        draft = self.reverting["draft"] if self.reverting is not None else buf.get_text(*buf.get_bounds(), True)
-        self.reverting = {"msg": turn.message, "draft": draft}
+        before = self.reverting
+        self.reverting = {"msg": turn.message, "gone": [id(m) for m in said[at:]],  # (what it takes back, as pressed)
+                          "draft": before["draft"] if before else buf.get_text(*buf.get_bounds(), True),
+                          "held": before["held"] if before else self.held()}
         buf.set_text(turn.message["text"])
-        self.exhausted.set(False)
+        self.restored(turn.message)
+        if available():
+            self.exhausted.set(False)
         self.render()
         self.composer.grab_focus()
 
     def cancel_revert(self):
-        """Esc on a revert not sent: what it hid shown again, and the box as it was before."""
+        """Esc on a revert not sent: what it hid shown again, and the box as it was before (what went with it too)."""
         rev, self.reverting = self.reverting, None
         self.composer.get_buffer().set_text(rev["draft"])
+        self.put_held(rev["held"])
         self.render()
         self.model_changed()  # (exhausted again, if it was)
 
     def commit_revert(self):
-        """A revert sent (submit): the message and everything after it out of the conversation, and its session
-        stopped, so the next message's is a new one told only what's left (message_for). The actions its replies took
-        stay, kept or undone as any are (the changes bar, Meta's changelog)."""
+        """A revert sent (submit): the message and what came after it when it was pressed out of the conversation (what
+        another window's added since kept), and its sessions stopped, so the next message's is a new one told only
+        what's left (message_for). The actions its replies took stay, kept or undone as any are (the changes bar,
+        Meta's changelog); what they proposed goes with them (after_revert)."""
         rev, self.reverting = self.reverting, None
         said = self.messages()
-        at = next((i for i, m in enumerate(said) if m is rev["msg"]), None)
-        if at is None:  # (cleared, or another conversation shown, meanwhile)
+        if not any(m is rev["msg"] for m in said):  # (cleared, or another conversation shown, meanwhile)
             return
-        del said[at:]
-        self.close_agent()
+        gone = set(rev["gone"])
+        said[:] = [m for m in said if id(m) not in gone]
+        self.close_agents()
         self.save(now=True)
+        self.after_revert()
+
+    def close_agents(self):
+        """The sessions the conversation's in stopped (a revert sent): Baude's, each window's."""
+        self.close_agent()
+
+    def held(self):
+        """What goes with what's in the box besides its text (Record's quote), kept while a revert's pending."""
+        return None
+
+    def put_held(self, held):
+        """held() put back (a revert put back, or cleared)."""
+
+    def restored(self, msg):
+        """A message put back in the box (revert_to): what went with it too (Record's quote), as taken let it go."""
+
+    def after_revert(self):
+        """A revert made: what the app shows of what was taken back, gone too (Record's proposed edits)."""
 
     def render(self):
         self.text_selection.forget()  # (its labels gone with what's drawn again)

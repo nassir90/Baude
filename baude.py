@@ -131,6 +131,7 @@ from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
 from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
+from widgets import UserTurn  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
 from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
@@ -8948,6 +8949,8 @@ class SideQuestion(Gtk.ListBoxRow):
         self.add_css_class("side-question")
         self.win, self.busy, self.answer, self.proc, self.answers = win, False, None, None, {}
         self.stopped = None  # (the answer stopped: Esc, or the box's stop button)
+        self.reverting = None  # (a follow-up being reverted, not sent yet: {turn, hidden, draft, asked}: revert_to)
+        self.model = win.model
         rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_child(rows)
         head = Gtk.Box(spacing=12, margin_start=12, margin_end=6, margin_top=8, margin_bottom=8)
@@ -9079,11 +9082,19 @@ class SideQuestion(Gtk.ListBoxRow):
         if keyval == Gdk.KEY_Escape and self.busy:
             self.stop()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None and self.reverting["asked"] is None:
+            self.cancel_revert()
+            return True
         return False
 
     def submit(self):
-        """What's written asked (kept if it couldn't be: said in the window's note, there to send again)."""
+        """What's written asked (kept if it couldn't be: said in the window's note, there to send again); a revert
+        pending, made first (commit_revert)."""
         if self.busy or not self.text().strip():
+            return
+        if self.reverting is not None:
+            if self.reverting["asked"] is None:
+                self.commit_revert()
             return
         if self.ask(self.text()) is not False:
             self.composer.get_buffer().set_text("")
@@ -9125,6 +9136,7 @@ class SideQuestion(Gtk.ListBoxRow):
                 self.proc = None
         if self.proc is None:
             return False
+        self.model = win.model  # (what it was started on: whether it can revert, can_revert)
         self.title.set_label(question)
         self.win.panel.side_question_titled(self)
         self.ask(question, first=True)
@@ -9136,13 +9148,88 @@ class SideQuestion(Gtk.ListBoxRow):
             return None if self.start(text) else False
         if not text or self.busy or self.proc is None:
             return
-        if not first:  # (a follow-up: in a bubble, as the chat has what you wrote; the answer in none)
-            self.body.append(self.win.user_bubble(text, []))
+        said = str(uuid.uuid4())  # (its claude keeps it as the message's: what a revert names, revert_to)
+        if not first:
+            self.body.append(UserTurn(self, self.win.user_bubble(text, []), text, said))
         self.answer = MarkdownView()
         self.body.append(self.answer)
         self.scroll.set_visible(True)
         self._busy(True)
-        self.proc.user((self.PREFACE if first else "") + text)
+        self.proc.user((self.PREFACE if first else "") + text, uuid=said)
+
+    # ---- revert (as the chat's: Baude's revert_to): a follow-up, and everything after it, taken back
+    def can_revert(self):
+        """Whether a follow-up of its can be reverted now: its claude there, and not answering. Not on Codex's models,
+        whose program has no rewind."""
+        return self.proc is not None and not self.busy and self.writing.get_sensitive() and \
+            model_program(self.model) != "codex"
+
+    def revert_to(self, turn):
+        """A follow-up reverted (UserTurn's button), tentatively: it and what came after it hidden, and what it said in
+        the box. Esc puts them back, and the draft that was there (cancel_revert); asking makes the revert
+        (commit_revert), then asks. One already being reverted is put back first (the draft kept: the one from before
+        either)."""
+        if not self.can_revert() or (self.reverting is not None and self.reverting["asked"] is not None):
+            return
+        draft = None
+        if self.reverting is not None:
+            draft = self.reverting["draft"]
+            self.cancel_revert(restore_draft=False)
+        buf = self.composer.get_buffer()
+        hidden, w = [], turn
+        while w is not None:
+            if w.get_visible():
+                w.set_visible(False)
+                hidden.append(w)
+            w = w.get_next_sibling()
+        self.reverting = {"turn": turn, "hidden": hidden, "asked": None,
+                          "draft": draft if draft is not None else buf.get_text(*buf.get_bounds(), True)}
+        buf.set_text(turn.text)
+        self.composer.grab_focus()
+
+    def cancel_revert(self, restore_draft=True):
+        """Esc on a revert not asked: what it hid shown again, and the box as it was before."""
+        rev, self.reverting = self.reverting, None
+        if rev is None:
+            return
+        for w in rev["hidden"]:
+            w.set_visible(True)
+        if restore_draft:
+            self.composer.get_buffer().set_text(rev["draft"])
+
+    def commit_revert(self):
+        """A revert asked (submit): its claude takes the follow-up and everything after it back (rewind_conversation, as
+        the chat's revert does), then what's in the box is asked (reverted); if it won't, said in the thread."""
+        rev = self.reverting
+        rid = self.proc.control({"subtype": "rewind_conversation", "target_message_uuid": rev["turn"].uuid,
+                                 "interrupt_if_running": True})
+        rev["asked"] = rid
+        self.writing.gate("reverting", True)  # (its box off till its claude's answered)
+        self.answers[rid] = (lambda r: self.reverted(rev, r), lambda why: self.revert_refused(rev, why))
+
+    def revert_refused(self, rev, why):
+        """Its claude wouldn't revert: said under what's still shown, the revert still pending (Esc puts it back;
+        Enter asks again)."""
+        rev["asked"] = None
+        self.writing.gate("reverting", False)
+        if self.reverting is rev:
+            self.win.note(f"Couldn't revert the side question's follow-up: {why}")
+
+    def reverted(self, rev, response):
+        """Its claude's answer to commit_revert: rewound, the follow-up and what came after it gone, and what's in the
+        box asked; else why not, said."""
+        if not (response or {}).get("rewound"):
+            why = next((v for k, v in (response or {}).items() if k != "rewound" and isinstance(v, str)), None)
+            return self.revert_refused(rev, why or "its claude said no")
+        self.writing.gate("reverting", False)
+        if self.reverting is not rev:
+            return
+        self.reverting = None
+        for w in rev["hidden"]:
+            self.body.remove(w)
+        last = self.body.get_last_child()
+        self.answer = last if isinstance(last, MarkdownView) else None
+        self.submit()
 
     def _busy(self, busy):
         self.busy = busy
@@ -9185,7 +9272,10 @@ class SideQuestion(Gtk.ListBoxRow):
         elif t == "control_response":
             r = msg.get("response") or {}
             then = self.answers.pop(r.get("request_id"), None)
-            if then is not None and r.get("subtype") == "success":
+            if isinstance(then, tuple):  # (a revert's: what's done with its answer, and with its refusal)
+                then[0](r.get("response") or {}) if r.get("subtype") == "success" else \
+                    then[1](r.get("error") or "its claude couldn't")
+            elif then is not None and r.get("subtype") == "success":
                 then(r.get("response") or {})
         elif t == "result":
             stopped, self.stopped = self.stopped is not None and self.stopped is self.answer, None
@@ -9205,6 +9295,9 @@ class SideQuestion(Gtk.ListBoxRow):
                 self._busy(False)
                 self._mark("interrupted")
             self.writing.set_sensitive(False)
+            if self.reverting is not None:  # (its claude gone: nothing to revert in, what was hidden shown again)
+                self.writing.gate("reverting", False)
+                self.cancel_revert()
         return False
 
     def close(self):
@@ -9480,6 +9573,15 @@ class BaudeMeta(meta.MetaChat):
 
     def told(self):
         return meta_store().setdefault("told", [])
+
+    def can_revert(self):
+        """Not while any window's Meta is answering: the conversation's theirs too."""
+        return super().can_revert() and all(o.ask is None for o in list(BaudeMeta.every))
+
+    def close_agents(self):
+        """Every window's session stopped (a revert sent): each one's next message starts one told what's left."""
+        for other in list(BaudeMeta.every):
+            other.close_agent()
 
     def space(self):
         return self.names
@@ -11961,50 +12063,6 @@ class SettingsDialog(Adw.PreferencesDialog):
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)
-
-
-class UserTurn(Gtk.Box):
-    """A message of yours in the chat: the whole width of the chat is its row, its bubble at the right. With the pointer
-    anywhere in the row, a revert button fades in just outside the bubble, level with its last line, and fades out as
-    it leaves (the chat's revert_to: this message and everything after it taken back, and what it said put back in
-    the box)."""
-
-    def __init__(self, win, bubble, text, uuid):
-        super().__init__(spacing=6, hexpand=True)
-        self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
-        self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
-                                 tooltip_text="Revert: take back this message and everything after it, and put it "
-                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
-                                 opacity=0, can_target=False)
-        self.revert.add_css_class("flat")
-        self.revert.add_css_class("circular")
-        self.revert.add_css_class("revert-turn")
-        self.revert.connect("clicked", lambda *_: win.revert_to(self))
-        self.append(self.revert)
-        self.append(bubble)
-        hover = Gtk.EventControllerMotion()
-        hover.connect("enter", lambda *_: self.show_revert(True))
-        hover.connect("leave", lambda *_: self.show_revert(False))
-        self.add_controller(hover)
-
-    BUTTON, PADDING = 24, 8  # px: the button's height (.revert-turn), the bubble's padding at its foot (.user-bubble)
-    FADE_MS = 150  # (the button fading in as the pointer comes onto the row, and out as it leaves)
-    fade = None
-
-    def show_revert(self, on):
-        on = on and self.uuid is not None and self.win.can_revert()
-        if on:  # (centred on the bubble's last line: its padding and half a line up, as the chat's font is now)
-            metrics = self.bubble.get_pango_context().get_metrics(None, None)
-            line = (metrics.get_height() or metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
-            self.revert.set_margin_bottom(max(0, round(self.PADDING + line / 2 - self.BUTTON / 2)))
-        self.revert.set_can_target(on)
-        if self.fade is None:
-            self.fade = Adw.TimedAnimation.new(self.revert, 0.0, 1.0, self.FADE_MS,
-                                               Adw.PropertyAnimationTarget.new(self.revert, "opacity"))
-            self.fade.set_easing(Adw.Easing.EASE_OUT_QUAD)  # (libadwaita's transitions' ease)
-        self.fade.set_value_from(self.revert.get_opacity())  # (from where it is: back the other way partway through)
-        self.fade.set_value_to(1.0 if on else 0.0)
-        self.fade.play()
 
 
 class Repaint(Gtk.Widget):

@@ -2002,6 +2002,7 @@ class MetaChat(Gtk.Box):
         CHATS.add(self)
         self.win, self.ask, self.agent = win, None, None
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
+        self.reverting = None  # (a message of yours being reverted, not sent yet: {msg, draft}: revert_to)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
@@ -2241,6 +2242,10 @@ class MetaChat(Gtk.Box):
         return False
 
     def _clear(self):
+        if self.reverting is not None:  # (a revert pending: the box as it was before it)
+            rev, self.reverting = self.reverting, None
+            self.composer.get_buffer().set_text(rev["draft"])
+            self.put_held(rev["held"])
         self.close_agent()
         del self.messages()[:]
         self.save(now=True)
@@ -2269,13 +2274,83 @@ class MetaChat(Gtk.Box):
         if keyval == Gdk.KEY_Escape and self.ask:
             self.ask.stop()
             return True
+        if keyval == Gdk.KEY_Escape and self.reverting is not None:
+            self.cancel_revert()
+            return True
         return False
+
+    # ---- revert (as Baude's chat's: revert_to there): a message of yours, and everything after it, taken back
+    def can_revert(self):
+        """Whether a message of yours can be reverted now: not while Meta's answering."""
+        return self.ask is None and self.ready()
+
+    def revert_to(self, turn):
+        """A message of yours reverted (UserTurn's button), tentatively: it and what came after it not shown, and what
+        it said in the box. Esc puts them back, and the draft that was there (cancel_revert); sending makes the revert
+        (commit_revert), then sends. Over the context window: the box on again meanwhile, as the revert's a way out."""
+        said = self.messages()
+        at = next((i for i, m in enumerate(said) if m is turn.message), None)
+        if not self.can_revert() or at is None:
+            return
+        buf = self.composer.get_buffer()
+        before = self.reverting
+        self.reverting = {"msg": turn.message, "gone": [id(m) for m in said[at:]],  # (what it takes back, as pressed)
+                          "draft": before["draft"] if before else buf.get_text(*buf.get_bounds(), True),
+                          "held": before["held"] if before else self.held()}
+        buf.set_text(turn.message["text"])
+        self.restored(turn.message)
+        if available():
+            self.exhausted.set(False)
+        self.render()
+        self.composer.grab_focus()
+
+    def cancel_revert(self):
+        """Esc on a revert not sent: what it hid shown again, and the box as it was before (what went with it too)."""
+        rev, self.reverting = self.reverting, None
+        self.composer.get_buffer().set_text(rev["draft"])
+        self.put_held(rev["held"])
+        self.render()
+        self.model_changed()  # (exhausted again, if it was)
+
+    def commit_revert(self):
+        """A revert sent (submit): the message and what came after it when it was pressed out of the conversation (what
+        another window's added since kept), and its sessions stopped, so the next message's is a new one told only
+        what's left (message_for). The actions its replies took stay, kept or undone as any are (the changes bar,
+        Meta's changelog); what they proposed goes with them (after_revert)."""
+        rev, self.reverting = self.reverting, None
+        said = self.messages()
+        if not any(m is rev["msg"] for m in said):  # (cleared, or another conversation shown, meanwhile)
+            return
+        gone = set(rev["gone"])
+        said[:] = [m for m in said if id(m) not in gone]
+        self.close_agents()
+        self.save(now=True)
+        self.after_revert()
+
+    def close_agents(self):
+        """The sessions the conversation's in stopped (a revert sent): Baude's, each window's."""
+        self.close_agent()
+
+    def held(self):
+        """What goes with what's in the box besides its text (Record's quote), kept while a revert's pending."""
+        return None
+
+    def put_held(self, held):
+        """held() put back (a revert put back, or cleared)."""
+
+    def restored(self, msg):
+        """A message put back in the box (revert_to): what went with it too (Record's quote), as taken let it go."""
+
+    def after_revert(self):
+        """A revert made: what the app shows of what was taken back, gone too (Record's proposed edits)."""
 
     def render(self):
         self.text_selection.forget()  # (its labels gone with what's drawn again)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         for m in self.messages() if self.ready() else ():
+            if self.reverting is not None and m is self.reverting["msg"]:
+                break  # (being reverted: it and what's after it not shown, till it's sent or put back)
             self.box.append(self._bubble(m))
         if self.ask is not None and self.live_widget is not None:  # (the reply coming, and what it's asking: kept)
             self.box.append(self.live_widget)
@@ -2310,14 +2385,15 @@ class MetaChat(Gtk.Box):
         order it came (each part of what it said, and each tool it called, as a tool card, with what that showed
         under it)."""
         if m["role"] == "user":
-            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.END, margin_start=28)
-            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.END)
             b.add_css_class("user-bubble")
             if (q := self.quote_said(m)) is not None:
                 b.append(label(q, css=("quote-in-bubble",), select=True))
             b.append(self._said(m))
-            outer.append(b)
-            outer.bubble = b
+            # (its row the conversation's width, its revert button fading in beside it as the chat's: UserTurn)
+            outer = widgets.UserTurn(self, b, m["text"], m.get("t", 0))
+            outer.set_margin_start(28)
+            outer.message = m
             return outer
         reply = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         reply.bubble, reply.prose = reply, None
@@ -3022,6 +3098,8 @@ class MetaChat(Gtk.Box):
         if text.lower() in self.CLEAR:
             buf.set_text("")
             return self._clear()
+        if self.reverting is not None:
+            self.commit_revert()
         self.before_ask()
         msg = self.make_message(text or self.empty_question())
         self.messages().append(msg)

@@ -351,7 +351,7 @@ def test_turn_allow(app):
         card = find(win.transcript, baude.ToolCard)[0]
         assert card.decision == "allowed" and "allowed" not in card.header.get_text(), "allowed: nothing to say"
         assert card.state == "done"
-        assert "$0.0125" in win.status.get_text(), win.status.get_text()
+        assert win.cost_label.get_text() == "$0.0125", win.cost_label.get_text()
         perm = [json.loads(l) for l in fake_log() if '"perm1"' in l and "control_response" in l]
         assert perm and perm[0]["response"]["response"]["behavior"] == "allow"
         assert perm[0]["response"]["response"]["updatedInput"] == {"command": "ls -la"}
@@ -8850,7 +8850,7 @@ def test_status_bar_has_no_session_id(app):
         win.update_status()
         said = win.status.get_text()
         assert "session" not in said and "abcdef12" not in said, said
-        assert said.startswith(win.short_cwd()) and "$" in said, said
+        assert said.startswith(win.short_cwd()) and win.cost_label.get_text().startswith("$"), said
     finally:
         close(win)
 

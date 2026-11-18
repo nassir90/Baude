@@ -14688,7 +14688,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
         if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)
-            self.update_status(f"{msg.get('model', '')}" + ("" if self.remote.mine else f"  ·  on {remote_name(self.remote)}"))
+            self.update_status("")
             return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
@@ -14704,7 +14704,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if msg.get("cwd") and self.norm_dir(msg["cwd"]) != self.run_cwd:
                 self.note(f"claude is running in {msg['cwd']}")
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
-            self.update_status(f"{msg.get('model', '')}  ·  {len(msg.get('tools', []))} tools")
+            self.update_status(f"{len(msg.get('tools', []))} tools")
         elif st == "codex_turn_started":
             if not self.busy:
                 self.set_busy(True)

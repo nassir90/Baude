@@ -372,8 +372,8 @@ def unreachable(url, e):
 
 # ---- Ollama
 
-EFFORT = {"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}  # (a thinking model's,
-# Ollama's here or another host's: pi asks its server with reasoning_effort, "none" for off)
+EFFORT = modelslib.EFFORT  # (a thinking model's, Ollama's here or another host's: pi asks its server with
+# reasoning_effort, "none" for off)
 
 _SHOWN = {}  # (Ollama's /api/show of a model, by its digest: what it can do, its window)
 

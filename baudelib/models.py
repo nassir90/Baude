@@ -31,10 +31,14 @@ def apple_exe():
 PI_CLAUDE = os.path.join(REPO, "pi-claude")
 
 
+EFFORT = {"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]}  # (a model that thinks,
+# run in pi-claude: its thinking levels)
+
+
 def _entry(m):
     """An MLX model as models.json has it, as initialize lists it."""
     return {"value": m["value"], "resolvedModel": m["repo"], "displayName": m["displayName"]} | \
-        ({"supportsEffort": True, "supportedEffortLevels": ["off", "low", "medium", "high"]} if m.get("thinking") else {})
+        (EFFORT if m.get("thinking") else {})
 
 
 try:

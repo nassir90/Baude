@@ -118,9 +118,8 @@ def agents(path=None):
 def endpoints(path=None):
     """Other members' providers that serve HTTP, as OpenAI-compatible endpoints on this machine (its host process's
     Proxy), for anything running here (no GTK, no connection): [{id (endpoint_id), name, provider, provider_name, host
-    (the member's id), host_name, url, key, models: [{id, displayName, window, tools, input}]}], from the file this
-    machine's host process keeps in its runtime folder.
-    [] if it isn't running."""
+    (the member's id), host_name, url, key, models: [{id, displayName, window, digest, tools, input, thinking}]}], from
+    the file this machine's host process keeps in its runtime folder. [] if it isn't running."""
     try:
         with open(path or os.path.join(wire.runtime_dir(), ENDPOINTS), encoding="utf-8") as f:
             kept = json.load(f)

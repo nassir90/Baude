@@ -13678,11 +13678,19 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         here = self.chat_host() == HERE_HOST
         there = None if here else self.remote_folder()
         self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
-                             f"   ${self.total_cost:.4f}   {getattr(self, 'status_extra', '')}")
+                             f"   {self.cost_said()}   {getattr(self, 'status_extra', '')}")
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
         self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
                                          ("" if here else f" ({self.remote.host})"))
+
+    def cost_said(self):
+        """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own
+        machines (providers.runs_free), which a turn adds nothing to, $0.00 (local) while it's spent nothing, so it
+        reads as a price and not as one missing."""
+        if not self.total_cost and providerslib.runs_free(self.model):
+            return "$0.00 (local)"
+        return f"${self.total_cost:.4f}"
 
     def remote_folder(self):
         """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it

@@ -62,6 +62,15 @@ def provider_of(value):
     return None
 
 
+def runs_free(value):
+    """Is a model one run on your own machines, which costs nothing a token: Apple's, MLX's, Ollama's, or one of those
+    on another host of the mesh (as an agent there, or through its proxy here, a mesh-<member>-<provider> endpoint)?
+    pi-claude prices them at 0 (its models.json) and says a turn cost $0. Not an endpoint settings.json lists: one
+    may be a service that charges, at prices nothing here knows."""
+    pid = provider_of(value)
+    return pid in NAMES or bool(pid) and (pid.startswith(modelslib.AGENT) or pid.startswith("openai/mesh-"))
+
+
 def provider_name(pid, settings=None):
     """A provider as it's shown: Ollama, MLX, Apple, an endpoint's name (another host's in the mesh: studio / Ollama)."""
     if pid in NAMES:

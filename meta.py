@@ -1547,11 +1547,17 @@ class Agent:
     def first(self, text, usage, turn):
         """A session's first message, sent if its window holds it: its instructions' and tools' tokens (usage;
         pi-claude's says none till it's started: overhead, then) and the message's, at most (weight). If not, it isn't
-        sent, and the chat's exhausted with what it would take (MetaChat._done)."""
+        sent, and the chat's exhausted with what it would take (MetaChat._done). A conversation that's empty (cleared,
+        or new: nothing it carries) starts from empty: only what was written's counted, as Clear's the way out of
+        Context Exhausted, which Meta's own words (its instructions, the app's index) would leave it in on a small
+        window; the session's own count, once it's answered, says from then on."""
         if self.closed or self.turn is not turn or turn.get("stopped"):
             return
         self.window = usage.get("maxTokens") or self.window
-        need = (usage.get("totalTokens") or self.overhead) + -(-weight(text) // CHARS_PER_TOKEN)
+        if not turn.get("carried", True):
+            need = -(-weight(turn["msg"]["text"]) // CHARS_PER_TOKEN)
+        else:
+            need = (usage.get("totalTokens") or self.overhead) + -(-weight(text) // CHARS_PER_TOKEN)
         if need > self.window:
             self.turn = None
             self.chat._done(self, "", None, turn, need=need)
@@ -3313,7 +3319,8 @@ class MetaChat(Gtk.Box):
                                    protect=setup.get("protect") or ())
                 self.agent_made(self.agent)
             turn = {"text": [], "items": [], "actions": [], "shown": [], "code": [], "streamed": False,
-                    "msg": msg, "told": list(self.told()), **self.turn_extra(msg)}  # (msg, told: kept, if not sent)
+                    "msg": msg, "told": list(self.told()), **self.turn_extra(msg),  # (msg, told: kept, if not sent)
+                    "carried": any(not m.get("error") for m in self.messages()[:-1])}  # (what came before: earlier_said)
             self.agent.ask(self.message_for(self.agent, msg), turn)
         except OSError as e:
             self.agent = None

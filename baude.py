@@ -10345,10 +10345,19 @@ class SidePanel(Gtk.Box):
         # empty)
         self.btw_ask = widgets.Composer(send_tip=f"Ask ({widgets.SEND_KEY})\nNew line: Enter")
         self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
-        self.btw_ask.set_margin_start(0)  # (edge to edge with the list under it)
-        self.btw_ask.set_margin_end(widgets.INSIDE_GAP)
-        self.btw_ask.set_margin_top(10)
-        self.btw_ask.input.get_parent().set_min_content_height(self.ASK_HEIGHT)
+        # (at least as tall as the other pages' empty lists, whatever the theme and text size: over one, unseen, the
+        # box filling it; taller as more's typed. Its text fills the box, so a click anywhere in it is in the text)
+        self.btw_ask.input.get_parent().set_vexpand(True)
+        ghost = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, opacity=0, can_target=False,
+                            accessible_role=Gtk.AccessibleRole.PRESENTATION)  # (not read out)
+        ghost.add_css_class("boxed-list")
+        ghost.set_placeholder(self._empty(""))
+        ask_holder = Gtk.Overlay(child=ghost, vexpand=False)  # (not the page's to grow: the list's under it)
+        ask_holder.add_overlay(self.btw_ask)
+        ask_holder.set_measure_overlay(self.btw_ask, True)
+        ask_holder.set_margin_start(0)  # (edge to edge with the list under it)
+        ask_holder.set_margin_end(widgets.INSIDE_GAP)
+        ask_holder.set_margin_top(10)
         self.btw_ask.gate("empty", True)
         self.btw_ask.input.get_buffer().connect("changed", lambda *_: self.btw_ask.gate(
             "empty", not self.btw_ask.text().strip()))
@@ -10356,7 +10365,7 @@ class SidePanel(Gtk.Box):
         keys.connect("key-pressed", self._ask_key)
         self.btw_ask.input.add_controller(keys)
         self.btw_ask.send.connect("clicked", lambda *_: self.ask_typed())
-        btw_page.append(self.btw_ask)
+        btw_page.append(ask_holder)
         self.btw_scroll = self._scrolled(self.btw_list)
         # (as wide as a side question's square, edge to edge with it, as the subagents' list is with theirs)
         self.btw_list.set_margin_start(0)
@@ -10435,8 +10444,6 @@ class SidePanel(Gtk.Box):
         self.btw_list.prepend(sq)
         self.btw_list.set_visible(True)
         sq.set_expanded(True)
-
-    ASK_HEIGHT = 63  # (px: the box's least)
 
     def _ask_key(self, _c, keyval, _code, state):
         """Ctrl+Enter (⌘Enter) asks what's typed in the box over the list (nothing, while it's empty); Enter is a

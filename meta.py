@@ -1569,7 +1569,7 @@ class Agent:
         turn, self.turn = self.turn, None
         if turn is not None:
             error = None if turn.get("stopped") else \
-                ("\n".join(self.stderr[-6:]).strip() or f"claude exited with {code}")[-600:]
+                ("\n".join(self.stderr[-6:]).strip() or f"{self.runs} exited with {code}")[-600:]
             self.chat._done(self, "".join(turn["text"]).strip(), error, turn)
         self.chat.agent_gone(self)
         return False

@@ -126,6 +126,7 @@ import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; se
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
 )
+import thumbs  # noqa: E402  (files' thumbnails, the system's)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
@@ -6521,9 +6522,20 @@ def attachment_widget(att, size, on_remove=None):
         make_image_interactive(thumb, att.data, att.path, att.name)
         box.append(thumb)
     else:
-        box.append(Gtk.Image.new_from_gicon(att.icon()))
+        icon = Gtk.Image.new_from_gicon(att.icon())
+        box.append(icon)
         name = Gtk.Label(label=att.name, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=22)
         box.append(name)
+        if att.path and thumbs.wanted(att.path):  # (a PDF, a video: the system's thumbnail of it, as it has one)
+            side = size * 2 // 3
+            icon.set_pixel_size(side)  # (its room from the start: a chat's history doesn't move when it comes)
+
+            def shown(tex):
+                if tex is not None:
+                    icon.set_from_paintable(tex)
+                    icon.set_pixel_size(side)
+                    icon.add_css_class("attach-thumb")
+            thumbs.thumbnail(att.path, round(side * widgets.screen_scale()), shown)
     if on_remove:
         rm = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Remove", valign=Gtk.Align.CENTER)
         rm.add_css_class("flat")
@@ -7827,8 +7839,8 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_banner = Adw.Banner(use_markup=True)  # (its titles: show_host_state's markup)
-        self.append(self.host_banner)
+        self.host_note = widgets.HostState()  # (its titles: show_host_state's markup)
+        self.append(self.host_note)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.list.connect("row-activated", self.on_activate)
@@ -8022,7 +8034,7 @@ class SessionSidebar(Gtk.Box):
 
     def deactivate_host(self, key, off):
         """New session's host right-clicked → Deactivate (off), or Activate: Network.deactivate, its chats grayed and
-        the banner saying so while it is."""
+        the note over them saying so while it is."""
         if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
             network().deactivate(r, off)
             toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
@@ -8728,12 +8740,12 @@ class SessionSidebar(Gtk.Box):
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
-        """The host picked isn't there (or is deactivated): said in the banner over its chats, as they were last
+        """The host picked isn't there (or is deactivated): said in the note over its chats, as they were last
         seen."""
         said = self.host_state(self.shown_remote())
         if said is not None:
-            self.host_banner.set_title(GLib.markup_escape_text(said))
-        self.host_banner.set_revealed(said is not None)
+            self.host_note.set_title(GLib.markup_escape_text(said))
+        self.host_note.set_revealed(said is not None)
 
     def pick_host(self, key):
         """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
@@ -11896,7 +11908,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(f"Show in {LAUNCHER.where}", LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1),
                               "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
-        self.version_row = update.version_row(self)  # (and the version, its changelog: Record's too)
+        self.version_row = update.version_row()
         group.add(self.version_row)
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")
@@ -12089,6 +12101,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item = Gio.MenuItem.new("Settings…", "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
         menu.append_item(item)
+        menu.append("Changelog", "win.changelog")
         menu.append("Full-width text", "win.fullwidth")
         menu.append("Read-only session", "win.readonly")
         menu.append("Database Schemas…", "win.dbschema")
@@ -12139,6 +12152,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
+        changelog = Gio.SimpleAction.new("changelog", None)  # (☰ → Changelog, Record's too)
+        changelog.connect("activate", lambda *_: update.changelog_dialog().present(self))
+        self.add_action(changelog)
         self.feedback_draft = None
         restart = Gio.SimpleAction.new("restart", None)
         restart.connect("activate", lambda *_: self.restart_app())
@@ -13770,7 +13786,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
-        self.apply_chat_signal()  # (a new chat: the defaults for new chats)
+        self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -14986,8 +15002,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     # ---- Signal
     def signal_menu(self):
-        """The link button's dropdown: this chat's two Signal switches (shown links, and running), the defaults new
-        chats start with, and Signal's page."""
+        """The link button's dropdown: this chat's two Signal switches (shown links, and running)."""
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=8, margin_bottom=6, margin_start=10,
                       margin_end=10, width_request=310)
@@ -15009,43 +15024,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                              "Kubernetes objects, tools")
         self.signal_run = row("Activate Signal", "Look up the names in this chat's replies as they come, and let the "
                                                  "reader (a model session) read the chat")
-        line = Gtk.Box(spacing=8)
-        self.signal_default = Gtk.Label(xalign=0, wrap=True, hexpand=True, max_width_chars=30)
-        self.signal_default.add_css_class("dim-label")
-        self.signal_default.add_css_class("caption")
-        line.append(self.signal_default)
-        use = Gtk.Button(label="Use for new chats", valign=Gtk.Align.CENTER,
-                         tooltip_text="New chats start with these two switches as they are now")
-        use.add_css_class("flat")
-        use.connect("clicked", lambda *_: (save_settings(signal=self.signal_run.get_active(),
-                                                         signal_links=self.signal_show.get_active()),
-                                           self.show_signal_default()))
-        line.append(use)
-        box.append(line)
-        page = Gtk.Button(label="Signal Page", halign=Gtk.Align.END)
-        page.add_css_class("flat")
-        page.connect("clicked", lambda *_: (pop.popdown(), self.show_panel(True, "refs")))
-        box.append(page)
         pop.set_child(box)
-        pop.connect("show", lambda *_: self.show_signal_default())
         return pop
 
-    def show_signal_default(self):
-        on, links = self.chat_signal(None)
-        self.signal_default.set_label("For this chat. New chats: " + ("links shown" if links else "links hidden") +
-                                      (", activated" if on else ", not activated"))
-
-    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with the
-    # defaults ("signal" and "signal_links" in settings; the dropdown's Use for new chats sets them)
+    # ---- Signal per chat, as Remote Control is: each chat keeps its own two switches, and a new chat starts with
+    # its links shown and Signal not activated
     SIGNAL_CHATS = 500  # chats whose switches are kept (the most recently changed)
 
     def chat_signal(self, sid):
-        """A chat's Signal switches, (on, links): its own if it has some, else the defaults for new chats."""
+        """A chat's Signal switches, (on, links): its own if it has some, else a new chat's (not activated, links
+        shown)."""
         s = load_settings()
         kept = (s.get("signal_chats") or {}).get(sid) if sid else None
         if isinstance(kept, list) and len(kept) == 2:
             return bool(kept[0]), bool(kept[1])
-        return bool(s.get("signal")), s.get("signal_links") is not False
+        return False, True
 
     def keep_chat_signal(self, sid, on, links):
         chats = {k: v for k, v in (load_settings().get("signal_chats") or {}).items() if k != sid}
@@ -15053,8 +15046,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         save_settings(signal_chats=dict(list(chats.items())[-self.SIGNAL_CHATS:]))
 
     def apply_chat_signal(self):
-        """The chat shown changed: its switches (a new chat's: the defaults, or what you set before it had an id), and
-        Signal as they say."""
+        """The chat shown changed: its switches (a new chat's: links shown and not activated, or what you set before
+        it had an id), and Signal as they say."""
         on, links = self.chat_signal(self.session_id) if self.session_id else \
             (self.signal_pending or self.chat_signal(None))
         for sw, value, handler in ((self.signal_run, on, self.signal_run_handler),
@@ -15411,9 +15404,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return rect
 
     def open_ref(self, surface, anchor, message=None):
-        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit /
-        branch / PR / tool shows its card, and everything else (several places, not found, stale, still looking)
-        gets a popover."""
+        """A Signal link was clicked: where the reader placed it in that reply; else a file opens, a commit or branch
+        shows in the Git page, a pull request or issue opens as ⌘K opens it (fixview.open_github: its page, or one of
+        Baude's own feedback issues on the Feedback tab), a tool shows its card, and everything else (several places,
+        not found, stale, still looking) gets a popover."""
         dec = self.signal.decision(message, surface) if self.signal else None
         if dec is not None and dec["verdict"] == "link" and dec.get("path"):
             full = os.path.join(self.signal.root, dec["path"])
@@ -15456,7 +15450,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if ref.status == "resolved" and ref.kind in ("commit", "branch"):  # (its place in the history: the Git page)
             self.show_git_ref(ref)
             return
-        if ref.status == "resolved" and (ref.kind in ("pr", "tool", "subagent", "skill") or ref.data.get("context")):
+        if ref.status == "resolved" and ref.kind == "pr" and ref.data.get("url"):  # (not its card: its page)
+            d = ref.data
+            return fixview.open_github(self, {"pr": not d.get("issue"), "repo": d["repo"], "number": d["number"],
+                                              "url": d["url"]})
+        if ref.status == "resolved" and (ref.kind in ("tool", "subagent", "skill") or ref.data.get("context")):
             self.show_ref(surface)
             return
         defs = [l for l in ref.locations if l["role"] != "used"]

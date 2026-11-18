@@ -2270,6 +2270,7 @@ class MetaChat(Gtk.Box):
         return False
 
     def render(self):
+        self.text_selection.forget()  # (its labels gone with what's drawn again)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         for m in self.messages() if self.ready() else ():

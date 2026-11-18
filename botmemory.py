@@ -149,6 +149,7 @@ class BotMemory(Gtk.Box):
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        widgets.inside(self, start=False)  # (the dark inside a subagent's chat and a Record page are read in)
         self.win, self.sid, self.remote, self.path, self.editor = win, None, None, None, None
         self.seen = {}  # (session id -> its memory as last accepted here: what the Bot's changes are shown against)
         self.saving = None

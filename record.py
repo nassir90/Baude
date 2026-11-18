@@ -71,7 +71,7 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
-from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification  # noqa: E402  (a background task's ending, as said;
+from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification, transcript_model  # noqa: E402  (a background task's ending, as said;
 # a revert's mark: what's after the record it keeps dropped)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
@@ -7211,6 +7211,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         menu.append("Detach all", "win.detach")
         view = Gio.Menu()
         view.append("Full-width text", "win.fullwidth")
@@ -7231,7 +7232,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         app_menu.append(f"Restart {noun()}", "win.restart")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
-        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("rename", self.rename),
+        for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
+                         ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),
                          ("exportall", lambda: self.ask_export(self.store.notebooks, book(plural=True))),
                          ("detach", self.detach),
@@ -7649,7 +7651,26 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         chat = (self.reader.chat if self.reader is not None else None) or self.store.reading or {}
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
-                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}"]
+                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}",
+                *feedback.report_lines([("the chat", self.report), ("Meta", self.chat.report)])]
+
+    def report(self, most=None):
+        """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
+        and folder, then its transcript, each tool call with its input and result (meta.transcript_report); None if no
+        chat's open."""
+        chat = (self.reader.chat if self.reader is not None else None) or {}
+        if not (path := chat.get("path")) or not os.path.exists(path):
+            return None
+        head = [("App", "Record"), ("Chat", f"{os.path.splitext(os.path.basename(path))[0]} ({chat.get('title') or '-'})"),
+                ("Model", transcript_model(path) or ""), ("Folder", chat.get("cwd") or ""),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        return meta.transcript_report(head, path, most=most)
+
+    def copy_report(self):
+        if (text := self.report()) is None:
+            return widgets.toast(self, "No chat open")
+        self.get_clipboard().set(text)
+        widgets.toast(self, "Transcript copied")
 
     def apply_full_width(self, on):
         """☰ → Full-width text, as Baude's: the chat read and the diary across the whole pane, not a column. (Adw.Clamp

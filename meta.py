@@ -440,6 +440,122 @@ def transcript_text(path, limit=REF_LIMIT):
         text[-limit:]
 
 
+REPORT_ITEM = 4000  # (characters of each tool call's input, and of its result, in a copied conversation)
+
+
+def report_most():
+    """How long a copied conversation is at most: what an issue's body holds, with room for the note around it."""
+    from feedback import ISSUE_BODY_MOST
+    return ISSUE_BODY_MOST - 5000
+
+
+def report_head_text(head):
+    """head, [(name, value)], as lines, the values in a column (those with none left out)."""
+    head = [(k, v) for k, v in head if v not in (None, "")]
+    width = max((len(k) for k, _ in head), default=0)
+    return "\n".join(f"{k + ':':<{width + 1}} {v}" for k, v in head)
+
+
+def capped_report(head, parts, most=None):
+    """head's lines, then the parts (each a message, as text), as many of the last as fit in most (report_most): its
+    end kept, as transcript_text keeps a transcript's, and how many were left out said."""
+    most = report_most() if most is None else most
+    top = report_head_text(head)
+    kept, size = [], len(top)
+    for part in reversed(parts):
+        if size + len(part) + 2 > most - 200:
+            if not kept:  # (the last by itself is too long: its end)
+                kept.append("[…]" + part[-(most - 200 - size):])
+            break
+        kept.append(part)
+        size += len(part) + 2
+    cut = len(parts) - len(kept)
+    return "\n\n".join([top] + ([f"[… the first {cut} message{'s' if cut != 1 else ''} left out: too long to "
+                                  "paste]"] if cut else []) + list(reversed(kept))).strip() + "\n"
+
+
+def report_text(head, messages, limit=REPORT_ITEM, most=None):
+    """A conversation as text to paste into an issue (Copy, under the box; a note sent with Send Feedback): head,
+    [(name, value)], the lines over it (the app, the model and what runs it, its effort and modes, its tools, its
+    context); then who said what (each reply with the model that said it), each tool call with its input and what it
+    gave back (each as far as limit), each error said as one; its end, if it's longer than most (capped_report)."""
+    parts = []
+    for m in messages:
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["t"])) if m.get("t") else ""
+        who = "User" if m.get("role") == "user" else NAME + (f" ({m['model']})" if m.get("model") else "") + \
+            (" (error)" if m.get("error") else "")
+        out = [f"## {who}" + (f" · {when}" if when else "")]
+        if m.get("role") == "user":
+            if m.get("quote"):
+                out.append("> " + "\n> ".join(m["quote"].splitlines()))
+            out.append(m.get("text") or "")
+            parts.append("\n".join(out))
+            continue
+        for text in m.get("warned") or ():
+            out.append(f"({text})")
+        items = m.get("items")
+        if items is None:  # (a reply kept from before its parts were, an error's too: its text is its one part)
+            items = [{"kind": "text", "text": m["text"]}] if m.get("text") else []
+        for it in items:
+            if it["kind"] == "text":
+                if it.get("text", "").strip():
+                    out.append(it["text"].strip())
+                continue
+            inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
+            out.append(f"[tool {it.get('name') or '?'} · {it.get('state') or '?'}]\n{trimmed(inp, limit)}")
+            if it.get("result"):
+                out.append("[result]\n" + trimmed(str(it["result"]), limit))
+        if m.get("error") and m.get("text") and m.get("items") is not None:
+            out.append(m["text"])
+        parts.append("\n".join(out))
+    return capped_report(head, parts, most)
+
+
+def transcript_report(head, path, limit=REPORT_ITEM, most=None):
+    """A Claude Code chat's transcript (path) as text for an issue, as report_text's: head's lines, then who said what,
+    each tool call with its whole input, its result and whether it failed (each as far as limit); its end, if it's
+    longer than most."""
+    parts, calls = [], {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                try:
+                    e = json.loads(raw)
+                except ValueError:
+                    continue
+                if e.get("type") not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
+                    continue
+                msg = e.get("message") or {}
+                content, out = msg.get("content"), []
+                for c in [{"type": "text", "text": content}] if isinstance(content, str) else content or []:
+                    if not isinstance(c, dict):
+                        continue
+                    if c.get("type") == "text" and (c.get("text") or "").strip():
+                        out.append(c["text"].strip())
+                    elif c.get("type") == "tool_use":
+                        calls[c.get("id")] = c.get("name")
+                        inp = json.dumps(c.get("input") or {}, ensure_ascii=False, indent=1)
+                        out.append(f"[tool {c.get('name')}]\n{trimmed(inp, limit)}")
+                    elif c.get("type") == "tool_result":
+                        res = c.get("content")
+                        res = res if isinstance(res, str) else "\n".join(
+                            b.get("text") or f"[{b.get('type')}]" for b in res or () if isinstance(b, dict))
+                        name = calls.get(c.get("tool_use_id")) or "tool"
+                        out.append(f"[{name} {'error' if c.get('is_error') else 'result'}]\n{trimmed(res, limit)}")
+                if not out:
+                    continue
+                results = e["type"] == "user" and all(isinstance(c, dict) and c.get("type") == "tool_result"
+                                                      for c in content or ()) and not isinstance(content, str)
+                who = "Tool results" if results else "User" if e["type"] == "user" else \
+                    "Claude" + (f" ({msg['model']})" if msg.get("model") and msg["model"] != "<synthetic>" else "") + \
+                    (" (API error)" if e.get("isApiErrorMessage") else "")
+                when = (e.get("timestamp") or "").replace("T", " ")[:19]
+                parts.append(f"## {who}" + (f" · {when}" if when else "") + "\n" + "\n".join(out))
+    except OSError as err:
+        parts.append(f"(transcript not read: {err})")
+    return capped_report(head, parts or ["(nothing said yet)"], most)
+
+
 def earlier_said(messages, limit=EARLIER_LIMIT, where=lambda m: ""):
     """What was said before this session (a new one: the app started again, another model), the newest as far back
     as limit; where(m): what goes before a message's text (Record's: the notebook it was asked in)."""
@@ -2049,6 +2165,11 @@ class MetaChat(Gtk.Box):
         clear.add_css_class("flat")
         clear.connect("clicked", lambda *_: self._clear())
         foot.append(clear)
+        copy = Gtk.Button(label="Copy", tooltip_text="Copy the conversation, with its model, tools and context, to "
+                                                     "paste into an issue")
+        copy.add_css_class("flat")
+        copy.connect("clicked", lambda *_: self.copy_report())
+        foot.append(copy)
         self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
         foot.append(self.dots)
         self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
@@ -2200,7 +2321,7 @@ class MetaChat(Gtk.Box):
         done (the box's stop button kept till then)."""
         agent = self.agent
         if usage.get("maxTokens") or usage.get("showWithoutLimit"):
-            self.used = usage.get("totalTokens") or 0
+            self.used, self.last_usage = usage.get("totalTokens") or 0, usage
             if agent is None or agent.model != model():
                 usage = {"totalTokens": self.used, "maxTokens": window(model())}
             self.ctx.set_usage(usage)
@@ -2209,6 +2330,49 @@ class MetaChat(Gtk.Box):
             self.ctx.bar.set_value(1)
         if available():
             self.exhausted.set((self.ctx.over or outgrown) and self.ask is None)
+
+    def report_head(self):
+        """The lines over a copied conversation (report_text): the app, Meta's model and what runs it, its effort, its
+        modes, the tools it's given, its context as its session last said it. The session's, while there's one (what
+        the conversation's had); Settings → Meta's, before there is."""
+        agent = self.agent
+        if agent is not None:
+            value, level, coded, commands = agent.model, agent.effort, agent.key[3], agent.commands
+        else:
+            value, level, coded, commands = model(), effort(), code_mode(), runs_commands()
+        tools = list(READ_TOOLS) + (list(COMMAND_TOOLS) if commands else [])
+        tools += ["run_python", *[t["name"] for t in SETUP_TOOLS]] if coded else [t["name"] for t in self.all_tools()]
+        usage = getattr(self, "last_usage", None) or {}
+        if self.used is not None:
+            total = usage.get("maxTokens") or (agent.window if agent else window(value))
+            context = f"{self.used:,} / {total:,} tokens" if total else f"{self.used:,} tokens"
+            parts = [f"{c['name']} {c.get('tokens', 0):,}" for c in usage.get("categories") or []
+                     if c.get("tokens") and c.get("kind") != "deferred"]
+            context += f" ({', '.join(parts)})" if parts else ""
+        else:
+            shown = self.ctx.label.get_text().removeprefix("context").strip(" :—")
+            context = "no session yet" if agent is None else shown or "not said by its session yet"
+        picked = model()
+        return [("App", f"{self.APP} ({NAME})"), ("Model", f"{model_name(value)} ({value})"),
+                ("Next message", f"{model_name(picked)} ({picked}), picked since" if picked != value else ""),
+                ("Runs on", agent.runs if agent is not None else ""),
+                ("Effort", EFFORT_LABELS.get(level, level) if level else "default"),
+                ("Code mode", said_value(bool(coded))), ("Runs commands", said_value(bool(commands))),
+                ("Mode", agent.started_mode if agent is not None else ""),
+                ("Context", context), ("Tools", ", ".join(dict.fromkeys(tools))),
+                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+
+    def report(self, most=None):
+        """The conversation as text for an issue (report_text), what's being said now too; None if nothing's been."""
+        messages = list(self.messages()) if self.ready() else []
+        if self.ask is not None and self.ask.turn is not None and self.ask.turn.get("items"):
+            messages.append({"role": "meta", "items": self.ask.turn["items"], "warned": ["still replying"],
+                             "model": self.ask.model})
+        return report_text(self.report_head(), messages, most=most) if messages else None
+
+    def copy_report(self):
+        self.get_clipboard().set(self.report() or report_text(self.report_head(), []))
+        widgets.toast(self, "Conversation copied")
 
     def close_agent(self):
         """Its session stopped (the conversation cleared, the window gone): the next message starts another, told what
@@ -3370,7 +3534,7 @@ class MetaChat(Gtk.Box):
         elif agent is self.agent:
             self._context_now()  # (at once: the box off before another's asked, if it's over)
         if error or text.strip() or self.worked(turn):
-            m = {"role": "meta", "text": text, "t": time.time(),
+            m = {"role": "meta", "text": text, "t": time.time(), "model": agent.model,
                  "items": [{k: v for k, v in it.items() if k != "ran"} for it in turn["items"]]}
             for it in m["items"]:
                 if it.get("state") == "running":  # (stopped before its result came)

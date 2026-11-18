@@ -12210,6 +12210,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         menu.append_item(item)
         menu.append("Ongoing Feedback", "win.fixes")
+        menu.append("Copy Transcript for an Issue", "win.copyreport")
         self.main_menu = menu
         menu.append("Restart Baude", "win.restart")
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
@@ -12248,6 +12249,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         feedback = Gio.SimpleAction.new("feedback", None)
         feedback.connect("activate", lambda *_: self.open_feedback())
         self.add_action(feedback)
+        report = Gio.SimpleAction.new("copyreport", None)
+        report.connect("activate", lambda *_: self.copy_report())
+        self.add_action(report)
         fixes_action = Gio.SimpleAction.new("fixes", None)
         fixes_action.connect("activate", lambda *_: self.open_fixes())
         self.add_action(fixes_action)
@@ -12539,7 +12543,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def feedback_context(self):
         """What a note sent from here says it came from (feedback.save_feedback)."""
         return [f"- session: {self.session_id or '-'} ({getattr(self, 'session_title', None) or 'untitled'})",
-                f"- folder: {self.cwd}", f"- Baude: {os.path.realpath(__file__)}"]
+                f"- folder: {self.cwd}", f"- Baude: {os.path.realpath(__file__)}",
+                *feedback.report_lines([("the chat", self.report), ("Meta", self.panel.meta.report)])]
 
     def capture_areas(self):
         """The window's parts, by name, for the text a capture records."""
@@ -13369,6 +13374,33 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         goes unsaid)."""
         if self.proc:
             self.pending[self.proc.control(req)] = (callback, refused)
+
+    def report(self, most=None):
+        """The open chat as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
+        and tools as claude said them as it started, its effort, mode, host, folder and context, as the header shows
+        them, then its transcript as it's drawn here (its mirror, for a chat on another host), each tool call with its
+        input and result (meta.transcript_report); None if there's no transcript yet."""
+        ctx, here = self.ctx_box, self.chat_host() == HERE_HOST
+        init = getattr(self, "init_info", None) or {}
+        tip = (ctx.get_tooltip_text() or "").split("\n")[1:]
+        tools = [t for t in init.get("tools") or () if isinstance(t, str)]
+        head = [("App", "Baude"), ("Session", self.session_id or "new"),
+                ("Model", init.get("model") or self.model or "default"),
+                ("Picked", self.model if self.model and self.model != init.get("model") else ""),
+                ("Effort", self.effort or "default"), ("Mode", self.mode),
+                ("Host", THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                ("Folder", self.cwd or ""), ("Claude Code", init.get("claude_code_version") or ""),
+                ("Context", (shown + (f" ({', '.join(tip)})" if tip else "")) if (shown := ctx.label.get_text()
+                                                                                .removeprefix("context").strip(" :—"))
+                 else "not said yet"),
+                ("Tools", ", ".join(tools)), ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        path = getattr(self, "history_path", None) or \
+            ((find_session(self.session_id) or {}).get("path") if self.session_id and here else None)
+        return meta.transcript_report(head, path, most=most) if path and os.path.exists(path) else None
+
+    def copy_report(self):
+        self.get_clipboard().set(self.report() or "(nothing said yet)\n")
+        widgets.toast(self, "Transcript copied")
 
     def refresh_context(self):
         self.request({"subtype": "get_context_usage"}, self.show_context)
@@ -14864,6 +14896,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def h_system(self, msg):
         st = msg.get("subtype")
         if st == "init":
+            self.init_info = msg  # (its model and tools, as claude says them: report)
             TOOL_NAMES.update(t for t in msg.get("tools") or [] if isinstance(t, str))  # (what Signal can name)
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one

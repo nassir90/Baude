@@ -631,9 +631,8 @@ def fmt_scale(scale):
 
 # ------------------------------------------------------------- file links --
 # Paths in Claude's text ("baude.py:42", `tests/run.sh`, /etc/hosts, ~/notes.md) become links when
-# they exist, relative to the session folder. Clicking one opens it in the user's editor.
-
-FILE_SCHEME = "baude-open:"
+# they exist, relative to the session folder; the link's target is the path itself (file_href), and clicking one opens
+# it on the side panel's Code page, or in the editor (open_code).
 
 
 _PATH = re.compile(r"(?<![\w/.:~@-])("
@@ -684,13 +683,18 @@ def resolve_link(url):
     m = re.fullmatch(r"(?:file://)?(.+?)(?:#L?(\d+)(?:-L?\d+)?|:(\d+)(?::\d+)?)?", url)
     if not m:
         return None
-    path = os.path.normpath(os.path.join(MarkdownView.base_dir, os.path.expanduser(urllib.parse.unquote(m[1]))))
     line = m[2] or m[3]
-    return (path, int(line) if line else None) if os.path.exists(path) else None
+    for raw in dict.fromkeys((m[1], urllib.parse.unquote(m[1]))):  # (a path as it is first: one with a % in its name)
+        path = os.path.normpath(os.path.join(MarkdownView.base_dir, os.path.expanduser(raw)))
+        if os.path.exists(path):
+            return path, int(line) if line else None
+    return None
 
 
 def file_href(path, line=None):
-    return FILE_SCHEME + urllib.parse.quote(path) + (f"#{line}" if line else "")
+    """A file link's target: the path itself, :line after it, so Copy Link Address gives what a terminal or an editor
+    takes (on_label_link opens it, as it does a [link](path))."""
+    return path + (f":{line}" if line else "")
 
 
 def link_paths(escaped_text):
@@ -753,23 +757,19 @@ def open_in_editor(path, line=None, widget=None):
 
 
 def on_label_link(label, uri):
-    """Labels' link handler: editor links open the editor, Signal links what they name;
-    everything else, the default."""
+    """Labels' link handler: a file's link opens it (open_code), a name what it names (open_ref); everything else, the
+    default."""
     if uri.startswith(REF_SCHEME):
         win = label.get_root()
         if hasattr(win, "open_ref"):
             name, _, message = uri[len(REF_SCHEME):].partition("#")
             win.open_ref(urllib.parse.unquote(name), label, message or None)
         return True
-    if not uri.startswith(FILE_SCHEME):
-        if (hit := resolve_link(uri)) is not None:  # (a path that wasn't there yet when the reply was drawn)
-            open_code(*hit, label)
-            return True
-        win = label.get_root()  # (a file on the server of a session on the network: Baude's open_remote_link)
-        return bool(hasattr(win, "open_remote_link") and win.open_remote_link(uri))
-    path, _, line = uri[len(FILE_SCHEME):].partition("#")
-    open_code(urllib.parse.unquote(path), int(line) if line.isdigit() else None, label)
-    return True
+    if (hit := resolve_link(uri)) is not None:  # (a file's: its path, :line after it; or a [link](path))
+        open_code(*hit, label)
+        return True
+    win = label.get_root()  # (a file on the server of a session on the network: Baude's open_remote_link)
+    return bool(hasattr(win, "open_remote_link") and win.open_remote_link(uri))
 
 
 def open_code(path, line=None, widget=None):

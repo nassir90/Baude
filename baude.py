@@ -138,7 +138,7 @@ from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
     CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
-    EXISTS_FOR, FILE_SCHEME, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
+    EXISTS_FOR, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
     HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
     KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch, natural_height,
     REF_ABSENT_WHY, REF_SCHEME, SETTINGS_RENAMED, SUB_BULLET, TableScroll, WEB_IMAGE_MAX,

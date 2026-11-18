@@ -1383,7 +1383,7 @@ def test_markdown_streamed_in_pieces(app):
             view.finish()
             assert view.streaming is None and view.blocks == whole.blocks and texts(view) == texts(whole)
             drawn.append(texts(view))
-        assert any("baude-open:" in l for _, labels, _ in drawn[0] for l in labels), "paths in it are links"
+        assert any('href="/' in l for _, labels, _ in drawn[0] for l in labels), "paths in it are links"
         assert drawn[2][-1][0] == "CodeBlock" and drawn[2][-1][2].endswith("- nor a list"), \
             "the fence left open is still code, to the end"
 
@@ -1414,12 +1414,12 @@ def test_markdown_streamed_in_pieces(app):
         # a path that exists only later is linked once what was found about it is due to be looked at again,
         # though the line's markup is remembered
         line = "See stream/later.py for it."
-        assert "baude-open:" not in baude.MarkdownView(line).widgets[0].get_label()
+        assert 'href="/' not in baude.MarkdownView(line).widgets[0].get_label()
         with open(os.path.join(TMP, "stream", "later.py"), "w") as f:
             f.write("x = 1\n")
-        assert "baude-open:" not in baude.MarkdownView(line).widgets[0].get_label(), "(as before: not looked at yet)"
+        assert 'href="/' not in baude.MarkdownView(line).widgets[0].get_label(), "(as before: not looked at yet)"
         pump(baude.EXISTS_FOR + 0.1)
-        assert "baude-open:" in baude.MarkdownView(line).widgets[0].get_label()
+        assert 'href="/' in baude.MarkdownView(line).widgets[0].get_label()
     finally:
         close(win)
 
@@ -1448,8 +1448,8 @@ def test_file_links(app):
         win.transcript.append(view)
         label = find(view, Gtk.Label)[0]
         markup = label.get_label()
-        assert markup.count("baude-open:") == 3, markup
-        assert f'baude-open:{f}#12' in markup and "missing.py</a>" not in markup and "2.1.296</a>" not in markup
+        assert markup.count(f'href="{TMP}') == 3, markup
+        assert f'href="{f}:12"' in markup and "missing.py</a>" not in markup and "2.1.296</a>" not in markup
         assert 'href="https://x.io/src/app.py"' in markup, "URLs stay URLs"
         launched, opened = [], []
         orig = (subprocess.Popen, Gtk.FileLauncher.launch, shutil.which)
@@ -1512,11 +1512,11 @@ def test_extensionless_links(app):
         with open(docker, "w") as f:
             f.write("FROM python:3.13\nRUN true\n")
         md = baude._inline
-        assert f'baude-open:{docker}"' in md("[svc/runner/Dockerfile](svc/runner/Dockerfile)"), "a link's target"
-        assert f'baude-open:{docker}#2"' in md("[its RUN](svc/runner/Dockerfile#L2)"), "with its line"
-        assert f'baude-open:{docker}"' in md("`svc/runner/Dockerfile`") and \
-            f'baude-open:{docker}"' in md("see svc/runner/Dockerfile now"), "in code and prose, in a folder"
-        assert "baude-open:" not in md("and/or, read/write, 10/23/26 and a lone Dockerfile")
+        assert f'href="{docker}"' in md("[svc/runner/Dockerfile](svc/runner/Dockerfile)"), "a link's target"
+        assert f'href="{docker}:2"' in md("[its RUN](svc/runner/Dockerfile#L2)"), "with its line"
+        assert f'href="{docker}"' in md("`svc/runner/Dockerfile`") and \
+            f'href="{docker}"' in md("see svc/runner/Dockerfile now"), "in code and prose, in a folder"
+        assert 'href="/' not in md("and/or, read/write, 10/23/26 and a lone Dockerfile")
         later = os.path.join(TMP, "svc", "runner", "Makefile")
         label = Gtk.Label()
         label.connect("activate-link", baude.on_label_link)

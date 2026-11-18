@@ -478,6 +478,56 @@ def window_of(value):
         next((m.get("window") for m in providers.mesh_agents() if m["value"] == value), None)
 
 
+# what each model's sessions last said its window was (get_context_usage's maxTokens), by its value, for its next
+# session's before it says: claude's for a model depends on the account, and Apple's on the OS
+SAID_WINDOWS = {"at": None, "windows": {}}
+
+
+def said_windows_path():
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "baude", "windows.json")
+
+
+def said_windows():
+    """{model value: tokens}, as said_windows_path has them (read again once it's changed)."""
+    path = said_windows_path()
+    try:
+        st = os.stat(path)
+        at = (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        at = None
+    if at != SAID_WINDOWS["at"]:
+        try:
+            with open(path) as f:
+                got = json.load(f)
+        except (OSError, ValueError):
+            got = {}
+        SAID_WINDOWS["windows"] = {k: v for k, v in got.items() if isinstance(v, int) and v > 0} \
+            if isinstance(got, dict) else {}
+        SAID_WINDOWS["at"] = at
+    return SAID_WINDOWS["windows"]
+
+
+def said_window(value):
+    """The window a session of a model last said it had; None if none's said."""
+    return said_windows().get(value) if isinstance(value, str) else None
+
+
+def remember_window(value, tokens):
+    """A session of a model's said its window (tokens): kept, for its next one's before it says (said_window)."""
+    if not isinstance(value, str) or not value or value == "default" or not isinstance(tokens, int) or tokens <= 0 \
+            or said_window(value) == tokens:
+        return
+    path = said_windows_path()
+    part = f"{path}.{os.getpid()}"  # (written whole, then put in its place: Baude and Record both keep it)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(part, "w") as f:
+            json.dump(said_windows() | {value: tokens}, f)
+        os.replace(part, path)
+    except OSError:
+        pass
+
+
 def launch(model, mode, effort, session_id=None, resumed=False):
     """How to start what runs a model, for a conversation of session_id (None: a new one it names itself) that it has
     (resumed) or hasn't had yet: {program, exe, missing (what runs it isn't here), mode, effort, resume, extra}, for

@@ -284,12 +284,15 @@ def effort():
 
 
 def window(value):
-    """How many tokens a model's session holds, till it says: its provider's say (Ollama's, an endpoint's), else
-    WINDOWS'."""
+    """How many tokens a model's session holds, till it says: its provider's say (Ollama's, an endpoint's, another
+    host's), else what its last session said (modelslib.said_window), else WINDOWS'."""
     program = model_program(value)
+    said = (modelslib.window_of(value) if program != "claude" else None) or modelslib.said_window(value)
+    if said:
+        return said
     if program == "claude":
         return 1_000_000 if "[1m]" in value else WINDOWS[program]
-    return modelslib.window_of(value) or WINDOWS[program]
+    return WINDOWS[program]
 
 
 def weight(text):
@@ -1615,7 +1618,10 @@ class Agent:
     def usage(self, then):
         """then(usage): how much of its context window the session's used (Claude Code's get_context_usage); {} if
         it didn't say."""
-        self.answers[self.proc.control({"subtype": "get_context_usage"})] = then
+        def said(usage):
+            modelslib.remember_window(self.model, usage.get("maxTokens"))  # (its next session's, before it says)
+            then(usage)
+        self.answers[self.proc.control({"subtype": "get_context_usage"})] = said
 
     def stop(self):
         """The turn interrupted (Esc, the stop button): what's been said kept; the session too, unless it won't stop."""
@@ -2255,7 +2261,7 @@ class MetaChat(Gtk.Box):
         foot.append(copy)
         self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
         foot.append(self.dots)
-        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
+        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END, window=lambda: window(model()))
         self.context_soon_id = None
         foot.append(self.ctx)
         comp.append(foot)
@@ -2377,6 +2383,7 @@ class MetaChat(Gtk.Box):
                                 "New line: Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
+        self.ctx.window_changed()  # (no session's said what it's used: the new model's window)
         agent = self.agent
         if not available():  # (its host gone from the mesh, or its model: said so, till it's back or another's picked)
             self.exhausted.set(True, UNAVAILABLE)

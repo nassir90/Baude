@@ -1943,10 +1943,12 @@ class ContextMeter(Gtk.LevelBar):
 class ContextUsage(Gtk.Box):
     """How much of its context window a session's used, Baude's chat's and Meta's alike: "context" and a bar with
     "24k / 200k" in it, amber past 60%, red past 85%; its tip, what the tokens are (set_usage: get_context_usage's
-    answer). Past the window ("12.4k / 8.2k"), the bar's full: over."""
+    answer). Past the window ("12.4k / 8.2k"), the bar's full: over. Till its session's said, the window its model has,
+    as far as it's known (window: a function giving it, None where it isn't): "— / 200k"."""
 
-    def __init__(self, **kw):
+    def __init__(self, window=None, **kw):
         super().__init__(spacing=6, tooltip_text="Context window usage", **kw)
+        self.window = window
         self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
         for name in ("low", "high", "full"):
@@ -1961,6 +1963,7 @@ class ContextUsage(Gtk.Box):
     def set_usage(self, usage):
         used, total = usage.get("totalTokens") or 0, usage.get("maxTokens") or 0
         if not total and usage.get("showWithoutLimit"):
+            self.said = True
             self.bar.set_visible(False)
             self.over = False
             self.label.set_text(f"context: {fmt_tokens(used)}" if usage.get("totalTokens") is not None else "context —")
@@ -1968,6 +1971,7 @@ class ContextUsage(Gtk.Box):
             return
         if not total:
             return
+        self.said = True
         self.bar.set_visible(True)
         self.over = used > total
         self.label.set_text("context")
@@ -1978,13 +1982,21 @@ class ContextUsage(Gtk.Box):
         self.set_tooltip_text(f"Context window usage: {used / total:.0%}\n" + "\n".join(lines))
 
     def reset(self):
-        """No session's: nothing used yet."""
-        self.over = False
+        """No session's: nothing used yet, of the window its model has (window_changed)."""
+        self.over = self.said = False
         self.label.set_text("context")
-        self.bar.set_text("—")
         self.bar.set_visible(True)
         self.bar.set_value(0)
-        self.set_tooltip_text("Context window usage")
+        self.window_changed()
+
+    def window_changed(self):
+        """Its model's another, or what's known of its window is: shown, till a session says what it's used."""
+        if self.said:
+            return
+        total = self.window() if self.window else None
+        self.bar.set_text(f"— / {fmt_tokens(total)}" if total else "—")
+        self.set_tooltip_text(f"Context window usage\nThe model's window: {total:,} tokens\n"
+                              "What's used is said once its session starts" if total else "Context window usage")
 
 
 class UserTurn(Gtk.Box):

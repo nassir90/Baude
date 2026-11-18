@@ -9028,7 +9028,7 @@ class SideQuestion(Gtk.ListBoxRow):
         self.foot.add_css_class("meta-foot")
         self.dots = widgets.WorkingDots()
         self.foot.append(self.dots)
-        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END)
+        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END, window=win.shown_window)  # (the chat's model's)
         self.context_soon = None
         self.foot.append(self.ctx)
         comp.append(self.foot)
@@ -12493,7 +12493,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.set_send_button(busy=False)
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
-        ctx = self.ctx_box = widgets.ContextUsage()  # (Meta's too)
+        ctx = self.ctx_box = widgets.ContextUsage(window=self.shown_window)  # (Meta's too)
         self.ctx_label, self.ctx_bar = ctx.label, ctx.bar
         statusbar = Gtk.Box(spacing=12)
         statusbar.add_css_class("statusbar")
@@ -13592,7 +13592,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.refresh_context()
         return False
 
+    def shown_window(self):
+        """The window of the chat's model, as far as it's known before its claude says (meta.window): None for
+        claude's own default, till it's said which model that is."""
+        model = getattr(self, "model", None) or getattr(self, "model_shown", None)
+        return meta.window(model) if model and model != "default" else None
+
     def show_context(self, usage):
+        modelslib.remember_window(self.model or getattr(self, "model_shown", None), usage.get("maxTokens"))
         self.ctx_box.set_usage(usage)
         if self.outgrown:
             self.ctx_box.bar.set_value(1)
@@ -15085,6 +15092,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.provider_dd.set_sensitive(not one)  # (one provider has it: greyed, there's no other to pick)
         self.provider_dd.set_visible(bool(self.alike_keys))  # (Claude's: none)
         self.provider_dd.set_tooltip_text("Where the chat's model runs" + (" (the only one that has it)" if one else ""))
+        self.ctx_box.window_changed()  # (no session's said what it's used yet: this model's window)
 
     def on_provider_changed(self, key):
         """Another provider of the chat's model picked (alike_keys): the chat's model is its copy there, as a model

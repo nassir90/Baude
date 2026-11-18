@@ -16,12 +16,13 @@ Nothing else: no path outside these folders, no other file."""
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
 
 REGISTRY = "registry.ollama.ai"
-CHUNK = 1 << 20
+CHUNK = 64 << 10  # (a message's worth: mesh.CHUNK)
 MANIFEST_TYPE = "application/vnd.docker.distribution.manifest.v2+json"
 PART = r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}"
 NAME_RE = re.compile(rf"(?:({PART})/)?({PART})(?::({PART}))?")  # ([namespace/]model[:tag], as Ollama names them)
@@ -202,6 +203,15 @@ def hosts():
     return out
 
 
+def is_here(host):
+    """Whether a host's name is this machine's: none, "here", its host name, or its name in the mesh."""
+    from baudelib import mesh
+    names = {"", "here", "this", socket.gethostname().lower(), socket.gethostname().split(".")[0].lower()}
+    me = mesh.me() or {}
+    names |= {str(me.get("name") or "").lower(), str(me.get("id") or "").lower()} - {""}
+    return str(host or "").strip().lower() in names
+
+
 def member_of(host):
     """A host's member id, by its name (or its id); ValueError naming those there are, if it isn't one."""
     found = hosts()
@@ -224,11 +234,13 @@ def _proxy():
     return p
 
 
-def _get(member, path, timeout=60):
-    """A response from member's files (path), through the Proxy: urllib's response; ValueError with what it said."""
+def _get(member, path, timeout=60, start=0):
+    """A response from member's files (path, from byte start), through the Proxy: urllib's response; ValueError with
+    what it said."""
     p = _proxy()
     req = urllib.request.Request(f"{p['url'].removesuffix('/mesh')}/files/{member}{path}",
-                                 headers={"Authorization": f"Bearer {p['key']}"})
+                                 headers={"Authorization": f"Bearer {p['key']}"} |
+                                         ({"Range": f"bytes={start}-"} if start else {}))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         return opener.open(req, timeout=timeout)
@@ -261,7 +273,8 @@ def remote_where(member, model, kind=None):
 
 def ollama_fetch(member, name, progress=None, stopped=lambda: False):
     """An Ollama model of another host's pulled into this machine's Ollama, by that Ollama (from the Proxy's /v2/,
-    as a registry: its blobs checked as any pull's are), then named as it's named there. Its name here."""
+    as a registry: its blobs checked as any pull's are), then named as it's named there (the name it was pulled by
+    removed, whatever happens). Its name here. progress(done, None, digest): bytes of all its blobs so far."""
     from baudelib import mesh, providers
     ns, model, tag = parse_name(name) or (None, None, None)
     if model is None:
@@ -281,7 +294,7 @@ def ollama_fetch(member, name, progress=None, stopped=lambda: False):
         resp = opener.open(req, timeout=600)
     except OSError as e:
         raise ValueError(f"Ollama {providers.unreachable(url, e)}") from None
-    last = None
+    last, blobs, sizes = None, {}, {}
     with resp:
         for line in resp:
             if stopped():
@@ -293,18 +306,33 @@ def ollama_fetch(member, name, progress=None, stopped=lambda: False):
             if said.get("error"):
                 raise ValueError(f"Ollama: {said['error']}")
             last = said.get("status")
-            if progress and said.get("total"):
-                progress(said.get("completed") or 0, said["total"], said.get("digest"))
-    if last != "success":
-        raise ValueError(f"Ollama's pull ended at {last!r}")
-    providers.fetch(url + "/api/copy", {"source": pulled, "destination": here})
-    providers.fetch(url + "/api/delete", {"model": pulled}, method="DELETE")  # (the name only: the copy keeps its blobs)
+            if said.get("total") and said.get("digest"):  # (Ollama says each blob's own, one blob after another,
+                # and not always how far a quick one got: one it's gone past is all there)
+                d = said["digest"]
+                for other in blobs:
+                    if other != d:
+                        blobs[other] = sizes[other]
+                sizes[d] = said["total"]
+                blobs[d] = max(blobs.get(d, 0), said.get("completed") or 0)
+                if progress:
+                    progress(sum(blobs.values()), None, d)
+    try:
+        if last != "success":
+            raise ValueError(f"Ollama's pull ended at {last!r}")
+        providers.fetch(url + "/api/copy", {"source": pulled, "destination": here})
+    finally:
+        try:  # (the name only: the copy keeps its blobs, and a pull cut short keeps what it had for the next)
+            providers.fetch(url + "/api/delete", {"model": pulled}, method="DELETE")
+        except (OSError, ValueError):
+            pass
     return here
 
 
 def mlx_fetch(member, repo, progress=None, stopped=lambda: False):
-    """An MLX model of another host's Hugging Face cache copied into this one's, file by file (each written aside,
-    then put in place; one there already at its size is kept). Its snapshot's folder here."""
+    """An MLX model of another host's Hugging Face cache copied into this one's, file by file (each written aside, as
+    <file>.part, and put in place once it's all there; one there already at its size is kept, a .part carried on
+    from where it stopped). refs/main names its revision, unless it names another that's here. Its snapshot's
+    folder here."""
     from baudelib import models
     _, where = remote_where(member, repo, "mlx")
     root = os.path.join(models.hf_hub(), "models--" + repo.replace("/", "--"))
@@ -318,9 +346,18 @@ def mlx_fetch(member, repo, progress=None, stopped=lambda: False):
         dest = os.path.join(snap, rel)
         if os.path.isfile(dest) and os.path.getsize(dest) == f["size"]:
             done += f["size"]
+            if progress:
+                progress(done, total, rel)
             continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with _get(member, f"/mlx/{repo}/{rel}", timeout=600) as r, open(dest + ".part", "wb") as out:
+        had = os.path.getsize(dest + ".part") if os.path.isfile(dest + ".part") else 0
+        had = had if 0 < had < f["size"] else 0
+        done += had
+        with _get(member, f"/mlx/{repo}/{rel}", timeout=600, start=had) as r, \
+                open(dest + ".part", "ab" if had else "wb") as out:
+            if had and r.status != 206:  # (the whole file, not the rest of it: from the start)
+                out.truncate(0)
+                done -= had
             while b := r.read(CHUNK):
                 if stopped():
                     raise ValueError(f"stopped at {rel} ({done / 1e9:.1f} of {total / 1e9:.1f} GB copied)")
@@ -332,6 +369,7 @@ def mlx_fetch(member, repo, progress=None, stopped=lambda: False):
             raise ValueError(f"{rel} came short ({os.path.getsize(dest + '.part'):,} of {f['size']:,} bytes)")
         os.replace(dest + ".part", dest)
     os.makedirs(os.path.join(root, "refs"), exist_ok=True)
-    with open(os.path.join(root, "refs", "main"), "w") as f:
-        f.write(rev)
+    if models.hub_snapshot(root) in (None, snap) or not os.path.isfile(os.path.join(root, "refs", "main")):
+        with open(os.path.join(root, "refs", "main"), "w") as f:
+            f.write(rev)
     return snap

@@ -1144,7 +1144,8 @@ Code mode: run_python is your one tool for the app. It runs up to {lines} lines 
 are the app's tools (below), and returns what's printed and the last expression's value. app.app_index gives its \
 rows as dicts; the others give their answer as text, and raise RuntimeError for an error. Look things up and act in \
 one go: filter, then act on what's found. No imports, no names starting with _; plain builtins only. The tools that \
-set models up (local_models, check_models, prune_models, add_mlx_model, add_endpoint, build_apple_adapter) are yours \
+set models up (local_models, check_models, prune_models, add_mlx_model, add_endpoint, model_files, fetch_model, \
+build_apple_adapter) are yours \
 to call as they are, not through run_python: they take longer than its code has.
 {doc}"""
 
@@ -3687,7 +3688,8 @@ class MetaChat(Gtk.Box):
                 "redo": self.redo_tool, "open_form": self.open_form, "fill_form": self.fill_form,
                 "local_models": self.local_models, "check_models": self.check_models,
                 "prune_models": self.prune_models, "add_mlx_model": self.add_mlx_model,
-                "add_endpoint": self.add_endpoint, "build_apple_adapter": self.build_apple_adapter,
+                "add_endpoint": self.add_endpoint, "model_files": self.model_files, "fetch_model": self.fetch_model,
+                "build_apple_adapter": self.build_apple_adapter,
                 **self.app_handlers()}
 
     def run_tool(self, turn, tool, args):
@@ -4115,7 +4117,7 @@ class MetaChat(Gtk.Box):
         model, host, kind = str(args.get("model") or "").strip(), str(args.get("host") or "").strip(), args.get("kind")
 
         def work():
-            if not host or host.lower() in ("here", "this", socket.gethostname().split(".")[0].lower()):
+            if modelfiles.is_here(host):
                 errors = []
                 for k in [kind] if kind else ["ollama", "mlx"]:
                     try:
@@ -4135,20 +4137,22 @@ class MetaChat(Gtk.Box):
         def work():
             member = modelfiles.member_of(host)
             k, where = modelfiles.remote_where(member, model, kind)
-            key = (host, model)
+            key = (member, where.get("name") or where.get("repo") or model)
             if (FETCHES.get(key) or {}).get("state") in ("starting", "copying"):
                 return {"text": f"{model} is being fetched from {host} already: local_models says how it's going."}
             if k == "ollama" and providerslib.ollama()["error"]:
                 raise ValueError("Ollama isn't running here: the user opens it (or runs ollama serve) first.")
             into = "this machine's Ollama" if k == "ollama" else f"the Hugging Face cache here ({modelslib.hf_hub()})"
+            mine = k == "ollama" and where["name"] in self.ollama_names()
             if not self.confirm(turn, f"{NAME} would like to copy {model} ({where['size'] / 1e9:.1f} GB) from {host} "
-                                      f"into {into}, over the mesh.", "Copy"):
+                                      f"into {into}, over the mesh." +
+                                      (f" It replaces the {where['name']} Ollama has here." if mine else ""), "Copy"):
                 return {"text": "The user said no: nothing was copied."}
             f = FETCHES[key] = {"host": host, "model": model, "kind": k, "state": "starting", "done": 0,
                                 "total": where["size"], "error": None}
 
-            def progress(done, total, _what):
-                f.update(state="copying", done=done, total=total or f["total"])
+            def progress(done, _total, _what):
+                f.update(state="copying", done=min(done, f["total"]))
 
             def run():
                 try:
@@ -4158,9 +4162,9 @@ class MetaChat(Gtk.Box):
                     providerslib.found(max_age=0)
                     note = f"(fetched {model} from {host}: " + (f"Ollama has it as {got}.)" if k == "ollama" else
                                                                 f"in {got}; it's listed among MLX's models.)")
-                except (OSError, ValueError) as e:
-                    f.update(state="failed", error=str(e))
-                    note = f"(fetching {model} from {host} failed: {e})"
+                except Exception as e:  # noqa: BLE001 (any way it ends: said, never left "copying")
+                    f.update(state="failed", error=str(e) or type(e).__name__)
+                    note = f"(fetching {model} from {host} failed: {f['error']})"
                 GLib.idle_add(lambda: told.append(note) and False)
             threading.Thread(target=run, daemon=True, name="fetch-model").start()
             return {"text": f"Copying {model} from {host} in the background; you're told when it's done "

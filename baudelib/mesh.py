@@ -84,6 +84,8 @@ PROVIDERS_S = 60  # this machine's providers looked at again this often, while i
 FORGET_S = 3600  # a record of a member no longer reached is let go after this long
 INFER_S = 600  # a provider has this long to answer
 CHUNK = 64 << 10
+BACKLOG = 32  # (messages a model's files may have waiting to go out, on a link or a connection, before more are read:
+# what's read goes no faster than the link takes it, and a ping waits behind no more than this)
 LINKS = "links.json"
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
 _PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
@@ -118,6 +120,12 @@ def proxy(path=None):
     """This machine's host process's Proxy, {url, key}, for anything running here: None if it has none."""
     p = _kept(path).get("proxy")
     return p if isinstance(p, dict) and isinstance(p.get("url"), str) and isinstance(p.get("key"), str) else None
+
+
+def me(path=None):
+    """This machine's own {id, name} in the mesh, as its host process says (None if it isn't running)."""
+    m = _kept(path).get("me")
+    return m if isinstance(m, dict) else None
 
 
 def namespace(key, member):
@@ -359,6 +367,9 @@ class Here:
             return
         try:
             for msg in self.ch:
+                while self.link.out.q.qsize() > BACKLOG and self.error is None:  # (a model's files, mostly: read
+                    # here no faster than the link sends them)
+                    time.sleep(0.01)
                 self.link.tsend(self.key, {"op": "data", "msg": msg})
         finally:
             if self.mesh.forget(self.link, self.key) is not None:
@@ -1022,7 +1033,8 @@ class Mesh:
             try:
                 fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump({"pid": os.getpid(), "endpoints": eps, "agents": agents, "proxy": proxy}, f)
+                    json.dump({"pid": os.getpid(), "endpoints": eps, "agents": agents, "proxy": proxy,
+                               "me": {"id": self.id, "name": self.server.me.get("name")}}, f)
                 os.replace(path + ".tmp", path)
             except OSError as e:
                 self.log(f"mesh: {path}: {e}")
@@ -1136,7 +1148,7 @@ class Mesh:
         through, by name; None for one linked to here)}], links: [{where, id, name, state ("linked", "connecting",
         "dropped", "inactive"), error, active}] (those made from here), found: [{id, name, state ("waiting",
         "connecting", "linked", "dropped"), error}] (links straight to members learned of through others: Found),
-        proxy: {url, key} (Proxy's: None till a member has a provider it serves), inactive: [the ids of members
+        proxy: {url, key} (Proxy's: None till a member has a provider), inactive: [the ids of members
         deactivated here]}."""
         with self.lock:
             members = []
@@ -1182,8 +1194,11 @@ class Mesh:
         status, headers, chunks = modelfiles.serve(path, heads)
         reply("infer_head", status=status, headers=headers)
         gone = lambda: getattr(getattr(conn, "channel", None), "closed", False)  # noqa: E731
+        queued = getattr(conn, "out", None)  # (server.Conn's: what's waiting to go out to whoever asked)
         try:
             for chunk in (() if msg.get("method") == "HEAD" else chunks):
+                while queued is not None and queued.qsize() > BACKLOG and not gone():
+                    time.sleep(0.01)
                 if gone():
                     return
                 reply("infer_data", data=base64.b64encode(chunk).decode())

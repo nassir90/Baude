@@ -9540,6 +9540,7 @@ class CompactMarks:
     compact_here(mark) says whether one's still in it, compact_started() that it's busy."""
 
     compact_mark = None  # (this turn's: compact_ended lets go of it as the turn ends, or its claude does)
+    compact_kept = False  # (its connection dropped mid-turn: the turn, and the compaction, going on without it)
 
     def compact_mark_now(self):
         """The marker of this turn's compaction under way, made where the conversation's at if there's none."""
@@ -9574,7 +9575,7 @@ class CompactMarks:
     def compact_ended(self):
         """Its turn's over, or its claude's gone: a compaction still under way didn't finish, and the next turn's is
         its own."""
-        mark, self.compact_mark = self.compact_mark, None
+        mark, self.compact_mark, self.compact_kept = self.compact_mark, None, False
         if mark is not None and mark.state == "running":
             mark.fail(stopped=True)
 
@@ -13972,7 +13973,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def set_busy(self, busy):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
-            self.compact_ended()  # (nor its compaction)
+            if not self.compact_kept:  # (nor its compaction; one kept through a dropped connection, its turn going on)
+                self.compact_ended()
         self.busy = busy
         if not busy:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
@@ -14615,6 +14617,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
+            if self.proc.listing.get("state") not in ("working", "waiting"):
+                self.settle_kept_compaction()  # (its turn over meanwhile)
             self.drop_running = self.drop_session = None
         if self.proc is not None:
             self.proc.mode = self.proc.listing.get("mode")
@@ -15063,7 +15067,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                     waiting.answered()
             self.waiting_cards.clear()
             self.show_retry(None)
-            self.compact_ended()
+            if code == "lost":  # (its claude going on there: what it says as it's attached again settles it)
+                self.compact_kept = True
+            else:
+                self.compact_ended()
             self.proc = None
             self.set_busy(False)
             self.remote_view()
@@ -17923,11 +17930,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             job.broken = True
             job.items.clear()
         before = set(self.tool_cards)
-        self.render_target = job.slot
+        self.render_target, self.render_job = job.slot, job
         try:
             self.render_history([item] if item is not None else [], final=False)
+            if not job.items and (mark := self.last_compact_mark()) is not None:
+                self.adopt_summary(mark)  # (the chunk's drawn: a summary after what a compaction kept, at its end)
         finally:
-            self.render_target = None
+            self.render_target = self.render_job = None
         job.calls.update(tid for tid in self.tool_cards if tid not in before)
         if not job.items:  # (its calls that never got a result were interrupted; a later chunk's result puts it right)
             for tid in job.calls:
@@ -18076,6 +18085,36 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 return child if child.fold is None and child.state == "done" else None
         return None
 
+    COMPACT_LOOK = 200  # (how far past a marker its summary's looked for: what a partial compaction kept between)
+
+    def adopt_summary(self, mark):
+        """A compaction's marker drawn from history after its summary was (history's drawn newest first, a chunk at a
+        time: the summary below a chunk's edge, or past what a partial compaction kept): that summary, drawn on its
+        own, folded under the marker instead. Looked for after it, in what's drawn in order from it: the rest of its
+        chunk once that's all drawn, the next chunk's, and after the lowest, what was drawn on opening; up to the
+        next marker."""
+        where, node, seen = mark.get_parent(), mark.get_next_sibling(), 0
+        while seen < self.COMPACT_LOOK:
+            if node is None:
+                job = getattr(self, "render_job", None)
+                whole = getattr(where, "filled", False) or job is not None and job.slot is where and not job.items
+                if getattr(where, "span", None) is None or not whole:
+                    return  # (the end of the chat, or of what's drawn of a chunk: what's after comes later, in order)
+                where = where.get_next_sibling()
+                if where is None:  # (the lowest chunk: then what was drawn on opening)
+                    where = self.history_box.get_parent()
+                    node = self.history_box.get_next_sibling()
+                else:
+                    node = where.get_first_child()
+                continue
+            if isinstance(node, widgets.CompactMark):
+                return
+            if getattr(node, "compact_summary", None) is not None:
+                mark.set_summary(node.compact_summary)
+                node.get_parent().remove(node)
+                return
+            node, seen = node.get_next_sibling(), seen + 1
+
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
@@ -18105,13 +18144,17 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.task_from_note(content)  # (its card, if it's drawn, says it ended)
                 if (line := self.task_note(content)) is not None:
                     self.add(line)
+            elif kind == "compact_boundary" and self.render_target is None and self.compact_mark is not None and \
+                    self.compact_mark.state == "running" and self.compact_here(self.compact_mark):
+                self.compact_mark.finish(content)  # (drawn going on: one kept through a dropped connection, finished)
             elif kind == "compact_boundary":  # (where claude compacted it, as it did live: on_compaction)
-                self.add(widgets.CompactMark(content))
+                self.adopt_summary(self.add(widgets.CompactMark(content)))
             elif kind == "compact_summary" and (mark := self.last_compact_mark()) is not None:
                 mark.set_summary(content)  # (what it wrote for itself on compacting: folded under its marker)
-            elif kind == "compact_summary":
+            elif kind == "compact_summary":  # (its boundary not drawn yet, or none: on its own till it is, adopt_summary)
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))
                 fold.add_css_class("sysnote")
+                fold.compact_summary = content
                 self.add(fold)
             elif kind == "ci_event":  # (what the desktop app says of a pull request it's watching: folded)
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
@@ -18889,8 +18932,20 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.update_session_state()
         self.follow_checkout(self.view_path)
 
+    def settle_kept_compaction(self):
+        """A compaction kept going through a dropped connection (compact_kept), its turn over on its host now: what its
+        transcript says of it drawn first (its marker finished: render_history), then ended if it didn't finish."""
+        if not self.compact_kept:
+            return
+        if self.remote is not None and self.remote.state == "alive" and self.resume_pending and self.view_path:
+            self.remote.sync(self.session_id, timeout=3, subagents=False)  # (once: on the main loop, as begin_resume)
+            self.tail.read()
+        self.compact_ended()
+
     def poll_tail(self):
         """Once a second: let 'live' and 'working' expire when the writes stop."""
+        if self.compact_kept and self.proc is not None and self.session_state() not in ("working", "waiting"):
+            self.settle_kept_compaction()  # (attached again, its turn's over there)
         if self.resume_pending and self.view_path:
             self.read_subagents()
             self.update_banner()

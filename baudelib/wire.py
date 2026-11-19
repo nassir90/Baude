@@ -17,7 +17,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        not). Each session's written: its transcript's size as its
                                                        own claude last left it (more since, with it stopped: another
                                                        program's writing to it)
-    start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, system?, add_dirs?,
+    start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
            env?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
@@ -99,6 +99,9 @@ A client's requests (a "req" it picks comes back on the reply):
     memory {session, text?}                         -> memory {session, text, path, mtime}: a Bot's memory (the file
                                                        its agent keeps it in, on the host), after writing text if
                                                        it's given (version 8)
+    mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
+                                                       the mesh's tools (baudelib.meshtools), or not, from its next
+                                                       start; a Bot's has them always
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
     catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
                                                        its sessions' folders, made there (lookup.items: its files,
@@ -185,9 +188,9 @@ import subprocess
 import threading
 import time
 
-VERSION = 8  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 9  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
-# others, info's mesh found; 8: bot, bot_picture, memory: Bots)
+# others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

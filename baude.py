@@ -7133,8 +7133,9 @@ def fork_tree(items):
             if (up := next((i for i in desktop_parents(info) if i in by_id), None)) is not None:
                 parent[info["id"]] = by_id[up]
             continue
-        if info.get("fork_from"):  # (a host's fork: its host says what it came from)
-            up = next((c for c in items if c is not info and info["fork_from"] in (c["id"], c.get("cli_id"))), None)
+        if info.get("fork_from") or info.get("spawned_by"):  # (a host's fork, or a chat a Bot started: its host
+            came = info.get("fork_from") or info.get("spawned_by")  # says what it came from)
+            up = next((c for c in items if c is not info and came in (c["id"], c.get("cli_id"))), None)
             if up is not None:
                 parent[info["id"]] = up
             continue
@@ -7653,7 +7654,8 @@ def remote_info(s):
             "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
             "archived": bool(s.get("archived")), "bot": s.get("bot"),
-            "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id")}
+            "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
+            "mesh_tools": bool(s.get("mesh_tools"))}
 
 
 BOT_PICTURES = {}  # (session id, its picture's mtime) -> Gdk.Texture: a Bot's picture, fetched from its host once
@@ -8038,7 +8040,9 @@ class SessionSidebar(Gtk.Box):
         actions = Gio.SimpleActionGroup()
         for name, fn in (("rename", self.ask_rename), ("archive", self.archive), ("unarchive", self.unarchive),
                          ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote),
-                         ("make_bot", self.ask_bot), ("unbot", self.unbot)):
+                         ("make_bot", self.ask_bot), ("unbot", self.unbot),
+                         ("mesh_on", lambda i: self.set_mesh_tools(i, True)),
+                         ("mesh_off", lambda i: self.set_mesh_tools(i, False))):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))
             actions.add_action(act)
@@ -8498,6 +8502,14 @@ class SessionSidebar(Gtk.Box):
                 "mtime": now, "prompts": 0, "unsaved": True})
         # (forks are found within a folder, by day too: a fork is in its session's folder. A folder with a server's
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
+        # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)
+        home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items}
+        for key, (_label, _folder, items) in list(groups.items()):
+            for info in list(items):
+                if (up := home.get(info.get("spawned_by"))) is not None and up != key:
+                    items.remove(info)
+                    groups[up][2].append(info)
+        groups = {k: g for k, g in groups.items() if g[2]}
         order_of = lambda items: sorted(items, key=lambda i: (not i.get("unsaved"), -last_used(i)))  # noqa: E731
         groups = {k: [label, folder, fork_tree(order_of(items))] for k, (label, folder, items) in groups.items()}
         if by_date:
@@ -8773,6 +8785,9 @@ class SessionSidebar(Gtk.Box):
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
             items[1:1] = [("Bot Settings…", "make_bot"), ("Make a Chat Again", "unbot")] if info.get("bot") else \
                 [("Make Bot…", "make_bot")]
+        if can_be_bot(info) and not info.get("bot") and (info["remote"].info.get("version") or 1) >= 9:
+            items.insert(2, ("Take Mesh Tools Away", "mesh_off") if info.get("mesh_tools") else
+                         ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -8901,6 +8916,12 @@ class SessionSidebar(Gtk.Box):
         self.dialog = dlg
         dlg.present(self.win)
         entry.grab_focus()
+
+    def set_mesh_tools(self, info, on):
+        """Give Mesh Tools (or take them away): its agent can see the mesh's hosts and models, start a subagent on any of
+        them and message other chats (baudelib.meshtools), from its next start, as a Bot's can."""
+        if info is not None and info.get("remote") is not None:
+            info["remote"].request({"op": "mesh_tools", "session": info["id"], "on": on}, self.bot_set)
 
     def unbot(self, info):
         """Make a Chat Again: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""

@@ -2102,6 +2102,48 @@ class QueuedTurn(Gtk.Box):
         self.fade.set_value_to(1.0 if on else 0.0)
         self.fade.play()
 
+class SenderTurn(Gtk.Box):
+    """A message to the chat from another than you (baudelib.wire.said_by: a Bot, another chat, a subagent's answer
+    held for it): its bubble at the left, where the agent's words are, headed "from <who>" over a rule (the window's
+    sender_bubble)."""
+
+    def __init__(self, bubble):
+        super().__init__(spacing=6, hexpand=True)
+        self.bubble = bubble
+        self.append(bubble)
+
+
+class HeldTurn(Gtk.Box):
+    """A message its host held for the chat, not sent (its held: a subagent's answer that came after the chat's host
+    restarted, which doesn't start its agent): under the conversation with the queue, grey as a queued message is, and
+    with the pointer on its row ✕ (dropped) and ↑ (sent, as you'd send it) fade in beside it, as a queued message's
+    do. held: as its host lists it ({id, text, sender, at}); win: its held_drop, held_send."""
+
+    def __init__(self, win, bubble, held):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.held = win, bubble, held
+        bubble.add_css_class("queued-bubble")
+        self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.START, valign=Gtk.Align.END, opacity=0,
+                               can_target=False)
+        for icon, tip, act in (("↑", "Send it to the agent: it was held, not sent, as this chat's host restarted "
+                                "while it waited for it", win.held_send),
+                               ("window-close-symbolic", "Delete this held message", win.held_drop)):
+            b = Gtk.Button(child=Gtk.Label(label="↑", css_classes=["queue-arrow"]) if icon == "↑" else
+                           Gtk.Image(icon_name=icon, pixel_size=12), tooltip_text=tip)
+            for c in ("flat", "circular", "revert-turn"):
+                b.add_css_class(c)
+            b.connect("clicked", lambda _b, act=act: act(self))
+            self.buttons.append(b)
+        self.append(bubble)
+        self.append(self.buttons)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: QueuedTurn.show_buttons(self, True))
+        hover.connect("leave", lambda *_: QueuedTurn.show_buttons(self, False))
+        self.add_controller(hover)
+
+    fade = None
+
+
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
     over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
@@ -8299,6 +8341,10 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .queue-arrow { font-weight: bold; font-size: 13px; }
 .user-bubble.queued-bubble { background: alpha(@view_fg_color, 0.07); color: alpha(@view_fg_color, 0.55); }  /* (a
    message queued while the agent works: grey, QueuedTurn) */
+.sender-bubble { background: alpha(@view_fg_color, 0.04); border: 1px solid @baude_rule; border-radius: 12px;
+                 padding: 8px 12px; }  /* (a message from another than you: at the left, SenderTurn) */
+.sender-from { font-size: 0.85em; color: alpha(@view_fg_color, 0.6); }
+.sender-bubble.queued-bubble { color: alpha(@view_fg_color, 0.55); border-style: dashed; }  /* (held for you: HeldTurn) */
 .tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }

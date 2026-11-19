@@ -322,6 +322,8 @@ class Session:
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
+                "held": [{"id": h["id"], "text": h["text"], "sender": h.get("sender"), "at": h.get("at")}
+                         for h in self.meta.get("held") or []],
                 "mesh_tools": self.mesh_tools(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -730,8 +732,9 @@ class Server:
 
     def answer_wait(self, s, w):
         """A wait of a session's agent (waits_on's: a subagent's answer, or a chat's) that this host's stop cut short:
-        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that sent to the
-        session as its user's message, which carries it on. Stopped again meanwhile: kept, for the next start."""
+        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that held for the
+        session (held), from that chat, till a head sends it or drops it: its claude isn't started for it. Stopped
+        again meanwhile: kept, for the next start."""
         with self.lock:
             self.following.add((s.id, w["session"]))
         try:
@@ -744,13 +747,15 @@ class Server:
                 return
             waits = [x for x in s.meta.get("waits_on") or [] if x["session"] != w["session"]]
             s.meta["waits_on"] = waits or None
+            sender = wire.clean_sender({"kind": "chat" if w.get("kind") == "chat" else "subagent",
+                                        "name": w.get("title"), "host": got.get("host") or w.get("host"),
+                                        "host_name": got.get("host_name"), "session": w["session"]})
+            s.meta["held"] = (s.meta.get("held") or []) + [{
+                "id": str(uuid.uuid4()), "text": wire.said_by(sender, meshtools.told(w, got)), "sender": sender,
+                "at": time.time()}]
             self.save(s)
-            self.log(f"{s.id}: the answer it waited on from {w['session']} sent to it")
-            try:
-                self.take_input(None, s, {"type": "user", "message": {"role": "user", "content": [
-                    {"type": "text", "text": meshtools.told(w, got)}]}})
-            except OSError as e:  # (its folder gone, say)
-                self.log(f"{s.id}: couldn't be sent it: {e}")
+            self.log(f"{s.id}: the answer it waited on from {w['session']} held for it")
+            self.changed()
 
     def drop_waits(self, s):
         """(lock held) Its agent's waits (waits_on) let go of, but those answered for it (answer_wait): its turn's
@@ -1084,7 +1089,7 @@ class Server:
                 self.drop_ephemeral(s)
                 return None
             if op == "input":
-                self.take_input(conn, s, msg.get("msg") or {})
+                self.take_input(conn, s, msg.get("msg") or {}, msg.get("sender"))
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
                 if s.proc is not None:
@@ -1129,6 +1134,17 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "held":  # (a message held for it: dropped, or sent as its user's input would be)
+                held = s.meta.get("held") or []
+                h = next((h for h in held if h.get("id") == msg.get("id")), None)
+                if h is None:
+                    return reply("error", error="no such message held for it")
+                if msg.get("send"):
+                    self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}})
+                s.meta["held"] = [x for x in held if x is not h] or None
+                self.save(s)
+                self.changed()
+                return reply("held", session=s.id)
             if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
                 on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
                 if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):
@@ -1139,6 +1155,7 @@ class Server:
                                   "kind": "chat" if on.get("kind") == "chat" else "subagent",
                                   "text": on["text"] if isinstance(on.get("text"), str) else None,
                                   "offset": on["offset"] if isinstance(on.get("offset"), int) else 0,
+                                  "title": on["title"][:200] if isinstance(on.get("title"), str) else None,
                                   "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
                 s.meta["waits_on"] = waits or None
                 self.save(s)
@@ -1614,9 +1631,13 @@ class Server:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg):
-        """(lock held) What a client sends its claude."""
+    def take_input(self, conn, s, msg, sender=None):
+        """(lock held) What a client sends its claude. sender: who a user message is from, if not the session's user
+        (wire.said_by: said so in it)."""
         kind = msg.get("type")
+        if kind == "user" and wire.clean_sender(sender) is not None:
+            message = msg.get("message") or {}
+            msg = {**msg, "message": {**message, "content": wire.said_by(sender, message.get("content"))}}
         if kind == "user":
             is_codex = models.model_program(s.meta.get("model")) == "codex"
             if is_codex:

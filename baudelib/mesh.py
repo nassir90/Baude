@@ -1149,7 +1149,8 @@ class Mesh:
         "dropped", "inactive"), error, active}] (those made from here), found: [{id, name, state ("waiting",
         "connecting", "linked", "dropped"), error}] (links straight to members learned of through others: Found),
         proxy: {url, key} (Proxy's: None till a member has a provider), inactive: [the ids of members
-        deactivated here], gone: [{id, name}] (members reached lately, not now: restarting, say; FORGET_S)}."""
+        deactivated here], gone: [{id, name}] (members reached lately, not now: restarting, say; FORGET_S; not one
+        deactivated here)}."""
         with self.lock:
             members = []
             for k, n in sorted(self.hops.items(), key=lambda kv: (kv[1], self.name_of(kv[0]).lower())):
@@ -1161,7 +1162,7 @@ class Mesh:
             inactive = sorted(self.inactive)
             found = [{"id": f.expect, "name": f.name, "state": f.state, "error": f.error} for f in self.found.values()]
             gone = [{"id": k, "name": r["rec"]["info"]["name"]} for k, r in self.records.items()
-                    if k != self.id and k not in self.hops]
+                    if k != self.id and k not in self.hops and k not in self.inactive]
             if self.proxy is None and any(m["providers"] for m in members):  # (their models run, or come, here)
                 try:
                     self.proxy = Proxy(self).start()

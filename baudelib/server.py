@@ -321,6 +321,7 @@ class Session:
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "start_key": self.meta.get("start_key"),
                 "mesh_tools": self.mesh_tools(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -1137,6 +1138,7 @@ class Server:
                     waits.append({"session": on["session"], "host": on.get("host"),
                                   "kind": "chat" if on.get("kind") == "chat" else "subagent",
                                   "text": on["text"] if isinstance(on.get("text"), str) else None,
+                                  "offset": on["offset"] if isinstance(on.get("offset"), int) else 0,
                                   "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
                 s.meta["waits_on"] = waits or None
                 self.save(s)
@@ -1420,6 +1422,7 @@ class Server:
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
+                "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
         with self.lock:
             if self.stopped.is_set():

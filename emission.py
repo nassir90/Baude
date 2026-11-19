@@ -1738,6 +1738,25 @@ def open_pages(pid, urls=None, why=None):
     return urls
 
 
+def pending_note(pid, note=None):
+    """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
+    next): note "" once it's told; note None, what's waiting read."""
+    path = os.path.join(data_home(), "profiles", pid + ".note")
+    try:
+        if note is None:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip() or None
+        if note:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(note)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        return None
+    return None
+
+
 class Tab:
     """A tab: its page, and where it's drawn. url None: a page another opened, WebKit loading it (opener: what the
     engine was given to make it with)."""
@@ -1787,11 +1806,15 @@ class Window(Adw.ApplicationWindow):
         self.released = None  # (hosted: what lets its profile go when someone's Emission asks for it)
         self.note = None  # (what the Bot's next request is told: this browser's a new one, and what it had's gone)
         if agent:
-            had, why = open_pages(profile_id(profile) or "")
+            pid = profile_id(profile) or ""
+            had, why = open_pages(pid)
+            self.note = pending_note(pid)  # (one a browser before it had for the Bot and never gave)
             if had:
-                self.note = (("This browser was closed after going unused for a while" if why == "idle" else
-                              "This browser was restarted (Baude or its host restarted)") +
-                             ": these pages it had open are closed now: " + ", ".join(had[:10]))
+                self.note = ((self.note + " ") if self.note else "") + (
+                    ("This browser was closed after going unused for a while" if why == "idle" else
+                     "This browser was restarted (Baude or its host restarted)") +
+                    ": these pages it had open are closed now: " + ", ".join(had[:10]))
+            pending_note(pid, self.note)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
         self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
@@ -1955,6 +1978,7 @@ class Window(Adw.ApplicationWindow):
             # browser it had: not Baude's Browser page's)
             note, said = self.note, answer
             self.note = None
+            pending_note(self.profile_id, "")
             answer = lambda r: said({**r, "note": note} if isinstance(r, dict) else r)  # noqa: E731
         return self.control.run(op, msg, answer)
 

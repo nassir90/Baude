@@ -284,8 +284,8 @@ class Here:
     def take(self):
         try:
             pid = emissionlink.bot_profile(self.sid, self.name)
-            if time.monotonic() - RELEASED.get(pid, -1e9) < RELEASED_S and not self.force:  # (just given to
-                # someone's Emission: not taken back unasked)
+            since = time.monotonic() - RELEASED.get(pid, -1e9)  # (just given to someone's Emission: not taken
+            if since < RELEASED_S and not (self.force and since > 3):  # back unasked, nor before it's had it)
                 raise OSError("it was just let go of")
             urls = []
             try:
@@ -295,9 +295,9 @@ class Here:
                 if info.get("idle_s", IDLE_TAKE_S) < IDLE_TAKE_S and not self.force:  # (the Bot's using it: not
                     # taken mid-task)
                     raise OSError("busy")
-                tabs = emissionlink.call(pid, {"op": "tabs"}, timeout=10).get("tabs") or []
-                urls = [t["url"] for t in tabs if t.get("url") and t["url"] != "about:blank"]
-                emissionlink.call(pid, {"op": "quit"}, timeout=3)
+                tabs = emissionlink.call(pid, {"op": "tabs", "from_pane": True}, timeout=10).get("tabs") or []
+                urls = [t["url"] for t in tabs if t.get("url") and t["url"] != "about:blank"]  # (Baude's asking,
+                emissionlink.call(pid, {"op": "quit", "from_pane": True}, timeout=3)  # not the Bot: its note kept)
             except (FileNotFoundError, ConnectionRefusedError):
                 pass  # (none running)
             end = time.monotonic() + 10
@@ -318,6 +318,7 @@ class Here:
             if win.Engine is None or win.status is not None:
                 why = win.status.get_description() if win.status is not None else "no page engine here"
                 win.closing_window()
+                win.destroy()
                 emission.Door.close(pid)
                 emissionlink.unlock_profile(pid)
                 return self.done(why)
@@ -325,8 +326,10 @@ class Here:
                 win.open(url)
             win.released = self.release  # (someone's Emission asking for its profile: let go of)
             if urls:  # (what the Bot's told, its next request: its pages moved, reloaded)
-                win.note = ("This browser moved into Baude: its pages were opened again from their addresses (what "
-                            "was typed in them, and their history, is gone): " + ", ".join(urls[:10]))
+                win.note = ((win.note + " ") if win.note else "") + (
+                    "This browser moved into Baude: its pages were opened again from their addresses (what was "
+                    "typed in them, and their history, is gone): " + ", ".join(urls[:10]))
+                emission.pending_note(pid, win.note)
             win.get_content().set_content(None)  # (its pages, its downloads' banner: the Browser page's to show)
             if not HOME.get("awake"):
                 HOME["awake"] = True
@@ -459,7 +462,7 @@ class BrowserPane(Gtk.Box):
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
         self.said.add_css_class("dim-label")
         self.append(self.said)
-        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.tabs, self.prompts]
+        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.native, self.tabs, self.prompts]
         self.input()
         self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
         self.connect("unmap", lambda *_: self.stop(keep=True))
@@ -512,8 +515,13 @@ class BrowserPane(Gtk.Box):
             return
         if self.sid is None or self.stream is not None:
             return
+        if self.here is not None and self.here.win is None and self.here.why is not None:  # (let go of meanwhile)
+            self.here = None
         off = time.monotonic() - self.here_off.get(self.sid, -1e9) < OFF_S
         ours = self.home is self.remote  # (a Bot whose chat's on this Mac: hosted unasked; another's, when you ask)
+        had = HERE.get(self.sid) if can_host(self.remote) else None  # (hosted already, or being: joined, whose)
+        if had is not None and (had.win is not None or had.why is None) and not off:
+            return self.show_here()
         if can_host(self.remote) and ours and not off and self.sid != self.here_busy:
             return self.show_here()
         self.native.set_visible(can_host(self.remote))
@@ -531,6 +539,8 @@ class BrowserPane(Gtk.Box):
         if self.here_poll is not None:
             GLib.source_remove(self.here_poll)
             self.here_poll = None
+        if not keep:
+            self.native.set_visible(False)  # (another Bot's, or none: offered again if it's hostable)
         if not keep and self.here is not None:
             if self.here.win is not None and self.here.win.body.get_parent() is self.body:
                 self.body.remove(self.here.win.body)
@@ -555,7 +565,7 @@ class BrowserPane(Gtk.Box):
     def restart_native(self):
         """Restart as Native: this Mac's browser of the Bot's, streamed, made Baude's (taken from its own Emission,
         busy or not: its pages reloaded there, the Bot told)."""
-        if self.sid is None or not can_host(self.remote) or self.here is not None:
+        if self.sid is None or not can_host(self.remote) or self.here is not None and self.here.win is not None:
             return
         if self.stream is not None:
             self.stream.stop()
@@ -564,7 +574,9 @@ class BrowserPane(Gtk.Box):
         self.here_busy = None
         self.native.set_visible(False)
         here = HERE.get(self.sid)
-        if here is None or here.win is None:
+        if here is not None and here.win is None and here.why is None:  # (being taken already: that one, forced)
+            here.force = True
+        elif here is None or here.win is None:
             here = HERE[self.sid] = Here(self.win.get_application(), self.sid, self.name, force=True)
         self.say_status("Connecting…", "")
         sid = self.sid
@@ -581,6 +593,9 @@ class BrowserPane(Gtk.Box):
         here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
 
     def here_ready(self, here):
+        if here.force and here.why is not None:  # (Restart as Native asked: why it couldn't, said)
+            self.said.set_label(f"Couldn't restart as native: {here.why}")
+            self.said.set_visible(True)
         if here.why is not None or here.win is None:  # (couldn't be had here: streamed; a busy Bot's, this time only)
             if here.why == "busy":  # (tried again while it's watched: the Bot may have let it be by then)
                 self.here_busy = here.sid
@@ -594,6 +609,9 @@ class BrowserPane(Gtk.Box):
             return self.watch_if_shown()
         if body.get_parent() is None:
             self.body.add_named(body, "here")
+        if self.stream is not None:  # (a stream begun meanwhile: its frames aren't shown over the page)
+            self.stream.stop()
+            self.stream = None
         self.here = here
         self.native.set_visible(False)
         self.body.set_visible_child_name("here")

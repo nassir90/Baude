@@ -3231,15 +3231,25 @@ if (!globalThis.__em) globalThis.__em = (() => {
   const keeps = (el, all) => all ? !!role(el) : (acts(el) || role(el) === 'heading');
   const LEAVES = ['link', 'button', 'option', 'img'];
   const boxes = () => {
-    // (el's ancestors that clip it, a box it's scrolled in, each one's rect: looked up once a read)
+    // (the rects of el's ancestors that clip it, a box it's scrolled in: only those its containing blocks are in, so
+    // nothing clips what's fixed, and what's absolute only from its positioned ancestor out; looked up once a read)
     const seen = new Map();
+    const look = p => {
+      if (!seen.has(p)) {
+        const st = getComputedStyle(p);
+        seen.set(p, {pos: st.position, clip: st.overflowX === 'visible' && st.overflowY === 'visible' ? null
+          : p.getBoundingClientRect()});
+      }
+      return seen.get(p);
+    };
     return function* (el) {
+      let pos = getComputedStyle(el).position;
       for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
-        if (!seen.has(p)) {
-          const st = getComputedStyle(p);
-          seen.set(p, st.overflowX === 'visible' && st.overflowY === 'visible' ? null : p.getBoundingClientRect());
-        }
-        if (seen.get(p)) yield seen.get(p);
+        if (pos === 'fixed') return;
+        const box = look(p);
+        if (pos === 'absolute' && box.pos === 'static') continue;
+        if (box.clip) yield box.clip;
+        pos = box.pos;
       }
     };
   };
@@ -3487,6 +3497,7 @@ class Control:
             self.win.open("about:blank")
         self.win.close_tab(t)
         self.reads.pop(t.id, None)
+        self.scales.pop(t.id, None)
         answer({"closed": t.id, "tabs": [self.describe(x) for x in self.win.tabs.values() if x is not t]})
 
     def op_navigate(self, msg, answer):
@@ -3786,17 +3797,20 @@ class Control:
                     "return {where: {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight, inner}, came}", answer,
                     lambda got: answer({**self.describe(t), "scrolled": got["where"], "by": how,
                                         "in_view": in_view(got["came"])})) and False, answer))
-            self.js(t, under.format(x=x, y=y) + "em.seen = new Set(em.onscreen()); return inner", answer, chosen)
+            self.js(t, under.format(x=x, y=y) + "return inner", answer, chosen)
 
         def in_view(came):
             if not came["lines"]:
                 return "Nothing new came into view."
             more = f"\n(… and {came['more']} more: read_page lists them)" if came["more"] else ""
             return "Came into view:\n" + "\n".join(came["lines"]) + more
+        # (what's in view first: before a ref's element is scrolled to, which may bring things into view itself)
         if msg.get("ref") or msg.get("x") is not None:
-            self.point(t, msg, answer, at)
+            self.js(t, "em.seen = new Set(em.onscreen()); return true", answer,
+                    lambda _v: self.point(t, msg, answer, at))
         else:
-            self.js(t, "return {x: innerWidth / 2, y: innerHeight / 2}", answer, lambda c: at(c["x"], c["y"], None))
+            self.js(t, "em.seen = new Set(em.onscreen()); return {x: innerWidth / 2, y: innerHeight / 2}", answer,
+                    lambda c: at(c["x"], c["y"], None))
 
     def op_console(self, msg, answer):
         """What the page has said in its console (and its errors), newest last: pattern only those matching."""

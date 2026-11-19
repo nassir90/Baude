@@ -1738,12 +1738,20 @@ class Window(Adw.ApplicationWindow):
             if not self.switch_profile(listed["name"]):
                 return answer({"error": "that profile isn't open here"})
         if op == "watch":
-            if not self.watchers and self.agent:
-                self.watch_size = self.get_default_size()
             self.watchers.append(Watcher(self, conn, msg))
             if self.agent and sys.platform == "darwin":  # (watched: its window in, where no one sees it, so WebKit
                 macos.in_unseen(self)                     # draws its pages as they change: a picture that moves)
             return self.watch_kick()
+        if op == "resize" and self.agent:  # (a watcher's: fit, the page laid out at its pane's size, its own kept to
+            if msg.get("restore"):           # put back, as restore asks or once no one watches; the Bot's: its own)
+                if self.watch_size is not None:
+                    self.set_default_size(*self.watch_size)
+                    self.watch_size = None
+                return answer({"ok": True})
+            if not msg.get("fit"):
+                self.watch_size = None
+            elif self.watch_size is None:
+                self.watch_size = self.get_default_size()
         self.watch_kick()  # (something's being done: frames often for a while)
         return self.control.run(op, msg, answer)
 
@@ -1753,7 +1761,11 @@ class Window(Adw.ApplicationWindow):
         """Frames often (FAST_MS) for a while: the page may be changing."""
         self.watch_fast_until = time.monotonic() + 3
         self.watch_same = 0
+        if self.watch_source is not None and self.watch_fast != self.FAST_MS:  # (timed slower: timed again, so what
+            GLib.source_remove(self.watch_source)                             # was done shows at once)
+            self.watch_source = None
         if self.watch_source is None and self.watchers:
+            self.watch_fast = self.FAST_MS
             self.watch_source = GLib.timeout_add(self.FAST_MS, self.watch_tick)
 
     def unwatch(self, watcher):

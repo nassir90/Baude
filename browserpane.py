@@ -472,9 +472,13 @@ class BrowserPane(Gtk.Box):
             w.set_sensitive(not on)
         if self.sid is None:
             return
-        if not on and self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel)
-            self.sized_to = None
-            self.fit_page()
+        if self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel; read-only: the
+            self.sized_to = None                                    # Bot's page at its own size again)
+            if on:
+                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True},
+                              lambda _r: None)
+            else:
+                self.fit_page()
         held = dict(widgets.load_settings().get("browser_read_only") or {})
         if bool(held.get(self.sid)) == on:
             return
@@ -660,4 +664,4 @@ class BrowserPane(Gtk.Box):
         if self.view_size and tuple(self.view_size) == size:
             return
         self.asks.put(self.remote, {"id": self.sid, "name": self.name},
-                      {"op": "resize", "width": size[0], "height": size[1]}, lambda _r: None)
+                      {"op": "resize", "width": size[0], "height": size[1], "fit": True}, lambda _r: None)

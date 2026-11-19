@@ -13320,8 +13320,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
-        draft (its caret and attachments too), a side question typed over their list, a Feedback note put aside, the
-        Feedback tab's reply."""
+        draft (its caret and attachments too), the other chats' drafts, a side question typed over their list, a
+        Feedback note put aside, the Feedback tab's reply."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
         return {
@@ -13341,6 +13341,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             "frame": widgets.window_frame(self),  # (macOS: the display it's on, where; put back by put_back)
             "panel": self.panel.get_visible(),
             "places": self.PLACES,  # (where the other chats were left: open_at)
+            "drafts": {k: {**d, "attachments": [a.state() for a in d["attachments"]]} for k, d in self.DRAFTS.items()},
         }
 
     def apply_restart_state(self, state):
@@ -13348,6 +13349,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.cut_pending = time.time()
         for sid, place in (state.get("places") or {}).items():
             self.PLACES.setdefault(sid, place)
+        if widgets.typed_text(self.input) or self.attachments:  # (one its chat took as it opened, another window's:
+            self.keep_draft(self.draft_key())                   # kept for it, this window's own put back below)
+        for key, d in (state.get("drafts") or {}).items():  # (the other chats' drafts: take_draft)
+            self.DRAFTS.setdefault(key, {**d, "attachments": [Attachment.from_state(a) for a in d["attachments"]]})
         if state.get("size") and not state.get("maximized"):
             self.set_default_size(*state["size"])
         widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
@@ -14813,6 +14818,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def clear_transcript(self, closing=False):
         self.remember_place()  # (to open it there again)
+        key = self.draft_key()  # (what its draft's kept under, below)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
         if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it)
@@ -14824,7 +14830,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
-        self.unqueue(list(self.queued))  # (another chat: this one's queue gone with it)
+        if self.queued:  # (not sent: in its draft, before what's in the box, as a queued message's revert puts it)
+            draft = widgets.typed_text(self.input).strip()
+            self.swapping_draft = True
+            self.input.get_buffer().set_text("\n\n".join([t.text for t in self.queued if t.text] +
+                                                          [draft] * bool(draft)))
+            self.swapping_draft = False
+            self.attachments = [a for t in self.queued for a in t.atts] + self.attachments
+        self.unqueue(list(self.queued))  # (another chat: this one's queue gone from under it)
+        self.keep_draft(key)  # (the box this chat's to come back to; the next chat's own put in it: take_draft)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
         self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
@@ -14887,6 +14901,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
         self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
+        self.take_draft()  # (a new chat's, if one was left)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -15054,7 +15069,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
     # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
     # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
-    # box; its ✕ drops it. They're the open chat's: another chat opened, they're gone (clear_transcript)
+    # box; its ✕ drops it. They're the open chat's: another chat opened, they go into its draft (clear_transcript)
     def queue_message(self):
         buf = self.input.get_buffer()
         text = ComposerMarkdown.to_markdown(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)).strip()
@@ -15228,9 +15243,57 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def draft_changed(self):
         """The composer's text changed: the sidebar lists the open chat once it's begun, and not while it's blank."""
+        if getattr(self, "swapping_draft", False):  # (a chat's draft put away or back: the switch fills the sidebar)
+            return
         if getattr(self, "sidebar", None) is not None and (begun := self.chat_begun()) != self.listed_begun:
             self.listed_begun = begun
             self.sidebar.fill()
+
+    # ---- each chat's draft: what's written in the box, its caret and what's attached, kept for the chat as it's left
+    # for another (clear_transcript) and put back as it's opened again (take_draft); every window's, kept over a
+    # restart. A new chat not written in yet (no id, or its host's draft still) has the one draft, "": the next new chat
+    # opens with it, as its host drops a draft nobody's on
+    DRAFTS = {}  # draft_key -> {"text", "caret", "attachments"}
+    MAX_DRAFTS = 200
+
+    def draft_key(self):
+        """What the open chat's draft is kept under: its id, or "" while it's a new chat not written in yet."""
+        if not self.session_id:
+            return ""
+        r = self.remote or network().find(self.session_id)  # (a host's, let go of as a chat's left: its host's still)
+        listed = (r.sessions.get(self.session_id) or {}) if r is not None else {}
+        return "" if listed.get("draft") and not getattr(self, "chat_sent", False) else self.session_id
+
+    def keep_draft(self, key):
+        """The box's draft kept as key's (an empty one: none), and the box emptied for the next chat's."""
+        text, atts = widgets.typed_text(self.input), list(self.attachments)
+        self.DRAFTS.pop(key, None)
+        if text.strip() or atts:
+            self.DRAFTS[key] = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts}
+            while len(self.DRAFTS) > self.MAX_DRAFTS:  # (the longest left go)
+                del self.DRAFTS[next(iter(self.DRAFTS))]
+        self.swapping_draft = True
+        try:
+            self.input.get_buffer().set_text("")
+            self.attachments = []
+            self.refresh_attach_strip()
+        finally:
+            self.swapping_draft = False
+
+    def take_draft(self):
+        """The chat just opened: its draft (keep_draft) in the box, if it was left with one."""
+        draft = self.DRAFTS.pop(self.draft_key(), None)
+        if not draft:
+            return
+        self.swapping_draft = True
+        try:
+            self.input.get_buffer().set_text(draft["text"])
+            widgets.put_caret(self.input, draft["caret"])
+            self.attachments = list(draft["attachments"])
+            self.refresh_attach_strip()
+        finally:
+            self.swapping_draft = False
+        self.completer.hide()
 
     def ask_side_question(self, question):
         sq = SideQuestion(self, question)
@@ -17934,6 +17997,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.set_busy(True)
         else:
             self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
+        self.take_draft()
         self.apply_read_only()
         self.update_status()  # (its host, and its folder there)
         self.sidebar.fill()
@@ -18445,6 +18509,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.attach_proc(left)
         else:
             self.restart_proc(resume=True)  # a fresh helper: resume_pending keeps --resume off
+        self.take_draft()
         self.apply_read_only()
         self.sidebar.fill()
 

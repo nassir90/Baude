@@ -8646,6 +8646,26 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 """
 
 
+def tree_line(x, top, mid, end):
+    """One parent's line in a tree (TreeList, TreeListView): down at x from top (under the parent) to mid (its last
+    child's middle), then a corner across to end (just short of that child). end None: that child is out of sight
+    below, and the line runs on down to mid with no corner."""
+    if mid <= top or end is not None and end <= x:
+        return []
+    down = Graphene.Rect().init(x, top, 1, mid - top + 1)
+    return [down] if end is None else [down, Graphene.Rect().init(x + 1, mid, end - x - 1, 1)]
+
+
+def snapshot_tree_lines(widget, snapshot, rects):
+    """A tree's lines (tree_line's rectangles), in the widget's text colour, faint."""
+    if not rects:
+        return
+    color = widget.get_color()
+    color.alpha *= 0.3
+    for rect in rects:
+        snapshot.append_color(color, rect)
+
+
 class TreeList(Gtk.ListBox):
     """A ListBox whose nested rows hang off one joined line per parent, like a file tree: down from
     under the parent's anchor to its last (visible) child, then a corner across to it. Rows nest by
@@ -8672,25 +8692,84 @@ class TreeList(Gtk.ListBox):
         for p, child in last.items():
             ok, pb = p.tree_anchor.compute_bounds(self)
             ok2, cb = child.tree_anchor.compute_bounds(self)
-            if not (ok and ok2):
-                continue
-            x = round(pb.get_x() + self.line_x)
-            top = round(pb.get_y() + pb.get_height() + 1)
-            mid = round(cb.get_y() + cb.get_height() / 2)
-            end = round(cb.get_x() - 4)
-            if mid > top and end > x:
-                out += [Graphene.Rect().init(x, top, 1, mid - top + 1), Graphene.Rect().init(x + 1, mid, end - x - 1, 1)]
+            if ok and ok2:
+                out += tree_line(round(pb.get_x() + self.line_x), round(pb.get_y() + pb.get_height() + 1),
+                                 round(cb.get_y() + cb.get_height() / 2), round(cb.get_x() - 4))
         return out
 
     def do_snapshot(self, snapshot):
         Gtk.ListBox.do_snapshot(self, snapshot)
         if self.lines is None:
             self.lines = self.tree_lines()
-        if self.lines:
-            color = self.get_color()
-            color.alpha *= 0.3
-            for rect in self.lines:
-                snapshot.append_color(color, rect)
+        snapshot_tree_lines(self, snapshot, self.lines)
+
+
+class TreeListView(Gtk.ListView):
+    """TreeList's lines on a ListView of a Gtk.TreeListModel, whose rows are TreeExpanders: one joined line per open
+    folder, down from under its anchor to its last child, then a corner across to it. A row's `tree_anchor` (on its
+    TreeExpander; the expander itself if it has none) is what the line starts under and points at. Only the rows in
+    sight have widgets, so a parent scrolled out of sight above has its line come in from the top, and one whose last
+    child is out of sight below has its line run on down off the bottom."""
+
+    def __init__(self, line_x=5, **kw):
+        super().__init__(**kw)
+        self.line_x = line_x
+        self.lines = None
+
+    def do_size_allocate(self, width, height, baseline):
+        Gtk.ListView.do_size_allocate(self, width, height, baseline)
+        self.lines = None  # (scrolled, opened or closed: it's laid out again, and drawn again, though no row in sight
+        self.queue_draw()  # moved: a row past the bottom added or gone changes where a line ends)
+
+    def tree_lines(self):
+        shown, height = {}, self.get_height()  # (the rows in sight, by place: row, its widget's and anchor's bounds)
+        step, w = 0, self.get_first_child()  # (step: how far in a level is, read off a nested row's indent)
+        while w is not None:
+            exp = w.get_first_child()
+            row = exp.get_list_row() if isinstance(exp, Gtk.TreeExpander) else None
+            ok, wb = w.compute_bounds(self)
+            ok2, ab = getattr(exp, "tree_anchor", exp).compute_bounds(self) if row is not None else (False, None)
+            if ok and ok2 and w.is_drawable() and wb.get_y() < height and wb.get_y() + wb.get_height() > 0:
+                shown[row.get_position()] = (row, wb, ab)
+                if not step and row.get_depth() and exp.get_child() is not None:
+                    ok3, kb = exp.get_child().compute_bounds(exp)
+                    step = kb.get_x() / row.get_depth() if ok3 else 0
+            w = w.get_next_sibling()
+        if not shown:
+            return []
+        first, last = min(shown), max(shown)
+        top = min(wb.get_y() for _r, wb, _a in shown.values())
+        bottom = max(wb.get_y() + wb.get_height() for _r, wb, _a in shown.values())
+        parents = {}
+        for row, _wb, ab in shown.values():
+            depth, p = row.get_depth(), row.get_parent()
+            while p is not None and p.get_position() not in parents:
+                parents[p.get_position()] = (p, ab, depth)  # (with a row under it, to place it across by)
+                p = p.get_parent()
+        out = []
+        for pos, (p, ub, depth) in parents.items():
+            kids = p.get_children()
+            n = kids.get_n_items() if kids is not None else 0
+            end = p.get_child_row(n - 1).get_position() if n else -1
+            if end < first or pos > last:
+                continue
+            if pos in shown:
+                pb = shown[pos][2]
+                x, y = pb.get_x() + self.line_x, pb.get_y() + pb.get_height() + 1
+            else:  # (above: as far left of the row under it as it's levels up from it)
+                x, y = ub.get_x() - (depth - p.get_depth()) * step + self.line_x, top - 1
+            if end in shown:
+                cb = shown[end][2]
+                out += tree_line(round(x), round(y), round(cb.get_y() + cb.get_height() / 2), round(cb.get_x() - 4))
+            else:
+                out += tree_line(round(x), round(y), round(bottom + 1), None)
+        return out
+
+    def do_snapshot(self, snapshot):
+        Gtk.ListView.do_snapshot(self, snapshot)
+        if self.lines is None:
+            self.lines = self.tree_lines()
+        snapshot_tree_lines(self, snapshot, self.lines)
 
 
 def sidebar_action(icon, label, tip, fn):

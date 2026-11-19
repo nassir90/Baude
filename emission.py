@@ -19,6 +19,7 @@ import shutil
 import socket
 import sys
 import threading
+import time
 import urllib.parse
 import uuid
 
@@ -212,17 +213,22 @@ class Blocks:
         if release:
             cls.system()._Block_release(block)
 
+    live = {}  # (blocks for one call, kept till they've run: WebKit has only their address)
+
     @classmethod
     def once(cls, fn, types=()):
-        """A block for one call (a completion handler's): let go of after it's run."""
+        """A block for one call (a completion handler's): kept till it's run, then let go of."""
         held = {}
 
         def run(*args):
             try:
                 fn(*args)
+            except Exception:  # (none can cross back into WebKit)
+                sys.excepthook(*sys.exc_info())
             finally:
-                GLib.idle_add(lambda: held.clear() or False)  # (not while it's running)
+                GLib.idle_add(lambda: cls.live.pop(id(held), None) and False)  # (not while it's running)
         held["block"] = cls.make(run, types, keep=held)
+        cls.live[id(held)] = held
         return held["block"]
 
     @classmethod
@@ -256,16 +262,12 @@ MAC_KEYS = {"Enter": (36, "\r"), "Tab": (48, "\t"), "Space": (49, " "), "Backspa
             "PageUp": (116, "\uf72c"), "PageDown": (121, "\uf72d")}
 MAC_CHAR_CODES = dict(zip("asdfhgzxcv bqweryt123465=97-80]ou[ip lj'k;\\,/nm.", range(0, 48)))
 MAC_CHAR_CODES.pop(" ", None)
-MAC_COMMANDS = {("Enter", ()): b"insertNewline:", ("Tab", ()): b"insertTab:", ("Tab", ("shift",)): b"insertBacktab:",
-                ("Backspace", ()): b"deleteBackward:", ("Delete", ()): b"deleteForward:",
-                ("Escape", ()): b"cancelOperation:", ("Left", ()): b"moveLeft:", ("Right", ()): b"moveRight:",
-                ("Up", ()): b"moveUp:", ("Down", ()): b"moveDown:",
-                ("Left", ("shift",)): b"moveLeftAndModifySelection:",
-                ("Right", ("shift",)): b"moveRightAndModifySelection:",
-                ("Home", ()): b"scrollToBeginningOfDocument:", ("End", ()): b"scrollToEndOfDocument:",
-                ("PageUp", ()): b"scrollPageUp:", ("PageDown", ()): b"scrollPageDown:",
-                ("a", ("cmd",)): b"selectAll:", ("c", ("cmd",)): b"copy:", ("x", ("cmd",)): b"cut:",
-                ("v", ("cmd",)): b"paste:", ("z", ("cmd",)): b"undo:", ("z", ("cmd", "shift")): b"redo:"}
+MAC_COMMANDS = {("Enter", ()): b"insertNewline:",  # (a window that isn't key runs every other key's editing from its
+                ("a", ("cmd",)): b"selectAll:", ("c", ("cmd",)): b"copy:",  # events: only Return's isn't)
+                ("x", ("cmd",)): b"cut:", ("v", ("cmd",)): b"paste:", ("z", ("cmd",)): b"undo:",
+                ("z", ("cmd", "shift")): b"redo:", ("Left", ("cmd",)): b"moveToBeginningOfLine:",
+                ("Right", ("cmd",)): b"moveToEndOfLine:", ("Up", ("cmd",)): b"moveToBeginningOfDocument:",
+                ("Down", ("cmd",)): b"moveToEndOfDocument:"}
 
 
 class MacWeb:
@@ -516,6 +518,15 @@ class MacWeb:
             send(config, b"setWebsiteDataStore:", store, types=(ctypes.c_void_p,))
             send(config, b"setApplicationNameForUserAgent:", macos.ns_string(self.user_agent()),
                  types=(ctypes.c_void_p,))
+        if not opener:
+            script = send(send(b"WKUserScript", b"alloc"), b"initWithSource:injectionTime:forMainFrameOnly:",
+                          macos.ns_string(CONSOLE_JS), 0, True, types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_bool))
+            send(send(config, b"userContentController"), b"addUserScript:", script, types=(ctypes.c_void_p,))
+            send(script, b"release")
+        prefs = send(config, b"preferences")
+        for sel in (b"_setHiddenPageDOMTimerThrottlingEnabled:", b"_setPageVisibilityBasedProcessSuppressionEnabled:"):
+            if send(prefs, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+                send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
         if (agent := os.environ.get("EMISSION_USER_AGENT")):
@@ -608,6 +619,18 @@ class MacWeb:
         send(b"WKWebsiteDataStore", b"removeDataStoreForIdentifier:completionHandler:", nsuuid,
              Blocks.make(finished, types=(ctypes.c_void_p,)), types=(ctypes.c_void_p, ctypes.c_void_p))
         send(nsuuid, b"release")
+
+    awake = None
+
+    @classmethod
+    def stay_awake(cls):
+        """An agent's Emission kept running at full speed though none of its windows is on screen: no App Nap
+        (an activity begun, as a user's would be, the Mac still free to sleep)."""
+        send = macos.objc_send
+        info = send(b"NSProcessInfo", b"processInfo")
+        cls.awake = send(send(info, b"beginActivityWithOptions:reason:", 0x00EFFFFF,
+                              macos.ns_string("A Bot's browser, at work"), types=(ctypes.c_ulonglong, ctypes.c_void_p)),
+                         b"retain")
 
     @staticmethod
     def keys_to_gtk(window):
@@ -761,6 +784,12 @@ class MacWeb:
         send = macos.objc_send
 
         def got(image, error):
+            try:
+                made(image, error)
+            except Exception as e:  # (said, as a screenshot that failed)
+                GLib.idle_add(lambda: done(None, f"{type(e).__name__}: {e}") and False)
+
+        def made(image, error):
             if not image:
                 why = self._text(send(error, b"localizedDescription")) if error else "no picture"
                 GLib.idle_add(lambda: done(None, why) and False)
@@ -847,6 +876,63 @@ class MacWeb:
         if command and not keyed:
             send(self.view, b"doCommandBySelector:", objc_sel(command), types=(ctypes.c_void_p,))
 
+    def type_char(self, ch):
+        """One character typed, as its key's press and release (True), or False if no key here makes it."""
+        if ch == "\n":
+            self.key("Enter")
+            return True
+        send = macos.objc_send
+        code = MAC_CHAR_CODES.get(ch.lower(), 0)
+        flags = MAC_MODS["shift"] if ch.isupper() else 0
+        ns = send(self.view, b"window")
+        f = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, MacPoint, ctypes.c_ulong,
+                             ctypes.c_double, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_bool, ctypes.c_ushort)(ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+        for kind, sel in ((10, b"keyDown:"), (11, b"keyUp:")):
+            ev = f(send.rt.objc_getClass(b"NSEvent"), objc_sel(
+                b"keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:"
+                b"charactersIgnoringModifiers:isARepeat:keyCode:"), kind, MacPoint(0, 0), flags,
+                GLib.get_monotonic_time() / 1e6, send(ns, b"windowNumber", ret=ctypes.c_long), None,
+                macos.ns_string(ch), macos.ns_string(ch.lower()), False, code)
+            send(self.view, sel, ev, types=(ctypes.c_void_p,))
+        return True
+
+    def wheel(self, x, y, dx, dy):
+        """A real scroll wheel's turn over (x, y): dy pixels down (dx right), in a few steps, as a wheel's are."""
+        send = macos.objc_send
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGEventCreateScrollWheelEvent2.restype = ctypes.c_void_p
+        cg.CGEventCreateScrollWheelEvent2.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                                                      ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
+        cg.CGEventSetLocation.argtypes = [ctypes.c_void_p, MacPoint]
+        cg.CGEventSetIntegerValueField.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int64]
+        cg.CFRelease.argtypes = [ctypes.c_void_p]
+        ns = send(self.view, b"window")
+        at = self._event(5, x, y)  # (where it is, in the window's terms: a mouse moved there)
+        f = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p)(ctypes.cast(send.rt.objc_msgSend,
+                                                                                    ctypes.c_void_p).value)
+        here = f(at, objc_sel(b"locationInWindow"))
+        g = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p, MacPoint)(ctypes.cast(send.rt.objc_msgSend,
+                                                                                             ctypes.c_void_p).value)
+        screen = g(ns, objc_sel(b"convertPointToScreen:"), here)
+        top = send(send(send(b"NSScreen", b"screens"), b"objectAtIndex:", 0, types=(ctypes.c_ulong,)), b"frame",
+                   ret=macos._rect()).h
+        self.move(x, y)  # (the pointer there first: what's under it is what the wheel turns)
+        steps = max(1, min(12, round(max(abs(dx), abs(dy)) / 100)))
+        for i, (tx, ty) in enumerate([(round(dx / steps), round(dy / steps))] * steps):
+            if i:
+                time.sleep(0.02)  # (a wheel's turns come apart, not at once)
+            for where in (screen, here):  # (an event of no window has its screen place for its window's: then here)
+                ev = cg.CGEventCreateScrollWheelEvent2(None, 0, 2, -ty, -tx, 0)
+                cg.CGEventSetLocation(ev, MacPoint(where.x, top - where.y))
+                for field in (91, 92):  # (the window under it, and the one to handle it: this one)
+                    cg.CGEventSetIntegerValueField(ev, field, send(ns, b"windowNumber", ret=ctypes.c_long))
+                made = send(b"NSEvent", b"eventWithCGEvent:", ev, types=(ctypes.c_void_p,))
+                cg.CFRelease(ev)
+                if where is here or send(made, b"window") == ns:
+                    break
+            send(self.view, b"scrollWheel:", made, types=(ctypes.c_void_p,))
+
     @staticmethod
     def user_agent():
         """Safari's own (this WebKit is Safari's): WKWebView's names no browser, which some sites take badly."""
@@ -886,7 +972,8 @@ class XTest:
             cls.made = False
             from gi.repository import Gdk
             shown_on = Gdk.Display.get_default()
-            if shown_on is not None and type(shown_on).__name__ == "X11Display":  # (on X: not Wayland's)
+            if shown_on is not None and shown_on.__gtype__.name == "GdkX11Display" and \
+                    os.environ.get("EMISSION_VIRTUAL_DISPLAY"):  # (X, and Emission's own: never someone's desktop)
                 try:
                     cls.made = cls()
                 except OSError:
@@ -933,11 +1020,20 @@ class XTest:
         self.x.XFlush(self.d)
 
     def code(self, name):
-        sym = self.x.XStringToKeysym(name.encode())
+        sym = self.x.XStringToKeysym(name.encode()) if len(name) > 1 else 0
+        if not sym and len(name) == 1:
+            sym = ord(name) if ord(name) < 0x100 else 0x1000000 + ord(name)
         code = self.x.XKeysymToKeycode(self.d, sym) if sym else 0
         if not code:
             raise ValueError(f"no key {name!r} here")
         return code
+
+    def shifted(self, ch):
+        """Whether ch's key needs Shift for it (its keycode's first keysym another)."""
+        code = self.code(ch)
+        self.x.XKeycodeToKeysym.restype = ctypes.c_ulong
+        self.x.XKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_int]
+        return self.x.XKeycodeToKeysym(self.d, code, 0) != (ord(ch) if ord(ch) < 0x100 else 0x1000000 + ord(ch))
 
     def key(self, name):
         code = self.code(name)
@@ -991,6 +1087,8 @@ class GtkWeb:
         self.view.connect("authenticate", self.authenticate)
         self.view.connect("run-file-chooser", self.file_chooser)
         self.held = []  # (what WebKit waits on an answer to, kept till it's given)
+        self.view.get_user_content_manager().add_script(WebKit.UserScript.new(  # (the page's console kept)
+            CONSOLE_JS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserScriptInjectionTime.START, None, None))
         self.view.get_user_content_manager().add_script(WebKit.UserScript.new_for_world(  # (Emission's own world
             "", WebKit.UserContentInjectedFrames.TOP_FRAME,  # registered: WebKitGTK keeps it, and what's set in it,
             WebKit.UserScriptInjectionTime.START, "emission", None, None))  # from one call to the next, then)
@@ -1259,7 +1357,8 @@ class GtkWeb:
     def click(self, x, y, button="left", count=1, mods=()):
         at = self._screen(x, y)
         if at is None:
-            raise OSError("no X display here for real clicks")
+            raise OSError("real clicks need Emission's own display: a Bot's Emission has one, a window on "
+                          "someone's desktop doesn't")
         xt = XTest.get()
         xt.move(*at)
         with xt.held(mods):
@@ -1272,9 +1371,37 @@ class GtkWeb:
     def key(self, name, mods=()):
         xt = XTest.get()
         if xt is None or self._screen(0, 0) is None:
-            raise OSError("no X display here for real keys")
+            raise OSError("real keys need Emission's own display: a Bot's Emission has one, a window on "
+                          "someone's desktop doesn't")
+        self.view.grab_focus()
         with xt.held(mods):
             xt.key(X_KEYS.get(name, name))
+
+    def type_char(self, ch):
+        xt = XTest.get()
+        if xt is None or self._screen(0, 0) is None:
+            return False
+        if ch == "\n":
+            self.key("Enter")
+            return True
+        try:
+            shift = xt.shifted(ch)
+        except ValueError:
+            return False  # (no key on this keyboard makes it: typed another way)
+        self.view.grab_focus()
+        with xt.held(("shift",) if shift else ()):
+            xt.key(ch)
+        return True
+
+    def wheel(self, x, y, dx, dy):
+        at = self._screen(x, y)
+        if at is None:
+            raise OSError("a real wheel needs Emission's own display")
+        xt = XTest.get()
+        xt.move(*at)
+        for amount, back, on in ((dy, 4, 5), (dx, 6, 7)):  # (X's wheel: buttons 4 up, 5 down, 6 left, 7 right)
+            for _ in range(min(40, max(1 if amount else 0, round(abs(amount) / 80)))):  # (a turn's about 80 pixels)
+                xt.button(on if amount > 0 else back)
 
     @staticmethod
     def user_agent():
@@ -1415,6 +1542,14 @@ class Window(Adw.ApplicationWindow):
             GLib.usleep(100_000)
         return False
 
+    def give_back(self, pid):
+        """A Bot's profile this window had, let go of (its door now, its lock once WebKit's let go of its store):
+        the Bot's own Emission can have it again."""
+        Door.close(pid)
+        GtkWeb.sessions.pop(pid, None)
+        self.later.append((GLib.get_monotonic_time() + 10_000_000,
+                           lambda: pid != self.profile_id and unlock_profile(pid)))
+
     def have(self, pid):
         """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
         has it."""
@@ -1439,9 +1574,14 @@ class Window(Adw.ApplicationWindow):
             return None
         if self.Engine is None:
             return answer({"error": "Emission has no page engine on this host"})
+        listed = next((p for p in profiles() if p["id"] == pid), None)
+        if listed is None or not listed.get("bot"):  # (a Bot's tools reach a Bot's own profile, nothing else)
+            return answer({"error": "Emission takes tools' requests for a Bot's own profile only"})
         if pid != self.profile_id:
-            name = next((p["name"] for p in profiles() if p["id"] == pid), None)
-            if name is None or not self.switch_profile(name):
+            if not self.agent:  # (someone's own window, on another profile now: not moved for a Bot)
+                return answer({"error": f"“{listed['name']}” is open in someone's Emission window, which shows "
+                                        "another profile now: it's the Bot's again once that window's closed"})
+            if not self.switch_profile(listed["name"]):
                 return answer({"error": "that profile isn't open here"})
         return self.control.run(op, msg, answer)
 
@@ -1663,9 +1803,12 @@ class Window(Adw.ApplicationWindow):
                 self.view.close_page(page)
         finally:
             self.switching = False
+        old = self.profile_id
         self.profile, self.profile_id = name, pid
         self.refresh_profiles()
         self.show_body(None)
+        if not self.agent and any(p.get("bot") and p["id"] == old for p in profiles()):
+            self.give_back(old)
         for url in urls or [HOME_PAGE]:
             self.open(url)
         return True
@@ -1852,6 +1995,8 @@ class Window(Adw.ApplicationWindow):
         if tab is not None:
             for dlg in self.asking.pop(tab.web, []):
                 dlg.force_close()
+            for pid in [k for k, w in self.waiting.items() if w["web"] is tab.web]:
+                self.waiting.pop(pid, None)
             tab.web.close()
         view.close_page_finish(page, True)
         if not self.tabs and not self.switching:
@@ -1917,6 +2062,24 @@ class Window(Adw.ApplicationWindow):
 
 
 # ------------------------------------------------------------------ agents --
+
+CONSOLE_JS = r"""
+(() => {
+  const K = Symbol.for('emission.console');
+  if (window[K]) return;
+  const log = [];
+  Object.defineProperty(window, K, {value: log});
+  const put = (level, text) => { log.push({level, text: String(text).slice(0, 2000), at: Date.now()});
+    if (log.length > 300) log.shift(); };
+  const show = x => { try { return typeof x === 'string' ? x : JSON.stringify(x); } catch (e) { return String(x); } };
+  for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+    const was = console[level];
+    console[level] = function (...a) { try { put(level, a.map(show).join(' ')); } catch (e) {} return was.apply(this, a); };
+  }
+  addEventListener('error', e => put('error', e.message + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : '')));
+  addEventListener('unhandledrejection', e => put('error', 'unhandled rejection: ' + show(e.reason)));
+})();
+"""
 
 PAGE_JS = r"""
 if (!globalThis.__em) globalThis.__em = (() => {
@@ -2049,6 +2212,10 @@ const em = globalThis.__em;
 """
 
 
+def guarded_by(answer):
+    return lambda fn: guarded(fn, answer)
+
+
 def guarded(fn, answer):
     """fn, its errors answered (a callback's, which nothing else would catch: the request would wait for good)."""
     def run(*a):
@@ -2095,6 +2262,7 @@ class Control:
         """answer(describe(t) + extra) once t's page has loaded (or LOAD_S has gone), after a moment to start."""
         started = started or GLib.get_monotonic_time()
 
+        @guarded_by(answer)
         def look():
             st = t.web.state() if t.web.view is not None else {}
             waited = (GLib.get_monotonic_time() - started) / 1e6
@@ -2107,6 +2275,10 @@ class Control:
     def js(self, t, body, answer, then=None, page=False):
         """body run in t's page (Emission's world, PAGE_JS's em there; page: the page's own world, for javascript):
         then(result) given what it returned, or the error answered."""
+        if (waiting := self.win.prompts(t)):
+            answer({"error": "the page is waiting on a prompt (answer_prompt answers it)", "prompts": waiting})
+            return
+
         def done(text, why):
             if why is not None:
                 answer({"error": why})
@@ -2134,6 +2306,8 @@ class Control:
 
     def op_close_tab(self, msg, answer):
         t = self.tab(msg)
+        if len(self.win.tabs) == 1:
+            self.win.open("about:blank")
         self.win.close_tab(t)
         answer({"closed": t.id, "tabs": [self.describe(x) for x in self.win.tabs.values() if x is not t]})
 
@@ -2171,7 +2345,7 @@ class Control:
                 answer({**self.describe(t), "image": base64.b64encode(data).decode(), "mime": "image/jpeg",
                         "width": pw, "height": ph,
                         "note": "x and y for click and scroll are this picture's pixels"})
-            GLib.timeout_add(120, lambda: t.web.snapshot(guarded(shot, answer)) and False)  # (a frame drawn first)
+            GLib.timeout_add(120, guarded(lambda: t.web.snapshot(guarded(shot, answer)) and False, answer))
         self.js(t, "return {w: innerWidth, h: innerHeight}", answer, sized)
 
     def op_read_page(self, msg, answer):
@@ -2236,17 +2410,35 @@ class Control:
             300, lambda: answer(self.describe(t)) and False)))
 
     def op_type(self, msg, answer):
+        """text typed into the focused field (or ref's, focused first), a key press a character at a time, as a
+        keyboard would type it (a character no key here makes: put in as the page's own editing would)."""
         t, text = self.tab(msg), str(msg.get("text") or "")
         focus = f"em.get({json.dumps(msg['ref'])}).focus();" if msg.get("ref") else ""
+        left = list(text)
+
+        def read_back():
+            self.js(t, "const el = document.activeElement;"
+                       "return 'value' in el ? String(el.value) : el.textContent", answer,
+                    lambda value: answer({**self.describe(t), "value": value}))
+
+        @guarded_by(answer)
+        def next_char():
+            if not left:
+                read_back()
+                return False
+            ch = left.pop(0)
+            if not t.web.type_char(ch):
+                self.js(t, f"document.execCommand('insertText', false, {json.dumps(ch)}); return true", answer,
+                        lambda _v: GLib.timeout_add(self.TYPE_GAP_MS, next_char))
+                return False
+            return True
+
+        def ready(_v):
+            if next_char():
+                GLib.timeout_add(self.TYPE_GAP_MS, next_char)
         self.js(t, focus + "const el = document.activeElement;"
                 "if (!em.editable(el)) throw new Error('nothing to type into is focused: click the field, or give "
-                "its ref');"
-                f"for (const ch of {json.dumps(text)}) {{"
-                "  if (!document.execCommand('insertText', false, ch)) {"
-                "    if ('value' in el) em.setValue(el, el.value + ch); else el.textContent += ch; }"
-                f"  await em.sleep({self.TYPE_GAP_MS}); }}"
-                "return 'value' in el ? String(el.value) : el.textContent",
-                answer, lambda value: answer({**self.describe(t), "value": value}))
+                "its ref'); return true", answer, ready)
 
     def op_key(self, msg, answer):
         t = self.tab(msg)
@@ -2277,31 +2469,79 @@ class Control:
             k, mods = presses.pop(0)
             try:
                 t.web.key(k, mods)
-            except (ValueError, OSError) as e:
-                answer({"error": str(e)})
+            except Exception as e:
+                answer({"error": f"{type(e).__name__}: {e}" if not isinstance(e, (ValueError, OSError)) else str(e)})
                 return False
             return True
         if press():
             GLib.timeout_add(self.KEY_GAP_MS, press)
 
     def op_scroll(self, msg, answer):
+        """A real mouse wheel turned over a ref, a point of the last screenshot, or the page's middle: dy pixels
+        down (600 if none's given; up negative), dx right; what's under the pointer scrolls."""
         t = self.tab(msg)
         dx, dy = int(msg.get("dx") or 0), int(msg.get("dy") if msg.get("dy") is not None else 600)
+        under = ("let el = document.elementFromPoint({x}, {y});"
+                 "while (el && el !== document.body && el !== document.documentElement && !("
+                 "el.scrollHeight > el.clientHeight + 2 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) && !("
+                 "el.scrollWidth > el.clientWidth + 2 && /(auto|scroll)/.test(getComputedStyle(el).overflowX)))"
+                 " el = el.parentElement;"
+                 "const inner = !!el && el !== document.body && el !== document.documentElement;"
+                 "const s = inner ? el : document.scrollingElement;")
 
         def at(x, y, _c):
-            t.web.move(x, y)
-            self.js(t, f"let el = document.elementFromPoint({x}, {y});"
-                       "while (el && el !== document.body && !(el.scrollHeight > el.clientHeight + 2 && "
-                       "/(auto|scroll)/.test(getComputedStyle(el).overflowY)) && !(el.scrollWidth > el.clientWidth + 2"
-                       " && /(auto|scroll)/.test(getComputedStyle(el).overflowX))) el = el.parentElement;"
-                       f"const s = (el && el !== document.body) ? el : document.scrollingElement;"
-                       f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}}); await em.sleep(150);"
-                       "return {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight}", answer,
-                    lambda where: answer({**self.describe(t), "scrolled": where}))
+            def chosen(inner):
+                how = "wheel"
+                try:
+                    t.web.wheel(x, y, dx, dy)
+                    extra = ""
+                except OSError:
+                    how = "script"
+                    extra = f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}});"
+                GLib.timeout_add(250, guarded(lambda: self.js(
+                    t, under.format(x=x, y=y) + extra + "await em.sleep(120);"
+                    "return {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight, inner}", answer,
+                    lambda where: answer({**self.describe(t), "scrolled": where, "by": how})) and False, answer))
+            self.js(t, under.format(x=x, y=y) + "return inner", answer, chosen)
         if msg.get("ref") or msg.get("x") is not None:
             self.point(t, msg, answer, at)
         else:
             self.js(t, "return {x: innerWidth / 2, y: innerHeight / 2}", answer, lambda c: at(c["x"], c["y"], None))
+
+    def op_console(self, msg, answer):
+        """What the page has said in its console (and its errors), newest last: pattern only those matching."""
+        t = self.tab(msg)
+        self.js(t, "const log = window[Symbol.for('emission.console')] || [];"
+                   f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
+                   f"const got = log.filter(e => !re || re.test(e.text)).slice(-{int(msg.get('limit') or 50)});"
+                   f"if ({json.dumps(bool(msg.get('clear')))}) log.length = 0; return got", answer,
+                lambda got: answer({**self.describe(t), "console": got}), page=True)
+
+    def op_network(self, msg, answer):
+        """What the page has loaded (itself, and its resources), newest last: pattern only URLs matching."""
+        t = self.tab(msg)
+        self.js(t, f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
+                   "return [...performance.getEntriesByType('navigation'), ...performance.getEntriesByType('resource')]"
+                   ".filter(e => !re || re.test(e.name))"
+                   f".slice(-{int(msg.get('limit') or 50)}).map(e => ({{url: e.name, type: e.initiatorType || "
+                   "e.entryType, status: e.responseStatus || null, ms: Math.round(e.duration), "
+                   "bytes: e.transferSize || null}))", answer,
+                lambda got: answer({**self.describe(t), "requests": got}))
+
+    def op_resize(self, msg, answer):
+        """The page's size (its viewport) made width by height, CSS pixels."""
+        t = self.tab(msg)
+        w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
+        if not (200 <= w <= 4000 and 200 <= h <= 4000):
+            raise ValueError("width and height between 200 and 4000")
+
+        def sized(now):
+            ww, wh = self.win.get_default_size()
+            self.win.set_default_size(max(300, ww + w - int(now["w"])), max(300, wh + h - int(now["h"])))
+            GLib.timeout_add(500, guarded(lambda: self.js(t, "return {width: innerWidth, height: innerHeight}",
+                                                          answer, lambda v: answer({**self.describe(t), "size": v}))
+                                          and False, answer))
+        self.js(t, "return {w: innerWidth, h: innerHeight}", answer, sized)
 
     def op_form_input(self, msg, answer):
         t = self.tab(msg)
@@ -2391,10 +2631,14 @@ def main():
         pid = bot_profile(a.bot, a.name)
         a.profile = next(p["name"] for p in profiles() if p["id"] == pid)
         if a.agent:
+            if engine()[0] is None:
+                print(engine()[1], file=sys.stderr)
+                return 2
             if not lock_profile(pid):
                 return 0  # (another Emission has it already: the tools reach that one)
             if sys.platform == "darwin":
                 macos.stay_offscreen()
+                MacWeb.stay_awake()
             return App(None, a.profile, agent=True).run([sys.argv[0]])
     if not a.profile.strip():
         p.error("a profile needs a name")

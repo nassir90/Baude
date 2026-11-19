@@ -934,7 +934,7 @@ class Server:
             def browse():
                 try:
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
-                                                                   timeout=emissiontools.WAIT_S))
+                                                                   timeout=emissiontools.HOST_WAIT_S))
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()

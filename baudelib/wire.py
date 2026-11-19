@@ -102,6 +102,9 @@ A client's requests (a "req" it picks comes back on the reply):
     mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
+    emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
+                                                       request, baudelib.emissiontools) to the Emission that has the
+                                                       Bot's own profile here, started for it if none has
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
     catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
                                                        its sessions' folders, made there (lookup.items: its files,

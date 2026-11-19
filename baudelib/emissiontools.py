@@ -11,7 +11,8 @@ import threading
 from baudelib import meshtools, wire
 
 NAME = "emission"
-WAIT_S = 90  # (a request's answer waited for this long: a page's load is 30 s of it at most)
+WAIT_S = 100  # (a request's answer waited for this long: the host's, HOST_WAIT_S, is said first)
+HOST_WAIT_S = 85  # (the host's wait on Emission: a page's load is 30 s of it at most)
 
 TAB = {"type": "string", "description": "A tab's id (tabs); the one in front if none"}
 HOST = {"type": "string", "description": "A host's id or name (mcp__mesh__hosts); this one if none. Each host has "
@@ -49,13 +50,14 @@ SCHEMAS = {
               []),
     "hover": ("Move the mouse over an element or a point (menus that open on hover).",
               {"ref": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
-    "type": ("Type text into the focused field (or the field with ref: focused first), a character at a time.",
+    "type": ("Type text into the focused field (or the field with ref: focused first), a key press a character at "
+             "a time, as a keyboard types.",
              {"text": {"type": "string"}, "ref": REF, "tab": TAB, "host": HOST}, ["text"]),
     "key": ("Press keys, one after another (space between them): Enter, Tab, Escape, Backspace, Delete, Up, Down, "
             "Left, Right, Home, End, PageUp, PageDown, a character, or a combination like cmd+a or shift+Tab.",
             {"keys": {"type": "string"}, "tab": TAB, "host": HOST}, ["keys"]),
-    "scroll": ("Scroll the page, or what's scrollable under an element or a point, by dy (and dx) pixels "
-               "(dy 600 if none's given; up is negative).",
+    "scroll": ("Turn the mouse wheel over an element, a point, or the page's middle: dy (and dx) pixels (dy 600 if "
+               "none's given; up is negative).",
                {"dy": {"type": "integer"}, "dx": {"type": "integer"}, "ref": REF, "x": {"type": "number"},
                 "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
     "form_input": ("Set a form field by its ref: a select's option (value or text), a checkbox or radio (true or "
@@ -63,6 +65,17 @@ SCHEMAS = {
                    {"ref": REF, "value": {}, "tab": TAB, "host": HOST}, ["ref", "value"]),
     "javascript": ("Run JavaScript in the page (an async function's body: return what you want back, as JSON).",
                    {"code": {"type": "string"}, "tab": TAB, "host": HOST}, ["code"]),
+    "console": ("What the page has written to its console, and its errors, newest last.",
+                {"tab": TAB, "host": HOST, "pattern": {"type": "string", "description": "Only messages matching "
+                                                                                        "this regular expression"},
+                 "limit": {"type": "integer"}, "clear": {"type": "boolean", "description": "Clear them after"}}, []),
+    "network": ("What the page has loaded (itself and its resources): each URL, its kind, status, time and size.",
+                {"tab": TAB, "host": HOST, "pattern": {"type": "string", "description": "Only URLs matching this "
+                                                                                        "regular expression"},
+                 "limit": {"type": "integer"}}, []),
+    "resize": ("Make the page's size (its viewport) width by height pixels.",
+               {"width": {"type": "integer"}, "height": {"type": "integer"}, "tab": TAB, "host": HOST},
+               ["width", "height"]),
     "prompts": ("What the pages are waiting for you to answer: an alert, a confirm, a prompt, a site's own sign-in "
                 "box, or files to upload (tools' answers also show them, as prompts).", {"host": HOST}, []),
     "answer_prompt": ("Answer what a page is waiting on (its id from prompts): accept (OK, or false for Cancel), "
@@ -75,7 +88,8 @@ SCHEMAS = {
 OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab": "close_tab",
        "screenshot": "screenshot", "read_page": "read_page", "find": "find", "get_text": "get_text", "click": "click",
        "hover": "hover", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
-       "javascript": "javascript", "prompts": "prompts", "answer_prompt": "answer_prompt"}
+       "javascript": "javascript", "console": "console", "network": "network", "resize": "resize",
+       "prompts": "prompts", "answer_prompt": "answer_prompt"}
 
 
 class Browser:
@@ -99,7 +113,7 @@ class Browser:
             raise ValueError("these tools are a Bot's (its chat's id wasn't given)")
         args = dict(args)
         where = self.mesh.where(args.pop("host", None))
-        msg = {"op": OPS[tool], **args}
+        msg = {**args, "op": OPS[tool]}  # (its op the tool's, whatever the arguments say)
         got = self.mesh.request(where, {"op": "emission", "bot": {"id": self.me, "name": self.bot_name()},
                                         "call": msg}, timeout=WAIT_S)
         result = got.get("result") or {}

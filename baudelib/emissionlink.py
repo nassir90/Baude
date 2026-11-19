@@ -50,9 +50,25 @@ def _read_profiles():
 def _write_profiles(items):
     os.makedirs(data_home(), exist_ok=True)
     path = os.path.join(data_home(), "profiles.json")
-    with open(path + ".tmp", "w", encoding="utf-8") as f:
+    tmp = f"{path}.{os.getpid()}.{time.monotonic_ns()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"profiles": items}, f, indent=1)
-    os.replace(path + ".tmp", path)
+    os.replace(tmp, path)
+
+
+class _Changing:
+    """profiles.json changed by one process at a time (a read, then a write: another's not lost between)."""
+
+    def __enter__(self):
+        os.makedirs(data_home(), exist_ok=True)
+        self.fd = os.open(os.path.join(data_home(), "profiles.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+
+    def __exit__(self, *_):
+        os.close(self.fd)
+
+
+changing = _Changing
 
 
 def profiles():
@@ -66,15 +82,21 @@ def profile_id(name):
 
 
 def add_profile(name):
-    if profile_id(name) is None:
-        _write_profiles([*_read_profiles(), {"name": name, "id": str(uuid.uuid4())}])
-    return profile_id(name)
+    with changing():
+        if profile_id(name) is None:
+            _write_profiles([*_read_profiles(), {"name": name, "id": str(uuid.uuid4())}])
+        return profile_id(name)
 
 
 def bot_profile(bot_id, name):
     """The id of a Bot's own profile on this host (made if it has none; named after the Bot, again if it's renamed;
     name None: as it's named now)."""
     pid = str(uuid.uuid5(PROFILE_SPACE, "bot:" + bot_id))
+    with changing():
+        return _bot_profile(pid, bot_id, name)
+
+
+def _bot_profile(pid, bot_id, name):
     items = _read_profiles()
     mine = next((p for p in items if p["id"] == pid), None)
     if name is None and mine is not None:
@@ -87,15 +109,19 @@ def bot_profile(bot_id, name):
             final, n = f"{label} {n}", n + 1
         items = [p for p in items if p["id"] != pid] + [{"name": final, "id": pid, "bot": bot_id}]
         _write_profiles(items)
+        if mine is None and pid in leftovers():  # (removed once, made again: its new data kept)
+            note_leftover(pid, add=False)
     return pid
 
 
 def rename_profile(old, new):
-    _write_profiles([{**p, "name": new} if p["name"] == old else p for p in _read_profiles()])
+    with changing():
+        _write_profiles([{**p, "name": new} if p["name"] == old else p for p in _read_profiles()])
 
 
 def forget_profile(name):
-    _write_profiles([p for p in _read_profiles() if p["name"] != name])
+    with changing():
+        _write_profiles([p for p in _read_profiles() if p["name"] != name])
 
 
 def leftovers():
@@ -161,8 +187,13 @@ def unlock_profile(pid):
 def door_path(pid):
     """Where the Emission that has pid's profile takes requests (a socket in a folder only this user can open; short,
     for macOS's limit on socket paths)."""
-    base = os.path.join(tempfile.gettempdir(), f"emission-{os.getuid()}")
+    run = os.environ.get("XDG_RUNTIME_DIR")
+    base = os.path.join(run, "emission") if run and os.path.isdir(run) else os.path.join(
+        tempfile.gettempdir(), f"emission-{os.getuid()}")
     os.makedirs(base, mode=0o700, exist_ok=True)
+    st = os.lstat(base)
+    if not os.path.isdir(base) or os.path.islink(base) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise OSError(f"{base} isn't this user's alone: Emission won't use it")
     return os.path.join(base, hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock")
 
 
@@ -206,8 +237,9 @@ def call_bot(bot_id, name, msg, timeout=60):
     except (FileNotFoundError, ConnectionRefusedError):
         pass
     os.makedirs(data_home(), exist_ok=True)
-    with open(os.path.join(data_home(), f"agent-{pid[:8]}.log"), "ab") as log:
-        subprocess.Popen([sys.executable, EMISSION, "--agent", "--bot", bot_id, *(["--name", str(name)] if name
+    log_path = os.path.join(data_home(), f"agent-{pid[:8]}.log")
+    with open(log_path, "ab") as log:
+        proc = subprocess.Popen([sys.executable, EMISSION, "--agent", "--bot", bot_id, *(["--name", str(name)] if name
                                                                                     else [])],
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
                          cwd=os.path.dirname(EMISSION))
@@ -216,6 +248,13 @@ def call_bot(bot_id, name, msg, timeout=60):
         try:
             return call(pid, msg, timeout)
         except (FileNotFoundError, ConnectionRefusedError):
+            if proc.poll() not in (None, 0):  # (gone, and not because another has the profile: it said why)
+                try:
+                    with open(log_path, encoding="utf-8", errors="replace") as f:
+                        said = [line.strip() for line in f.readlines()[-6:] if line.strip()]
+                except OSError:
+                    said = []
+                raise OSError("Emission couldn't start for this Bot here" + (": " + said[-1] if said else ""))
             if time.monotonic() > end:
                 raise OSError(f"Emission didn't start for this Bot (its log: {data_home()}/agent-{pid[:8]}.log)")
             time.sleep(0.3)

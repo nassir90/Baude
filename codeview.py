@@ -770,7 +770,7 @@ class FilesPage(Gtk.Box):
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._setup)
         factory.connect("bind", self._bind)
-        self.view = Gtk.ListView(factory=factory, single_click_activate=True)
+        self.view = widgets.TreeListView(line_x=self.THUMB // 2, factory=factory, single_click_activate=True)
         self.view.add_css_class("navigation-sidebar")
         self.view.add_css_class("file-tree")
         self.view.connect("activate", self._activate)
@@ -802,7 +802,8 @@ class FilesPage(Gtk.Box):
     def _setup(self, _factory, item):
         exp = Gtk.TreeExpander(indent_for_icon=False, hide_expander=True)  # (a folder's open or closed icon says it)
         box = Gtk.Box(spacing=6)
-        box.append(Gtk.Image(width_request=self.THUMB))  # (an icon in the middle of a thumbnail's room)
+        exp.tree_anchor = Gtk.Image(width_request=self.THUMB)  # (an icon in the middle of a thumbnail's room)
+        box.append(exp.tree_anchor)  # (an open folder's line runs down from under it to its last row's)
         box.append(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
         exp.set_child(box)
         exp.set_has_tooltip(True)

@@ -72,6 +72,36 @@ def state_home():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "server")
 
 
+def kept_sessions(state_dir=None):
+    """The sessions a host process keeps in its state folder (None: this machine's), each one's settings as it saved
+    them (Server.save), read as it loads them, whether it's running or not."""
+    folder = os.path.join(state_dir or state_home(), "sessions")
+    out = []
+    for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        try:
+            with open(os.path.join(folder, entry), encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict) and wire.is_id(meta.get("id")):
+            out.append(meta)
+    return out
+
+
+def kept_session(sid, state_dir=None):
+    """The settings this machine's host process keeps for a session (kept_sessions), by its id or claude's (cli_id),
+    or None: not one of its own."""
+    if wire.is_id(sid or ""):
+        try:
+            with open(os.path.join(state_dir or state_home(), "sessions", f"{sid}.json"), encoding="utf-8") as f:
+                meta = json.load(f)
+            if isinstance(meta, dict) and meta.get("id") == sid:
+                return meta
+        except (OSError, ValueError):
+            pass
+    return next((m for m in kept_sessions(state_dir) if sid and m.get("cli_id") == sid), None)
+
+
 def lock_path(state_dir=None):
     """The lock a host process holds while it runs (one each): in its state folder, named for this machine."""
     return os.path.join(state_dir or state_home(), f"host-{wire.safe_name(socket.gethostname().split('.')[0])}.lock")
@@ -184,6 +214,8 @@ class Session:
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
+        self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
+        self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
@@ -320,10 +352,34 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
+                "acting": self.acting and self.busy and not self.asks,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "start_key": self.meta.get("start_key"),
                 "mesh_tools": self.mesh_tools(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
+
+
+def turn_acting(msg, was, streamed=False):
+    """Whether a turn's at its tools once msg (its agent's own, not a subagent's) has come, was being whether it
+    was before: a tool call's begun (its block started, as it's streamed; or come whole, as some agents send their
+    calls though they stream their text), and it is; text begun, and it isn't (it's writing to you). streamed: its
+    agent streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say),
+    not looked at. Thinking, and the rest, leave it as it was: between two calls it's still at them. Its result, or
+    its agent gone, ends it (from_claude, claude_exited)."""
+    if msg.get("type") == "stream_event":
+        event = msg.get("event") or {}
+        if event.get("type") != "content_block_start":
+            return was
+        kinds = [(event.get("content_block") or {}).get("type")]
+    else:
+        content = (msg.get("message") or {}).get("content")
+        kinds = [c.get("type") for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+    if any(k in ("tool_use", "server_tool_use") for k in kinds):
+        return True
+    if msg.get("type") != "stream_event" and streamed:
+        return was
+    return False if "text" in kinds else was
 
 
 BOT_PICTURE_MAX = 2 << 20  # (bytes: a Bot's picture, as sent)
@@ -429,13 +485,8 @@ class Server:
         _write_json(me, self.me)
         providers.found()  # (this machine's inference providers looked for now: there by the time a head says hello)
         self.sessions = {}
-        folder = os.path.join(self.state_dir, "sessions")
-        for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        for meta in kept_sessions(self.state_dir):
             try:
-                with open(os.path.join(folder, entry), encoding="utf-8") as f:
-                    meta = json.load(f)
-                if not wire.is_id(meta.get("id")):
-                    continue
                 self.sessions[meta["id"]] = Session(self, meta)
                 meta.pop("tags", None)  # (an older server kept tags: not read, and gone at its next save)
             except (OSError, ValueError, KeyError, TypeError):
@@ -464,6 +515,7 @@ class Server:
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
+        self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
     def bind(self):
@@ -698,6 +750,10 @@ class Server:
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
         self.mesh.start()
+        with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
+            waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
+        for s, w in waits:
+            threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -721,6 +777,42 @@ class Server:
             self.accepted = time.monotonic()
             threading.Thread(target=self.serve, args=(sock,), daemon=True, name="client").start()
         self.listener.close()
+
+    def answer_wait(self, s, w):
+        """A wait of a session's agent (waits_on's: a subagent's answer, or a chat's) that this host's stop cut short:
+        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that sent to the
+        session as its user's message, which carries it on. Stopped again meanwhile: kept, for the next start."""
+        with self.lock:
+            self.following.add((s.id, w["session"]))
+        try:
+            got = meshtools.Mesh(socket=self.socket_path).follow(w)
+        except Exception as e:  # (said to the session as the call would have said it, its host named)
+            got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}",
+                   **meshtools.Mesh(socket=self.socket_path).named(
+                       {"via": "mesh", "host": w["host"]} if w.get("host") else {"via": "local"})}
+        with self.lock:
+            self.following.discard((s.id, w["session"]))
+            if self.stopped.is_set() or self.sessions.get(s.id) is not s or s.deleting:
+                return
+            waits = [x for x in s.meta.get("waits_on") or [] if x["session"] != w["session"]]
+            s.meta["waits_on"] = waits or None
+            self.save(s)
+            self.log(f"{s.id}: the answer it waited on from {w['session']} sent to it")
+            try:
+                self.take_input(None, s, {"type": "user", "message": {"role": "user", "content": [
+                    {"type": "text", "text": meshtools.told(w, got)}]}})
+            except OSError as e:  # (its folder gone, say)
+                self.log(f"{s.id}: couldn't be sent it: {e}")
+
+    def drop_waits(self, s):
+        """(lock held) Its agent's waits (waits_on) let go of, but those answered for it (answer_wait): its turn's
+        over, or its claude's gone otherwise than by this host's stop (stopped by a head, say), so nothing waits on
+        them."""
+        waits = s.meta.get("waits_on") or []
+        kept = [w for w in waits if (s.id, w["session"]) in self.following]
+        if len(kept) != len(waits):
+            s.meta["waits_on"] = kept or None
+            self.save(s)
 
     def shutdown(self, if_idle=False, restart=None):
         """Goodbye on the network, every claude stopped (asked to end, then made to: what it's written is kept, and
@@ -871,7 +963,7 @@ class Server:
         try:
             emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.door_path(emissionlink.bot_profile(bot["id"], None)))
+            sock.connect(emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None)))
             sock.sendall((json.dumps({"op": "watch", **size}) + "\n").encode())
         except (OSError, ValueError) as e:
             conn.send({"op": "error", "req": req, "error": str(e)})
@@ -1089,6 +1181,20 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
+                on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
+                if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):
+                    return reply("error", error="waits_on needs on: {session, host (None: this one)}")
+                waits = [w for w in s.meta.get("waits_on") or [] if w["session"] != on["session"]]
+                if not msg.get("done"):
+                    waits.append({"session": on["session"], "host": on.get("host"),
+                                  "kind": "chat" if on.get("kind") == "chat" else "subagent",
+                                  "text": on["text"] if isinstance(on.get("text"), str) else None,
+                                  "offset": on["offset"] if isinstance(on.get("offset"), int) else 0,
+                                  "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
+                s.meta["waits_on"] = waits or None
+                self.save(s)
+                return reply("waits_on", session=s.id)
             if op == "mesh_tools":  # (a chat given the mesh's tools, or not: from its next start)
                 s.meta["mesh_tools"] = bool(msg.get("on"))
                 self.save(s)
@@ -1368,6 +1474,7 @@ class Server:
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
+                "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
         with self.lock:
             if self.stopped.is_set():
@@ -1548,7 +1655,8 @@ class Server:
                 exe=run["exe"] if run["program"] != "claude" else self.exe,
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
-        s.used = time.time()
+        s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
+        # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
 
@@ -1763,6 +1871,12 @@ class Server:
                 self.changed()
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
+            if kind == "stream_event" and not msg.get("parent_tool_use_id"):
+                s.streamed = True  # (its text said as it's written: the same text come whole after is late)
+            if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and \
+                    (acting := turn_acting(msg, s.acting, s.streamed)) != s.acting:
+                s.acting = acting
+                self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
                 self.changed()
             if kind == "result" and s.id in self.cutting and self.stopped.is_set() and msg.get("subtype") == "success":
@@ -1771,11 +1885,13 @@ class Server:
                 self.save(s)
             if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
                 self.restart_agent(s)
+            if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
+                self.drop_waits(s)
             if kind == "result":
                 for message, said in s.queued:
                     self.keep(s, "user", message, said)
                 s.queued = []
-                s.busy, s.used = False, time.time()
+                s.busy, s.used, s.acting = False, time.time(), False
                 s.routines_out.clear()
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
@@ -1898,7 +2014,7 @@ class Server:
         with self.lock:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
-            s.proc, s.busy = None, False
+            s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)
@@ -1911,6 +2027,8 @@ class Server:
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
             s.waiting_init = []
             self.drop_routes(s)
+            if not self.stopped.is_set():
+                self.drop_waits(s)
             if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
                 # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)

@@ -258,6 +258,9 @@ def main():
     mesh_tools = sub.add_parser("mesh-tools", help="the mesh's tools of a Bot's agent (hosts, chats, a subagent on any "
                                                    "host, a message to another chat), as an MCP server on stdin and stdout")
     mesh_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
+    browser_tools = sub.add_parser("emission-tools", help="a Bot's browser tools (its own Emission profile, on any "
+                                                          "host), as an MCP server on stdin and stdout")
+    browser_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
     relay = sub.add_parser("mcp-relay", help=argparse.SUPPRESS)  # (an agent run here's MCP server: its caller's)
     relay.add_argument("--socket", required=True)
     for name in ("run", "name", "token"):
@@ -285,6 +288,9 @@ def main():
     if args.command == "mesh-tools":
         from baudelib import meshtools
         return meshtools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)
+    if args.command == "emission-tools":
+        from baudelib import emissiontools
+        return emissiontools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)
     if args.command == "mcp-relay":
         from baudelib import agentproxy
         return agentproxy.relay(args.socket, args.run, args.name, args.token)

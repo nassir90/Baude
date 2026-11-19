@@ -102,6 +102,9 @@ A client's requests (a "req" it picks comes back on the reply):
     mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
+    emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
+                                                       request, baudelib.emissiontools) to the Emission that has the
+                                                       Bot's own profile here, started for it if none has
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
     catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
                                                        its sessions' folders, made there (lookup.items: its files,
@@ -188,9 +191,10 @@ import subprocess
 import threading
 import time
 
-VERSION = 9  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 10  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
-# others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools)
+# others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
+# 10: emission, a Bot's browser here)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

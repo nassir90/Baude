@@ -853,9 +853,11 @@ def parse_records(lines, items, seen=None):
             meta = d.get("compactMetadata") or {}
             items.append({"role": "compact", "text": widgets.compact_text(meta), "meta": meta, "id": d.get("uuid")})
             continue
-        if d.get("isCompactSummary") and items and items[-1]["role"] == "compact" and not items[-1].get("summary"):
-            items[-1]["summary"] = _text_of((d.get("message") or {}).get("content"))
-            items[-1]["grew"] = True
+        if d.get("isCompactSummary"):  # (under its boundary's: the messages a partial compaction kept between them)
+            mark = next((it for it in reversed(items) if it["role"] == "compact"), None)
+            if mark is not None and not mark.get("summary"):
+                mark["summary"] = _text_of((d.get("message") or {}).get("content"))
+                seen.setdefault("\0summaries", []).append(mark)
             continue
         if kind not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
             continue
@@ -1671,8 +1673,13 @@ def chat_text(path, title, cwd):
         parse_records(f, items)
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
     who = {"user": "You", "start": "Started with"}
-    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
-                                  if it["role"] not in ("note", "compact")])  # (said by neither)
+
+    def said(it):
+        if it["role"] != "compact":
+            return f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}"
+        summary = it.get("summary")  # (a compaction: what it did, and what it wrote)
+        return f"*{it['text']}*" + (f"\n\n**Summary of the earlier conversation:**\n\n{summary}" if summary else "")
+    return "\n\n".join([head] + [said(it) for it in items if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
 def chats_of(notebook, transcripts):
@@ -5520,10 +5527,12 @@ class Reader(Gtk.Box):
                 self.box.remove(row)
             del self.rows[keep:]
         grew = keep and self.items[keep - 1].pop("grew", False)
-        if grew and self.items[keep - 1]["role"] == "compact":  # (its summary, read after it)
-            self.rows[keep - 1].prose.set_summary(self.items[keep - 1].get("summary"))
-        elif grew:
+        if grew:
             self.rows[keep - 1].prose.set_text(self.items[keep - 1]["text"])
+        for mark in self.seen.pop("\0summaries", ()):  # (a compaction's summary, read after it was drawn)
+            row = next((r for r in reversed(self.rows[:keep]) if r.item is mark), None)
+            if row is not None:
+                row.prose.set_summary(mark["summary"])
         for it in self.items[keep:]:
             it.pop("grew", None)
             self._add(it)

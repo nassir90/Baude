@@ -459,21 +459,16 @@ def history_item(line, sidechain=False, first=None):
         if rec.get("frameUrl"):
             return "artifact", {"url": rec["frameUrl"], "title": rec.get("title"), "path": rec.get("path")}
         return None
-    if '"compact_boundary"' in line:  # (Claude Code compacted the conversation here: what it did, its compactMetadata)
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            return None
-        if isinstance(rec, dict) and rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
-            return ("compact_boundary", rec.get("compactMetadata") or {}) \
-                if sidechain or not rec.get("isSidechain") else None
-    if '"type":"user"' not in line and '"type":"assistant"' not in line \
+    boundary = '"compact_boundary"' in line  # (Claude Code compacted the conversation here)
+    if not boundary and '"type":"user"' not in line and '"type":"assistant"' not in line \
             and '"type": "user"' not in line and '"type": "assistant"' not in line:
         return None
     try:
         rec = json.loads(line)
     except ValueError:
         return None
+    if boundary and isinstance(rec, dict) and rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+        return ("compact_boundary", rec.get("compactMetadata") or {}) if sidechain or not rec.get("isSidechain") else None
     if rec.get("type") not in ("user", "assistant") or rec.get("isMeta") or \
             (rec.get("isSidechain") and not sidechain):
         return None

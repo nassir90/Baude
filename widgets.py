@@ -2030,6 +2030,36 @@ def compact_text(meta):
     return " · ".join(parts)
 
 
+def compact_said(msg):
+    """What a message of claude's stream says of a compaction, as (what, detail), or None:
+      ("running", characters of summary written or None): its status "compacting";
+      ("failed", claude's compact_error or None): its status null, compact_result "failed";
+      ("succeeded", None): compact_result "success" (its compact_boundary next);
+      ("ended", None): its status null with no result (a PreCompact hook blocked it, it had nothing to do): none made;
+      ("done", compact_metadata): compact_boundary;
+      ("summary", text): the summary it wrote, as the message after its boundary (isSynthetic, its content a string;
+      not a message of the conversation's replayed).
+    A subagent's (parent_tool_use_id) are its own."""
+    if not isinstance(msg, dict) or msg.get("parent_tool_use_id"):
+        return None
+    kind, sub = msg.get("type"), msg.get("subtype")
+    if kind == "system" and sub == "compact_boundary":
+        return "done", msg.get("compact_metadata") or {}
+    if kind == "system" and sub == "status" and msg.get("status") == "compacting":
+        return "running", msg.get("compact_output_chars")
+    if kind == "system" and sub == "status" and msg.get("status") is None:
+        result = msg.get("compact_result")
+        if result == "failed":
+            return "failed", msg.get("compact_error")
+        if result == "success":
+            return "succeeded", None
+        return None if "permissionMode" in msg else ("ended", None)  # (a mode changed says its status too)
+    content = (msg.get("message") or {}).get("content")
+    if kind == "user" and msg.get("isSynthetic") and not msg.get("isReplay") and isinstance(content, str):
+        return "summary", content
+    return None
+
+
 class CompactMark(Gtk.Box):
     """Where Claude Code compacted a conversation (summarised what came before, to free its context window), in a chat
     (Baude's, Record's reader, Meta's): a quiet line between two rules. While it runs (claude's status "compacting"),

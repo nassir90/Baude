@@ -9511,7 +9511,53 @@ class SessionSidebar(Gtk.Box):
 
 # --------------------------------------------------------- side questions --
 
-class SideQuestion(Gtk.ListBoxRow):
+class CompactMarks:
+    """A conversation with claude that marks its compactions (widgets.compact_said: Baude's chat, a side question's):
+    where it's compacting, as it happens (it can take a minute), then what it did, the summary it wrote folded under
+    that (widgets.CompactMark). Its compact_add(mark) puts a marker where the conversation's at (returning it),
+    compact_here(mark) says whether one's still in it, compact_started() that it's busy."""
+
+    compact_mark = None  # (this turn's: compact_ended lets go of it as the turn ends, or its claude does)
+
+    def compact_mark_now(self):
+        """The marker of this turn's compaction under way, made where the conversation's at if there's none."""
+        mark = self.compact_mark
+        if mark is None or mark.state != "running" or not self.compact_here(mark):
+            mark = self.compact_mark = self.compact_add(widgets.CompactMark())
+        return mark
+
+    def on_compaction(self, msg):
+        """What msg says of a compaction, marked; True if it was the summary (nothing more to draw of it)."""
+        what, detail = widgets.compact_said(msg) or (None, None)
+        mark = self.compact_mark
+        if what == "running":
+            self.compact_started()
+            self.compact_mark_now().running(detail)
+        elif what == "failed":
+            self.compact_mark_now().fail(detail)
+        elif what == "ended" and mark is not None and mark.state == "running":
+            self.compact_mark = None  # (none made after all: nothing to mark)
+            if (parent := mark.get_parent()) is not None:
+                parent.remove(mark)
+        elif what == "succeeded":
+            self.refresh_context()
+        elif what == "done":
+            self.compact_mark_now().finish(detail)  # (kept: the summary claude says next goes under it)
+        elif what == "summary" and mark is not None and mark.state == "done" and mark.fold is None:
+            mark.set_summary(detail)
+            self.compact_mark = None
+            return True
+        return False
+
+    def compact_ended(self):
+        """Its turn's over, or its claude's gone: a compaction still under way didn't finish, and the next turn's is
+        its own."""
+        mark, self.compact_mark = self.compact_mark, None
+        if mark is not None and mark.state == "running":
+            mark.fail(stopped=True)
+
+
+class SideQuestion(CompactMarks, Gtk.ListBoxRow):
     """One /btw thread, a row of the side panel's Side questions titled with its question: its own claude, started with
         --resume <session> --fork-session --no-session-persistence --permission-mode plan
     so it sees the whole conversation so far but writes nothing (not to the session, not a new
@@ -9821,10 +9867,25 @@ class SideQuestion(Gtk.ListBoxRow):
         self.submit()
 
     def _busy(self, busy):
+        if busy and not self.busy:
+            self.compact_ended()  # (an answer starting: an earlier one's compaction isn't its)
         self.busy = busy
         self._mark("running" if busy else None)
         self.dots.set_working(busy)
         self.writing.set_busy(busy)
+
+    def compact_add(self, mark):  # (CompactMarks: over the answer it's before)
+        if self.answer is not None and self.answer.get_parent() is self.body:
+            mark.insert_before(self.body, self.answer)
+        else:
+            self.body.append(mark)
+        return mark
+
+    def compact_here(self, mark):
+        return mark.get_parent() is self.body
+
+    def compact_started(self):
+        pass
 
     def refresh_context(self):
         if self.proc is not None:
@@ -9846,6 +9907,8 @@ class SideQuestion(Gtk.ListBoxRow):
         if proc is not self.proc:
             return False
         t = msg.get("type")
+        if t in ("system", "user") and self.on_compaction(msg):
+            return False
         if t == "stream_event" and not msg.get("parent_tool_use_id"):
             d = msg.get("event", {}).get("delta") or {}
             if d.get("type") == "text_delta" and self.answer is not None:
@@ -9870,6 +9933,7 @@ class SideQuestion(Gtk.ListBoxRow):
                 then(r.get("response") or {})
         elif t == "result":
             stopped, self.stopped = self.stopped is not None and self.stopped is self.answer, None
+            self.compact_ended()
             self._busy(False)
             if stopped:
                 self._stopped()
@@ -9881,6 +9945,7 @@ class SideQuestion(Gtk.ListBoxRow):
         return False
 
     def on_exit(self, code):
+        self.compact_ended()
         if self.proc is not None:
             if self.busy:  # (ended mid-answer)
                 self._busy(False)
@@ -12856,7 +12921,7 @@ class Repaint(Gtk.Widget):
             snap.append_color(Repaint.TINT, Graphene.Rect().init(0, 0, self.get_width(), self.get_height()))
 
 
-class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
+class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def do_snapshot(self, snapshot):
         self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
 
@@ -13881,6 +13946,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def set_busy(self, busy):
         if busy and not getattr(self, "busy", False):
             self.said_last = None  # (a turn starting: what the last one said isn't this one's)
+            self.compact_ended()  # (nor its compaction)
         self.busy = busy
         if not busy:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
@@ -14945,10 +15011,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                     waiting.answered()
             self.waiting_cards.clear()
             self.show_retry(None)
+            self.compact_ended()
             self.proc = None
             self.set_busy(False)
             self.remote_view()
             return
+        self.compact_ended()
         if code != 0 and self.session_id and not self.resume_pending:  # (nothing said now: the claude started next
             self.resume_reason = (self.session_id, "claude binary error")  # resumes it, and says why: start_proc. One
             # only showing a session it isn't running (resume_pending): nothing to resume)
@@ -16036,16 +16104,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)
         elif st == "compact_boundary":
-            self.compacted(msg.get("compact_metadata") or {})
+            self.on_compaction(msg)
             self.refresh_context()
         elif st == "status":
             self.sync_mode(msg.get("permissionMode"))  # e.g. leaving plan mode
-            if msg.get("status") == "compacting":
-                self.compacting(msg.get("compact_output_chars"))
-            elif msg.get("compact_result") == "failed":
-                self.compact_mark_now().fail(msg.get("compact_error"))
-            elif msg.get("compact_result") == "success":
-                self.refresh_context()
+            self.on_compaction(msg)
             if msg.get("status") == "requesting" and not self.busy:
                 self.set_busy(True)  # a turn the CLI started itself (e.g. a background task finished)
         elif st == "session_title_changed":
@@ -16061,30 +16124,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                         "post_turn_summary", "rate_limit_event"):
             self.note(f"[system:{st}]")
 
-    # ---- compaction (claude summarising the conversation to free its window: status "compacting", then compact_boundary)
-    def compact_mark_now(self):
-        """The marker of the compaction under way (widgets.CompactMark), made at the chat's end if there's none."""
-        mark = getattr(self, "compact_mark", None)
-        if mark is None or mark.state != "running" or not mark.is_ancestor(self.transcript):
-            mark = self.compact_mark = self.add(widgets.CompactMark())
-        return mark
+    # ---- compaction (CompactMarks): marked in the chat, at its end
+    def compact_add(self, mark):
+        return self.add(mark)
 
-    def compacting(self, written=None):
-        """claude compacting the conversation: said where it's happening, as it happens (it can take a minute)."""
+    def compact_here(self, mark):
+        return mark.is_ancestor(self.transcript)
+
+    def compact_started(self):
         if not self.busy:
             self.set_busy(True)
-        self.compact_mark_now().running(written)
-
-    def compacted(self, meta):
-        mark = self.compact_mark_now()
-        mark.finish(meta)
-        self.compact_mark = mark  # (the summary claude says next goes under it: h_user)
-
-    def compact_ended(self):
-        """Its turn's over: a compaction still under way didn't finish."""
-        mark, self.compact_mark = getattr(self, "compact_mark", None), None
-        if mark is not None and mark.state == "running":
-            mark.fail(stopped=True)
 
     # ---- session title (click it in the header to rename)
     def show_title(self, title):
@@ -16258,7 +16307,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def h_assistant(self, msg):
         m, parent = msg["message"], msg.get("parent_tool_use_id")
-        if parent is None and getattr(self, "compact_mark", None) is not None and self.compact_mark.state == "done":
+        if parent is None and self.compact_mark is not None and self.compact_mark.state == "done":
             self.compact_mark = None  # (the conversation's gone on: a summary only follows its boundary at once)
         if parent is None:  # (what a turn ending in an error last said: the error, said once, not again by h_result)
             said = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text").strip()
@@ -17412,11 +17461,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def h_user(self, msg):
         content = msg.get("message", {}).get("content")
-        mark = getattr(self, "compact_mark", None)
-        if msg.get("isSynthetic") and mark is not None and mark.state == "done" and not msg.get("parent_tool_use_id"):
-            mark.set_summary(content if isinstance(content, str) else _first_text(content))  # (what it compacted to)
-            self.compact_mark = None
-            return
+        if self.on_compaction(msg):
+            return  # (what it compacted the conversation to)
         if isinstance(content, list):  # a plain string is the echo of our own prompt
             self.render_tool_results(content)
             if not msg.get("parent_tool_use_id"):
@@ -17839,10 +17885,23 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             _adj, _before, expire = pending
             GLib.source_remove(expire) if GLib.MainContext.default().find_source_by_id(expire) else None
 
+    def last_compact_mark(self):
+        """The marker of the last compaction drawn where history's being drawn (a chunk's slot, or the chat), if its
+        summary isn't under it yet: the summary's record follows its boundary's, the messages a partial compaction kept
+        between them at most; items are drawn one at a time (fill_item), so it's looked for among what's drawn (a
+        chunk's slot, then the one before it: its boundary the end of that chunk)."""
+        target = self.render_target or self.transcript
+        for where in (target, target.get_prev_sibling() if target is not self.transcript else None):
+            child = where.get_last_child() if where is not None else None
+            while child is not None and not isinstance(child, widgets.CompactMark):
+                child = child.get_prev_sibling()
+            if child is not None:
+                return child if child.fold is None and child.state == "done" else None
+        return None
+
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
-        mark = None  # (the last compaction's marker: its summary, the record after it, folded under it)
         for kind, content, *rest in items:
             if kind in ("user", "start_prompt"):
                 turn_calls, stop_said = [], False
@@ -17867,9 +17926,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.task_from_note(content)  # (its card, if it's drawn, says it ended)
                 if (line := self.task_note(content)) is not None:
                     self.add(line)
-            elif kind == "compact_boundary":  # (where claude compacted it, as it did live: compacted)
-                mark = self.add(widgets.CompactMark(content))
-            elif kind == "compact_summary" and mark is not None and mark.fold is None:
+            elif kind == "compact_boundary":  # (where claude compacted it, as it did live: on_compaction)
+                self.add(widgets.CompactMark(content))
+            elif kind == "compact_summary" and (mark := self.last_compact_mark()) is not None:
                 mark.set_summary(content)  # (what it wrote for itself on compacting: folded under its marker)
             elif kind == "compact_summary":
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))

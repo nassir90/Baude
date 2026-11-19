@@ -566,6 +566,16 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                 if e.get("type") not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
                     continue
                 msg = e.get("message") or {}
+                if e.get("isCompactSummary"):  # (what that compaction wrote: under its heading)
+                    content = msg.get("content")
+                    text = content if isinstance(content, str) else "\n".join(
+                        b.get("text") or "" for b in content or () if isinstance(b, dict) and b.get("type") == "text")
+                    said = f"Summary of the earlier conversation:\n{trimmed(text.strip(), limit)}"
+                    if parts and parts[-1].startswith("## Conversation compacted") and "\n" not in parts[-1]:
+                        parts[-1] += "\n" + said
+                    else:
+                        parts.append("## " + said)
+                    continue
                 content, out = msg.get("content"), []
                 for c in [{"type": "text", "text": content}] if isinstance(content, str) else content or []:
                     if not isinstance(c, dict):
@@ -1716,13 +1726,9 @@ class Agent:
             self.chat.context_soon(self)
         elif t == "system" and msg.get("subtype") == "baude_context" and self is self.chat.agent:  # (pi-claude's: the
             self.chat.show_usage(msg.get("usage") or {})  # tokens of the request it's sent, as MLX's server says)
-        if t == "system" and turn is not None and not msg.get("parent_tool_use_id"):  # (compacting: said in the reply)
-            if msg.get("subtype") == "status" and msg.get("status") == "compacting":
-                self.chat._compaction(self, turn, "running", written=msg.get("compact_output_chars"))
-            elif msg.get("subtype") == "status" and msg.get("compact_result") == "failed":
-                self.chat._compaction(self, turn, "failed", error=msg.get("compact_error"))
-            elif msg.get("subtype") == "compact_boundary":
-                self.chat._compaction(self, turn, "done", meta=msg.get("compact_metadata") or {})
+        said = widgets.compact_said(msg) if turn is not None else None  # (compacting: said in the reply)
+        if said is not None and said[0] != "summary":
+            self.chat._compaction(self, turn, *said)
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
             if msg.get("warn") and turn is not None:  # (its tools didn't reach the model's host: over the reply)
@@ -1762,11 +1768,10 @@ class Agent:
                 elif c.get("type") == "text" and not turn.get("streamed") and c.get("text"):
                     turn["text"].append(c["text"])
                     self.chat._said_more(self, turn, c["text"])
-        elif t == "user" and msg.get("isSynthetic") and turn["items"] and turn["items"][-1]["kind"] == "compact" and \
-                turn["items"][-1]["state"] == "done":  # (what it compacted the conversation to: under its marker)
-            content = (msg.get("message") or {}).get("content")
-            self.chat._compaction(self, turn, "done", summary=content if isinstance(content, str) else "\n\n".join(
-                b.get("text") or "" for b in content or () if isinstance(b, dict) and b.get("type") == "text"))
+        elif said is not None and said[0] == "summary" and turn["items"] and \
+                turn["items"][-1]["kind"] == "compact" and turn["items"][-1]["state"] == "done" and \
+                not turn["items"][-1].get("summary"):
+            self.chat._compaction(self, turn, *said)  # (what it compacted the conversation to: under its marker)
         elif t == "user":  # (what its tools gave back)
             for c in (msg.get("message") or {}).get("content") or []:
                 if isinstance(c, dict) and c.get("type") == "tool_result":
@@ -2689,7 +2694,9 @@ class MetaChat(Gtk.Box):
         if m.get("error"):
             drawn = set()
             for it in items or ():
-                if it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn):
+                if it["kind"] == "compact":
+                    reply.append(self.compact_mark(it))
+                elif it["kind"] == "tool" and not (it.get("actions") and set(it["actions"]) <= drawn):
                     widget, holds = self.call_widget({**it, "actions": [i for i in it.get("actions") or ()
                                                                          if i not in drawn]})
                     drawn.update(it.get("actions") or ())
@@ -3533,16 +3540,26 @@ class MetaChat(Gtk.Box):
         if agent is self.ask:
             self._refresh_live(turn)
 
-    def _compaction(self, agent, turn, state, **said):
-        """Claude Code compacting the conversation in a turn (running), done (meta: its compact_metadata; summary: what
-        it wrote) or failed (error): an item of the reply, its marker (compact_mark)."""
+    def _compaction(self, agent, turn, what, detail):
+        """Claude Code compacting the conversation in a turn (widgets.compact_said's what and detail): an item of the
+        reply, {"kind": "compact", "state": running|done|failed, "written", "meta", "error", "summary"}, its marker
+        (compact_mark); none, if it ended with none made."""
         items = turn["items"]
         item = items[-1] if items and items[-1]["kind"] == "compact" and \
-            (items[-1]["state"] == "running" or "summary" in said) else None
-        if item is None:
-            item = {"kind": "compact", "state": "running"}
-            items.append(item)
-        item.update(state=state, **{k: v for k, v in said.items() if v is not None})
+            (items[-1]["state"] == "running" or what == "summary") else None
+        if what == "succeeded" or what == "ended" and item is None:
+            return
+        if what == "ended":
+            items.remove(item)
+        elif what == "summary":
+            item["summary"] = detail
+        else:
+            if item is None:
+                item = {"kind": "compact", "state": "running"}
+                items.append(item)
+            item["state"] = what
+            if detail is not None:
+                item[{"running": "written", "done": "meta", "failed": "error"}[what]] = detail
         if agent is self.ask:
             self._refresh_live(turn)
 

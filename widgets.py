@@ -8576,6 +8576,8 @@ def tree_line(x, top, mid, end):
 
 def snapshot_tree_lines(widget, snapshot, rects):
     """A tree's lines (tree_line's rectangles), in the widget's text colour, faint."""
+    if not rects:
+        return
     color = widget.get_color()
     color.alpha *= 0.3
     for rect in rects:
@@ -8634,7 +8636,8 @@ class TreeListView(Gtk.ListView):
 
     def do_size_allocate(self, width, height, baseline):
         Gtk.ListView.do_size_allocate(self, width, height, baseline)
-        self.lines = None  # (scrolled, opened or closed: it's laid out again)
+        self.lines = None  # (scrolled, opened or closed: it's laid out again, and drawn again, though no row in sight
+        self.queue_draw()  # moved: a row past the bottom added or gone changes where a line ends)
 
     def tree_lines(self):
         shown, height = {}, self.get_height()  # (the rows in sight, by place: row, its widget's and anchor's bounds)

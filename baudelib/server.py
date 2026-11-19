@@ -26,12 +26,13 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
 DRAFT_S = 30  # (a new chat never written in, nobody attached this long: gone)
 EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
+GRACE_MOST = 24 * 3600  # (start's grace: an ephemeral session waits at most this long for its head to come back)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
@@ -516,6 +517,7 @@ class Server:
         self.update, self.restarting = None, None
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
         self.feedback_filed = {}  # (feedback's notes filed this run, by id: found before GitHub's search finds them)
+        self.feedback_claims, self.feedback_lock = {}, threading.Lock()  # (notes being filed now: .filing's, here)
         # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
@@ -698,6 +700,8 @@ class Server:
                     return reply("error", error=f"{p} couldn't be moved to the trash: {e}{moved}")
         with self.lock:
             s.deleted = True
+            if s.app_tools is not None:
+                s.app_tools.end()
             s.meta.pop("cut", None)
             self.sessions.pop(s.id, None)
             try:
@@ -721,13 +725,15 @@ class Server:
         if not later:
             if s.drop_timer is not None:
                 s.drop_timer.cancel()
-            wait = EPHEMERAL_S if s.meta.get("ephemeral") and s.attached_once else DRAFT_S
+            wait = (s.meta.get("grace") or EPHEMERAL_S) if s.meta.get("ephemeral") and s.attached_once else DRAFT_S
             s.drop_timer = threading.Timer(wait, lambda: self._drop_later(s))
             s.drop_timer.daemon = True
             s.drop_timer.start()
             return
         s.drop_timer = None
         del self.sessions[s.id]
+        if s.app_tools is not None:  # (its head's own tools with it)
+            s.app_tools.end()
         if s.proc is not None:
             s.proc.stopping = True
             s.proc.kill()
@@ -848,6 +854,8 @@ class Server:
             self.restarting = restart
             procs = []
             for s in self.sessions.values():
+                if s.app_tools is not None:  # (the host going: its heads' tools let go of)
+                    s.app_tools.end()
                 if s.proc is None:
                     continue
                 if s.busy or s.asks:  # (cut short: a head offers to carry it on)
@@ -943,8 +951,8 @@ class Server:
                 conn.agent_run.end()
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
-            for tools in list(getattr(conn, "app_tools", ())):  # (its chats' tools that were its own: gone with it)
-                tools.end()
+            for tools in list(getattr(conn, "app_tools", ())):  # (its chats' tools that were its own: waiting for it
+                tools.unbind(conn)                               # to attach again, which binds them to it then)
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
@@ -1020,8 +1028,31 @@ class Server:
         title = first if len(first) <= 90 else first[:89].rstrip() + "…"
         token = f"`baude-note-{note}`"  # (the note's own: an issue ending with it is the note's, whoever filed it)
         mark = f"_Sent from Baude for Android's Send Feedback, through {self.me['name']}_ {token}"
+        with self.feedback_lock:  # (one filing a note at a time: another for it waits, and has what it made)
+            claim = self.feedback_claims.get(note)
+            mine = claim is None
+            if mine:
+                claim = self.feedback_claims[note] = threading.Event()
+        if not mine:
+            claim.wait(120)
         if note in self.feedback_filed:
+            if mine:
+                self._unclaim(note, claim)
             return reply("feedback_filed", repo=repo, **self.feedback_filed[note])
+        if not mine:
+            return reply("error", error="it's being filed already: try again in a moment")
+        try:
+            self._file_feedback(fixes, note, text, context, title, mark, token, repo, reply)
+        finally:
+            self._unclaim(note, claim)
+
+    def _unclaim(self, note, claim):
+        with self.feedback_lock:
+            self.feedback_claims.pop(note, None)
+        claim.set()
+
+    def _file_feedback(self, fixes, note, text, context, title, mark, token, repo, reply):
+        """(the note claimed) Filed, unless an issue of its own is there already (found by its id)."""
         body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
                                         else "") + "\n\n" + mark + "\n"
         ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
@@ -1091,6 +1122,17 @@ class Server:
                 except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
+            return None
+        if op in ("list_dir", "git", "signal_names"):  # (a session's folder read for a head elsewhere: hostfiles; on a
+            def read():                                  # thread of its own, as git may take a while)
+                try:
+                    if op == "list_dir":
+                        reply("dir", **hostfiles.list_dir(self, msg.get("path")))
+                    else:
+                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
+                except (ValueError, OSError) as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=read, daemon=True, name=op).start()
             return None
         if op == "feedback":  # (a head with no gh of its own: its feedback filed by this host's; on a thread of its own)
             def feedback():
@@ -1198,6 +1240,8 @@ class Server:
                 s.viewers.add(conn)
                 if msg.get("live"):
                     s.live.add(conn)
+                if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
+                    s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()))
             if op == "detach":
                 s.viewers.discard(conn)
@@ -1551,6 +1595,8 @@ class Server:
                 "fork_from": (src.meta.get("cli_id") or src.id) if src else None,
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
+                "grace": min(float(params["grace"]), GRACE_MOST) if params.get("ephemeral") and
+                isinstance(params.get("grace"), (int, float)) and params["grace"] > 0 else None,
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
@@ -2233,8 +2279,9 @@ class Server:
 
     def stoppable(self, s):
         """(lock held) Would an idle look stop a session's claude, once it's idle long enough (_look)? Not one at a
-        turn, asking, watched live, stopping already, or whose program forgets what it's said (apple-claude)."""
-        return s.proc is not None and not s.busy and not s.asks and not s.live and \
+        turn, asking, watched live, stopping already, or whose program forgets what it's said (apple-claude, and an
+        ephemeral session's, kept nowhere)."""
+        return s.proc is not None and not s.busy and not s.asks and not s.live and not s.meta.get("ephemeral") and \
             not getattr(s.proc, "stopping", False) and models.program(s.meta.get("model"))["resumes"]
 
     def _notes(self):
@@ -2263,9 +2310,7 @@ class Server:
                 if s.agents is None or s.proc is not None or grew:  # (only a running claude's subagents work)
                     if (agents := s.subagent_files(s.meta.get("path"))) != s.agents:
                         s.agents, self.dirty = agents, True
-                if s.proc is not None and not s.busy and not s.asks and not s.live \
-                        and time.time() - s.used > self.idle_s and not getattr(s.proc, "stopping", False) \
-                        and models.program(s.meta.get("model"))["resumes"]:  # (apple-claude would forget it all)
+                if self.stoppable(s) and time.time() - s.used > self.idle_s:  # (one that'd forget it all, not)
                     self.log(f"{s.id} idle: its claude stopped")
                     s.proc.stopping = True
                     s.proc.close_stdin()

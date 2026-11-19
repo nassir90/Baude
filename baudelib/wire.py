@@ -19,7 +19,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?, app_tools?}
+           env?, start_key?, app_tools?, grace?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -32,14 +32,15 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        Claude's models. ask_timeout: seconds a permission it asks
                                                        waits while nobody who answers is attached, then ask_default
                                                        ("deny", or "allow") answers it. answers: as attach's
-    attach {session, live, answers?}                -> attached {session, asks}; live: claude {session, msg} as it
+    attach {session, live, answers?, app_tools?}    -> attached {session, asks}; live: claude {session, msg} as it
                                                        speaks, exited {session, code} when it stops; deleted
                                                        {session} when it's deleted (nothing to carry on). answers
                                                        (default true; kept for the connection, its last attach's or
                                                        start's): false for a head that won't answer what the session
                                                        asks (a permission): it isn't counted as there to answer, so
                                                        ask_timeout's wait still runs out and ask_default answers, as
-                                                       if nobody were attached. draft: a new chat, listed as
+                                                       if nobody were attached. app_tools: (version 17) the session's
+                                                       app_tools (start's) carried to this connection from now. draft: a new chat, listed as
                                                        draft (a head leaves it out of its lists) and not kept till
                                                        it's written in (its first user input), and gone if nobody's
                                                        attached before it is. ephemeral: a side
@@ -57,8 +58,12 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        over this connection (agentproxy.AppTools), allowed without
                                                        asking; mcp_open {session, conn, name} when its claude starts
                                                        one, then mcp {conn, line} either way and mcp_close {conn}
-                                                       from either side, as an agent's are (agent). Gone with this
-                                                       connection
+                                                       from either side, as an agent's are (agent); while this
+                                                       connection's gone, their calls fail, till attach's app_tools
+                                                       binds them to the head's new one; gone with the session.
+                                                       grace: (version 17) seconds an ephemeral session waits for its
+                                                       head to come back (a day at most; else EPHEMERAL_S), its idle
+                                                       claude not stopped meanwhile (it keeps nothing)
     detach {session}
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
@@ -136,10 +141,24 @@ A client's requests (a "req" it picks comes back on the reply):
     emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
                                                        request, baudelib.emissiontools) to the Emission that has the
                                                        Bot's own profile here, started for it if none has
-    routines {session, routines?}                   -> routines {session, routines}: (version 12) a Bot's routines
-                                                       (baudelib.routines), set if they're given
+    routines {session, set?, delete?}               -> routines {session, routines, clock}: (version 12) a Bot's routines
+                                                       (baudelib.routines): set, one made or changed (by its id),
+                                                       delete, one gone (its id); clock, the host's {zone, offset}
     run_routine {session, id}                       -> routines {session, routines}: one of them run now
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
+    list_dir {path}                                 -> dir {path, entries: [{name, dir, size?, ignored}], more}:
+                                                       (version 17) a folder in a session's folder, folders first
+                                                       (.git left out; ignored: git ignores it), at most 2000
+    git {cwd, what, rev?, limit?, skip?, sha?, path?} -> git {what, ...}: (version 17) a session's folder's git, read
+                                                       only (nothing fetched): log, its branch {name, upstream, ahead,
+                                                       behind} and commits [{sha, parents, author, email, at, refs,
+                                                       subject}] (the host's own checkout's too, for a changelog);
+                                                       card (sha): {author, at, message, files [[path, +, -]],
+                                                       branches}; diff (sha, path?): {text, truncated}
+    signal_names {cwd, session?, cli_id?}           -> signal_names {glossary, refs: [{surface, kind, canonical,
+                                                       status, summary, locations}]}: (version 17) the names Signal's
+                                                       glossary has for a session's folder (session: the chat's own
+                                                       mentions), read as they are; nothing looked up or written
     feedback {note, text, context?}                 -> feedback_filed {url, number, repo}: (version 17) feedback a head
                                                        with no gh of its own wrote (a phone's), filed as an issue by
                                                        this host's gh where Send Feedback files it
@@ -242,7 +261,7 @@ VERSION = 17  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh
 # gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
 # always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer,
 # emission_unserved, a session's on_phone: a Bot's browser on a phone; 17: feedback, filed by this host's gh; start's
-# app_tools)
+# app_tools and grace, attach's app_tools, list_dir, git, signal_names)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

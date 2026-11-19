@@ -677,18 +677,18 @@ RELAY_NUMBERS = itertools.count(1)  # (an app's tools' relays: numbered apart fr
 
 class AppTools:
     """A chat's MCP servers that are a head's own (start's app_tools: a phone's Meta's tools, which act on the phone):
-    each run by its claude here as a relay (mcp-relay) whose lines go to and from the head over the connection that
-    started the chat, as an agent's MCP servers go to and from its caller (Run): mcp_open {session, conn, name},
-    then mcp {conn, line} either way, mcp_close {conn} from either side. Gone with that connection."""
+    each run by its claude here as a relay (mcp-relay) whose lines go to and from the head over its connection, as an
+    agent's MCP servers go to and from its caller (Run): mcp_open {session, conn, name}, then mcp {conn, line} either
+    way, mcp_close {conn} from either side. The head's connection gone, its calls are answered as failed till it
+    attaches again (attach's app_tools: bind); they're let go of with the chat (end)."""
 
     def __init__(self, server, conn, session, names):
-        self.server, self.conn, self.session, self.names = server, conn, session, names
+        self.server, self.session, self.names = server, session, names
         self.id, self.token = secrets.token_hex(8), secrets.token_hex(16)
-        self.relays, self.lock, self.gone = {}, threading.Lock(), False
+        self.relays, self.lock, self.gone, self.conn = {}, threading.Lock(), False, None
+        self.asked = {}  # (calls a relay's carried to the head, not answered yet: (relay, JSON-RPC id) -> True)
         server.agent_runs[self.id] = self  # (found by mcp_relay, as an agent's run is)
-        if not hasattr(conn, "app_tools"):
-            conn.app_tools, conn.tool_relays = set(), {}
-        conn.app_tools.add(self)
+        self.bind(conn)
 
     def config(self):
         """--mcp-config's servers for them: a relay each, to this host process."""
@@ -696,25 +696,81 @@ class AppTools:
                                                         os.path.abspath(self.server.socket_path), self.id, n,
                                                         self.token]} for n in self.names}
 
-    def relay(self, conn, msg):
-        if msg.get("token") != self.token or msg.get("name") not in self.names or self.gone:
-            return None
+    def bind(self, conn):
+        """Carried to conn from now (the head's, attached again): each relay open said to it again."""
         with self.lock:
+            if self.gone:
+                return
+            old, self.conn = self.conn, conn
+            if old is not None and old is not conn:
+                getattr(old, "app_tools", set()).discard(self)
+            if not hasattr(conn, "app_tools"):
+                conn.app_tools, conn.tool_relays = set(), {}
+            conn.app_tools.add(self)
+            relays = list(self.relays.items())
+            for n, _relay in relays:
+                conn.tool_relays[n] = self
+        for n, relay in relays:
+            conn.send({"op": "mcp_open", "session": self.session, "conn": n, "name": relay.app_tool})
+
+    def unbind(self, conn):
+        """The head's connection gone: what it was asked, answered as failed; asked nothing more till it's back."""
+        with self.lock:
+            if self.conn is not conn:
+                return
+            self.conn = None
+            asked, self.asked = list(self.asked), {}
+        for n, rid in asked:
+            self._fail(n, rid)
+
+    def _fail(self, n, rid):
+        relay = self.relays.get(n)
+        if relay is not None:
+            relay.send({"op": "mcp_line", "line": json.dumps({"jsonrpc": "2.0", "id": rid, "error": {
+                "code": -32000, "message": "the app these tools act on isn't connected to this host now"}})})
+
+    def relay(self, conn, msg):
+        with self.lock:
+            if msg.get("token") != self.token or msg.get("name") not in self.names or self.gone:
+                return None
             n = next(RELAY_NUMBERS)
             self.relays[n] = conn
+            conn.app_tool = msg["name"]
+            to = self.conn
+            if to is not None:
+                to.tool_relays[n] = self
         conn.agent_relay = (self, n)
-        self.conn.tool_relays[n] = self
-        self.conn.send({"op": "mcp_open", "session": self.session, "conn": n, "name": msg["name"]})
+        if to is not None:
+            to.send({"op": "mcp_open", "session": self.session, "conn": n, "name": msg["name"]})
         return n
 
     def relay_line(self, n, line):
-        if isinstance(line, str) and n in self.relays:
-            self.conn.send({"op": "mcp", "conn": n, "line": line})
+        """A line from claude's side: to the head, or, the head away, a call answered as failed at once."""
+        if not isinstance(line, str) or n not in self.relays:
+            return
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            msg = {}
+        call = isinstance(msg, dict) and "id" in msg and "method" in msg
+        with self.lock:
+            to = self.conn
+            if to is not None and call:
+                self.asked[(n, json.dumps(msg["id"]))] = True
+        if to is not None:
+            to.send({"op": "mcp", "conn": n, "line": line})
+        elif call:
+            self._fail(n, msg["id"])
 
     def relay_gone(self, n):
-        self.conn.tool_relays.pop(n, None)
-        if self.relays.pop(n, None) is not None:
-            self.conn.send({"op": "mcp_close", "conn": n})
+        with self.lock:
+            to = self.conn
+            if to is not None:
+                to.tool_relays.pop(n, None)
+            had = self.relays.pop(n, None) is not None
+            self.asked = {k: v for k, v in self.asked.items() if k[0] != n}
+        if had and to is not None:
+            to.send({"op": "mcp_close", "conn": n})
 
     def take(self, msg):
         """The head's: a line for one of its relays, or one closed."""
@@ -722,19 +778,29 @@ class AppTools:
         if relay is None:
             return
         if msg.get("op") == "mcp" and isinstance(msg.get("line"), str):
+            try:
+                rid = json.loads(msg["line"]).get("id")
+            except (ValueError, AttributeError):
+                rid = None
+            with self.lock:
+                self.asked.pop((msg["conn"], json.dumps(rid)), None)
             relay.send({"op": "mcp_line", "line": msg["line"]})
         elif msg.get("op") == "mcp_close":
-            self.relays.pop(msg["conn"], None)
-            self.conn.tool_relays.pop(msg["conn"], None)
+            with self.lock:
+                self.relays.pop(msg["conn"], None)
+                if self.conn is not None:
+                    self.conn.tool_relays.pop(msg["conn"], None)
             close_conn(relay)
 
     def end(self):
-        """The head's gone: its relays let go of (its tools fail for its chat's claude from then on)."""
+        """Its chat gone (dropped, deleted, or the host stopping): its relays let go of, its claude's tools with them."""
         with self.lock:
             if self.gone:
                 return
             self.gone = True
             relays, self.relays = list(self.relays.values()), {}
+            if self.conn is not None:
+                getattr(self.conn, "app_tools", set()).discard(self)
         for r in relays:
             close_conn(r)
         self.server.agent_runs.pop(self.id, None)

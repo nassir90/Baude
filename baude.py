@@ -10897,7 +10897,7 @@ class SidePanel(Gtk.Box):
         if not bot and self.stack.get_visible_child_name() == "memory":
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
-        self.memory.show(info if bot else None)
+        self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 
     def reset(self):
         self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)
@@ -12989,6 +12989,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
+                                                  self.panel.memory.stop(),  # (what's written in a Bot's memory saved)
                                                   self.drop_signal(), GLib.idle_add(self.let_go)) and False)
 
         motion = Gtk.EventControllerMotion(propagation_phase=Gtk.PropagationPhase.CAPTURE)

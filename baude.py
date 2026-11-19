@@ -8700,7 +8700,7 @@ class SessionSidebar(Gtk.Box):
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         sid = self.win.session_id
         if mine and not q and self.win.chat_begun() and (self.win.remote is None or self.win.remote.mine) and \
-                (picked is None or chat_group({"id": sid}, assigned) in picked) and \
+                (picked is None or self.open_group(assigned) in picked) and \
                 not any(i["id"] == sid for g in groups.values() for i in g[2]):
             key, label = session_group(self.win.cwd)
             groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
@@ -8826,7 +8826,21 @@ class SessionSidebar(Gtk.Box):
         by_date = self.by_date()
         if by_date:
             self.track_days()
-        for key, label, folder, rows in self.groups():
+        listed = self.groups()
+        if not searching:  # (the groups of the chats listed on the host picked, for new_group: not the open one not
+            # saved yet, an archived one, one Meta's deleted, one Meta's changed listed where it was though it's now
+            # in a group not picked, nor a chat an agent started, listed under it whatever its group. While searching:
+            # those listed before)
+            picked, self.listed_groups = self.group_filter(), set()
+            for key, *_f, rows in listed:
+                for info, _d, _l in rows if key != "archived" else ():
+                    if not info["id"] or info.get("unsaved") or info.get("ghost") or info.get("spawned_by"):
+                        continue
+                    group = chat_group(info, self.assigned)
+                    if picked is None or group in picked or info["id"] not in self.marks:
+                        self.listed_groups.add(group)
+            self.listed_host = self.shown_host()
+        for key, label, folder, rows in listed:
             shut = key in collapsed and not searching
             if key != "bots":  # (Bots, first: no heading, their rows say what they are)
                 self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
@@ -9263,8 +9277,7 @@ class SessionSidebar(Gtk.Box):
                 return
             if op == "delete":
                 r.sessions.pop(info["id"], None)
-                if info["id"] == self.win.session_id:
-                    self.win.new_session()
+                self.win.carry_on(info["id"])
             elif info["id"] in r.sessions:
                 r.sessions[info["id"]] = {**r.sessions[info["id"]], "archived": op == "archive"}
             self.fill()
@@ -9287,8 +9300,7 @@ class SessionSidebar(Gtk.Box):
                     self.win.note(f"no trash here; moved {os.path.basename(path)} to {keep}")
                 except OSError as e:
                     self.win.note(f"couldn't move {os.path.basename(path)} away: {e}")
-        if info["id"] == self.win.session_id:
-            self.win.new_session()
+        self.win.carry_on(info["id"])
         self.refresh()
 
     def new_hosts(self):
@@ -9355,23 +9367,35 @@ class SessionSidebar(Gtk.Box):
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
-    def new_group(self):
-        """The group a new chat's put in: the one group picked in ⋮; with several, the open chat's if it's one of them,
-        else none ("")."""
-        picked = self.group_filter()
+    def new_group(self, host=None):
+        """The group a new chat on a host (its key; None: the one picked beside New session) is put in: the one group
+        picked in ⋮, or, on the host whose chats are listed, the one group they're in (fill's listed_groups: the
+        others picked have none listed); with several, the open chat's if it's one of them, else none ("")."""
+        picked, listed = self.group_filter(), getattr(self, "listed_groups", set())
+        if picked is not None and len(picked) == 1:
+            return next(iter(picked))
+        if len(listed) == 1 and (host or self.shown_host()) == getattr(self, "listed_host", None):
+            return next(iter(listed))
         if picked is None:
             return ""
-        if len(picked) == 1:
-            return next(iter(picked))
+        group = self.open_group()
+        return group if group in picked else ""
+
+    def open_group(self, assigned=None):
+        """The open chat's group (chat_group): a new one's, not written in yet, the group it was started in."""
         win, sid = self.win, self.win.session_id
         r = win.remote
         if sid is None or r is not None and r.sessions.get(sid, {}).get("draft"):
-            group = getattr(win, "draft_group", "")  # (a new chat still: the group it was started in)
-        elif r is not None and sid in r.sessions:
-            group = chat_group(remote_info({**r.sessions[sid], "server": r}))
-        else:
-            group = chat_group({"id": sid})
-        return group if group in picked else ""
+            return getattr(win, "draft_group", "")
+        if r is not None and sid in r.sessions:
+            return chat_group(remote_info({**r.sessions[sid], "server": r}), assigned)
+        return chat_group({"id": sid}, assigned)
+
+    def put_in(self, group):
+        """A new chat's group (new_group) picked in ⋮ too, if it isn't (no group, say), so the chat's listed."""
+        picked = self.group_filter()
+        if picked is not None and group not in picked:
+            self.filtered(sidebar_groups=sorted(picked | {group}))
 
     def mine_listed(self):
         """Is a new chat here listed (this machine's host picked in New session's dropdown, and No group in ⋮: it's in
@@ -9381,21 +9405,19 @@ class SessionSidebar(Gtk.Box):
 
     def new_chat(self):
         """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here. With groups
-        picked in ⋮, it's in one of them (new_group), a draft like any other till it's written in, so its folder and
-        model can still be changed (new_session's group); only while This Mac's host process is too old for drafts,
-        one through it (ask_remote_start)."""
+        picked in ⋮, or only one group's chats listed, it's in one of them (new_group), a draft like any other till
+        it's written in, so its folder and model can still be changed (new_session's group); only while This Mac's
+        host process is too old for drafts, one in a group (or one a chat here wouldn't list) through it
+        (ask_remote_start): Baude's own claude would leave it in none."""
         key = self.host_dd.value() or HERE_HOST
         if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
             # not known)
             toast(self, said)
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
-        elif self.mine_listed():
-            self.win.switch_to(lambda: self.win.new_session(group=""))
-        elif not host_old():
-            picked, group = self.group_filter(), self.new_group()
-            if picked is not None and group not in picked:  # (no group: listed in ⋮ too, as remote_started does)
-                self.filtered(sidebar_groups=sorted(picked | {group}))
+        elif not host_old() or self.mine_listed() and not self.new_group(HERE_HOST):
+            group = self.new_group(HERE_HOST)
+            self.put_in(group)  # (as remote_started does)
             self.win.switch_to(lambda: self.win.new_session(group=group))
         else:
             self.win.ask_remote_start(hosts=self.host_filter())
@@ -13235,6 +13257,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             pane.add_controller(hand)
             pane.get_vadjustment().connect("value-changed", BaudeWindow.pane_scrolled)
         network().listen(self.on_network)
+        if BaudeWindow.forget_gone not in network().listeners:  # (once, for the app)
+            network().listen(BaudeWindow.forget_gone)
         providerslib.listen(self.providers_found)  # (Ollama started, a model pulled, an endpoint added: the pickers)
         self.outer = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.sidebar,
                                           end_child=self.split, resize_start_child=False, resize_end_child=True,
@@ -13386,7 +13410,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
         draft (its caret and attachments too), a side question typed over their list, a Feedback note put aside, the
-        Feedback tab's reply."""
+        Feedback tab's reply. The other chats' drafts are every window's: BaudeApp.restart's."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
         return {
@@ -13413,6 +13437,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.cut_pending = time.time()
         for sid, place in (state.get("places") or {}).items():
             self.PLACES.setdefault(sid, place)
+        if widgets.typed_text(self.input) or self.attachments:  # (one its chat took as it opened, another window's:
+            self.keep_draft(self.draft_key())                   # kept for it, this window's own put back below)
         if state.get("size") and not state.get("maximized"):
             self.set_default_size(*state["size"])
         widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
@@ -14877,20 +14903,43 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         for msg in list(p.asks.values()):
             self.h_control_request(msg)
 
-    def clear_transcript(self, closing=False):
+    def clear_transcript(self, closing=False, keep_box=False, gone=False):
+        """The chat emptied for another (closing: the window's going). Its draft kept for it (keep_draft), the box
+        emptied for the next one's. keep_box: what's typed in the box goes on to the next one (a new conversation for
+        another kind of model: remote_new_conversation; the chat deleted: carry_on), the rest of its draft (its queue,
+        a revert written over) kept for it, or, gone, dropped with it."""
         self.remember_place()  # (to open it there again)
+        key = self.draft_key()  # (what its draft's kept under, below)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
-        if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it)
-            self.input.get_buffer().set_text(self.reverting["draft"])
-            self.reverting = None
+        self.carry_box = None  # (a new conversation that opens later doesn't take this box: open_remote)
+        carried = None
+        if keep_box:  # (what's typed: under a revert, the box as it was before it)
+            text = self.reverting["draft"] if self.reverting is not None else widgets.typed_text(self.input)
+            carried = (text, [len(text)] * 2 if self.reverting is not None else widgets.caret_of(self.input),
+                       list(self.attachments))
+            if self.reverting is not None:
+                self.reverting["draft"] = ""
+            self.set_box(widgets.typed_text(self.input) if self.reverting is not None else "", None, [])
+        if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it, and
+            rev, self.reverting = self.reverting, None  # what's been written over it in its draft, ahead of that)
+            typed = widgets.typed_text(self.input).strip()
+            self.set_box(rev["draft"], rev["draft"] and [len(rev["draft"])] * 2)
+            if typed and typed != (rev["turn"].text or "").strip():
+                self.put_ahead([typed], [])
         if self.send_after_result is not None:  # (nor what was to be sent after one)
             GLib.source_remove(self.send_after_result)
             self.send_after_result = None
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
-        self.unqueue(list(self.queued))  # (another chat: this one's queue gone with it)
+        if self.queued:  # (not sent: in its draft, before what's in the box, as a queued message's revert puts it)
+            self.put_ahead([t.text for t in self.queued if t.text], [a for t in self.queued for a in t.atts])
+        self.unqueue(list(self.queued))  # (another chat: this one's queue gone from under it)
+        if not gone:
+            self.keep_draft(key)  # (the box this chat's to come back to; the next chat's own put in it: take_draft)
+        if carried is not None:
+            self.set_box(*carried)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
         self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
@@ -14928,11 +14977,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """The chat's tab shown (from the Feedback tab, a file's code)."""
         self.tabs.show("chat")
 
-    def new_session(self, run_in=None, group=None):
+    def new_session(self, run_in=None, group=None, carry=False):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
         Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that. group:
         the group it's started in (New session with one group picked in ⋮), kept while it's a draft (another folder or
-        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none."""
+        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none.
+        carry: the open chat's gone (carry_on)."""
         if group is not None or self.remote is None or not (self.remote.sessions.get(self.session_id) or {}).get(
                 "draft"):
             self.draft_group = group or ""
@@ -14948,11 +14998,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         MarkdownView.base_dir = self.run_cwd  # (a network session's folder is its server's: open_remote)
         self.tail.stop()
         self.update_banner()
-        self.clear_transcript()
+        self.clear_transcript(keep_box=carry, gone=carry)
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
         self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
+        if not carry:
+            self.take_draft()  # (a new chat's, if one was left)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -14992,7 +15044,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.proc = None
             self.set_busy(False)
             toast(self.sidebar, f"That session was deleted on {remote_name(self.remote)}")
-            self.new_session()
+            self.carry_on(self.session_id)
             return
         if self.remote is not None:
             # (nothing said in the chat. "lost": let go of with no exit said, its host process gone (or restarted onto
@@ -15122,7 +15174,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
     # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
     # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
-    # box; its ✕ drops it. They're the open chat's: another chat opened, they're gone (clear_transcript)
+    # box; its ✕ drops it. They're the open chat's: another chat opened, they go into its draft (clear_transcript)
     def queue_message(self):
         buf = self.input.get_buffer()
         text = ComposerMarkdown.to_markdown(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)).strip()
@@ -15296,9 +15348,124 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def draft_changed(self):
         """The composer's text changed: the sidebar lists the open chat once it's begun, and not while it's blank."""
+        if getattr(self, "swapping_draft", False):  # (a chat's draft put away or back: the switch fills the sidebar)
+            return
         if getattr(self, "sidebar", None) is not None and (begun := self.chat_begun()) != self.listed_begun:
             self.listed_begun = begun
             self.sidebar.fill()
+
+    # ---- each chat's draft: what's written in the box, its caret and what's attached, kept for the chat as it's left
+    # for another (clear_transcript) and put back as it's opened again (take_draft); every window's, kept over a
+    # restart (BaudeApp.restart). A new chat (nothing sent in it, nor anything of it listed or saved) has the one draft,
+    # "": the next new chat opens with it, as its host drops a draft nobody's on and its id goes with it
+    DRAFTS = {}  # draft_key -> {"text", "caret", "attachments"}
+    MAX_DRAFTS = 200
+
+    GONE = set()  # the ids of chats deleted or trashed: forget_draft
+
+    @classmethod
+    def forget_draft(cls, sid):
+        """A chat deleted or trashed (here, in another window, or on its host: forget_gone): its draft gone with it, and
+        nothing kept under its id from now on (draft_key)."""
+        cls.GONE.add(sid)
+        cls.DRAFTS.pop(sid, None)
+
+    LISTED = None  # {host's key: its sessions' ids}, as last listed while it was there: forget_gone
+
+    @classmethod
+    def forget_gone(cls):
+        """The network changed: a chat a host that's there no longer lists (deleted there, by any head) forgotten."""
+        net = network()
+        with net.lock:
+            now = {r.key: set(r.sessions) for r in net.servers.values() if r.state == "alive"}
+        for key, ids in (cls.LISTED or {}).items():
+            for sid in ids - now.get(key, ids):
+                cls.forget_draft(sid)
+        cls.LISTED = {**(cls.LISTED or {}), **now}
+        cls.GONE.difference_update(*now.values())  # (listed again: a host that had lost it has it back)
+
+    def carry_on(self, sid):
+        """The open chat (sid) deleted or trashed: a new chat in its place, what's typed in the box carried into it."""
+        if sid == self.session_id:
+            self.new_session(carry=True)
+        self.forget_draft(sid)
+
+    def draft_key(self):
+        """What the open chat's draft is kept under: its id, or "" while it's a new chat (or one that's gone)."""
+        sid = self.session_id
+        if not sid or sid in self.GONE:
+            return ""
+        if getattr(self, "chat_sent", False):
+            return sid
+        r = self.remote or network().find(sid)  # (a host's, let go of as a chat's left: its host's still)
+        listed = r.sessions.get(sid) if r is not None else None
+        if listed is not None:
+            return "" if listed.get("draft") else sid
+        return sid if self.shows_anything() or session_file(sid) else ""
+
+    def set_box(self, text, caret=None, atts=None):
+        """The box's text (its caret, what's attached: as given, if given), the sidebar not filled again for it."""
+        self.swapping_draft = True
+        try:
+            self.input.get_buffer().set_text(text)
+            widgets.put_caret(self.input, caret)
+            if atts is not None:
+                self.attachments = list(atts)
+                self.refresh_attach_strip()
+        finally:
+            self.swapping_draft = False
+
+    def put_ahead(self, texts, atts):
+        """texts and atts put in the box ahead of what's there, the caret after them, as a queued message's revert does
+        (queue_edit)."""
+        ahead = "\n\n".join(t for t in texts if t)
+        draft = widgets.typed_text(self.input).strip()
+        self.set_box("\n\n".join(p for p in (ahead, draft) if p), [len(ahead)] * 2, list(atts) + self.attachments)
+
+    @staticmethod
+    def join_drafts(first, then):
+        """Two drafts for one chat (another window's, and this one's) as one: first's text, then then's (the same text
+        once), and what's attached to either; the caret where then's was."""
+        a, b = first["text"], then["text"]
+        if not a.strip() or a.strip() == b.strip():
+            text, caret = b, then.get("caret")
+        elif not b.strip():
+            text, caret = a, first.get("caret")
+        else:
+            text, caret = f"{a}\n\n{b}", [c + len(a) + 2 for c in then.get("caret") or [len(b)] * 2]
+        seen = [(x.name, x.path, x.data) for x in first["attachments"]]
+        atts = first["attachments"] + [x for x in then["attachments"] if (x.name, x.path, x.data) not in seen]
+        return {"text": text, "caret": caret, "attachments": atts}
+
+    def keep_draft(self, key):
+        """The box's draft kept as key's, with one another window left there (join_drafts), and the box emptied for
+        the next chat's. An empty box keeps nothing and drops nothing: a draft this window took is gone already
+        (take_draft), and one there is another window's."""
+        text, atts = widgets.typed_text(self.input), list(self.attachments)
+        if text.strip() or atts:
+            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts}
+            if (other := self.DRAFTS.pop(key, None)) is not None:
+                draft = self.join_drafts(other, draft)
+            self.DRAFTS[key] = draft
+            while len(self.DRAFTS) > self.MAX_DRAFTS:  # (the longest left go)
+                del self.DRAFTS[next(iter(self.DRAFTS))]
+        self.set_box("", None, [])
+
+    def take_draft(self):
+        """The chat just opened: its draft (keep_draft) in the box, if it was left with one."""
+        if draft := self.DRAFTS.pop(self.draft_key(), None):
+            self.set_box(draft["text"], draft["caret"], draft["attachments"])
+            self.completer.hide()
+
+    @classmethod
+    def drafts_state(cls):
+        """The drafts as a restart keeps them (BaudeApp.restart)."""
+        return {k: {**d, "attachments": [a.state() for a in d["attachments"]]} for k, d in cls.DRAFTS.items()}
+
+    @classmethod
+    def restore_drafts(cls, state):
+        for key, d in (state or {}).items():
+            cls.DRAFTS.setdefault(key, {**d, "attachments": [Attachment.from_state(a) for a in d["attachments"]]})
 
     def ask_side_question(self, question):
         sq = SideQuestion(self, question)
@@ -15586,9 +15753,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             return
         self.outgrown = False  # (another model's window: as its usage says)
         if self.remote is not None and model_program(value) != model_program(was):
-            label = self.model_said(value)
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
-            self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
+            self.remote_new_conversation(value)  # (a network session: a new one, on its server)
             return
         if getattr(self, "busy", False) and self.proc is not None and \
                 (model_program(value) != model_program(was) or model_program(value) == "pi" or
@@ -16017,10 +16183,21 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         dlg.select_folder(self, None, done)
 
     def start_in_folder(self, path):
+        """A new chat in a folder (Open folder…, a folder's +): from a new chat not written in yet that was started
+        in a group, in that group still; else in the group New session would put it in (new_group). While This Mac's
+        host process is too old for drafts, a chat in a group is started through it (ask_remote_start), as New
+        session's is: Baude's own claude would leave it in none."""
         if not os.path.isdir(path):
             self.note(f"not a folder: {path}")
             return
-        self.new_session(path)
+        draft = self.session_id is None or self.remote is not None and \
+            (self.remote.sessions.get(self.session_id) or {}).get("draft")
+        group = self.draft_group if draft and getattr(self, "draft_group", "") else self.sidebar.new_group(HERE_HOST)
+        if group and host_old():
+            self.ask_remote_start(folder=path, here=True)
+            return
+        self.sidebar.put_in(group)
+        self.new_session(path, group=group)
 
     def change_cwd(self, path):
         path = self.norm_dir(os.path.join(self.run_cwd, path))  # relative to the folder claude runs in
@@ -17902,6 +18079,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
+        spawned = self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("spawned_by")
+        # (a chat a Bot started on the mesh: the task it was given drawn as any prompt is)
         for kind, content, *rest in items:
             if kind in ("user", "start_prompt"):
                 turn_calls, stop_said = [], False
@@ -17953,7 +18132,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                if kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
+                if kind == "start_prompt" and not spawned:  # (what a session started from outside was asked: at its
+                    # top, not yours)
                     row = Gtk.Box(spacing=6)
                     for a in atts:
                         row.append(attachment_widget(a, 96))
@@ -18007,10 +18187,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         r = info["remote"]
         self.left_remote.pop(info["id"], None)  # (open here again: what it does is seen)
         self.draft_group = ""  # (a new chat's group: not another's)
+        carry = getattr(self, "carry_box", None) == (info["id"], self.session_id)  # (the box for its new conversation)
+        self.carry_box = None
         self.remember_own_writes()
         if self.busy and self.proc is not None:
             self.detach_proc()  # (the turn goes on: detach_proc)
-        self.clear_transcript()
+        self.clear_transcript(keep_box=carry)
         self.switching_chat = True
         cwd = info.get("cwd")
         if baudelib.client.is_here(r.info) and cwd and os.path.isdir(cwd):
@@ -18036,6 +18218,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.set_busy(True)
         else:
             self.restart_proc(resume=True)  # (start_remote_proc: what it asks, its models; all it says once you write)
+        if not carry:
+            self.take_draft()
         self.apply_read_only()
         self.update_status()  # (its host, and its folder there)
         self.sidebar.fill()
@@ -18193,11 +18377,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def ask_remote_start(self, server=None, folder=None, hosts=None, here=False):
         """New session through a server: the sidebar's New session while a new chat here isn't listed (hosts: the keys
         of those that are), or a server's folder's + (here: this machine's, one started there if there's none,
-        local_server). A prompt, a folder and a group (the one group picked in ⋮, if one is);
+        local_server). A prompt, a folder and a group (new_group's, if it has one);
         the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
         (remote_started)."""
-        picked = self.sidebar.group_filter()
-        group = next(iter(picked)) if picked is not None and len(picked) == 1 else None
+        group = self.sidebar.new_group(HERE_HOST if here else host_key(server) if server is not None else None) or None
         if here:
             servers = [r for r in network().alive() if host_key(r) == HERE_HOST][:1]
         else:
@@ -18443,32 +18626,32 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
         once it's written in, as a new chat here is."""
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
-        group = self.sidebar.new_group()
+        group = self.sidebar.new_group(host_key(r))
         model = self.model if self.model and model_program(self.model) == "claude" else None
-        self.note(f"a new session on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
                    "model": model, "effort": self.effort if model else None, "mode": "auto", "group": group,
                    "draft": True, **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))
 
-    def remote_new_conversation(self, model, label):
+    def remote_new_conversation(self, model):
         """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new
         conversation, but on the same server, in the same folder and group, opened to be written in."""
-        r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
+        r, listed, was = self.remote, self.remote.sessions.get(self.session_id) or {}, self.session_id
         effort = self.local_effort if model_program(model) == "pi" else self.effort
         mode = "default" if "codex" in (model_program(model), model_program(self.model)) else self.mode
-        self.note(f"model → {label}: a new conversation on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
                    "mode": mode, "group": listed.get("group"), "draft": True,
                    **({"env": claudelib.claude_env()} if r.mine else {})},
-                  lambda reply: self.remote_started(r, reply))
+                  lambda reply: self.remote_started(r, reply, carry_from=was))
 
-    def remote_started(self, r, reply):
+    def remote_started(self, r, reply, carry_from=None):
         """A server started a session asked for here: its group listed, and it opened (another host's isn't listed till
-        that host's picked beside New session: Meta's button:host)."""
+        that host's picked beside New session: Meta's button:host). carry_from: the chat whose box it opens with, if
+        that's still the one open (a new conversation for another kind of model: open_remote)."""
         if reply.get("op") != "started":
             self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
             return
+        self.carry_box = (reply["session"]["id"], carry_from) if carry_from else None
         r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
         sb, info = self.sidebar, remote_info({**reply["session"], "server": r})
         groups, group = sb.group_filter(), chat_group(info)  # (and its group, if ⋮ leaves it out)
@@ -18547,6 +18730,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.attach_proc(left)
         else:
             self.restart_proc(resume=True)  # a fresh helper: resume_pending keeps --resume off
+        self.take_draft()
         self.apply_read_only()
         self.sidebar.fill()
 
@@ -19031,6 +19215,7 @@ class BaudeApp(Adw.Application):
         restore, self.opts.restore = take_restart_state(getattr(self.opts, "restore", None)), None  # (once)
         if restore is not None and "windows" not in restore:
             restore = {"windows": [restore]}  # (one window's, from before every window came back)
+        BaudeWindow.restore_drafts((restore or {}).get("drafts"))  # (before the windows: each takes its chat's)
         for i, state in enumerate((restore or {}).get("windows") or [None]):
             opts = argparse.Namespace(**vars(self.opts))
             if state:
@@ -19121,7 +19306,8 @@ class BaudeApp(Adw.Application):
         path = restart_state_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            json.dump({"windows": [w.restart_state() for w in wins], "front": update.front_app(), "updated": updated}, f)
+            json.dump({"windows": [w.restart_state() for w in wins], "drafts": BaudeWindow.drafts_state(),
+                       "front": update.front_app(), "updated": updated}, f)
         for w in wins:
             if w.proc:
                 w.proc.on_exit = lambda *_: None

@@ -31,12 +31,17 @@ data class Contact(val hostId: String, val session: JSONObject) {
 }
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
- * ended, a turn stopped, the conversation compacted). rewind: a revert's mark, text the uuid of the last line kept. */
+ * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
+ * transcript record (uuid: its uuid, shown or not), and "rewind", a revert's mark (uuid: the record it keeps last;
+ * none, none kept). */
 data class Line(val kind: String, val text: String, val uuid: String? = null)
 
 /** A chat open: its lines, read from its transcript on its host (more read as it grows), what's sent to it. */
 class Chat(val hostId: String, val sid: String) {
     val lines = mutableStateListOf<Line>()
+    val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
+    val preparing = mutableStateOf(0)         // (picked, still being read)
+    val ends = HashMap<String, Int>()         // (a record's uuid: how many lines were shown up to its end)
     val busy = mutableStateOf(false)
     val said = mutableStateOf<String?>(null)
     var offset = -1L
@@ -142,7 +147,7 @@ object Mesh {
                     val before = sessions[c.host.id]
                     sessions[c.host.id] = now
                     if (catchUp.remove(c.host.id) && before != null) missed(c, before, now)
-                    open?.let { if (it.hostId == c.host.id && it.offset < 0) read(it) }
+                    open?.let { if (it.hostId == c.host.id) read(it) } // (its first read, or what it missed)
                 }
                 "turn_ended" -> ended(c, msg)
                 "claude" -> open?.let { if (it.hostId == c.host.id && it.sid == msg.optString("session")) read(it) }
@@ -218,13 +223,14 @@ object Mesh {
                 if (r.optString("op") == "transcript") {
                     chat.offset = next
                     for (line in lines) {
-                        if (line.kind != "rewind") {
-                            chat.lines.add(line)
-                            continue
-                        }
-                        val kept = chat.lines.indexOfLast { it.uuid != null && it.uuid == line.text }
-                        if (kept >= 0 || line.text.isEmpty()) {
-                            while (chat.lines.size > kept + 1) chat.lines.removeAt(chat.lines.size - 1)
+                        when (line.kind) {
+                            "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
+                            "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
+                                val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
+                                while (chat.lines.size > keep) chat.lines.removeAt(chat.lines.size - 1)
+                                chat.ends.values.removeAll { it > keep }
+                            }
+                            else -> chat.lines.add(line)
                         }
                     }
                 }
@@ -350,6 +356,7 @@ object Mesh {
             .setContentText(text.take(200))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(2000)))
             .setContentIntent(pending)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
         try {
@@ -387,17 +394,26 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
         }
         val type = o.optString("type")
         if (type == "last-prompt" && o.optBoolean("rewound")) {
-            out.add(Line("rewind", o.optString("leafUuid", "")))
+            out.add(Line("rewind", "", if (o.isNull("leafUuid")) null else o.optString("leafUuid")))
             continue
         }
-        if (type != "user" && type != "assistant") continue
-        if (o.optBoolean("isMeta") || o.optBoolean("isSidechain")) continue
-        val uuid = o.optString("uuid").ifBlank { null }
+        val uuid = if (o.isNull("uuid")) null else o.optString("uuid").ifBlank { null }
+        record(o, type, uuid, out)
+        if (uuid != null) out.add(Line("record", "", uuid)) // (where it ends: a revert to it cuts there)
+    }
+    return out
+}
+
+/** The lines one record shows (none, for most). */
+private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<Line>) {
+    run {
+        if (type != "user" && type != "assistant") return
+        if (o.optBoolean("isMeta") || o.optBoolean("isSidechain")) return
         if (o.optBoolean("isCompactSummary")) {
             out.add(Line("note", "The conversation was compacted", uuid))
-            continue
+            return
         }
-        val msg = o.optJSONObject("message") ?: continue
+        val msg = o.optJSONObject("message") ?: return
         val blocks = when (val content = msg.opt("content")) {
             is JSONArray -> content.list()
             is String -> listOf(JSONObject().put("type", "text").put("text", content))
@@ -412,10 +428,13 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
                         when {
                             t.startsWith("<task-notification") -> out.add(Line("note", "A background task ended", uuid))
                             t.startsWith(STOPPED) -> out.add(Line("note", "Stopped", uuid))
+                            t.startsWith("<command-name>") -> out.add(Line("you", command(t), uuid))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
                             else -> out.add(Line("you", t, uuid))
                         }
-                    } else if (t.isNotBlank()) out.add(Line("bot", t.trim(), uuid))
+                    } else if (t.isNotBlank()) {
+                        out.add(Line(if (o.optBoolean("isApiErrorMessage")) "note" else "bot", t.trim(), uuid))
+                    }
                 }
                 "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))
                 "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document"), uuid))
@@ -423,7 +442,14 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
             }
         }
     }
-    return out
+}
+
+/** A slash command as you typed it ("/name args"), from claude's record of it. */
+private fun command(t: String): String {
+    val name = Regex("<command-name>(.*?)</command-name>", RegexOption.DOT_MATCHES_ALL).find(t)?.groupValues?.get(1)
+    val args = Regex("<command-args>(.*?)</command-args>", RegexOption.DOT_MATCHES_ALL).find(t)?.groupValues?.get(1)
+    return listOfNotNull(name?.trim()?.let { if (it.startsWith("/")) it else "/$it" }, args?.trim()?.ifBlank { null })
+        .joinToString(" ").ifBlank { t }
 }
 
 private val LEADING_REMINDERS = Regex("""\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*""", RegexOption.DOT_MATCHES_ALL)

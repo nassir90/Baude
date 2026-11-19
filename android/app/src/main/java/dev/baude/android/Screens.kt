@@ -121,14 +121,20 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
     val contact = Mesh.contact(hostId, sid)
     val name = contact?.name ?: "Bot"
     val host = Mesh.hosts.firstOrNull { it.id == hostId }
-    var text by remember { mutableStateOf("") }
-    val files = remember { mutableStateListOf<Picked>() }
+    var text by androidx.compose.runtime.saveable.rememberSaveable(hostId, sid) { mutableStateOf("") }
+    val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val main = android.os.Handler(android.os.Looper.getMainLooper())
+        chat.preparing.value += uris.size
         kotlin.concurrent.thread(name = "pick", isDaemon = true) { // (read, and pictures made small, off the main thread)
             for (uri in uris) {
-                val (picked, why) = read(ctx, uri)
+                val (picked, why) = try {
+                    read(ctx, uri)
+                } catch (e: Throwable) { // (too big to hold, say: said, not a crash)
+                    null to "That file couldn't be read"
+                }
                 main.post {
+                    chat.preparing.value -= 1
                     if (picked != null) files.add(picked)
                     if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show()
                 }
@@ -173,7 +179,7 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
                     BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
                 }
-                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value
+                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
                 IconButton(Icons.Filled.ArrowUpward, "Send", enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
                     Mesh.send(chat, text, files.toList())
@@ -295,10 +301,27 @@ private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
     val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0) return null
-    if (mime in Mesh.IMAGE_TYPES && maxOf(bounds.outWidth, bounds.outHeight) <= MAX_EDGE && bytes.size <= MAX_BYTES) {
-        return mime to bytes
+    val turn = try { // (a camera's picture, upright as it was taken: its EXIF orientation)
+        when (android.media.ExifInterface(java.io.ByteArrayInputStream(bytes)).getAttributeInt(
+            android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    } catch (_: Exception) {
+        0f
     }
-    var bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    if (turn == 0f && mime in Mesh.IMAGE_TYPES && maxOf(bounds.outWidth, bounds.outHeight) <= MAX_EDGE &&
+        bytes.size <= MAX_BYTES) return mime to bytes
+    var sample = 1 // (decoded at a fraction of its size where it's far bigger: a 50 MP photo isn't held whole)
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2
+    var bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+        android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+    if (turn != 0f) {
+        bmp = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height,
+            android.graphics.Matrix().apply { postRotate(turn) }, true)
+    }
     val edge = maxOf(bmp.width, bmp.height)
     if (edge > MAX_EDGE) {
         val k = MAX_EDGE.toFloat() / edge
@@ -308,6 +331,11 @@ private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
     if (bmp.hasAlpha()) {
         val png = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         if (png.size() <= MAX_BYTES) return "image/png" to png.toByteArray()
+    }
+    if (bmp.hasAlpha()) { // (a JPEG has no see-through: on white, as Baude puts it)
+        val flat = android.graphics.Bitmap.createBitmap(bmp.width, bmp.height, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(flat).apply { drawColor(android.graphics.Color.WHITE); drawBitmap(bmp, 0f, 0f, null) }
+        bmp = flat
     }
     for (quality in intArrayOf(90, 80, 70, 60, 50)) {
         val jpg = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, it) }

@@ -121,9 +121,11 @@ python3 record.py            # Record
 ## Emission
 
 `emission.py` is Baude's browser, a window of its own for now: tabs, back and forward, an address bar that searches
-too, and profiles. Each profile keeps its own cookies and logins, so a site signed in to once stays signed in there.
-Pages are WebKit's: Apple's WKWebView on macOS, and WebKitGTK 6.0 on Linux (`gir1.2-webkit-6.0` on Debian and
-Ubuntu, `webkitgtk-6.0` on Arch). On a host with no display, run it under `xvfb-run`.
+too, and profiles (made, renamed and removed from the profile menu). Each profile keeps its own cookies and logins, so
+a site signed in to once stays signed in there; a profile is open in one Emission at a time. Downloads go to your
+Downloads folder. Pages are WebKit's: Apple's WKWebView on macOS 14 or later, and WebKitGTK 6.0 on Linux
+(`gir1.2-webkit-6.0` on Debian and Ubuntu, `webkitgtk-6.0` on Arch). On a Linux host with no display it starts a
+virtual one of its own, with `xvfb-run` installed (package `xvfb`).
 
 ```bash
 python3 emission.py [URL] [--profile NAME]

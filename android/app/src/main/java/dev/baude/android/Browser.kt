@@ -179,8 +179,10 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
     var readOnly by remember(sid) { mutableStateOf(prefs.getBoolean("ro:$sid", false)) }
     var picture by remember { mutableStateOf(IntSize.Zero) }
     var typing by remember { mutableStateOf(false) }
-    DisposableEffect(here, hostId, sid) {
-        if (here) watch.start()
+    Mesh.tick.value
+    val reachable = Mesh.conn(hostId) != null // (opened before its host's connection is made: watched once it is)
+    DisposableEffect(here, hostId, sid, reachable) {
+        if (here && reachable) watch.start()
         onDispose { watch.stop() }
     }
     LaunchedEffect(picture) { // (its size told once it's settled)
@@ -266,8 +268,10 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
                 }
                 return@Box
             }
+            val latest = androidx.compose.runtime.rememberUpdatedState(state)
+            val send = androidx.compose.runtime.rememberUpdatedState<(JSONObject) -> Unit> { call(it) }
             Image(bmp, now?.optString("title"), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
-                .pointerTaps(bmp, picture, state, { readOnly }) { call(it) })
+                .pointerTaps(bmp, picture, { latest.value }, { readOnly }) { send.value(it) })
             if (watch.status.value == "stopped") Text("The browser stopped. It restarts when you open this page again.",
                 style = Type.caption, color = c.dim, modifier = Modifier.align(Alignment.BottomCenter)
                     .background(c.inside).padding(start = 8.dp, end = 8.dp, bottom = 4.dp))
@@ -294,26 +298,25 @@ private fun css(p: Offset, bmp: ImageBitmap, picture: IntSize, state: JSONObject
 }
 
 /** A tap clicks (twice, a double click; held, the right button), a drag scrolls the page (sent every 50 ms). */
-private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: JSONObject?, readOnly: () -> Boolean,
+private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: () -> JSONObject?, readOnly: () -> Boolean,
                                  call: (JSONObject) -> Unit): Modifier = this
-    .pointerInput(bmp.width, bmp.height, picture, state) {
+    .pointerInput(bmp.width, bmp.height, picture) {
         fun click(p: Offset, press: Int, button: String) {
             if (readOnly()) return
-            val (x, y) = css(p, bmp, picture, state) ?: return
+            val (x, y) = css(p, bmp, picture, state()) ?: return
             call(JSONObject().put("op", "click").put("x", x).put("y", y).put("css", true).put("press", press)
                 .put("quick", true).put("button", button))
         }
         detectTapGestures(onTap = { click(it, 1, "left") }, onDoubleTap = { click(it, 2, "left") },
             onLongPress = { click(it, 1, "right") })
     }
-    .pointerInput(bmp.width, bmp.height, picture, state) {
+    .pointerInput(bmp.width, bmp.height, picture) {
         var at: Pair<Double, Double>? = null
         var dx = 0.0
         var dy = 0.0
         var last = 0L
+        var k = 1.0
         val fw = bmp.width.toDouble()
-        val view = state?.optJSONArray("view")
-        val k = (view?.optDouble(0, 0.0)?.takeIf { it > 0 } ?: fw) / fw / minOf(picture.width / fw, picture.height / bmp.height.toDouble())
         fun flush() {
             val p = at ?: return
             if (dx == 0.0 && dy == 0.0) return
@@ -323,7 +326,12 @@ private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: JSON
             dy = 0.0
             last = System.currentTimeMillis()
         }
-        detectDragGestures(onDragStart = { at = if (readOnly()) null else css(it, bmp, picture, state) },
+        detectDragGestures(onDragStart = {
+            at = if (readOnly()) null else css(it, bmp, picture, state())
+            val view = state()?.optJSONArray("view") // (the page's pixels a picture's pixel is)
+            k = (view?.optDouble(0, 0.0)?.takeIf { w -> w > 0 } ?: fw) / fw /
+                minOf(picture.width / fw, picture.height / bmp.height.toDouble())
+        },
             onDragEnd = { flush(); at = null }, onDragCancel = { at = null }) { change, d ->
             change.consume()
             dx -= d.x * k
@@ -364,14 +372,11 @@ private fun TypeRow(enabled: Boolean, call: (JSONObject) -> Unit) {
             .padding(horizontal = 8.dp, vertical = 7.dp)) {
             if (text.isEmpty()) Text("Type into the page", style = Type.body, color = c.dim)
             BasicTextField(text, { now ->
-                when {
-                    now.startsWith(text) && now.length > text.length -> {
-                        val added = now.substring(text.length)
-                        if (added == " ") call(JSONObject().put("op", "key").put("keys", "Space"))
-                        else call(JSONObject().put("op", "type").put("text", added).put("anywhere", true))
-                    }
-                    text.startsWith(now) -> repeat(text.length - now.length) { call(JSONObject().put("op", "key").put("keys", "Backspace")) }
-                }
+                val same = text.commonPrefixWith(now).length // (a correction: what changed taken back, then typed)
+                repeat(text.length - same) { call(JSONObject().put("op", "key").put("keys", "Backspace")) }
+                val added = now.substring(same)
+                if (added == " ") call(JSONObject().put("op", "key").put("keys", "Space"))
+                else if (added.isNotEmpty()) call(JSONObject().put("op", "type").put("text", added).put("anywhere", true))
                 text = now
             }, enabled = enabled, singleLine = true, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

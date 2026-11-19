@@ -159,24 +159,29 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
     LaunchedEffect(a, a.agentId.value) {
         val id = a.agentId.value ?: return@LaunchedEffect
         val name = "agent-$id.jsonl"
-        while (true) {
+        while (true) { // (each file held said, so only what's new comes; one request at a time)
             val have = JSONObject()
-            held[name]?.let { (size, mtime) -> have.put(name, org.json.JSONArray(listOf(size, mtime))) }
-            Mesh.ask(chat.hostId, JSONObject().put("op", "subagents").put("session", chat.sid).put("have", have)
-                .put("limit", 4 shl 20)) { r ->
-                val f = r.optJSONArray("files").list().firstOrNull { it.optString("name") == name } ?: return@ask
+            for ((n, sm) in held) have.put(n, org.json.JSONArray(listOf(sm.first, sm.second)))
+            val r = asked(chat.hostId, JSONObject().put("op", "subagents").put("session", chat.sid).put("have", have)
+                .put("limit", 4 shl 20))
+            if (r.optString("op") != "subagents") { delay(5_000); continue }
+            for (f in r.optJSONArray("files").list()) {
+                val n = f.optString("name")
                 val data = f.optString("data")
-                if (data.isNotEmpty()) {
-                    val got = String(Base64.getDecoder().decode(data), Charsets.UTF_8)
-                    if (f.optLong("offset") == 0L) text.setLength(0)
-                    text.append(got)
-                    lines.clear()
-                    lines.addAll(parse(text.toString(), cutFirst = false, sidechain = true)
-                        .filter { it.kind in setOf("you", "bot", "tool", "note", "error") })
+                if (n == name && data.isNotEmpty()) {
+                    val offset = f.optLong("offset")
+                    if (offset == 0L) text.setLength(0)
+                    if (offset == 0L || offset == (held[n]?.first ?: 0L)) {
+                        text.append(String(Base64.getDecoder().decode(data), Charsets.UTF_8))
+                        lines.clear()
+                        lines.addAll(parse(text.toString(), cutFirst = false, sidechain = true)
+                            .filter { it.kind in setOf("you", "bot", "tool", "note", "error") })
+                    }
                 }
-                held[name] = f.optLong("next", f.optLong("size")) to f.optLong("mtime")
+                held[n] = f.optLong("next", f.optLong("size")) to f.optLong("mtime")
             }
-            if (a.status.value != "running" && lines.isNotEmpty()) break
+            if (r.optBoolean("more")) continue
+            if (a.status.value != "running" && name in held) break
             delay(2_000)
         }
     }
@@ -200,6 +205,11 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
             }
         }
     }
+}
+
+/** Mesh.ask, waited for. */
+suspend fun asked(hostId: String, msg: JSONObject): JSONObject = kotlinx.coroutines.suspendCancellableCoroutine { k ->
+    Mesh.ask(hostId, msg) { r -> if (k.isActive) k.resumeWith(Result.success(r)) }
 }
 
 // -------------------------------------------------------------------------------------------------- processes --

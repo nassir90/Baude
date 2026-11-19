@@ -25,6 +25,7 @@ object Meta {
     val host = mutableStateOf<String?>(null)
     var chat = Chat("", "")
     private var started = false
+    private val waiting = ArrayList<String>() // (sent before its session's made: sent once it is)
     private var heard: ((String, JSONObject) -> Unit)? = null
 
     val SYSTEM = listOf(
@@ -78,8 +79,11 @@ object Meta {
             haiku?.let { msg.put("model", it.value) }
             Mesh.ask(h, msg) { r ->
                 val id = r.optJSONObject("session")?.optString("id")
-                if (r.optString("op") == "started" && id != null) c.sid = id
-                else {
+                if (r.optString("op") == "started" && id != null) {
+                    c.sid = id
+                    waiting.toList().also { waiting.clear() }.forEach { input(c, h, it) }
+                } else {
+                    waiting.clear()
                     started = false
                     c.thinking.value = false
                     c.said.value = "Couldn't start Meta on ${Mesh.label(h)}: " + r.optString("error")
@@ -87,6 +91,10 @@ object Meta {
             }
             return
         }
+        if (c.sid.isEmpty()) waiting.add(text) else input(c, h, text)
+    }
+
+    private fun input(c: Chat, h: String, text: String) {
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", text))
         Mesh.ask(h, JSONObject().put("op", "input").put("session", c.sid).put("msg", msg)) { r ->
             if (r.optString("op") == "error") {
@@ -133,6 +141,7 @@ object Meta {
             Mesh.conn(c.hostId)?.send(JSONObject().put("op", "detach").put("session", c.sid))
         }
         started = false
+        waiting.clear()
         chat = Chat(host.value ?: "", "").also { it.sender = { t, _ -> send(t) } }
         version.value++
     }
@@ -151,8 +160,9 @@ fun MetaPage(chatHost: String, here: Boolean) {
     Mesh.tick.value
     Meta.version.value
     val up = Mesh.reached()
-    if (Meta.host.value == null || up.none { it.first == Meta.host.value }) {
-        (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
+    androidx.compose.runtime.LaunchedEffect(up, chatHost) {
+        if (Meta.host.value == null || up.none { it.first == Meta.host.value })
+            (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),

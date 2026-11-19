@@ -40,25 +40,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.util.UUID
-
-/** Feedback written here and not yet filed, kept on this phone (filesDir/feedback/<id>.json) so a try that failed is
- * tried again as the same note: the host files it once, by its id. */
-object FeedbackStore {
-    private fun dir(ctx: Context) = File(ctx.filesDir, "feedback").apply { mkdirs() }
-
-    fun save(ctx: Context, id: String, text: String, context: List<String>, filed: JSONObject? = null) {
-        val o = JSONObject().put("id", id).put("text", text).put("context", JSONArray(context)).put("at", System.currentTimeMillis())
-        if (filed != null) o.put("filed", filed)
-        File(dir(ctx), "$id.json").writeText(o.toString())
-    }
-}
 
 /** Send Feedback: what should change, and the screen it's about (the context, shown if you ask), filed as an issue
  * by a host's gh (this phone has none), where Baude's Send Feedback files it (fixes.submit_issue_target: the private
- * repository the host's checkout has, if its gh sees it). Kept on this phone first, so trying again doesn't file it
- * twice. */
+ * repository the host's checkout has, if its gh sees it). Its id stays the same while it's tried again, so the host
+ * files it once. */
 @Composable
 fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     val c = LocalBaude.current
@@ -70,8 +57,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     var showContext by rememberSaveable { mutableStateOf(false) }
     Mesh.tick.value
     val up = Mesh.reached().filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours: its gh files it)
-    var host by rememberSaveable { mutableStateOf<String?>(null) }
-    if (host == null || up.none { it.first == host }) host = up.firstOrNull()?.first
+    var picked by rememberSaveable { mutableStateOf<String?>(null) }
+    val host = picked?.takeIf { p -> up.any { it.first == p } } ?: up.firstOrNull()?.first
     var target by remember { mutableStateOf<String?>(null) }
     var targetWhy by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(host) {
@@ -88,11 +75,9 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         val h = host ?: return
         sending = true
         failed = null
-        FeedbackStore.save(ctx, id, text, full)
         Mesh.ask(h, JSONObject().put("op", "feedback").put("note", id).put("text", text).put("context", JSONArray(full))) { r ->
             sending = false
             if (r.optString("op") == "feedback_filed") {
-                FeedbackStore.save(ctx, id, text, full, filed = r)
                 Toast.makeText(ctx, "Filed as an issue on ${r.optString("repo")}", Toast.LENGTH_LONG).show()
                 back()
             } else failed = said(h, r.optString("error"))
@@ -113,7 +98,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Filed by", style = Type.caption, color = c.dim)
                 Picker(host?.let { Mesh.label(it) } ?: "No host connected", "The host whose gh files it",
-                    up.map { it.second to it.first }, host, enabled = up.size > 1) { host = it }
+                    up.map { it.second to it.first }, host, enabled = up.size > 1) { picked = it }
                 Text(when {
                     host == null -> ""
                     target != null -> "on $target"

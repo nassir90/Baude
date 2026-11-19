@@ -124,10 +124,16 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
         saving = true
         val msg = JSONObject().put("op", "memory").put("session", sid).put("text", t).put("seen", s)
         mtime?.let { msg.put("base_mtime", it) }
+        val edits = dirty // (edits made by now: those made while it's saved are saved after it)
         Mesh.ask(hostId, msg) { r ->
             saving = false
             when {
-                r.optString("op") == "memory" -> { took(r); dirty = 0 }
+                r.optString("op") == "memory" && dirty == edits -> { took(r); dirty = 0 }
+                r.optString("op") == "memory" -> { // (written in it meanwhile: what's there kept, saved next)
+                    text = r.optString("text")
+                    seen = if (r.has("seen") && !r.isNull("seen")) r.optString("seen") else r.optString("text")
+                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+                }
                 r.has("text") && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
                     val theirs = r.optString("text")
                     mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
@@ -153,7 +159,8 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     LaunchedEffect(dirty) { // (saved 600 ms after the last edit)
         if (dirty == 0) return@LaunchedEffect
         delay(600)
-        if (!saving) write(doc, doc, text ?: "")
+        while (saving) delay(200)
+        write(doc, doc, text ?: "")
     }
     val bot = text
     val offline = failed?.let { if (it in UNREACHED) "Can't connect to the host." else "Couldn't load the memory." }
@@ -166,7 +173,7 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
         return
     }
     val a = seen.split("\n")
-    val pending = hunks(a, bot.split("\n"))
+    val pending = remember(seen, bot) { hunks(a, bot.split("\n")) }
     Column(Modifier.fillMaxSize()) {
         if (offline != null) GreyBanner("$offline Showing the last saved copy.")
         Box(Modifier.fillMaxSize().inside(c).alpha(if (offline != null) 0.5f else 1f)) {

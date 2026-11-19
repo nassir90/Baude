@@ -326,6 +326,10 @@ object Mesh {
         main.post(block)
     }
 
+    fun later(ms: Long, block: () -> Unit) {
+        main.postDelayed(block, ms)
+    }
+
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): JSONObject? = sessions[hostId]?.firstOrNull { it.optString("id") == sid }
 

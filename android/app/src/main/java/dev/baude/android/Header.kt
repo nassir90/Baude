@@ -112,19 +112,25 @@ private val nextControl = AtomicInteger(1)
 fun control(hostId: String, sid: String, request: JSONObject, then: (String?) -> Unit) {
     val rid = "android_${nextControl.getAndIncrement()}"
     var heard: ((String, JSONObject) -> Unit)? = null
+    var done = false
     heard = { at, msg ->
         val r = msg.optJSONObject("msg")?.optJSONObject("response")
         if (at == hostId && msg.optString("op") == "claude" && msg.optString("session") == sid &&
             msg.optJSONObject("msg")?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
+            done = true
             then(if (r.optString("subtype") == "error") r.optString("error").ifBlank { "it said no" } else null)
         }
     }
     Mesh.listeners.add(heard)
+    Mesh.later(30_000) { // (no answer: not waited for any longer)
+        if (done || !Mesh.listeners.remove(heard)) return@later
+        then("it didn't answer")
+    }
     val msg = JSONObject().put("type", "control_request").put("request_id", rid).put("request", request)
     Mesh.ask(hostId, JSONObject().put("op", "input").put("session", sid).put("msg", msg)) { r ->
-        if (r.optString("op") == "error") {
-            Mesh.listeners.remove(heard)
+        if (r.optString("op") == "error" && Mesh.listeners.remove(heard)) {
+            done = true
             then(r.optString("error"))
         }
     }

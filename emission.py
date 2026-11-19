@@ -34,6 +34,7 @@ APP_ID = "dev.baude.Emission"
 HOME_PAGE = "https://duckduckgo.com/"
 SEARCH = "https://duckduckgo.com/?q={}"
 POLL_MS = 200  # (each page's title, address, progress, back and forward read this often, the same on both engines)
+SCREEN = (3840, 2400)  # (the virtual display a Linux agent's Emission is on: resize's limits fit in it)
 AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long without a request)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -138,6 +139,14 @@ def address(text):
         if "." in host:
             return "https://" + text
     return SEARCH.format(urllib.parse.quote_plus(text))
+
+
+AGENT = {"on": False}  # (this process an agent's Emission: emission.py --agent)
+
+
+def for_bots(pid):
+    """Whether pid's profile is a Bot's (its pages watched for its tools: their console kept)."""
+    return any(p["id"] == pid and p.get("bot") for p in profiles())
 
 
 def failure_page(url, why):
@@ -262,6 +271,8 @@ MAC_KEYS = {"Enter": (36, "\r"), "Tab": (48, "\t"), "Space": (49, " "), "Backspa
             "PageUp": (116, "\uf72c"), "PageDown": (121, "\uf72d")}
 MAC_CHAR_CODES = dict(zip("asdfhgzxcv bqweryt123465=97-80]ou[ip lj'k;\\,/nm.", range(0, 48)))
 MAC_CHAR_CODES.pop(" ", None)
+MAC_CHAR_CODES["`"] = 50
+MAC_SHIFTED = dict(zip('!@#$%^&*()_+{}|:"<>?~', "1234567890-=[]\\;',./`"))  # (a US keyboard's Shift)
 MAC_COMMANDS = {("Enter", ()): b"insertNewline:",  # (a window that isn't key runs every other key's editing from its
                 ("a", ("cmd",)): b"selectAll:", ("c", ("cmd",)): b"copy:",  # events: only Return's isn't)
                 ("x", ("cmd",)): b"cut:", ("v", ("cmd",)): b"paste:", ("z", ("cmd",)): b"undo:",
@@ -518,13 +529,14 @@ class MacWeb:
             send(config, b"setWebsiteDataStore:", store, types=(ctypes.c_void_p,))
             send(config, b"setApplicationNameForUserAgent:", macos.ns_string(self.user_agent()),
                  types=(ctypes.c_void_p,))
-        if not opener:
+        if not opener and for_bots(profile):
             script = send(send(b"WKUserScript", b"alloc"), b"initWithSource:injectionTime:forMainFrameOnly:",
                           macos.ns_string(CONSOLE_JS), 0, True, types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_bool))
             send(send(config, b"userContentController"), b"addUserScript:", script, types=(ctypes.c_void_p,))
             send(script, b"release")
         prefs = send(config, b"preferences")
-        for sel in (b"_setHiddenPageDOMTimerThrottlingEnabled:", b"_setPageVisibilityBasedProcessSuppressionEnabled:"):
+        for sel in (b"_setHiddenPageDOMTimerThrottlingEnabled:", b"_setPageVisibilityBasedProcessSuppressionEnabled:")\
+                if AGENT["on"] else ():
             if send(prefs, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
                 send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
@@ -882,8 +894,9 @@ class MacWeb:
             self.key("Enter")
             return True
         send = macos.objc_send
-        code = MAC_CHAR_CODES.get(ch.lower(), 0)
-        flags = MAC_MODS["shift"] if ch.isupper() else 0
+        base = MAC_SHIFTED.get(ch, ch.lower())
+        code = 49 if ch == " " else MAC_CHAR_CODES.get(base, 0)
+        flags = MAC_MODS["shift"] if ch.isupper() or ch in MAC_SHIFTED else 0
         ns = send(self.view, b"window")
         f = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, MacPoint, ctypes.c_ulong,
                              ctypes.c_double, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
@@ -1059,6 +1072,7 @@ class XTest:
 
 
 class GtkWeb:
+    given_back = {}  # (sessions of Bots' profiles a window's let go of: this process's till their lock goes)
     """One page in WebKitGTK 6.0's WebView, in its place in the window, with its profile's own network session (its
     cookies, its logins, its cache: kept on disk under data_home()/profiles/<its id>, apart from others'). Its tab
     sets window, popup and closed, as MacWeb's. WebKitGTK asks for alerts, sign-ins and files itself."""
@@ -1087,8 +1101,10 @@ class GtkWeb:
         self.view.connect("authenticate", self.authenticate)
         self.view.connect("run-file-chooser", self.file_chooser)
         self.held = []  # (what WebKit waits on an answer to, kept till it's given)
-        self.view.get_user_content_manager().add_script(WebKit.UserScript.new(  # (the page's console kept)
-            CONSOLE_JS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserScriptInjectionTime.START, None, None))
+        if opener is None and for_bots(profile):
+            self.view.get_user_content_manager().add_script(WebKit.UserScript.new(  # (the page's console kept)
+                CONSOLE_JS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserScriptInjectionTime.START, None,
+                None))
         self.view.get_user_content_manager().add_script(WebKit.UserScript.new_for_world(  # (Emission's own world
             "", WebKit.UserContentInjectedFrames.TOP_FRAME,  # registered: WebKitGTK keeps it, and what's set in it,
             WebKit.UserScriptInjectionTime.START, "emission", None, None))  # from one call to the next, then)
@@ -1134,8 +1150,10 @@ class GtkWeb:
                                                                 self.WebKit.CredentialPersistence.FOR_SESSION))
             if request in self.held:
                 self.held.remove(request)
-        self.window.sign_in(self, request.get_host() or "", request.get_realm() or "",
-                            request.is_retry(), once(answer))
+        waiting = self.window.sign_in(self, request.get_host() or "", request.get_realm() or "",
+                                      request.is_retry(), once(answer))
+        request.connect("cancelled", lambda *_: (self.window.done_waiting(waiting),
+                                                 request in self.held and self.held.remove(request)))
         return True
 
     def file_chooser(self, _view, request):
@@ -1156,6 +1174,8 @@ class GtkWeb:
     @classmethod
     def session(cls, profile):
         """profile's network session (its cookies, logins and cache), made once in this process."""
+        if profile not in cls.sessions and profile in cls.given_back:
+            cls.sessions[profile] = cls.given_back.pop(profile)
         if profile not in cls.sessions:
             from gi.repository import WebKit
             root = cls.folder(profile)
@@ -1546,9 +1566,15 @@ class Window(Adw.ApplicationWindow):
         """A Bot's profile this window had, let go of (its door now, its lock once WebKit's let go of its store):
         the Bot's own Emission can have it again."""
         Door.close(pid)
-        GtkWeb.sessions.pop(pid, None)
-        self.later.append((GLib.get_monotonic_time() + 10_000_000,
-                           lambda: pid != self.profile_id and unlock_profile(pid)))
+        held = GtkWeb.sessions.pop(pid, None)
+        if held is not None:
+            GtkWeb.given_back[pid] = held  # (taken up again if this window comes back to it first)
+
+        def let_go():
+            if pid != self.profile_id and pid not in Door.open:
+                GtkWeb.given_back.pop(pid, None)
+                unlock_profile(pid)
+        self.later.append((GLib.get_monotonic_time() + 10_000_000, let_go))
 
     def have(self, pid):
         """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
@@ -1767,6 +1793,9 @@ class Window(Adw.ApplicationWindow):
                 self.later.append((GLib.get_monotonic_time() + 1_000_000, lambda: MacWeb.remove_store(pid, removed)))
                 return
             if why:
+                if pid != self.profile_id:
+                    Door.close(pid)
+                    unlock_profile(pid)
                 self.say(f"“{name}” wasn't removed", why)
                 return
             forget_profile(name)
@@ -1896,7 +1925,7 @@ class Window(Adw.ApplicationWindow):
                          if m.get("accept", True) else answer(None, None),
                          host=host, realm=realm, failed_before=bool(failed_before))
         if self.agent:
-            return
+            return pid
         user = Gtk.Entry(placeholder_text="User name", activates_default=True)
         password = Gtk.PasswordEntry(placeholder_text="Password", activates_default=True, show_peek_icon=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1914,6 +1943,7 @@ class Window(Adw.ApplicationWindow):
         dlg.connect("response", lambda _d, r: (self.done_waiting(pid), answer(user.get_text(), password.get_text())
                                                if r == "ok" else answer(None, None)))
         self.present_dialog(dlg, web)
+        return pid
 
     def choose_files(self, multiple, folders, finish, web=None):
         """Files for a page's file input: finish([paths]) or finish(None)."""
@@ -1996,7 +2026,11 @@ class Window(Adw.ApplicationWindow):
             for dlg in self.asking.pop(tab.web, []):
                 dlg.force_close()
             for pid in [k for k, w in self.waiting.items() if w["web"] is tab.web]:
-                self.waiting.pop(pid, None)
+                w = self.waiting.pop(pid, None)
+                try:
+                    w["answer"]({"accept": False})
+                except Exception:  # (its page gone with it: nothing more to tell)
+                    sys.excepthook(*sys.exc_info())
             tab.web.close()
         view.close_page_finish(page, True)
         if not self.tabs and not self.switching:
@@ -2067,6 +2101,7 @@ CONSOLE_JS = r"""
 (() => {
   const K = Symbol.for('emission.console');
   if (window[K]) return;
+  try { performance.setResourceTimingBufferSize(2000); } catch (e) {}
   const log = [];
   Object.defineProperty(window, K, {value: log});
   const put = (level, text) => { log.push({level, text: String(text).slice(0, 2000), at: Date.now()});
@@ -2275,8 +2310,12 @@ class Control:
     def js(self, t, body, answer, then=None, page=False):
         """body run in t's page (Emission's world, PAGE_JS's em there; page: the page's own world, for javascript):
         then(result) given what it returned, or the error answered."""
-        if (waiting := self.win.prompts(t)):
-            answer({"error": "the page is waiting on a prompt (answer_prompt answers it)", "prompts": waiting})
+        if t.web.view is None or t not in self.win.tabs.values():
+            answer({"error": f"tab {t.id} has closed: tabs lists the open ones"})
+            return
+        if (waiting := [p for p in self.win.prompts(t) if p["kind"] in ("alert", "confirm", "prompt")]):
+            answer({"error": "the page is waiting on its prompt, and runs nothing till it's answered (answer_prompt)",
+                    "prompts": waiting})
             return
 
         def done(text, why):
@@ -2417,9 +2456,12 @@ class Control:
         left = list(text)
 
         def read_back():
-            self.js(t, "const el = document.activeElement;"
-                       "return 'value' in el ? String(el.value) : el.textContent", answer,
-                    lambda value: answer({**self.describe(t), "value": value}))
+            self.js(t, "const el = em.typed;"
+                       "if (!el || !el.isConnected) return null;"
+                       "const v = 'value' in el ? String(el.value) : el.textContent;"
+                       "return v.length > 2000 ? v.slice(0, 2000) + '…' : v", answer,
+                    lambda value: answer({**self.describe(t), "value": value} if value is not None else
+                                         {**self.describe(t), "note": "the field's gone (the page changed)"}))
 
         @guarded_by(answer)
         def next_char():
@@ -2428,7 +2470,10 @@ class Control:
                 return False
             ch = left.pop(0)
             if not t.web.type_char(ch):
-                self.js(t, f"document.execCommand('insertText', false, {json.dumps(ch)}); return true", answer,
+                self.js(t, f"const ch = {json.dumps(ch)}, el = em.typed;"
+                           "if (!document.execCommand('insertText', false, ch) && el) {"
+                           "  if ('value' in el) em.setValue(el, el.value + ch); else el.textContent += ch; }"
+                           "return true", answer,
                         lambda _v: GLib.timeout_add(self.TYPE_GAP_MS, next_char))
                 return False
             return True
@@ -2438,7 +2483,7 @@ class Control:
                 GLib.timeout_add(self.TYPE_GAP_MS, next_char)
         self.js(t, focus + "const el = document.activeElement;"
                 "if (!em.editable(el)) throw new Error('nothing to type into is focused: click the field, or give "
-                "its ref'); return true", answer, ready)
+                "its ref'); em.typed = el; return true", answer, ready)
 
     def op_key(self, msg, answer):
         t = self.tab(msg)
@@ -2513,7 +2558,7 @@ class Control:
         t = self.tab(msg)
         self.js(t, "const log = window[Symbol.for('emission.console')] || [];"
                    f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
-                   f"const got = log.filter(e => !re || re.test(e.text)).slice(-{int(msg.get('limit') or 50)});"
+                   f"const got = log.filter(e => !re || re.test(e.text)).slice(-{max(1, int(msg.get('limit') or 50))});"
                    f"if ({json.dumps(bool(msg.get('clear')))}) log.length = 0; return got", answer,
                 lambda got: answer({**self.describe(t), "console": got}), page=True)
 
@@ -2523,7 +2568,7 @@ class Control:
         self.js(t, f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
                    "return [...performance.getEntriesByType('navigation'), ...performance.getEntriesByType('resource')]"
                    ".filter(e => !re || re.test(e.name))"
-                   f".slice(-{int(msg.get('limit') or 50)}).map(e => ({{url: e.name, type: e.initiatorType || "
+                   f".slice(-{max(1, int(msg.get('limit') or 50))}).map(e => ({{url: e.name, type: e.initiatorType || "
                    "e.entryType, status: e.responseStatus || null, ms: Math.round(e.duration), "
                    "bytes: e.transferSize || null}))", answer,
                 lambda got: answer({**self.describe(t), "requests": got}))
@@ -2532,8 +2577,8 @@ class Control:
         """The page's size (its viewport) made width by height, CSS pixels."""
         t = self.tab(msg)
         w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
-        if not (200 <= w <= 4000 and 200 <= h <= 4000):
-            raise ValueError("width and height between 200 and 4000")
+        if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
+            raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
 
         def sized(now):
             ww, wh = self.win.get_default_size()
@@ -2610,7 +2655,7 @@ def with_display(own=False):
     if shutil.which("xvfb-run") is None:
         return "There's no display here, and xvfb-run (package xvfb) isn't installed to make one."
     env = {**os.environ, "EMISSION_VIRTUAL_DISPLAY": "1", "GDK_BACKEND": "x11"}
-    os.execvpe("xvfb-run", ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x900x24", sys.executable,
+    os.execvpe("xvfb-run", ["xvfb-run", "--auto-servernum", f"--server-args=-screen 0 {SCREEN[0]}x{SCREEN[1]}x24", sys.executable,
                             os.path.abspath(__file__), *sys.argv[1:]], env)
 
 
@@ -2636,6 +2681,7 @@ def main():
                 return 2
             if not lock_profile(pid):
                 return 0  # (another Emission has it already: the tools reach that one)
+            AGENT["on"] = True
             if sys.platform == "darwin":
                 macos.stay_offscreen()
                 MacWeb.stay_awake()

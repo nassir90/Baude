@@ -11,8 +11,8 @@ import threading
 from baudelib import meshtools, wire
 
 NAME = "emission"
-WAIT_S = 100  # (a request's answer waited for this long: the host's, HOST_WAIT_S, is said first)
-HOST_WAIT_S = 85  # (the host's wait on Emission: a page's load is 30 s of it at most)
+HOST_WAIT_S = 85  # (the host's wait on Emission's answer: a page's load is 30 s of it at most)
+WAIT_S = 130  # (a request's answer waited for this long: the host's start of Emission and its wait, and then some)
 
 TAB = {"type": "string", "description": "A tab's id (tabs); the one in front if none"}
 HOST = {"type": "string", "description": "A host's id or name (mcp__mesh__hosts); this one if none. Each host has "
@@ -90,6 +90,7 @@ OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab"
        "hover": "hover", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
        "javascript": "javascript", "console": "console", "network": "network", "resize": "resize",
        "prompts": "prompts", "answer_prompt": "answer_prompt"}
+HOST_OPS = {*OPS.values(), "sites"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
 
 
 class Browser:

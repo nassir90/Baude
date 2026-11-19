@@ -187,14 +187,14 @@ def unlock_profile(pid):
 def door_path(pid):
     """Where the Emission that has pid's profile takes requests (a socket in a folder only this user can open; short,
     for macOS's limit on socket paths)."""
-    run = os.environ.get("XDG_RUNTIME_DIR")
-    base = os.path.join(run, "emission") if run and os.path.isdir(run) else os.path.join(
-        tempfile.gettempdir(), f"emission-{os.getuid()}")
-    os.makedirs(base, mode=0o700, exist_ok=True)
-    st = os.lstat(base)
-    if not os.path.isdir(base) or os.path.islink(base) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-        raise OSError(f"{base} isn't this user's alone: Emission won't use it")
-    return os.path.join(base, hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock")
+    from baudelib import wire
+    name = hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock"
+    base = os.path.join(wire.runtime_dir(), "emission")  # (the host process's folder: found the same from ssh as at
+    if len(os.path.join(os.path.abspath(base), name).encode()) > 100:  # the screen, unlike $TMPDIR)
+        base = os.path.join(tempfile.gettempdir() if sys.platform != "darwin" else "/tmp", f"emission-{os.getuid()}")
+    else:
+        wire.own_dir(wire.runtime_dir())
+    return os.path.join(wire.own_dir(base), name)
 
 
 def call(pid, msg, timeout=60):
@@ -238,16 +238,23 @@ def call_bot(bot_id, name, msg, timeout=60):
         pass
     os.makedirs(data_home(), exist_ok=True)
     log_path = os.path.join(data_home(), f"agent-{pid[:8]}.log")
-    with open(log_path, "ab") as log:
-        proc = subprocess.Popen([sys.executable, EMISSION, "--agent", "--bot", bot_id, *(["--name", str(name)] if name
-                                                                                    else [])],
-                         stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
-                         cwd=os.path.dirname(EMISSION))
+
+    def start():
+        with open(log_path, "ab") as log:
+            return subprocess.Popen([sys.executable, EMISSION, "--agent", "--bot", bot_id,
+                                     *(["--name", str(name)] if name else [])],
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+                                    cwd=os.path.dirname(EMISSION))
+    proc = start()
     end = time.monotonic() + START_S
     while True:
         try:
             return call(pid, msg, timeout)
         except (FileNotFoundError, ConnectionRefusedError):
+            if proc.poll() == 0:  # (it found the profile someone's, with no door yet: tried again a moment on)
+                time.sleep(0.5)
+                proc = start()
+                continue
             if proc.poll() not in (None, 0):  # (gone, and not because another has the profile: it said why)
                 try:
                     with open(log_path, encoding="utf-8", errors="replace") as f:

@@ -930,6 +930,8 @@ class Server:
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # running; on a thread of its own)
             if not isinstance(bot.get("id"), str) or not bot["id"] or not isinstance(msg.get("call"), dict):
                 return reply("error", error="emission needs a Bot (its id) and a call")
+            if msg["call"].get("op") not in emissiontools.HOST_OPS:  # (the tools' requests only: no quit, open, …)
+                return reply("error", error=f"emission takes the tools' requests, not {msg['call'].get('op')!r}")
 
             def browse():
                 try:

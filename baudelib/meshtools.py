@@ -196,7 +196,7 @@ class Mesh:
             ch.close()
             raise
         return self._answer(ch, where, session, wait, timeout_s, skip=1 if busy else 0, req=sent, text=text,
-                            kind="chat", offset=offset, title=title)
+                            kind="chat", offset=offset, title=title, sender=sender)
 
     def sender(self):
         """This chat as a message from it says it's from (wire.said_by): a Bot by its name, else a chat by its title,
@@ -213,7 +213,7 @@ class Mesh:
                 "host_name": here.get("name"), "session": self.me}
 
     def _answer(self, ch, where, session, wait, timeout_s, skip=0, req=None, text=None, kind="subagent", offset=0,
-                end=None, title=None):
+                end=None, title=None, sender=None):
         """The turn's answer, read off ch (attached, live; closed by the end), or as far as it got. skip: the answers
         of turns before it, to pass by; req: the input sent, its error the answer at once; text: what the turn was
         asked, what its answer comes after in the chat, past offset (its transcript's size as it was asked); end:
@@ -221,8 +221,8 @@ class Mesh:
         None: from the start): reached again (BACK_S) and the session looked at (_chat). Its turn going on: followed
         again, the turns before it passed by. Done meanwhile: its answer read from the chat. Cut short at the turn
         (its claude stopped by that restart): said so, interrupted. Cut before its claude had what it was asked:
-        sent again (req, or text as its user's). This chat's host is told what it waits on meanwhile (waiting; title:
-        the chat's, for what it's held as)."""
+        sent again (req, or text from sender: said so in it). This chat's host is told what it waits on meanwhile
+        (waiting; title: the chat's, for what it's held as)."""
         if not wait and req is None:
             if ch is not None:
                 ch.close()
@@ -230,7 +230,8 @@ class Mesh:
         if end is None:
             end = time.monotonic() + max(5, min(int(timeout_s or WAIT_S), WAIT_MAX_S))
         host = where.get("host") if where.get("via") == "mesh" else None
-        said, told, again = [], wait and self.waiting(host, session, kind, text, offset, end, title=title), req
+        said, told = [], wait and self.waiting(host, session, kind, text, offset, end, title=title, sender=sender)
+        again = req or (said_to(session, text, sender, says=False) if text is not None else None)
         try:
             while True:
                 if ch is None:
@@ -256,7 +257,7 @@ class Mesh:
                             return {"session": session, "answer": cut([chat["answer"]]), "error": False}
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
-                        req, skip, said = again or said_to(session, text), 0, []
+                        req, skip, said = again, 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -290,7 +291,7 @@ class Mesh:
             if ch is not None:
                 ch.close()
             if told:
-                self.waiting(host, session, kind, text, offset, end, done=True, title=title)
+                self.waiting(host, session, kind, text, offset, end, done=True, title=title, sender=sender)
 
     def reattach(self, where, session, end):
         """(channel, attached) for a session whose host went, once it's back (till end, monotonic; one stopping,
@@ -314,7 +315,7 @@ class Mesh:
                 return None, "its host went, and wasn't back in time"
             time.sleep(AGAIN_S)
 
-    def waiting(self, host, session, kind, text, offset, end, done=False, title=None):
+    def waiting(self, host, session, kind, text, offset, end, done=False, title=None, sender=None):
         """This chat's host told what its agent waits on (waits_on: session, on host, None for that one), or that it's
         done: kept there, so if it restarts meanwhile, which stops this, the answer's sent to this chat once there's
         one. Told: True."""
@@ -323,6 +324,7 @@ class Mesh:
         try:
             self.request(self.local, {"op": "waits_on", "session": self.me, "done": done, "on": {
                 "host": host, "session": session, "kind": kind, "text": text, "offset": offset, "title": title,
+                "sender": sender,
                 "until": time.time() + end - time.monotonic()}}, timeout=10)
             return True
         except (OSError, ValueError):  # (a host before waits_on keeps none: a restart of it ends the wait)
@@ -339,7 +341,7 @@ class Mesh:
                                "since."}
         return {**self._answer(None, where, wait["session"], True, left, text=wait.get("text"), kind=wait.get("kind"),
                                offset=int(wait.get("offset") or 0), end=time.monotonic() + left,
-                               title=wait.get("title")), **named}
+                               title=wait.get("title"), sender=wait.get("sender")), **named}
 
     def start_subagent(self, a):
         """A chat started on a host with the task, attached to as it starts (nothing it says missed), its answer
@@ -353,12 +355,16 @@ class Mesh:
                 params[k] = a[k]
         if self.me:
             params["spawned_by"] = self.me
+        sender = self.sender()  # (who its task's from, said so in it: this chat, its Bot)
         where, wait, timeout_s = self.where(a.get("host")), a.get("wait", True), a.get("timeout_s") or WAIT_S
         named = self.named(where)
         end, dropped = time.monotonic() + BACK_S, False
         while True:
             try:
                 ch, info = self.again(where, end)
+                says = (info.get("version") or 0) >= 14  # (a host that says who it's from itself; else said here)
+                asked = {**params, "sender": sender} if sender and says else \
+                    {**params, "prompt": wire.said_by(sender, params["prompt"])} if sender else params
             except OSError as e:
                 raise OSError(f"{a.get('host') or 'this host'} wasn't reached within {BACK_S} s: {e}") from None
             if dropped:
@@ -367,11 +373,11 @@ class Mesh:
                     raise ValueError("the host went before it answered")
                 if (sid := self._started(where, params["start_key"])) is not None:  # (taken before it went)
                     ch.close()
-                    return {**self._answer(None, where, sid, wait, timeout_s, text=a["prompt"], title=params["title"]),
-                            **named}
+                    return {**self._answer(None, where, sid, wait, timeout_s, text=a["prompt"], title=params["title"],
+                                           sender=sender), **named}
             try:
                 ch.sock.settimeout(60)
-                ch.send(params)
+                ch.send(asked)
                 while (r := ch.reply()) is not None and r.get("req") != 1:
                     pass
             except OSError:
@@ -379,7 +385,7 @@ class Mesh:
             if r is not None and r.get("op") != "error":
                 ch.keep_alive()
                 return {**self._answer(ch, where, r["session"]["id"], wait, timeout_s, text=a["prompt"],
-                                       title=params["title"]), **named}
+                                       title=params["title"], sender=sender), **named}
             ch.close()
             if r is not None and "host process is stopping" not in (r.get("error") or ""):
                 raise ValueError(r.get("error") or "the host didn't take it")

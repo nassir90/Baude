@@ -828,6 +828,7 @@ class RemoteProc(claude.ClaudeProc):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.session, self.live, self.code, self.killed = session_id, live, None, False
+        self.answering = {}  # (requests of its own sent on it, held's: their req -> what's done with the answer)
         self.ch, self.server = wire.reach(where, timeout=3)
         self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
@@ -848,7 +849,9 @@ class RemoteProc(claude.ClaudeProc):
     def _read_remote(self):
         for msg in self.ch:
             op = msg.get("op")
-            if op == "claude" and msg.get("session") == self.session:
+            if (done := self.answering.pop(msg.get("req"), None)) is not None:  # (held's answer: its own, not a turn's)
+                self.dispatch(lambda m=msg, done=done: done(m))
+            elif op == "claude" and msg.get("session") == self.session:
                 self.dispatch(lambda m=msg["msg"]: self.on_msg(self, m))
             elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
                 self.code = "stopped" if msg.get("stopped") else msg.get("code")
@@ -867,6 +870,16 @@ class RemoteProc(claude.ClaudeProc):
 
     def send(self, obj):
         self.ch.send({"op": "input", "session": self.session, "msg": obj})
+
+    def held(self, held_id, send, done):
+        """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says
+        of it comes here as it's said: done(answer) with the host's answer (op held, or error, why), on the main
+        loop."""
+        req = f"held-{next(self.req_ids)}"
+        self.answering[req] = done
+        if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": "its host isn't there"}))
 
     def close_stdin(self):
         pass  # (nothing to close here: the server's claude goes on)

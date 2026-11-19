@@ -7854,7 +7854,8 @@ def remote_info(s):
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
             "archived": bool(s.get("archived")), "bot": s.get("bot"),
             "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
-            "mesh_tools": bool(s.get("mesh_tools"))}
+            "mesh_tools": bool(s.get("mesh_tools")),
+            "held": len(s.get("held") or [])}  # (messages its host holds for it, to send or drop: HeldTurn)
 
 
 BOT_PICTURES = {}  # (session id, its picture's mtime) -> Gdk.Texture: a Bot's picture, fetched from its host once
@@ -8585,7 +8586,7 @@ class SessionSidebar(Gtk.Box):
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         # (and the host listed: this machine's again while the one picked is gone)
         seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
-                                       s.get("said"), s.get("group"), bool(s.get("archived")))
+                                       s.get("said"), s.get("group"), bool(s.get("archived")), len(s.get("held") or []))
                                       for s in network().sessions() if self.shows(s, hosts, groups, assigned)
                                       or s["id"] in getattr(self, "listed_remote", ())))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
@@ -8914,10 +8915,12 @@ class SessionSidebar(Gtk.Box):
         box.append(words)
         is_open = info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
+        if info.get("held"):
+            box.append(self.held_tag())
         box.append(dot)
         r = info.get("remote")
         tip = [name, info.get("title") or "", info.get("cwd") or "",
-               f"On {remote_name(r)} ({r.host})" if r is not None else ""]
+               f"On {remote_name(r)} ({r.host})" if r is not None else "", self.held_tip(info)]
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")
         if tree := info.get("worktree"):
@@ -8931,6 +8934,19 @@ class SessionSidebar(Gtk.Box):
         click.connect("pressed", lambda g, n, x, y: self.show_menu(row, x, y))
         row.add_controller(click)
         return row
+
+    @staticmethod
+    def held_tag():
+        """A row's mark for a chat its host holds messages for (held: a subagent's answer after a restart), there till
+        each's sent or dropped in it."""
+        tag = Gtk.Label(label="held", valign=Gtk.Align.CENTER)
+        tag.add_css_class("row-tag")
+        return tag
+
+    @staticmethod
+    def held_tip(info):
+        n = info.get("held") or 0
+        return f"{n} message{'s' if n != 1 else ''} held for it, to send or delete in it" if n else ""
 
     def session_row(self, info, depth=0, last=True):
         """Title ··· [dot] — one line; the dot only when something's happening (working, waiting for an answer,
@@ -8954,8 +8970,10 @@ class SessionSidebar(Gtk.Box):
             tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
             tag.add_css_class("row-tag")
             box.append(tag)
+        elif info.get("held"):
+            box.append(self.held_tag())
         box.append(dot)
-        tip = [info.get("title") or "", info.get("cwd") or ""]
+        tip = [info.get("title") or "", info.get("cwd") or "", self.held_tip(info)]
         if r is not None:
             gone = ", deactivated" if info.get("off") else \
                 f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""
@@ -15137,12 +15155,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     # send it, or dropped with its ✕ (HeldTurn). They're its host's, as it lists them: there till one's done with,
     # whatever restarts meanwhile
     def show_held(self, gone=()):
-        """The held messages as the open chat's host lists them now (gone: those just sent or dropped, not again)."""
+        """The held messages as the open chat's host lists them now (gone: those just dropped, not again); one being
+        sent (its ↑, its host's answer not come yet: held_send) left as it is."""
         listed = (self.remote.sessions.get(self.session_id) or {}) if self.remote is not None else {}
         held = {h["id"]: h for h in listed.get("held") or []
                 if isinstance(h, dict) and isinstance(h.get("text"), str) and h.get("id") and h["id"] not in gone}
         turns = self.held_turns = getattr(self, "held_turns", {})
-        for hid in [k for k in turns if k not in held]:
+        for hid in [k for k, t in turns.items() if k not in held and not t.sending]:
             t = turns.pop(hid)
             if t.get_parent() is self.queue_box:
                 self.queue_box.remove(t)
@@ -15154,23 +15173,63 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                                or {"kind": "host"}, said.strip()), h)
                 self.queue_box.insert_child_after(turns[hid], last)  # (over what's queued, in the order held)
             last = turns[hid]
-        self.queue_box.set_visible(bool(self.queued or turns))
+        self.queue_box.set_visible(bool(self.queued or any(t.get_visible() for t in turns.values())))
 
     def held_send(self, turn):
-        """Its ↑: sent to the agent, as you'd send it (its claude started for it, if it isn't running), once no turn's
-        going."""
+        """Its ↑, once no turn's going: sent to the agent by its host and no longer held there, at once (held, send:
+        kept if it can't be sent), on this chat's own connection, so what its claude says of it comes as it's said;
+        drawn as sent meanwhile, and put back, its host's no said, if it isn't. A revert not made yet is made first,
+        as sending does (on_send), and this sent after it (held_after_revert), what's in the box left there."""
+        if turn.sending:
+            return
         if self.busy:
             toast(self, "It can be sent once this turn's over")
             return
         if self.composer_box.gates:  # (its host gone, the connection dropped: nothing's sent)
             toast(self, "It can't be sent while this chat's host isn't there")
             return
+        if self.reverting is not None:
+            if not self.revert_asked():
+                self.held_after_revert = turn
+                self.commit_revert()
+            return
         if self.resume_pending:
             self.begin_resume()
-        self.send_text(turn.held["text"], turn.held)
+        if self.proc is None:
+            self.start_proc()
+        if self.proc is None or not hasattr(self.proc, "held"):
+            toast(self, "It can't be sent: this chat's agent couldn't be started")
+            return
+        h, sid = turn.held, self.session_id
+        sender, said = baudelib.wire.sender_of(h["text"])
+        sent = SenderTurn(self.sender_bubble(sender or baudelib.wire.clean_sender(h.get("sender")) or
+                                             {"kind": "host"}, said.strip()))
+        turn.sending = sent
+        turn.set_visible(False)
+        self.add(sent)
+        self.stick_bottom, self.restore_scroll = True, None
+        self.proc.stop_asked = False
+        self.set_busy(True)
+
+        def done(answer):
+            turn.sending = None
+            if self.session_id != sid:
+                return
+            if answer.get("op") != "error":
+                self.show_held(gone={h["id"]})
+                return
+            if sent.get_parent() is not None:  # (not sent: as it was, and why said)
+                sent.get_parent().remove(sent)
+            self.set_busy(False)
+            turn.set_visible(True)
+            self.show_held()
+            toast(self, f"Not sent: {answer.get('error') or 'its host said no'}")
+        self.proc.held(h["id"], True, done)
 
     def held_drop(self, turn):
         """Its ✕: dropped, here and by its host."""
+        if turn.sending:
+            return
         if self.remote is not None:
             self.remote.request({"op": "held", "session": self.session_id, "id": turn.held["id"]})
         self.show_held(gone={turn.held["id"]})
@@ -15215,14 +15274,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         threading.Thread(target=work, daemon=True, name="worktree").start()
         return True
 
-    def send_text(self, text, held=None):
+    def send_text(self, text):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
-        by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's).
-        held: a message its host held for the chat (HeldTurn's), text its own: sent as it is, from its sender, and
-        dropped there once it's gone; never put in the box."""
+        by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's)."""
         self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
         going = getattr(self, "cut_continuing", False) and text == CUT_CONTINUE  # (Continue's: not the box's to keep)
-        boxed = not going and held is None  # (what was written: back in the box if it can't be sent)
         if not going:
             self.cut_continuing = False
         self.show_cut(None)
@@ -15230,7 +15286,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.proc is None and self.remote is None and not self.runs_here():
             took = self.take_up()
             if took is False:  # (This Mac's host process isn't there yet: started, and this sent once it is, from the
-                if boxed:  # box it's kept in meanwhile, if it's still this chat's and still what's written)
+                if not going:  # box it's kept in meanwhile, if it's still this chat's and still what's written)
                     buf.set_text(text)
                 self.note(f"Starting {THIS_MACHINE}'s host process…")
                 sid = self.session_id
@@ -15240,9 +15296,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 def ready(_r):
                     if self.session_id != sid or self.remote is not None:
                         return
-                    if going and getattr(self, "cut_continuing", False) or held is not None:
-                        self.send_text(text, held)
-                    elif boxed and widgets.typed_text(self.input).strip() == text:
+                    if going and getattr(self, "cut_continuing", False):
+                        self.send_text(text)
+                    elif not going and widgets.typed_text(self.input).strip() == text:
                         buf.set_text("")
                         self.send_text(text)
                 self.local_server(ready)
@@ -15250,7 +15306,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if took is None:
                 if going:
                     self.continue_failed()  # (Continue back, to press again)
-                elif boxed:
+                else:
                     buf.set_text(text)
                 return
         if self.proc is None:
@@ -15258,28 +15314,21 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.proc is None:  # (it couldn't be started, or its server isn't there: what was written stays)
             if going:
                 self.continue_failed()
-            elif boxed:
+            else:
                 buf.set_text(text)
             if self.remote is not None:
                 self.remote_view()
             return
         self.cut_continuing = False
         # (Continue's message goes alone: what's attached is kept for what's written next)
-        atts, self.attachments = ([], self.attachments) if not boxed else (self.attachments, [])
+        atts, self.attachments = ([], self.attachments) if going else (self.attachments, [])
         self.refresh_attach_strip()
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
-        if held is not None:
-            self.add(SenderTurn(self.sender_bubble(held.get("sender") or {"kind": "host"},
-                                                   baudelib.wire.sender_of(text)[1].strip())))
-        else:
-            self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
+        self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)
         self.proc.user(self.user_content(text, atts), said)
         self.set_busy(True)
-        if held is not None and self.remote is not None:  # (sent: no longer its host's to hold)
-            self.remote.request({"op": "held", "session": self.session_id, "id": held["id"]})
-            self.show_held(gone={held["id"]})
 
     def chat_begun(self):
         """Whether the open chat is something yet, so the sidebar lists it before it's saved: something typed or
@@ -15326,22 +15375,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         return bubble
 
     def sender_bubble(self, sender, text, atts=()):
-        """A message from sender, not you (baudelib.wire.said_by's): at the left, headed "from <who>" over a rule, then
-        what it said."""
-        bubble = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.START)
+        """A message from sender, not you (baudelib.wire.said_by's): where yours are, grey (not your accent), as a
+        queued one is, with who it's from in a small line at its top."""
+        bubble = self.user_bubble(text, atts)
         bubble.add_css_class("sender-bubble")
-        head = Gtk.Label(label=f"from {baudelib.wire.sender_name(sender)}", xalign=0, wrap=True,
-                         wrap_mode=Pango.WrapMode.WORD_CHAR)
+        head = Gtk.Label(label=f"from {baudelib.wire.sender_name(sender)}", xalign=1, wrap=True,
+                         wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
         head.add_css_class("sender-from")
-        bubble.append(head)
-        bubble.append(Gtk.Separator())
-        if atts:
-            row = Gtk.Box(spacing=6)
-            for a in atts:
-                row.append(attachment_widget(a, 96))
-            bubble.append(row)
-        if text:
-            bubble.append(MarkdownView(text))
+        bubble.prepend(head)
         return bubble
 
     def can_revert(self):
@@ -15500,6 +15541,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.send_after_result) else None
             self.send_after_result = None
         self.set_busy(False)
+        if (held := getattr(self, "held_after_revert", None)) is not None:  # (a held message's ↑ made it: that sent)
+            self.held_after_revert = None
+            if held.get_parent() is self.queue_box:
+                self.held_send(held)
+            return False
         self.on_send()
         return False
 
@@ -17931,13 +17977,14 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 atts += [Attachment(c.get("title") or "document.pdf", "file", "application/pdf")
                          for c in (content if isinstance(content, list) else [])
                          if isinstance(c, dict) and c.get("type") == "document"]
-                if kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
+                said = baudelib.wire.sender_of(text)
+                if said[0] is not None:  # (from another than you: a Bot, a chat; a subagent's task, its parent's)
+                    self.add(SenderTurn(self.sender_bubble(said[0], said[1].strip(), atts)))
+                elif kind == "start_prompt":  # (what a session started from outside was asked: at its top, not yours)
                     row = Gtk.Box(spacing=6)
                     for a in atts:
                         row.append(attachment_widget(a, 96))
                     self.add(widgets.start_prompt_view(text, row if atts else None))
-                elif (said := baudelib.wire.sender_of(text))[0] is not None:  # (from another than you: a Bot, a chat)
-                    self.add(SenderTurn(self.sender_bubble(said[0], said[1].strip(), atts)))
                 else:
                     self.add(UserTurn(self, self.user_bubble(text, atts), text, rest[2] if len(rest) > 2 else None))
         # calls that never got a result were interrupted; don't spin forever

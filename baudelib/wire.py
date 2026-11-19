@@ -19,7 +19,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?}
+           env?, start_key?, sender?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -51,7 +51,8 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        environment for the session's claude (kept in memory only;
                                                        attach takes it too). start_key: (version 13) an id the client
                                                        picks, kept and listed, so it can tell whether a start whose
-                                                       answer it lost was taken
+                                                       answer it lost was taken. sender: (version 14) who the prompt's
+                                                       from, said so in it, as input's sender
     detach {session}
     input {session, msg, sender?}                   -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
@@ -112,10 +113,11 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
     waits_on {session, on: {session, host, kind,     -> waits_on {session}: (version 13) the session's agent waits on
-              text, offset, until, title?}, done?}     another chat's answer (on: that chat, on member host, None for
+              text, offset, until, title?, sender?},   another chat's answer (on: that chat, on member host, None for
                                                        this host; kind "subagent" or "chat", text what it was asked,
                                                        offset its transcript's size as it was asked, until when the
-                                                       wait ends, epoch seconds, title the chat's), or done: no
+              done?}                                   wait ends, epoch seconds, title the chat's, sender who what it
+                                                       asked was from, to ask it again so), or done: no
                                                        longer. Kept with the session (not listed) while its turn goes
                                                        on: if this host stops meanwhile, which stops its agent, it
                                                        follows the wait once it's started again, and what the wait

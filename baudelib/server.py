@@ -1136,7 +1136,8 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
-            if op == "held":  # (a message held for it: dropped, or sent as its user's input would be)
+            if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
+                # at once: kept if it can't be)
                 held = s.meta.get("held") or []
                 h = next((h for h in held if h.get("id") == msg.get("id")), None)
                 if h is None:
@@ -1158,6 +1159,7 @@ class Server:
                                   "text": on["text"] if isinstance(on.get("text"), str) else None,
                                   "offset": on["offset"] if isinstance(on.get("offset"), int) else 0,
                                   "title": on["title"][:200] if isinstance(on.get("title"), str) else None,
+                                  "sender": wire.clean_sender(on.get("sender")),
                                   "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
                 s.meta["waits_on"] = waits or None
                 self.save(s)
@@ -1457,9 +1459,10 @@ class Server:
                 s.viewers.add(conn)
                 s.live.add(conn)
             try:
-                if meta["prompt"].strip():
+                if meta["prompt"].strip():  # (from sender, if it's given: said so in it, as input's sender)
                     self.ensure_proc(s)
-                    self.send_user(s, meta["prompt"])
+                    self.send_user(s, wire.said_by(params["sender"], meta["prompt"])
+                                   if wire.clean_sender(params.get("sender")) else meta["prompt"])
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
                 del self.sessions[s.id]
                 if s.proc is not None:

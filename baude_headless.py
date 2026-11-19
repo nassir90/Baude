@@ -255,6 +255,8 @@ def main():
                                          "Glob), here, as an MCP server on stdin and stdout")
     tools.add_argument("--cwd", required=True, help="the folder they work in")
     tools.add_argument("--only", help="those of them it has, by name, with commas (default: all)")
+    sub.add_parser("mesh-tools", help="the mesh's tools of a Bot's agent (hosts, chats, a subagent on any host, a "
+                                      "message to another chat), as an MCP server on stdin and stdout")
     relay = sub.add_parser("mcp-relay", help=argparse.SUPPRESS)  # (an agent run here's MCP server: its caller's)
     relay.add_argument("--socket", required=True)
     for name in ("run", "name", "token"):
@@ -279,6 +281,9 @@ def main():
     if args.command == "tools":
         from baudelib import hosttools
         return hosttools.serve(args.cwd, args.only.split(",") if args.only else None)
+    if args.command == "mesh-tools":
+        from baudelib import meshtools
+        return meshtools.serve(os.environ.get("BAUDE_SESSION"))
     if args.command == "mcp-relay":
         from baudelib import agentproxy
         return agentproxy.relay(args.socket, args.run, args.name, args.token)

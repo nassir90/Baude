@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, mesh, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, mesh, meshtools, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -291,6 +291,10 @@ class Session:
             pass
         return out
 
+    def mesh_tools(self):
+        """Has its agent the mesh's tools (baudelib.meshtools): a Bot's always; another chat's if it's been given them."""
+        return bool(self.meta.get("bot") or self.meta.get("mesh_tools"))
+
     def bot_listing(self):
         """A Bot's name, and when its picture last changed (None: no picture): what a head draws it with."""
         bot = self.meta.get("bot")
@@ -315,7 +319,8 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
-                "fork_from": self.meta.get("fork_from"),
+                "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "mesh_tools": self.mesh_tools(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
@@ -1007,6 +1012,12 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "mesh_tools":  # (a chat given the mesh's tools, or not: from its next start)
+                s.meta["mesh_tools"] = bool(msg.get("on"))
+                self.save(s)
+                self.restart_agent(s)
+                self.changed()
+                return reply("mesh_tools_set", session=s.listing())
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
             if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
@@ -1188,6 +1199,7 @@ class Server:
                 "fork_from": (src.meta.get("cli_id") or src.id) if src else None,
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
+                "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
         with self.lock:
             if self.stopped.is_set():
@@ -1322,6 +1334,17 @@ class Server:
                 extra += ["--add-dir", folder]
                 rules = [f"{tool}(/{folder}/**)" for tool in ("Edit", "Write")]  # (//: a path from the root)
                 if "--allowedTools" in extra:  # (one: the chat's own allowed_tools with them)
+                    at = extra.index("--allowedTools") + 1
+                    extra[at:at] = rules
+                else:
+                    extra += ["--allowedTools", *rules]
+        if s.mesh_tools() and run["program"] in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
+            servers = {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools"],
+                                        "env": {"BAUDE_SESSION": s.id}}}
+            extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
+            if run["program"] == "claude":  # (what it reads asked for no more than a file read is: what it starts or
+                rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.READ_ONLY]  # says, as the chat's mode has it)
+                if "--allowedTools" in extra:
                     at = extra.index("--allowedTools") + 1
                     extra[at:at] = rules
                 else:

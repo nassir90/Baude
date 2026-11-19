@@ -545,6 +545,10 @@ class MacWeb:
                 send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
+        if (AGENT["on"] or for_bots(profile)) and send(self.view, b"respondsToSelector:", objc_sel(
+                b"_setWindowOcclusionDetectionEnabled:"), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(self.view, b"_setWindowOcclusionDetectionEnabled:", False, types=(ctypes.c_bool,))  # (a Bot's page
+            # drawn on, its animations run, in a window off the screen or behind others: watched, it moves)
         if (agent := os.environ.get("EMISSION_USER_AGENT")):
             send(self.view, b"setCustomUserAgent:", macos.ns_string(agent), types=(ctypes.c_void_p,))
         if not opener:
@@ -957,6 +961,20 @@ class MacWeb:
             macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
         macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
+    def keys_here(self, fn):
+        """fn() with the page its window's first responder: in another app's window (hosted), whose own widgets have
+        the keys, a page's keys (and the text they make) go to the page only while it is, given back straight after."""
+        send = macos.objc_send
+        ns = send(self.view, b"window")
+        before = send(ns, b"firstResponder") if ns and getattr(self.window, "hosted", False) else None
+        if before is None or before == self.view:
+            return fn()
+        send(ns, b"makeFirstResponder:", self.view, types=(ctypes.c_void_p,))
+        try:
+            return fn()
+        finally:
+            send(ns, b"makeFirstResponder:", before, types=(ctypes.c_void_p,))
+
     def keyed(self):
         """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
         that isn't key types characters, but doesn't run Return, Delete and the like)."""
@@ -966,6 +984,9 @@ class MacWeb:
     def key(self, name, mods=()):
         """A key pressed and let go (name: a character, or Enter, Tab, Backspace, Delete, Escape, the arrows, Home,
         End, PageUp, PageDown, Space), as real key events."""
+        return self.keys_here(lambda: self._key(name, mods))
+
+    def _key(self, name, mods=()):
         send = macos.objc_send
         code, chars = MAC_KEYS.get(name, (None, name))
         if code is None and len(name) == 1:
@@ -1004,6 +1025,9 @@ class MacWeb:
         if ch == "\n":
             self.key("Enter")
             return True
+        return self.keys_here(lambda: self._type_char(ch))
+
+    def _type_char(self, ch):
         send = macos.objc_send
         base = MAC_SHIFTED.get(ch, ch.lower())
         code = 49 if ch == " " else MAC_CHAR_CODES.get(base, 0)
@@ -1708,6 +1732,8 @@ class Window(Adw.ApplicationWindow):
             clicks.connect("pressed", lambda *_: MacWeb.keys_to_gtk(self))
             self.add_controller(clicks)
         self.connect("close-request", self.closing_window)
+        if agent and not hosted and sys.platform == "darwin":  # (out of sight, but in: its pages drawn as they change)
+            self.connect("map", lambda *_: GLib.idle_add(lambda: macos.in_unseen(self) and False))
         if self.Engine is not None:
             if not why:
                 self.open(url or ("about:blank" if agent else HOME_PAGE))

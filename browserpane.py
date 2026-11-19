@@ -201,9 +201,13 @@ class Asks:
         while True:
             remote, bot, call, answered = self.q.get()
             try:
+                got = None
                 if remote.mine:  # (straight to its door: no host between)
-                    got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
-                else:
+                    try:
+                        got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
+                    except (FileNotFoundError, ConnectionRefusedError):
+                        got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
+                if got is None:
                     r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
                     got = r.get("result") if r.get("op") == "emission" else {"error": r.get("error") or "no answer"}
             except (OSError, ValueError) as e:

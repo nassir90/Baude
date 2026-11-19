@@ -6230,8 +6230,8 @@ class MeshCard(ToolCard):
     call's); under it, once it's come, what the chat said back. Prompt (Message) opens what it was given."""
 
     def __init__(self, name, tool_id):
-        self.reply, self.answer_view, self.mark = {}, None, None
-        super().__init__(name, tool_id)
+        self.reply, self.answer_view, self.mark, self.began = {}, None, None, time.time()  # (began: as it's
+        super().__init__(name, tool_id)                                                     # made, a live call's start)
         self.add_css_class("mesh-card")
         self.input_toggle.set_label("Prompt" if self.base == "start_subagent" else "Message")
         head = self.head = Gtk.Box(spacing=10)
@@ -6287,9 +6287,17 @@ class MeshCard(ToolCard):
         me = getattr(self.get_root(), "session_id", None)
         if not me or self.base != "start_subagent" or self.state != "running" or not self.input_whole:
             return None
-        title = self.task_title()
-        return max((s for s in network().sessions() if s.get("spawned_by") == me and s.get("title") == title),
-                   key=lambda s: s.get("created") or 0, default=None)
+        title, host = self.task_title(), self.input.get("host")
+        win = self.get_root()
+        claimed = {c.listing_id for c in getattr(win, "mesh_cards", ()) if c is not self and c.listing_id}
+        found = max((s for s in network().sessions() if s.get("spawned_by") == me and s.get("title") == title
+                     and (s.get("created") or 0) >= self.began - 10 and s["id"] not in claimed  # (this call's: not
+                     and (not host or host in (s["server"].info.get("id"), remote_name(s["server"])))),  # a run before,
+                    key=lambda s: s.get("created") or 0, default=None)                   # nor another card's)
+        self.listing_id = found["id"] if found is not None else None
+        return found
+
+    listing_id = None  # (the chat found for it while it starts: no other card takes it)
 
     def shown_state(self, listed=None):
         """The mark's: the chat's own state while it works (or waits on a question), else the call's."""
@@ -6347,8 +6355,10 @@ class MeshCard(ToolCard):
         self.chevron.set_visible(chat)
         (self.head.add_css_class if chat else self.head.remove_css_class)("openable")
         pointers.set_pointer(self.head, pointers.HAND if chat else None)
-        self.head.set_tooltip_text(None if not chat else f"Open this chat{where}" if listed is not None else
-                                   f"This chat{where} isn't listed here yet")
+        tip = None if not chat else f"Open this chat{where}" if listed is not None else \
+            f"This chat{where} isn't listed here yet"
+        if tip != self.head.get_tooltip_text():
+            self.head.set_tooltip_text(tip)
 
     def open_chat(self):
         """Its chat, opened as the sidebar opens one (BaudeWindow.open_mesh_chat); one not listed here, said so."""
@@ -6359,8 +6369,8 @@ class MeshCard(ToolCard):
             win.open_mesh_chat(listed)
             return
         host = self.reply.get("host_name") or self.input.get("host")
-        win.note(f"{self.title.get_text()}: its chat isn't listed here"
-                 + (f" (is {host} reachable from this machine?)" if host else ""))
+        widgets.toast(win, f"{self.title.get_text()}: its chat isn't listed here yet"
+                      + (f" (is {host} reachable from here?)" if host and self.state != "running" else ""))
 
     def ask(self, buttons):
         super().ask(buttons)
@@ -17973,7 +17983,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if codex_changed:
             self.sync_effort_choices()
             self.sync_local()
-        for card in getattr(self, "mesh_cards", ()):  # (the chats they started or messaged: as their hosts list them now)
+        self.mesh_cards = [c for c in getattr(self, "mesh_cards", ()) if c.get_parent() is not None]  # (a reverted
+        # one's gone; one in history not shown yet, kept)
+        for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
         if self.remote is None:
             return

@@ -110,8 +110,12 @@ class Mesh:
         raise ValueError(f"no host {host!r} in the mesh: hosts lists them")
 
     def named(self, where):
-        """The host where is, as a reply names it: {host: its id, host_name}."""
-        here = self.here()
+        """The host where is, as a reply names it: {host: its id, host_name}; as much as is known, never an error
+        (asked before the call, not after: a reply's never lost to this host process restarting meanwhile)."""
+        try:
+            here = self.here()
+        except (OSError, ValueError):
+            return {"host": where.get("host"), "host_name": None}
         if where.get("host") is None:
             return {"host": here.get("id"), "host_name": here.get("name")}
         m = next((m for m in (here.get("mesh") or {}).get("members") or [] if m.get("id") == where["host"]), {})
@@ -211,6 +215,7 @@ class Mesh:
         if self.me:
             params["spawned_by"] = self.me
         where = self.where(a.get("host"))
+        named = self.named(where)
         ch, _info = _channel(where)
         try:
             ch.sock.settimeout(60)
@@ -223,7 +228,7 @@ class Mesh:
             got = self._answer(ch, r["session"]["id"], a.get("wait", True), a.get("timeout_s") or WAIT_S)
         finally:
             ch.close()
-        return {**got, **self.named(where)}
+        return {**got, **named}
 
     def chats(self, a):
         out = []
@@ -264,8 +269,9 @@ class Mesh:
         if a["session"] == self.me:
             raise ValueError("that's this chat")
         where, _s = self.find(a["session"], a.get("host"))
+        named = self.named(where)
         return {**self.ask(where, a["session"], a["text"], a.get("wait", True), a.get("timeout_s") or WAIT_S),
-                **self.named(where)}
+                **named}
 
 
 def cut(parts):

@@ -214,7 +214,7 @@ def published(p, http=None):
 
 def _hello_of(host):
     """A host's hello on a link, if it's one: {id, name, group, host, version, bonjour (its name on the local
-    network, if it said one)}, cut to size."""
+    network, if it said one), dial (False: it can't be linked to, only from: a phone, with no sshd)}, cut to size."""
     if not isinstance(host, dict) or not wire.is_id(host.get("id")):
         return None
     out = {"id": host["id"], "name": str(host.get("name") or "")[:64] or host["id"][:8],
@@ -222,6 +222,8 @@ def _hello_of(host):
            "version": host.get("version") if isinstance(host.get("version"), int) else 0}
     if isinstance(host.get("bonjour"), str):
         out["bonjour"] = host["bonjour"][:255]
+    if host.get("dial") is False:
+        out["dial"] = False
     return out
 
 
@@ -964,6 +966,8 @@ class Mesh:
         (remembered), then those its record gives for its machine (its Bonjour name, its host, its name, its
         name.local), strict (its key in known_hosts already)."""
         info = ((self.records.get(member) or {}).get("rec") or {}).get("info") or {}
+        if info.get("dial") is False:  # (a member that only links out: a phone)
+            return []
         name = info.get("name")
         names = []
         for n in [*(self.remembered.get(member) or {}).get("names", []), info.get("bonjour"), info.get("host"), name,

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -69,12 +70,15 @@ import androidx.compose.ui.unit.dp
 /** Your Bots, on every host, the last to say something first: as Baude's sidebar lists them, each its picture, its
  * name and what it's on. */
 @Composable
-fun Contacts(open: (Contact) -> Unit, hosts: () -> Unit) {
+fun Contacts(open: (Contact) -> Unit, hosts: () -> Unit, phone: () -> Unit = {}) {
     val c = LocalBaude.current
     Mesh.tick.value // (a host's state changed: drawn again)
     val contacts = Mesh.contacts
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Baude", end = { IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts) })
+        Bar("Baude", end = {
+            IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
+            IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
+        })
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) {
             GreyBanner("Add a host to see its Bots.", onClick = hosts)
@@ -160,7 +164,7 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line) }
-            items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, contact?.alwaysOffered ?: true) }
+            items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, contact?.alwaysOffered ?: true, name) }
             if (contact?.state == "working" && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -205,12 +209,12 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
  * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean) {
+private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String) {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
     Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (ask.tool == "AskUserQuestion" && questions != null) {
-            Text("Claude has a question", style = Type.bold, color = c.fg)
+            Text("$name has a question", style = Type.bold, color = c.fg)
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
             return@Column

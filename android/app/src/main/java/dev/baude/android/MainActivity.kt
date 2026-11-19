@@ -32,7 +32,10 @@ class MainActivity : ComponentActivity() {
                 when (now[0]) {
                     "chat" -> ChatScreen(now[1], now[2], ::back)
                     "hosts" -> HostsScreen(::back)
-                    else -> Contacts(open = { go(listOf("chat", it.hostId, it.id)) }, hosts = { go(listOf("hosts")) })
+                    "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
+                    "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
+                    else -> Contacts(open = { go(listOf("chat", it.hostId, it.id)) }, hosts = { go(listOf("hosts")) },
+                        phone = { go(listOf("phone")) })
                 }
                 HostKeyAsk()
             }

@@ -118,6 +118,7 @@ object Mesh {
         hosts.addAll(HostStore.load(app))
         channel()
         hosts.forEach { connect(it) }
+        start(PhoneHost.connection(app, ::heard) { conn -> main.post { changed(conn) } }) // (this phone's own agents)
         try { // (the network back: each host that's down tried again at once)
             app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
                 object : android.net.ConnectivityManager.NetworkCallback() {
@@ -228,7 +229,7 @@ object Mesh {
             for (m in c.info?.optJSONObject("mesh")?.optJSONArray("members").list()) {
                 val id = m.optString("id").takeIf(::isId) ?: continue
                 seen.add(id)
-                if (id in known || heldBy(m) != null) continue
+                if (id in known || heldBy(m) != null || id == PhoneHost.id) continue // (this phone, as the mesh has it)
                 val now = best[id]
                 if (now == null || m.optInt("hops", 99) < now.first.optInt("hops", 99)) best[id] = m to c
             }
@@ -296,7 +297,10 @@ object Mesh {
             if (sessions[c.id] != null) catchUp.add(c.id)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
-        if (c.place is Place.Direct) meshed()
+        if (c.place is Place.Direct) {
+            meshed()
+            PhoneLink.look()
+        }
     }
 
     fun conn(hostId: String): Connection? = conns[hostId]
@@ -758,7 +762,7 @@ private fun toolLine(b: JSONObject): String {
     val input = b.optJSONObject("input") ?: JSONObject()
     val what = input.optString("description").ifBlank { input.optString("command") }
         .ifBlank { input.optString("file_path") }.ifBlank { input.optString("url") }.ifBlank { input.optString("pattern") }
-    return if (what.isBlank()) name else "$name · ${what.lines().first().take(80)}"
+    return if (what.isBlank()) toolTitle(name) else "${toolTitle(name)} · ${what.lines().first().take(80)}"
 }
 
 /** A tool's name as Baude says it (tool_display): (its title, its source), an MCP tool's (mcp__<server>__<tool>)

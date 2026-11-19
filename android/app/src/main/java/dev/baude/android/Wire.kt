@@ -23,6 +23,8 @@ const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long t
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
 
+private val STREAM_ENDS = setOf("infer_end", "error")
+
 const val RELAY_RETRY_MS = 10_000L // (a member that's dropped, tried again this often while it's listed: Baude's 10 s)
 
 /** What ssh offers and takes here: what Android's own crypto has, P-256's ECDH and ECDSA, RSA and AES. */
@@ -42,6 +44,11 @@ sealed class Place {
     data class Member(val member: String) : Place() {
         override val id: String get() = "mesh:$member"
     }
+
+    /** This phone's own host (PhoneHost), talked to in the app. */
+    object Phone : Place() {
+        override val id: String get() = "phone"
+    }
 }
 
 /** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, "<command> connect" run
@@ -50,7 +57,7 @@ sealed class Place {
  * member, and from then on a tunnel to it, hello first as ever (wire.through). Made again whenever it drops, a little
  * later each time (a member: every RELAY_RETRY_MS while a host lists it, else once one does); not while the host's key
  * isn't one you've trusted (shown, for you to say). */
-class Connection(
+open class Connection(
     private val ctx: Context,
     val place: Place,
     private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
@@ -71,15 +78,16 @@ class Connection(
     @Volatile private var session: Session? = null
     @Volatile private var end: () -> Unit = {} // (this connection let go of: its ssh, or a member's channel on another's)
     private val calls = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
+    private val streams = ConcurrentHashMap<Int, (JSONObject) -> Unit>() // (requests answered in many lines: stream)
     private val nextReq = AtomicInteger(100)
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
 
-    fun start() {
+    open fun start() {
         thread(name = "conn-$id", isDaemon = true) { loop() }
     }
 
-    fun stop() {
+    open fun stop() {
         stopped = true
         wake.offer(Unit)
         end()
@@ -169,6 +177,7 @@ class Connection(
             s.connect(15_000)
             (s.openChannel("exec") as ChannelExec).apply { setCommand("${p.host.command} connect") }
         }
+        is Place.Phone -> throw NoRoute("this phone's own host isn't reached over ssh")
         is Place.Member -> {
             val v = route(p.member) ?: throw NoRoute("none of your hosts reaches it now")
             via = v
@@ -276,7 +285,9 @@ class Connection(
                         continue // (not a line of the host process's: a shell's greeting, say)
                     }
                     val req = msg.optInt("req", -1)
-                    val call = if (req >= 0) calls.remove(req) else null
+                    val call = if (req < 0) null else streams[req]?.also {
+                        if (msg.optString("op") in STREAM_ENDS) streams.remove(req)
+                    } ?: calls.remove(req)
                     if (call != null) call(msg) else heard(this, msg)
                 }
             }
@@ -295,7 +306,7 @@ class Connection(
     }
 
     /** A line to the host process, sent in turn on its own thread (false if there's no connection). */
-    fun send(msg: JSONObject): Boolean {
+    open fun send(msg: JSONObject): Boolean {
         val q = writes ?: return false
         q.put((msg.toString() + "\n").toByteArray(Charsets.UTF_8))
         return true
@@ -303,7 +314,7 @@ class Connection(
 
     /** A request, its reply to then (on this connection's thread), or an error reply if it can't be sent or the
      * connection goes first. */
-    fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
+    open fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
         val req = nextReq.getAndIncrement()
         calls[req] = then
         if (!send(msg.put("req", req))) {
@@ -312,9 +323,21 @@ class Connection(
         }
     }
 
+    /** A request whose answer comes in many lines (infer's: infer_head, infer_data..., infer_end), each to then till
+     * one that ends it (infer_end, or an error, the connection's going too). */
+    open fun stream(msg: JSONObject, then: (JSONObject) -> Unit) {
+        val req = nextReq.getAndIncrement()
+        streams[req] = then
+        if (!send(msg.put("req", req))) {
+            streams.remove(req)
+            then(JSONObject().put("op", "error").put("error", "not connected"))
+        }
+    }
+
     private fun failAll() {
-        val waiting = calls.values.toList()
+        val waiting = calls.values.toList() + streams.values.toList()
         calls.clear()
+        streams.clear()
         waiting.forEach { it(JSONObject().put("op", "error").put("error", "the connection went")) }
     }
 

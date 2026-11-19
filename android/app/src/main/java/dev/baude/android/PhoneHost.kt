@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 abstract class Head {
     @Volatile var subscribed = false
     @Volatile var archived = false
+    @Volatile var answers = true // (what its agents ask, answered by it, as attach says: ask_timeout's wait runs on without)
     abstract fun send(msg: JSONObject)
 }
 
@@ -49,9 +50,12 @@ class PhoneSession(val meta: JSONObject) {
  * the app's own folder: phone/sessions (each one's meta), phone/transcripts (each one's, as Claude Code writes one,
  * which is what the heads read) and phone/agents (each one's folder, the only files its tools reach). */
 object PhoneHost {
-    /** The ops it takes (hello's ops: wire.speaks). */
+    /** The ops it takes, and the control requests its agents take that a program's mightn't (hello's ops:
+     * wire.speaks). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
-        "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory")
+        "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
+        "read_file", "catalogue", "set_permission_mode", "set_model")
+    private val CONTROLS = setOf("set_permission_mode", "set_model") // (OPS' that are control requests, not ops)
     lateinit var ctx: Context
     @Volatile var id = ""
     @Volatile var name = "Phone"
@@ -73,7 +77,7 @@ object PhoneHost {
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
             name = deviceName()
             root = File(ctx.filesDir, "phone")
-            for (d in listOf("sessions", "transcripts", "agents")) File(root, d).mkdirs()
+            for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash")) File(root, d).mkdirs()
             for (f in File(root, "sessions").listFiles().orEmpty().filter { it.name.endsWith(".json") }) {
                 try {
                     val meta = JSONObject(f.readText())
@@ -209,12 +213,16 @@ object PhoneHost {
                 return reply("sessions", "sessions" to listing(head.archived), "server" to info())
             }
         }
-        if (op !in OPS) return reply("error", "error" to "unknown op '$op' (${name} is a phone: it takes ${OPS.joinToString()})")
+        if (op !in OPS || op in CONTROLS) return reply("error", "error" to "unknown op '$op' (${name} is a phone: it takes " +
+            "${(OPS - CONTROLS).joinToString()})")
         if (op == "start") return start(head, msg, ::reply)
+        if (op == "read_file") return reply("file", *readFile(msg))
+        if (op == "catalogue") return reply("catalogue", *catalogue(if (msg.isNull("cwd")) "" else msg.optString("cwd")))
         val s = synchronized(lock) { sessions[msg.optString("session")] }
             ?: return reply("error", "error" to "no session ${msg.optString("session")}")
         when (op) {
             "attach" -> synchronized(lock) {
+                head.answers = msg.optBoolean("answers", true)
                 s.viewers.add(head)
                 if (msg.optBoolean("live")) s.live.add(head)
                 msg.optJSONArray("always_allow")?.let { a ->
@@ -256,17 +264,16 @@ object PhoneHost {
             }
             "delete" -> {
                 stopTurn(s)
-                val watching = synchronized(lock) { // (under the lock: nothing it says after is kept, or made again)
+                // (under the lock: nothing it says after is kept, or made again)
+                val (watching, went) = synchronized(lock) {
                     s.deleted = true
                     sessions.remove(s.id)
-                    File(root, "sessions/${s.id}.json").delete()
-                    transcript(s).delete()
-                    s.folder.deleteRecursively()
-                    (s.viewers + s.live).toSet()
+                    val went = trash(s)
+                    (s.viewers + s.live).toSet() to went
                 }
                 for (h in watching) h.send(JSONObject().put("op", "deleted").put("session", s.id))
                 changed()
-                reply("deleted", "session" to s.id, "trashed" to JSONArray())
+                reply("deleted", "session" to s.id, "trashed" to JSONArray(went))
             }
             "always_allow" -> {
                 synchronized(lock) {
@@ -284,14 +291,23 @@ object PhoneHost {
                 live(s) {
                     val bot = msg.optJSONObject("bot")
                     if (bot == null) s.meta.put("bot", JSONObject.NULL)
-                    else s.meta.put("bot", JSONObject().put("name", bot.optString("name").trim().take(64).ifBlank { "Agent" })
-                        .put("since", s.meta.optJSONObject("bot")?.optDouble("since") ?: now()))
+                    else {
+                        s.meta.put("bot", JSONObject().put("name", bot.optString("name").trim().take(64).ifBlank { "Agent" })
+                            .put("since", s.meta.optJSONObject("bot")?.optDouble("since") ?: now()))
+                        if (bot.has("picture")) { // (a PNG, base64; "" to drop it; left out, kept)
+                            val pic = picture(s)
+                            val data = if (bot.isNull("picture")) "" else bot.optString("picture")
+                            if (data.isEmpty()) pic.delete()
+                            else Base64.getDecoder().decode(data).takeIf { it.size <= PICTURE_MAX }?.let { pic.writeBytes(it) }
+                        }
+                    }
                     save(s)
                 }
                 changed()
                 reply("bot_set", "session" to listing(s))
             }
-            "bot_picture" -> reply("bot_picture", "session" to s.id, "picture" to null)
+            "bot_picture" -> reply("bot_picture", "session" to s.id, "picture" to
+                picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) })
             "memory" -> {
                 val file = File(s.folder, MEMORY)
                 if (msg.has("text")) live(s) { file.writeText(msg.optString("text")) }
@@ -301,24 +317,34 @@ object PhoneHost {
         }
     }
 
-    /** A new agent: its folder made, a Bot if it's named, its prompt sent. Its model's one the mesh serves this phone,
-     * (Inference's value; none given, the first of them, as a host runs its own default). A fork, a side question or a conversation adopted: not here. */
+    /** A new agent: its folder made, a Bot if it's named, its prompt sent. Its model's one the mesh serves this phone
+     * (Inference's value; none given, the first of them, as a host runs its own default). ask_timeout, ask_default and
+     * spawned_by as a host's start has them (a subagent: Auto at most, meshtools.SUBAGENT_MODES). */
     private fun start(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
         val refused = listOf("fork_from", "ephemeral", "adopt").firstOrNull { msg.has(it) && !msg.isNull(it) && msg.opt(it) != false }
         if (refused != null) return reply("error", arrayOf("error" to "an agent on $name can't be started so ($refused)", "plain" to true))
+        if (msg.has("ask_default") && !msg.isNull("ask_default") && msg.optString("ask_default") !in setOf("deny", "allow"))
+            return reply("error", arrayOf("error" to "ask_default is deny or allow"))
         fun str(k: String) = if (msg.isNull(k)) "" else msg.optString(k) // (JSON's null: none given, not "null")
         val served = (if (str("model").isBlank()) Inference.found().firstOrNull() else Inference.of(str("model")))
             ?: return reply("error", arrayOf("error" to "$name can't run ${str("model").ifBlank { "a model" }}: its agents " +
                 "run the models the mesh's machines serve over an API, and none does now", "plain" to true))
         val sid = UUID.randomUUID().toString()
-        val folder = File(root, "agents/$sid").apply { mkdirs() }
         val botName = msg.optJSONObject("bot")?.optString("name")?.trim()?.take(64)?.ifBlank { null }
+        val slug = (botName ?: "chat").lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(24).ifBlank { "chat" }
+        val folder = File(root, "agents/$slug-${sid.take(8)}").apply { mkdirs() } // (named as you'd say it: Baude
+        // lists a folder's chats under its name)
+        val spawnedBy = str("spawned_by").takeIf(::isId)
+        val asked = str("mode").takeIf { m -> PhoneTools.MODES.any { it.first == m } } ?: "default"
         val prompt = str("prompt")
         val meta = JSONObject().put("id", sid).put("cwd", folder.path).put("model", served.value)
             .put("infer", served.json()).put("title", str("title").trim().ifBlank { null } ?: JSONObject.NULL)
             .put("created", now()).put("said", now()).put("prompts", 0).put("archived", false)
             .put("draft", msg.optBoolean("draft") && prompt.isBlank())
-            .put("mode", str("mode").takeIf { m -> PhoneTools.MODES.any { it.first == m } } ?: "default")
+            .put("mode", if (spawnedBy != null && asked !in SUBAGENT_MODES) "auto" else asked)
+            .put("spawned_by", spawnedBy ?: JSONObject.NULL)
+            .put("ask_timeout", msg.optDouble("ask_timeout").takeIf { it > 0 } ?: JSONObject.NULL)
+            .put("ask_default", if (str("ask_default") == "allow") "allow" else "deny")
             .put("bot", if (botName != null) JSONObject().put("name", botName).put("since", now()) else JSONObject.NULL)
             .put("start_key", str("start_key").takeIf(::isId) ?: JSONObject.NULL)
         val s = PhoneSession(meta)
@@ -375,8 +401,9 @@ object PhoneHost {
                         else JSONObject().put("subtype", "success").put("request_id", rid).put("response", response))))
                 when (request.optString("subtype")) {
                     "initialize" -> answer(JSONObject().put("commands", JSONArray()).put("agents", JSONArray())
-                        .put("models", JSONArray().put(JSONObject().put("value", s.meta.optString("model"))
-                            .put("displayName", Inference.display(s))))
+                        .put("models", JSONArray((listOf(s.meta.optString("model") to Inference.display(s)) +
+                            Inference.found().filter { it.value != s.meta.optString("model") }.map { it.value to "${it.display} · ${it.memberName}" })
+                            .map { (v, d) -> JSONObject().put("value", v).put("displayName", d) }))
                         .put("current_permission_mode", mode(s)).put("output_style", "default")
                         .put("available_output_styles", JSONArray().put("default")))
                     "interrupt" -> {
@@ -384,8 +411,22 @@ object PhoneHost {
                         stopTurn(s)
                         answer(JSONObject().put("running", running))
                     }
-                    "set_model" -> if (request.optString("model").let { it.isEmpty() || it == s.meta.optString("model") }) answer(JSONObject())
-                        else answer(null, "an agent on this phone keeps the model it was made with: make another for that one")
+                    "set_model" -> {
+                        val want = if (request.isNull("model")) "" else request.optString("model")
+                        val served = Inference.of(want)
+                        when {
+                            want.isEmpty() || want == s.meta.optString("model") -> answer(JSONObject())
+                            served == null -> answer(null, "the mesh doesn't serve $want now")
+                            else -> {
+                                live(s) { // (its next call, the one after a turn's call going on, goes there)
+                                    s.meta.put("model", served.value).put("infer", served.json())
+                                    save(s)
+                                }
+                                changed()
+                                answer(JSONObject())
+                            }
+                        }
+                    }
                     "get_settings" -> answer(JSONObject().put("applied", JSONObject().put("model", s.meta.optString("model"))))
                     "set_permission_mode" -> if (PhoneTools.MODES.any { it.first == request.optString("mode") }) {
                         setMode(s, request.optString("mode"))
@@ -424,9 +465,7 @@ object PhoneHost {
     private fun stopTurn(s: PhoneSession) {
         val waiting = synchronized(lock) {
             if (!s.busy) return
-            s.cancel = true
-            s.meta.remove("queued")
-            save(s)
+            s.cancel = true // (what was sent meanwhile: kept as said, as the turn ends: ended)
             s.asks.clear()
             s.waits.values.toList().also { s.waits.clear() }
         }
@@ -472,7 +511,7 @@ object PhoneHost {
 
     /** Said to those attached live, as claude says it (stream-json). */
     fun tell(s: PhoneSession, msg: JSONObject) {
-        val to = synchronized(lock) { s.live.toList() }
+        val to = synchronized(lock) { if (s.deleted) return else s.live.toList() }
         for (h in to) h.send(JSONObject().put("op", "claude").put("session", s.id).put("msg", msg))
     }
 
@@ -480,9 +519,9 @@ object PhoneHost {
      * chat (never a question for you, nor a plan), or its permission asked (claude's can_use_tool) and waited for. The
      * answer (behavior: allow, with updatedInput; or deny, with a message), or null if the turn's stopped first. */
     fun permit(s: PhoneSession, toolUseId: String, tool: String, input: JSONObject): JSONObject? {
-        val need = PhoneTools.need(mode(s), tool, !s.meta.isNull("bot"))
+        val need = if (editsMemory(s, tool, input)) "allow" else PhoneTools.need(mode(s), tool, !s.meta.isNull("bot"))
         val asked = tool == ASK_TOOL || tool == "ExitPlanMode"
-        if (need == "allow" || !asked && tool in synchronized(lock) { s.alwaysAllow })
+        if (need == "allow" || !asked && mode(s) != "plan" && tool in synchronized(lock) { s.alwaysAllow })
             return JSONObject().put("behavior", "allow").put("updatedInput", input)
         if (need != "ask") return JSONObject().put("behavior", "deny").put("message", need)
         val rid = UUID.randomUUID().toString()
@@ -498,6 +537,7 @@ object PhoneHost {
         }
         for (h in to) h.send(JSONObject().put("op", "claude").put("session", s.id).put("msg", ask))
         changed()
+        s.meta.optDouble("ask_timeout").takeIf { it > 0 }?.let { timeout(s, rid, wait, input, it) }
         return try {
             wait.get()
         } finally {
@@ -509,10 +549,41 @@ object PhoneHost {
         }
     }
 
+    /** (an agent started with ask_timeout: a subagent's, say) An ask answered as its ask_default says once it's waited
+     * that long with nobody attached who answers (someone's there: given as long again), as a host's ask_timer. */
+    private fun timeout(s: PhoneSession, rid: String, wait: CompletableFuture<JSONObject?>, input: JSONObject, seconds: Double) {
+        work.schedule({
+            val due = synchronized(lock) {
+                when {
+                    rid !in s.asks -> null
+                    s.viewers.any { it.answers } -> false
+                    else -> true
+                }
+            }
+            when (due) {
+                false -> timeout(s, rid, wait, input, seconds)
+                true -> wait.complete(if (s.meta.optString("ask_default") == "allow")
+                    JSONObject().put("behavior", "allow").put("updatedInput", input)
+                    else JSONObject().put("behavior", "deny").put("message", "Nobody answered within ${if (seconds % 1.0 == 0.0) seconds.toLong() else seconds} s."))
+                null -> {}
+            }
+        }, (seconds * 1000).toLong(), TimeUnit.MILLISECONDS)
+    }
+
+    /** Is a call a Bot's edit of its own memory (memory.md, in its folder): never asked, as a host's Bot's isn't
+     * (edits_memory)? */
+    private fun editsMemory(s: PhoneSession, tool: String, input: JSONObject): Boolean {
+        if (s.meta.isNull("bot") || tool !in setOf("Write", "Edit")) return false
+        val path = input.optString("file_path").ifBlank { return false }
+        val f = (if (path.startsWith("/")) File(path) else File(s.folder, path)).canonicalFile
+        return f == File(s.folder, MEMORY).canonicalFile
+    }
+
     /** Its turn's over: its result said (to those attached live, and as turn_ended to every head subscribed), and what
      * was sent meanwhile taken now, in a turn of its own (in the same hold of the lock, so no other turn starts
      * between). */
     fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long) {
+        val stopped = s.cancel
         tell(s, JSONObject().put("type", "result").put("subtype", if (error) "error_during_execution" else "success")
             .put("is_error", error).put("result", result).put("num_turns", turns).put("duration_ms", ms)
             .put("total_cost_usd", 0).put("session_id", s.id).put("usage", JSONObject()))
@@ -521,8 +592,9 @@ object PhoneHost {
             s.asks.clear()
             s.stopModel = null
             val next = s.queued.list()
-            if (next.isNotEmpty() && !s.deleted && sessions[s.id] === s) {
-                s.meta.remove("queued")
+            s.meta.remove("queued")
+            if (stopped) for (m in next) record(s, "user", m, null) // (sent as it was stopped: kept as said, not taken)
+            if (next.isNotEmpty() && !stopped && !s.deleted && sessions[s.id] === s) {
                 begin(s, next, null)
             } else {
                 s.busy = false
@@ -531,7 +603,7 @@ object PhoneHost {
                     save(s)
                 }
             }
-            heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
+            if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
         }
         val end = JSONObject().put("op", "turn_ended").put("session", s.id).put("result", result).put("is_error", error)
             .put("cost", 0).put("turns", turns).put("duration_ms", ms)
@@ -548,11 +620,43 @@ object PhoneHost {
         val id = uuid ?: UUID.randomUUID().toString()
         val rec = JSONObject().put("parentUuid", JSONObject.NULL).put("isSidechain", false).put("type", kind)
             .put("uuid", id).put("timestamp", java.time.Instant.now().toString()).put("sessionId", s.id)
-            .put("cwd", shared()).put("entrypoint", "baude-android").put("message", message)
+            .put("cwd", s.folder.path).put("entrypoint", "baude-android").put("message", message)
         if (apiError) rec.put("isApiErrorMessage", true)
+        return keep(s, rec)
+    }
+
+    /** (lock held) A record kept, as it is, and added to the conversation: its uuid; null for an agent deleted. */
+    private fun keep(s: PhoneSession, rec: JSONObject): String? {
+        if (s.deleted) return null
         transcript(s).appendText(rec.toString() + "\n")
         s.convo?.let { c -> PhoneAgent.add(c, rec) }
-        return id
+        return rec.optString("uuid")
+    }
+
+    /** Its conversation compacted, as claude compacts one: a compact_boundary, then the summary it wrote (isCompactSummary),
+     * kept, and said to those attached live as claude says them (its status, the boundary, the summary). The
+     * conversation its model's given from now on starts from the summary. */
+    fun compacted(s: PhoneSession, summary: String, preTokens: Int) {
+        val at = java.time.Instant.now().toString()
+        synchronized(lock) {
+            if (s.deleted) return
+            keep(s, JSONObject().put("parentUuid", JSONObject.NULL).put("isSidechain", false).put("type", "system")
+                .put("subtype", "compact_boundary").put("content", "Conversation compacted").put("isMeta", false)
+                .put("uuid", UUID.randomUUID().toString()).put("timestamp", at).put("sessionId", s.id)
+                .put("cwd", s.folder.path).put("level", "info")
+                .put("compactMetadata", JSONObject().put("trigger", "auto").put("preTokens", preTokens)))
+            keep(s, JSONObject().put("parentUuid", JSONObject.NULL).put("isSidechain", false).put("type", "user")
+                .put("isCompactSummary", true).put("isVisibleInTranscriptOnly", true)
+                .put("uuid", UUID.randomUUID().toString()).put("timestamp", at).put("sessionId", s.id)
+                .put("cwd", s.folder.path).put("message", JSONObject().put("role", "user").put("content", summary)))
+        }
+        tell(s, JSONObject().put("type", "system").put("subtype", "status").put("status", JSONObject.NULL)
+            .put("compact_result", "success").put("session_id", s.id))
+        tell(s, JSONObject().put("type", "system").put("subtype", "compact_boundary").put("session_id", s.id)
+            .put("compact_metadata", JSONObject().put("trigger", "auto").put("pre_tokens", preTokens)))
+        tell(s, JSONObject().put("type", "user").put("isSynthetic", true).put("session_id", s.id)
+            .put("message", JSONObject().put("role", "user").put("content", summary)))
+        changed()
     }
 
     private fun save(s: PhoneSession) {
@@ -591,7 +695,7 @@ object PhoneHost {
     fun info(): JSONObject = JSONObject().put("id", id).put("name", name).put("group", name)
         .put("ops", JSONArray(OPS))
         .put("models", JSONArray(Inference.found().map { JSONObject().put("value", it.value).put("displayName", it.display) }))
-        .put("host", name).put("home", shared())
+        .put("host", name).put("home", if (::root.isInitialized) File(root, "agents").path else "")
         .put("pid", android.os.Process.myPid()).put("groups", JSONArray().put(name)).put("init", JSONObject.NULL)
         .put("commit", JSONObject.NULL).put("update", JSONObject.NULL).put("providers", JSONArray())
         .put("notes", JSONObject.NULL).put("phone", true)
@@ -603,7 +707,7 @@ object PhoneHost {
         val size = if (f.exists()) f.length() else 0L
         val bot = s.meta.optJSONObject("bot")
         JSONObject().put("id", s.id).put("title", s.meta.opt("title") ?: JSONObject.NULL)
-            .put("cwd", shared()).put("model", s.meta.optString("model")).put("effort", JSONObject.NULL)
+            .put("cwd", s.folder.path).put("model", s.meta.optString("model")).put("effort", JSONObject.NULL)
             .put("mode", mode(s)).put("group", name).put("created", s.meta.optDouble("created"))
             .put("said", s.meta.optDouble("said")).put("updated", if (f.exists()) f.lastModified() / 1000.0 else s.meta.optDouble("created"))
             .put("size", size).put("state", if (s.asks.isNotEmpty()) "waiting" else if (s.busy) "working" else "idle") // (between turns: ready, nothing to resume)
@@ -611,9 +715,10 @@ object PhoneHost {
             .put("archived", s.meta.optBoolean("archived")).put("draft", s.meta.optBoolean("draft")).put("written", size)
             .put("subagents", 0).put("commands", JSONArray()).put("cut", s.meta.opt("cut") ?: JSONObject.NULL)
             .put("bot", if (bot == null) JSONObject.NULL else JSONObject().put("name", bot.optString("name"))
-                .put("since", bot.optDouble("since")).put("picture", JSONObject.NULL))
+                .put("since", bot.optDouble("since"))
+                .put("picture", picture(s).takeIf { it.exists() }?.let { it.lastModified() / 1000.0 } ?: JSONObject.NULL))
             .put("acting", s.acting && s.busy && s.asks.isEmpty()).put("fork_from", JSONObject.NULL)
-            .put("spawned_by", JSONObject.NULL).put("start_key", s.meta.opt("start_key") ?: JSONObject.NULL)
+            .put("spawned_by", s.meta.opt("spawned_by") ?: JSONObject.NULL).put("start_key", s.meta.opt("start_key") ?: JSONObject.NULL)
             .put("mesh_tools", true).put("always_allow", JSONArray(s.alwaysAllow.sorted()))
             .put("asks", JSONArray(s.asks.entries.map { (rid, m) ->
                 val r = m.optJSONObject("request") ?: JSONObject()
@@ -644,9 +749,81 @@ object PhoneHost {
 
     fun session(sid: String): PhoneSession? = synchronized(lock) { sessions[sid] }
 
-    /** The folder heads are told its agents are in (their folders' own, the phone's home): one for all, so Baude lists
-     * them together, as it lists a folder's chats; each agent's tools use its own folder in it. */
-    fun shared(): String = if (::root.isInitialized) File(root, "agents").path else ""
+    private fun picture(s: PhoneSession) = File(root, "pictures/${s.id}")
+
+    /** A file in one of its agents' folders, as a host's read_file serves one in a session's folder:
+     * {path, size, data (base64), error?}. */
+    private fun readFile(msg: JSONObject): Array<Pair<String, Any?>> {
+        val path = if (msg.isNull("path")) "" else msg.optString("path")
+        val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return arrayOf("path" to path, "error" to "not an absolute path")
+        val inside = synchronized(lock) { sessions.values.any { f.path.startsWith(it.folder.canonicalPath + File.separator) } }
+        if (!inside) return arrayOf("path" to path, "error" to "not in one of its sessions' folders")
+        if (!f.isFile) return arrayOf("path" to path, "error" to "No such file")
+        val limit = msg.optInt("limit", FILE_LIMIT).coerceIn(1, FILE_LIMIT)
+        val data = f.inputStream().use { it.readNBytes(limit + 1) }
+        return arrayOf("path" to path, "size" to f.length(), "data" to Base64.getEncoder().encodeToString(data))
+    }
+
+    /** What @ lists for one of its agents' folders, as a host's catalogue (lookup.items' shape): its files. */
+    private fun catalogue(cwd: String): Array<Pair<String, Any?>> {
+        val dir = File(cwd).takeIf { cwd.startsWith("/") }?.canonicalFile
+        val ok = dir != null && synchronized(lock) { sessions.values.any { it.folder.canonicalFile == dir } }
+        if (!ok) return arrayOf("cwd" to cwd, "items" to JSONArray(), "error" to "not one of its sessions' folders")
+        val items = JSONArray()
+        for (f in dir!!.walkTopDown().filter { it.isFile }.take(CATALOGUE_LIMIT)) {
+            val rel = f.relativeTo(dir).path
+            items.put(JSONObject().put("surface", rel).put("canonical", "").put("faint", false).put("icon", "file")
+                .put("what", "File").put("summary", rel).put("kind", "file").put("line", JSONObject.NULL).put("path", f.path)
+                .put("entry", JSONObject().put("kind", "file").put("sources", JSONArray().put(JSONArray().put("File").put(rel)))))
+        }
+        return arrayOf("cwd" to cwd, "items" to items, "busy" to false)
+    }
+
+    /** (lock held) An agent moved to the phone's trash (phone/trash/<id>: its meta, transcript, folder and picture),
+     * where it can be put back (putBack), as a host moves a deleted chat's files to the trash: where they went. */
+    private fun trash(s: PhoneSession): List<String> {
+        val bin = File(root, "trash/${s.id}").apply { mkdirs() }
+        val went = ArrayList<String>()
+        s.meta.put("trashed", now()).remove("queued")
+        File(bin, "meta.json").writeText(s.meta.toString())
+        File(root, "sessions/${s.id}.json").delete()
+        for ((from, name) in listOf(transcript(s) to "transcript.jsonl", s.folder to "folder", picture(s) to "picture")) {
+            if (from.exists() && from.renameTo(File(bin, name))) went.add(File(bin, name).path)
+        }
+        return went
+    }
+
+    /** The agents in the phone's trash: their meta, newest first. */
+    fun trashed(): List<JSONObject> = File(root, "trash").listFiles().orEmpty().mapNotNull { d ->
+        try {
+            JSONObject(File(d, "meta.json").readText())
+        } catch (_: Exception) {
+            null
+        }
+    }.sortedByDescending { it.optDouble("trashed") }
+
+    /** One put back from the trash: its files where they were, and it listed again. */
+    fun putBack(sid: String) {
+        work.execute {
+            val bin = File(root, "trash/$sid")
+            val meta = try {
+                JSONObject(File(bin, "meta.json").readText())
+            } catch (_: Exception) {
+                return@execute
+            }
+            meta.remove("trashed")
+            val s = PhoneSession(meta)
+            File(bin, "transcript.jsonl").renameTo(transcript(s))
+            File(bin, "folder").renameTo(s.folder)
+            File(bin, "picture").renameTo(picture(s))
+            synchronized(lock) {
+                sessions[s.id] = s
+                save(s)
+            }
+            bin.deleteRecursively()
+            changed()
+        }
+    }
 
     fun mode(s: PhoneSession): String = s.meta.optString("mode").ifBlank { "default" }
 
@@ -663,5 +840,9 @@ object PhoneHost {
     private fun now() = System.currentTimeMillis() / 1000.0
 
     private const val NL: Byte = 10 // (a newline)
+    private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
+    private const val CATALOGUE_LIMIT = 5000
+    private const val PICTURE_MAX = 2 shl 20 // (server.BOT_PICTURE_MAX)
+    private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)
     const val MEMORY = "memory.md" // (a Bot's memory, in its own folder: its file tools edit it)
 }

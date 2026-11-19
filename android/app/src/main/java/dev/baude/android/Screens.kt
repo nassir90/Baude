@@ -158,7 +158,8 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
     val conn = Mesh.conn(at)
     Column(Modifier.fillMaxSize().background(c.inside).imePadding()) {
         Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
-            lead = { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) })
+            lead = { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) },
+            end = if (at == "phone") ({ PhoneMode(sid) }) else null) // (this phone's own agents: their permission mode)
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),

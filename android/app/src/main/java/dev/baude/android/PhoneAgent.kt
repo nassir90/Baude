@@ -16,17 +16,19 @@ import kotlin.concurrent.thread
  * process says it (info's providers), run there through that host process's infer: the API proxy. member: the
  * machine's id in the mesh; provider: its id there (ollama, openai/<endpoint>); model: its name in the provider's API. */
 data class Served(val member: String, val memberName: String, val provider: String, val providerName: String,
-                  val model: String, val display: String) {
+                  val model: String, val display: String, val window: Int = WINDOW) {
     val key: String get() = "$member/$provider"
     /** Its value as a host names another member's model (openai/<endpoint_id>/<model>), so Baude says what it is. */
     val value: String get() = "openai/${endpointId(member, provider)}/$model"
 
     fun json(): JSONObject = JSONObject().put("member", member).put("member_name", memberName).put("provider", provider)
-        .put("provider_name", providerName).put("model", model).put("display", display)
+        .put("provider_name", providerName).put("model", model).put("display", display).put("window", window)
 
     companion object {
         fun of(o: JSONObject) = Served(o.optString("member"), o.optString("member_name"), o.optString("provider"),
-            o.optString("provider_name"), o.optString("model"), o.optString("display"))
+            o.optString("provider_name"), o.optString("model"), o.optString("display"), o.optInt("window", WINDOW))
+
+        const val WINDOW = 32768 // (providers.DEFAULT_WINDOW: a model's context, where its host says none)
     }
 }
 
@@ -41,7 +43,7 @@ fun endpointId(member: String, provider: String): String {
 /** The models the mesh serves this phone's agents: those the machines this phone reaches serve over an API, as any
  * member may use the mesh's inference, and the calls to them. */
 object Inference {
-    const val WAIT_MS = 600_000L // (mesh.INFER_S: a provider has this long to answer)
+    const val WAIT_MS = 600_000L // (mesh.INFER_S: a provider has this long to say something, each time)
 
     /** Every model those machines serve over an API (and that call tools), by machine. */
     fun found(): List<Served> {
@@ -59,7 +61,8 @@ object Inference {
                     val id = m.optString("id").ifBlank { m.optString("value") }
                     if (id.isBlank()) continue
                     out.add(Served(member, info.optString("name").ifBlank { member.take(8) }, p.optString("id"),
-                        p.optString("name").ifBlank { p.optString("id") }, id, m.optString("displayName").ifBlank { id }))
+                        p.optString("name").ifBlank { p.optString("id") }, id, m.optString("displayName").ifBlank { id },
+                        m.optInt("window", Served.WINDOW).takeIf { it > 0 } ?: Served.WINDOW))
                 }
             }
         }
@@ -95,6 +98,7 @@ object Inference {
         val ch = base.exec() ?: throw Failed("${base.host?.label ?: "its host"} isn't connected now")
         val done = CountDownLatch(1)
         var error: String? = null
+        var heard = System.currentTimeMillis()
         val sse = Sse(text)
         val line = WireLine(ch.inputStream, ch.outputStream) { ch.disconnect() }
         s.stopModel = { line.shut() }
@@ -108,6 +112,7 @@ object Inference {
                 line.send(if (conn.place is Place.Member) JSONObject().put("op", "relay").put("to", served.member).put("req", 0)
                     else JSONObject().put("op", "hello").put("client", "baude-android").put("req", 1))
                 line.run { m ->
+                    heard = System.currentTimeMillis()
                     when (m.optString("op")) {
                         "relayed" -> line.send(JSONObject().put("op", "hello").put("client", "baude-android").put("req", 1))
                         "hello" -> line.send(infer)
@@ -127,11 +132,11 @@ object Inference {
                 done.countDown()
             }
         }
-        val until = System.currentTimeMillis() + WAIT_MS
         try {
             while (!done.await(250, TimeUnit.MILLISECONDS)) {
                 if (s.cancel) return null
-                if (System.currentTimeMillis() > until) throw Failed("${served.memberName} didn't answer in time")
+                if (System.currentTimeMillis() - heard > WAIT_MS) throw Failed("${served.memberName} said nothing for " +
+                    "${WAIT_MS / 1000} s")
             }
         } finally {
             line.shut()
@@ -243,6 +248,12 @@ object PhoneAgent {
      * you, so a turn that needs more is one to split; and it bounds what a model stuck in a loop costs the machine that serves it. */
     private const val MAX_CALLS = 40
     const val STOPPED = "[Request interrupted by user]"
+    private const val COMPACT_AT = 0.8 // (of its model's context: the conversation compacted, as claude's auto-compact)
+    private const val COMPACT_ASK = "Your task is to create a detailed summary of the conversation so far, paying " +
+        "close attention to the user's explicit requests and your previous actions. Include: the user's requests and " +
+        "intents; the key facts and decisions; the files in your folder you read, wrote or changed, and why; errors and " +
+        "how they were fixed; what's pending; and the work in hand just before this summary, with the user's last " +
+        "message, so the work can carry on from the summary alone. Write only the summary."
 
     private class Stopped : Exception()
 
@@ -254,14 +265,24 @@ object PhoneAgent {
         var error = false
         try {
             PhoneHost.tell(s, JSONObject().put("type", "system").put("subtype", "init").put("session_id", s.id)
-                .put("model", s.meta.optString("model")).put("cwd", PhoneHost.shared())
+                .put("model", s.meta.optString("model")).put("cwd", s.folder.path)
                 .put("tools", JSONArray(PhoneTools.names(PhoneHost.mode(s)))).put("permissionMode", PhoneHost.mode(s)))
+            var compacted = false
             while (true) {
                 if (s.cancel) throw Stopped()
                 steps++
                 val last = calls >= MAX_CALLS // (no more calls: answered in words)
-                val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system(s)))
-                PhoneHost.conversation(s).list().forEach { messages.put(it) }
+                val told = system(s)
+                var convo = PhoneHost.conversation(s)
+                val window = (s.meta.optJSONObject("infer")?.let { Served.of(it) }?.window ?: Served.WINDOW)
+                val size = (told.length + convo.toString().length) / 4 // (tokens, about: four characters each)
+                if (!compacted && size > window * COMPACT_AT && convo.length() > 2) { // (once a turn at most)
+                    compacted = true
+                    if (compact(s, told, convo, size)) convo = PhoneHost.conversation(s)
+                    if (s.cancel) throw Stopped()
+                }
+                val messages = JSONArray().put(JSONObject().put("role", "system").put("content", told))
+                convo.list().forEach { messages.put(it) }
                 if (last) messages.put(JSONObject().put("role", "user").put("content", "(You've made $MAX_CALLS tool " +
                     "calls in this turn, the most one turn on this phone may. Answer now, in words, without tools: say " +
                     "what you've done and what's left.)"))
@@ -311,46 +332,48 @@ object PhoneAgent {
                     if (answer.finish == "length") result += if (result.isEmpty()) "(cut off: the model's length limit)" else " (cut off)"
                     break
                 }
-                val results = JSONArray()
                 var stopped = false
+                // (each call's result kept as it's had: one the app's stopped after isn't said not to have run)
+                fun answered(id: String, text: String, error: Boolean) = PhoneHost.said(s, "user",
+                    JSONObject().put("role", "user").put("content", JSONArray().put(toolResult(id, text, error))))
                 for (use in uses) {
                     val id = use.getString("id")
                     val name = use.getString("name")
-                    calls++
                     when {
                         stopped || s.cancel -> {
                             stopped = true
-                            results.put(toolResult(id, "The user stopped this turn before it ran.", true))
+                            answered(id, "The user stopped this turn before it ran.", true)
                         }
-                        use.has("_cut") -> results.put(toolResult(id, "This call's arguments weren't whole JSON" +
+                        calls >= MAX_CALLS -> answered(id, "Not run: this turn's made its $MAX_CALLS tool calls, the most " +
+                            "one turn on this phone may.", true)
+                        use.has("_cut") -> answered(id, "This call's arguments weren't whole JSON" +
                             (if (answer.finish == "length") " (your reply reached its length limit)" else "") +
-                            ", so it didn't run: call it again, with less in it.", true))
-                        name !in PhoneTools.names(PhoneHost.mode(s)) ->
-                            results.put(toolResult(id, "No such tool here: $name. The tools are " +
-                                "${PhoneTools.names(PhoneHost.mode(s)).joinToString()}.", true))
+                            ", so it didn't run: call it again, with less in it.", true)
+                        name !in PhoneTools.names(PhoneHost.mode(s)) -> answered(id, "No such tool here: $name. The tools " +
+                            "are ${PhoneTools.names(PhoneHost.mode(s)).joinToString()}.", true)
                         else -> {
+                            calls++
                             val input = use.getJSONObject("input")
-                            val answered = PhoneHost.permit(s, id, name, input)
+                            val allowed = PhoneHost.permit(s, id, name, input)
                             when {
-                                answered == null -> {
+                                allowed == null -> {
                                     stopped = true
-                                    results.put(toolResult(id, "The user stopped this turn before it ran.", true))
+                                    answered(id, "The user stopped this turn before it ran.", true)
                                 }
-                                answered.optString("behavior") != "allow" ->
-                                    results.put(toolResult(id, answered.optString("message", "The user denied this tool use."), true))
+                                allowed.optString("behavior") != "allow" ->
+                                    answered(id, allowed.optString("message", "The user denied this tool use."), true)
                                 else -> {
                                     val (out, bad) = try {
-                                        PhoneTools.run(s, name, answered.optJSONObject("updatedInput") ?: input)
+                                        PhoneTools.run(s, name, allowed.optJSONObject("updatedInput") ?: input)
                                     } catch (e: Exception) {
                                         "${e.javaClass.simpleName}: ${e.message}" to true
                                     }
-                                    results.put(toolResult(id, out, bad))
+                                    answered(id, out, bad)
                                 }
                             }
                         }
                     }
                 }
-                PhoneHost.said(s, "user", JSONObject().put("role", "user").put("content", results))
                 if (stopped) throw Stopped()
             }
         } catch (_: Stopped) {
@@ -367,6 +390,32 @@ object PhoneAgent {
         } finally {
             PhoneHost.ended(s, result, error, steps, System.currentTimeMillis() - began)
         }
+    }
+
+    /** The conversation compacted, as claude compacts one near its model's context: the model asked to summarise it
+     * (said as claude says it, compacting), and from then on given the summary in its place. Whether it was. */
+    private fun compact(s: PhoneSession, told: String, convo: JSONArray, size: Int): Boolean {
+        PhoneHost.tell(s, JSONObject().put("type", "system").put("subtype", "status").put("status", "compacting")
+            .put("session_id", s.id))
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", told))
+        convo.list().forEach { messages.put(it) }
+        messages.put(JSONObject().put("role", "user").put("content", COMPACT_ASK))
+        val body = JSONObject().put("model", (s.meta.optJSONObject("infer") ?: JSONObject()).optString("model"))
+            .put("messages", messages).put("tools", PhoneTools.schemas(PhoneHost.mode(s))).put("tool_choice", "none")
+        val why = try {
+            val answer = Inference.complete(s, body) {} ?: return false
+            if (answer.text.isNotBlank()) {
+                PhoneHost.compacted(s, "This session is being continued from a previous conversation that ran out of " +
+                    "context. The summary below covers the earlier portion of the conversation.\n\n" + answer.text, size)
+                return true
+            }
+            "the model wrote no summary"
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+        PhoneHost.tell(s, JSONObject().put("type", "system").put("subtype", "status").put("status", JSONObject.NULL)
+            .put("compact_result", "failed").put("compact_error", why).put("session_id", s.id))
+        return false
     }
 
     private fun event(s: PhoneSession, e: JSONObject) = PhoneHost.tell(s, JSONObject().put("type", "stream_event")
@@ -413,6 +462,11 @@ object PhoneAgent {
     /** A transcript's record added to the conversation, as OpenAI's chat messages: what you said (pictures as images;
      * a PDF named, which isn't read here), what it said and the tools it called, and each call's result. */
     fun add(out: JSONArray, o: JSONObject) {
+        // (compacted: what was before is its summary from now on, the record after this)
+        if (o.optString("type") == "system" && o.optString("subtype") == "compact_boundary") {
+            while (out.length() > 0) out.remove(out.length() - 1)
+            return
+        }
         if (o.optBoolean("isApiErrorMessage")) return
         val msg = o.optJSONObject("message") ?: return
         val blocks = when (val c = msg.opt("content")) {

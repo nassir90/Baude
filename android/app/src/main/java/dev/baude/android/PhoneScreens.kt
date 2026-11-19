@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -52,6 +53,14 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     val c = LocalBaude.current
     Mesh.tick.value // (a host's state, or the agents', changed: drawn again)
     var deleting by remember { mutableStateOf<JSONObject?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var picturing by remember { mutableStateOf<JSONObject?>(null) } // (the agent whose picture's being picked)
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        val s = picturing ?: return@rememberLauncherForActivityResult
+        picturing = null
+        if (uri != null) kotlin.concurrent.thread(name = "picture", isDaemon = true) { picture(ctx, uri)?.let { setPicture(s, it) } }
+    }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("This phone", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             end = { IconButton(Icons.Filled.Add, "New Agent", onClick = make) })
@@ -82,7 +91,12 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                     val name = s.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: "Agent"
                     Row(Modifier.fillMaxWidth().clickable { open(s.optString("id")) }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(name, null)
+                        val contact = Mesh.contact("phone", s.optString("id"))
+                        androidx.compose.runtime.LaunchedEffect(contact?.pictureKey) { contact?.let { Mesh.picture(it) } }
+                        Box(Modifier.clip(CircleShape).clickable(enabled = !s.isNull("bot")) { // (a Bot's picture: picked)
+                            picturing = s
+                            pick.launch("image/*")
+                        }) { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }
                         Spacer(Modifier.width(Gap.avatarGap))
                         Column(Modifier.weight(1f)) {
                             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -114,6 +128,26 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                 }
             }
 
+            val bin = PhoneHost.trashed()
+            if (bin.isNotEmpty()) {
+                Heading("Trash")
+                Panel(rows = true) {
+                    bin.forEachIndexed { i, m ->
+                        if (i > 0) Rule()
+                        Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(m.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: "Agent", style = Type.bold,
+                                    color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text((if (m.isNull("title")) "" else m.optString("title")).ifBlank { modelSaid(m.optString("model")) },
+                                    style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Button("Put Back") { PhoneHost.putBack(m.optString("id")) }
+                        }
+                    }
+                }
+            }
+
             Heading("What they reach")
             Panel {
                 Text("Files in each agent's own folder on this phone; questions to you; and the mesh's hosts and " +
@@ -124,15 +158,61 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     }
     deleting?.let { s ->
         val name = s.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: "this agent"
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete $name?") },
-            text = { Text("Its chat, its memory and the files in its folder are deleted from this phone. This can't be undone.") },
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Move $name to the Trash?") },
+            text = { Text("Its chat, its memory and the files in its folder go to this phone's trash, under Trash here, " +
+                "where you can put it back.") },
             confirmButton = {
-                Button("Delete", destructive = true) {
+                Button("Move to Trash", destructive = true) {
                     Mesh.conn("phone")?.request(JSONObject().put("op", "delete").put("session", s.optString("id"))) {}
                     deleting = null
                 }
             },
             dismissButton = { Button("Cancel") { deleting = null } }, containerColor = c.dialog)
+    }
+}
+
+/** A picture picked, as a Bot's is sent: a PNG, 256 across at most (null if it can't be read). */
+private fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArray? = try {
+    val bmp = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
+    bmp?.let {
+        val k = minOf(1f, 256f / maxOf(it.width, it.height))
+        val small = android.graphics.Bitmap.createScaledBitmap(it, maxOf(1, (it.width * k).toInt()), maxOf(1, (it.height * k).toInt()), true)
+        java.io.ByteArrayOutputStream().also { o -> small.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o) }.toByteArray()
+    }
+} catch (_: Exception) {
+    null
+}
+
+/** A Bot's picture set, as Baude's Bot Settings sets one (bot, its picture with it). */
+private fun setPicture(s: JSONObject, png: ByteArray) {
+    val bot = s.optJSONObject("bot") ?: return
+    Mesh.conn("phone")?.request(JSONObject().put("op", "bot").put("session", s.optString("id")).put("bot", JSONObject()
+        .put("name", bot.optString("name")).put("picture", java.util.Base64.getEncoder().encodeToString(png)))) {}
+}
+
+/** A phone agent's permission mode, in its chat's bar: tapped, the modes to pick from, as Baude's menu has them
+ * (set_permission_mode). */
+@Composable
+fun PhoneMode(sid: String) {
+    val c = LocalBaude.current
+    Mesh.tick.value
+    val mode = Mesh.sessions["phone"].orEmpty().firstOrNull { it.optString("id") == sid }?.optString("mode") ?: return
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Text(PhoneTools.MODES.firstOrNull { it.first == mode }?.second ?: mode, style = Type.caption, color = c.fg,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(c.raised).clickable { open = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp))
+        androidx.compose.material3.DropdownMenu(open, { open = false }, containerColor = c.dialog) {
+            for ((value, label) in PhoneTools.MODES) androidx.compose.material3.DropdownMenuItem(
+                text = { Text(label, style = Type.body, color = c.fg) },
+                onClick = {
+                    open = false
+                    Mesh.conn("phone")?.send(JSONObject().put("op", "input").put("session", sid).put("msg", JSONObject()
+                        .put("type", "control_request").put("request_id", java.util.UUID.randomUUID().toString())
+                        .put("request", JSONObject().put("subtype", "set_permission_mode").put("mode", value))))
+                },
+                leadingIcon = if (value == mode) ({ androidx.compose.material3.Icon(Icons.Filled.Check, null, tint = c.accent) }) else null)
+        }
     }
 }
 

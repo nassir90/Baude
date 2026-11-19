@@ -6,7 +6,6 @@ import android.os.SystemClock
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -16,11 +15,22 @@ import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
 /** JSON lines with a host process (wire.py's) on a channel of their own: written in turn from a queue, a ping every
- * PING_MS, read on the thread that runs it, and let go of after SILENT_MS without a word or at a line longer than
- * MAX_LINE. */
-class WireLine(input: InputStream, private val output: OutputStream, private val close: () -> Unit) {
-    private val input = BufferedInputStream(input, 1 shl 16)
+ * PING_MS, read in chunks on the thread that runs it, and let go of after SILENT_MS without a word or at a line longer
+ * than MAX_LINE. */
+class WireLine(private val input: InputStream, private val output: OutputStream, private val close: () -> Unit) {
     private val queue = LinkedBlockingQueue<ByteArray>()
+    private val chunk = ByteArray(1 shl 16)
+    private var have = 0 // (of chunk: read, not yet taken as a line's)
+    private var at = 0
+
+    /** Messages waiting to go out. */
+    val waiting: Int get() = queue.size
+
+    /** Till there's room for more to go out (BACKLOG at most waiting), or it's closed: what's passed on through the
+     * phone is read no faster than the link it goes on takes it, as mesh.py's tunnels are. */
+    fun room() {
+        while (queue.size > BACKLOG && !closed) Thread.sleep(10)
+    }
     @Volatile private var heard = SystemClock.elapsedRealtime() + START_MS + OPEN_MS
     @Volatile var closed = false
         private set
@@ -86,17 +96,31 @@ class WireLine(input: InputStream, private val output: OutputStream, private val
     private fun line(): String? {
         val buf = ByteArrayOutputStream()
         while (true) {
-            val b = input.read()
-            if (b < 0) return if (buf.size() > 0) buf.toString("UTF-8") else null
-            if (b == '\n'.code) return buf.toString("UTF-8")
-            buf.write(b)
-            heard = SystemClock.elapsedRealtime() // (a long line coming slowly isn't silence)
+            if (at == have) {
+                have = input.read(chunk)
+                at = 0
+                if (have < 0) {
+                    have = 0
+                    return if (buf.size() > 0) buf.toString("UTF-8") else null
+                }
+                heard = SystemClock.elapsedRealtime() // (a long line coming slowly isn't silence)
+            }
+            var end = at
+            while (end < have && chunk[end] != NL) end++
+            buf.write(chunk, at, end - at)
             if (buf.size() > MAX_LINE) throw IOException("a line longer than ${MAX_LINE shr 20} MB")
+            if (end < have) {
+                at = end + 1
+                return buf.toString("UTF-8")
+            }
+            at = have
         }
     }
 
     companion object {
         const val MAX_LINE = 48 shl 20 // (a host's longest: a transcript's whole lines, base64'd)
+        const val BACKLOG = 32 // (mesh.BACKLOG: messages waiting to go out on a link before more are passed to it)
+        private const val NL: Byte = 10
     }
 }
 
@@ -118,6 +142,7 @@ object PhoneLink {
     private val records = ConcurrentHashMap<String, Pair<JSONObject, Link>>() // (a member: its record, the link it came by
     // first; where a tunnel to it goes is route's)
     private val fails = HashMap<String, Int>()
+    private val nextTry = HashMap<String, Long>() // (a host whose link failed: not tried again before this)
     private val pending = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>()) // (being linked)
     @Volatile private var seq = 0L
 
@@ -125,6 +150,7 @@ object PhoneLink {
      * and those opened from here (outs: the far end's r). */
     private class Link(val conn: Connection, val wire: WireLine) {
         @Volatile var peer: String? = null
+        @Volatile var told = false // (its host's records have come: what it reaches is known)
         val ins = ConcurrentHashMap<Int, End>()
         val outs = ConcurrentHashMap<Int, End>()
         val next = java.util.concurrent.atomic.AtomicInteger(1)
@@ -147,7 +173,10 @@ object PhoneLink {
      * ("out" t: one opened from here; "in" r: one the far end opened). */
     private class Passed(val link: Link, val out: Boolean, val n: Int) : End {
         private fun frame(o: JSONObject) = link.wire.send(o.put(if (out) "t" else "r", n))
-        override fun deliver(msg: JSONObject) = frame(JSONObject().put("op", "data").put("msg", msg))
+        override fun deliver(msg: JSONObject) {
+            link.wire.room()
+            frame(JSONObject().put("op", "data").put("msg", msg))
+        }
         override fun opened() = frame(JSONObject().put("op", "opened"))
         override fun closed(error: String?) {
             (if (out) link.outs else link.ins).remove(n)
@@ -158,11 +187,13 @@ object PhoneLink {
     /** (main thread: a host's connection changed) A link to each of your hosts that's up and isn't reached through
      * one already: one at a time, so the first one's records say what it reaches before another's made. */
     fun look() {
-        if (pending.isNotEmpty() || links.values.any { it.peer == null }) return // (one joining: what it reaches
-        // known first)
+        // (one joining: what it reaches known first)
+        if (pending.isNotEmpty() || links.values.any { it.peer == null || !it.told }) return
         val reached = reachable()
-        val conn = Mesh.hosts.firstNotNullOfOrNull { h ->
-            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.info?.optString("id") !in reached }
+        val now = SystemClock.elapsedRealtime()
+        val conn = Mesh.hosts.firstNotNullOfOrNull { h -> // (one that refused, or failed, lately: past it, to the next)
+            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.info?.optString("id") !in reached &&
+                (nextTry[it.id] ?: 0L) <= now }
         } ?: return
         pending.add(conn.id)
         shown()
@@ -191,8 +222,11 @@ object PhoneLink {
                 why.value = said ?: if (joined) "the link to ${conn.host?.label ?: "its host"} dropped" else why.value
                 val n = if (joined) 0 else (fails[conn.id] ?: 0) + 1
                 fails[conn.id] = n
+                val wait = RETRY_MS[minOf(n, RETRY_MS.size - 1)]
+                nextTry[conn.id] = if (joined) 0L else SystemClock.elapsedRealtime() + wait
                 shown()
-                main.postDelayed({ look() }, RETRY_MS[minOf(n, RETRY_MS.size - 1)])
+                look() // (another host, at once, if there's one to try)
+                main.postDelayed({ look() }, wait)
             }
         }
     }
@@ -236,7 +270,7 @@ object PhoneLink {
         .put("links", JSONArray(links.values.mapNotNull { it.peer }.distinct().sorted()))
 
     /** Its record, anew (its links changed), to every link. */
-    private fun publish() {
+    private fun publish() = synchronized(this) { // (its seq and what's sent with it: one telling at a time, in order)
         seq = maxOf(seq + 1, System.currentTimeMillis() * 1_000_000)
         val mine = record()
         for (l in links.values) if (l.peer != null) l.wire.send(JSONObject().put("op", "mesh").put("records", JSONArray().put(mine)))
@@ -257,7 +291,6 @@ object PhoneLink {
                     val known = records.values.map { it.first } // (what the other links reach: this one told)
                     if (known.isNotEmpty()) wire.send(JSONObject().put("op", "mesh").put("records", JSONArray(known)))
                     shown()
-                    main.post { look() }
                 }
                 "error" -> throw Exception(f.optString("error", "the host said no"))
             }
@@ -269,7 +302,9 @@ object PhoneLink {
     private fun dropped(link: Link) {
         link.wire.shut()
         links.remove(link.conn.id)
-        records.entries.removeAll { it.value.second === link }
+        val still = reachable() // (what another link reaches: kept, and passed on by it from now on)
+        records.entries.removeAll { it.value.second === link && it.key !in still }
+        for ((id, v) in records.entries.toList()) if (v.second === link) route(id)?.let { records[id] = v.first to it }
         for (e in link.ins.values + link.outs.values) e.closed("the phone's link to ${link.conn.host?.label ?: "a host"} dropped")
         link.ins.clear()
         link.outs.clear()
@@ -284,9 +319,11 @@ object PhoneLink {
                 for (r in f.optJSONArray("records").list()) {
                     val id = r.optString("id").takeIf(::isId) ?: continue
                     if (id == PhoneHost.id) { // (this phone's own, from before a restart: its record told anew, newer)
-                        if (r.optLong("seq") >= seq) {
-                            seq = r.optLong("seq")
-                            publish()
+                        synchronized(this) {
+                            if (r.optLong("seq") > seq) {
+                                seq = r.optLong("seq")
+                                publish()
+                            }
                         }
                         continue
                     }
@@ -299,6 +336,10 @@ object PhoneLink {
                 }
                 if (new.length() > 0) for (l in links.values) if (l !== link && l.peer != null) // (passed on: not back)
                     l.wire.send(JSONObject().put("op", "mesh").put("records", new))
+                if (!link.told) { // (what this host reaches known now: another mesh's host linked to, if there's one)
+                    link.told = true
+                    main.post { look() }
+                }
             }
             "open" -> {
                 val t = f.optInt("t", -1).takeIf { it >= 0 } ?: return

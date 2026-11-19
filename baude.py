@@ -6617,12 +6617,7 @@ class FreedesktopLauncher(Launcher):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
 
-def _exec_quote(arg):
-    """Quote an argument for a desktop-entry Exec= line (not shell quoting)."""
-    arg = arg.replace("%", "%%")  # % starts a field code
-    if re.fullmatch(r"[\w@%+=:,./-]+", arg):
-        return arg
-    return '"' + re.sub(r'(["`$\\])', r"\\\1", arg) + '"'
+from baudelib.applist import exec_quote as _exec_quote  # noqa: E402  (Record's and Emission's entries quoted so too)
 
 
 MACOS_LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework" \

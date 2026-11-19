@@ -6220,6 +6220,191 @@ class ToolCard(Gtk.Box):
         return self._media_box is not None and self._media_box.get_visible()
 
 
+MESH_CHAT_TOOLS = ("mcp__mesh__start_subagent", "mcp__mesh__message_chat")  # (drawn as MeshCard)
+
+
+class MeshCard(ToolCard):
+    """A call of the mesh's tools (baudelib/meshtools.py) that starts a subagent on a host of the mesh, or messages a
+    chat there: a line as a subagent's row in the side panel is, [mark] its title over its host and model, ›, the
+    whole line opening that chat as the sidebar does (its mark: the chat's state, as its host lists it, else the
+    call's); under it, once it's come, what the chat said back. Prompt (Message) opens what it was given."""
+
+    def __init__(self, name, tool_id):
+        self.reply, self.answer_view, self.mark = {}, None, None
+        super().__init__(name, tool_id)
+        self.add_css_class("mesh-card")
+        self.input_toggle.set_label("Prompt" if self.base == "start_subagent" else "Message")
+        head = self.head = Gtk.Box(spacing=10)
+        head.add_css_class("mesh-head")
+        self.mark = StatusSlot(self.shown_state())
+        head.append(self.mark)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+        self.line.remove(self.title)
+        self.title.set_ellipsize(Pango.EllipsizeMode.END)
+        texts.append(self.title)
+        self.sub = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.sub.add_css_class("dim-label")
+        self.sub.add_css_class("caption")
+        texts.append(self.sub)
+        head.append(texts)
+        self.line.remove(self.toggles)
+        head.append(self.toggles)
+        chevron = self.chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        chevron.add_css_class("soft-icon")
+        head.append(chevron)
+        self.grid.remove(self.line)
+        self.remove(self.grid)
+        self.remove_css_class("tool-card")  # (its frame's: what the chat said back goes under that, outside it)
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        frame.add_css_class("tool-card")
+        frame.append(head)
+        frame.append(self.grid)
+        self.append(frame)
+        self.grid.set_margin_start(10)
+        self.grid.set_margin_end(10)
+        self.grid.set_column_homogeneous(True)  # (what opens under the line as wide as the card: its line's gone)
+        click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        click.connect("released", lambda g, _n, x, y: g.get_widget().contains(x, y) and self.open_chat())
+        head.add_controller(click)
+        self.refresh_header()
+
+    def has_chat(self):
+        """Is there a chat to open: the one messaged, or the subagent started (or being started)?"""
+        return self.base == "message_chat" or bool(self.reply.get("session")) or self.state == "running"
+
+    def task_title(self):
+        """Its title in the list, as meshtools gives it one."""
+        return self.input.get("title") or " ".join(str(self.input.get("prompt") or "").split())[:60]
+
+    def listing(self):
+        """The chat as its host lists it (Network.sessions'), if that's known here: by its id, from the reply (or what
+        was messaged); a subagent's while it's started, by its title, among the chats this one started."""
+        sid = self.reply.get("session") or (self.input.get("session") if self.base == "message_chat" else None)
+        if sid:
+            r = network().find(sid)
+            listed = r.sessions.get(sid) if r is not None else None
+            return {**listed, "server": r} if listed is not None else None
+        me = getattr(self.get_root(), "session_id", None)
+        if not me or self.base != "start_subagent" or self.state != "running" or not self.input_whole:
+            return None
+        title = self.task_title()
+        return max((s for s in network().sessions() if s.get("spawned_by") == me and s.get("title") == title),
+                   key=lambda s: s.get("created") or 0, default=None)
+
+    def shown_state(self, listed=None):
+        """The mark's: the chat's own state while it works (or waits on a question), else the call's."""
+        if self.state in ("running", "error", "interrupted"):
+            return self.state
+        if listed is not None and listed.get("state") in ("working", "waiting"):
+            return "running"
+        return "error" if self.reply.get("error") or self.reply.get("exited") is not None or \
+            self.reply.get("lost") else "done"
+
+    def show_status(self):
+        self.refresh_header()
+
+    def refresh_header(self):
+        if self.mark is None:
+            return
+        listed = self.listing()
+        self.mark.set_state(self.shown_state(listed) if self.asking is None else "done")
+        self.mark.set_opacity(1 if self.asking is None else 0)  # (waiting on you: the border says so; its place kept)
+        r = listed["server"] if listed is not None else None
+        host = self.reply.get("host_name") or (remote_name(r) if r is not None else None) or self.input.get("host")
+        if self.base == "start_subagent":
+            title = (listed or {}).get("title") or self.task_title() or "Subagent"
+            model = self.input.get("model") or (listed or {}).get("model")
+            if model and r is not None:
+                model = next((m.get("displayName") for m in r.info.get("models") or []
+                              if isinstance(m, dict) and m.get("value") == model and m.get("displayName")), model)
+            bits = [f"Subagent on {host}" if host else "Subagent"] + ([model] if model else [])
+        else:
+            bot = ((listed or {}).get("bot") or {}).get("name")
+            title = bot or (listed or {}).get("title") or f"Chat {str(self.input.get('session') or '')[:8]}".strip()
+            bits = [f"Messaged on {host}" if host else "Messaged"]
+        reply = self.reply
+        if self.state == "interrupted":
+            bits.append("interrupted")
+        elif self.decision == "denied":
+            bits.append("denied")
+        elif listed is not None and listed.get("state") == "waiting":
+            bits.append("waiting for an answer")
+        elif reply.get("still_working"):
+            bits.append("stopped waiting for it" if (listed or {}).get("state") != "working" else "still working")
+        elif reply.get("sent"):
+            bits.append("not waited for")
+        elif reply.get("exited") is not None:
+            bits.append(f"its claude exited ({reply['exited']})")
+        elif reply.get("lost"):
+            bits.append("its host went before it answered")
+        self.title.set_markup(f"<b>{html.escape(title)}</b>")
+        self.sub.set_text(" · ".join(bits))
+        self.head_tip(listed, host)
+
+    def head_tip(self, listed, host):
+        """The line's pointer, ›, and what it says on hover: opening the chat, if there's one."""
+        where, chat = f" on {host}" if host else "", self.has_chat()
+        self.chevron.set_visible(chat)
+        (self.head.add_css_class if chat else self.head.remove_css_class)("openable")
+        pointers.set_pointer(self.head, pointers.HAND if chat else None)
+        self.head.set_tooltip_text(None if not chat else f"Open this chat{where}" if listed is not None else
+                                   f"This chat{where} isn't listed here yet")
+
+    def open_chat(self):
+        """Its chat, opened as the sidebar opens one (BaudeWindow.open_mesh_chat); one not listed here, said so."""
+        win, listed = self.get_root(), self.listing()
+        if not isinstance(win, BaudeWindow) or not self.has_chat():
+            return
+        if listed is not None:
+            win.open_mesh_chat(listed)
+            return
+        host = self.reply.get("host_name") or self.input.get("host")
+        win.note(f"{self.title.get_text()}: its chat isn't listed here"
+                 + (f" (is {host} reachable from this machine?)" if host else ""))
+
+    def ask(self, buttons):
+        super().ask(buttons)
+        buttons.set_margin_bottom(8)
+
+    def build_input(self):
+        fresh = self.input_box is None
+        super().build_input()
+        if fresh:
+            self.input_box.set_margin_top(0)
+            self.input_box.set_margin_bottom(8)
+
+    def output_boxes(self):
+        fresh = self._output is None
+        out = super().output_boxes()
+        if fresh:
+            box = self.output_toggle.get_child()
+            box.set_margin_top(0)
+            box.set_margin_bottom(8)
+        return out
+
+    def set_result(self, content, is_error):
+        texts = [c.get("text", "") if isinstance(c, dict) else str(c)
+                 for c in (content if isinstance(content, list) else [content]) if c]
+        try:
+            reply = None if is_error else json.loads("\n".join(texts))
+        except ValueError:
+            reply = None
+        if not isinstance(reply, dict):  # (refused, or failed: as the tool said it, under Error)
+            return super().set_result(content, is_error)
+        if self.asking is not None:
+            self.answered()
+        self.reply = reply
+        said = reply.get("answer") or reply.get("said_so_far")
+        if said and self.answer_view is None:
+            box = self.answer_view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=6)
+            box.add_css_class("mesh-answer")
+            if not reply.get("answer"):
+                box.append(sel_label("<span alpha='60%'>What it had said so far</span>"))
+            box.append(MarkdownView(said))
+            self.append(box)
+        self.set_state("done")
+
+
 def read_tail(path, limit=6000):
     try:
         with open(path, "rb") as f:
@@ -13279,12 +13464,29 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.blocks = {}         # stream index -> widget for current message
         self.tool_cards = {}     # tool_use_id -> ToolCard
         self.tool_parent = {}    # tool_use_id -> the subagent's call it ran inside (nested agents)
+        self.mesh_cards = []     # the MeshCards among them (their chats' states followed: on_network)
         self.task_lines = {}     # task id -> the line its ending got while its card wasn't drawn (task_note)
         self.streamed_ids = set()  # message ids we already rendered via stream events
 
+    def tool_card(self, name, tool_id):
+        """A tool call's card, kept by its id: a mesh subagent's or a message to a chat a MeshCard, else a ToolCard."""
+        card = self.tool_cards[tool_id] = (MeshCard if name in MESH_CHAT_TOOLS else ToolCard)(name, tool_id)
+        if isinstance(card, MeshCard):
+            self.mesh_cards.append(card)
+        return card
+
+    def open_mesh_chat(self, listed):
+        """A chat on the network (Network.sessions'), opened from its card here (MeshCard), as the sidebar opens it."""
+        info = remote_info(listed)
+        self.show_chat()
+        if info["id"] == self.session_id:
+            self.opening_remote = None
+            return
+        self.open_remote_soon(info)
+
     def add(self, widget, parent_tool=None):
         """Append to the chat, or to a subagent's transcript (side panel, else inside its card).
-        Tool calls and the thinking between them fold into a ToolGroup."""
+        Tool calls and the thinking between them fold into a ToolGroup; a MeshCard stands on its own, as a reply does."""
         if parent_tool and isinstance(widget, ToolCard):
             self.tool_parent[widget.tool_id] = parent_tool
         if parent_tool and (view := self.panel.agent_view(parent_tool)) is not None:
@@ -13305,12 +13507,15 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def add_activity(self, target, widget):
         last = target.get_last_child()
+        if isinstance(widget, MeshCard):
+            target.append(widget)
+            return widget
         if isinstance(last, ToolGroup):
             last.add_item(widget)
             return widget
         # the run of tool cards at the end of the container (narration between them splits it)
         run, child = [], last
-        while isinstance(child, ToolCard):
+        while isinstance(child, ToolCard) and not isinstance(child, MeshCard):
             run.insert(0, child)
             child = child.get_prev_sibling()
         if isinstance(widget, ToolCard) and any(isinstance(w, ToolCard) for w in run):
@@ -15993,9 +16198,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.reply_views.append(view.md)  # (its names link as a reply's do)
                 self.blocks[key(ev["index"])] = view
             elif cb["type"] in ("tool_use", "server_tool_use"):
-                card = ToolCard(cb["name"], cb["id"])
-                self.tool_cards[cb["id"]] = card
-                self.blocks[key(ev["index"])] = self.add(card, parent)
+                self.blocks[key(ev["index"])] = self.add(self.tool_card(cb["name"], cb["id"]), parent)
         elif et == "content_block_delta":
             w, d = self.blocks.get(key(ev["index"])), ev["delta"]
             if w is None:
@@ -16034,9 +16237,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             if c.get("type") in ("tool_use", "server_tool_use"):
                 card = self.tool_cards.get(c["id"])
                 if card is None:
-                    card = ToolCard(c["name"], c["id"])
-                    self.tool_cards[c["id"]] = card
-                    self.add(card, parent)
+                    card = self.add(self.tool_card(c["name"], c["id"]), parent)
                 card.set_input(c.get("input", {}))
                 if c["id"] in self.orphan_results:  # its result was drawn before it (older history)
                     self.render_tool_results([self.orphan_results.pop(c["id"])])
@@ -17755,7 +17956,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def on_network(self):
         """The network changed: the open network session's transcript fetched as it grows (its subagents' too), its
-        title as it's listed (renamed in another window, or elsewhere), the banner as it is now."""
+        title as it's listed (renamed in another window, or elsewhere), the banner as it is now, and the chats its
+        mesh cards name as they are now."""
         if getattr(self, "let_go_done", False):
             return
         self.watch_left_remote()
@@ -17770,6 +17972,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if codex_changed:
             self.sync_effort_choices()
             self.sync_local()
+        for card in getattr(self, "mesh_cards", ()):  # (the chats they started or messaged: as their hosts list them now)
+            card.refresh_header()
         if self.remote is None:
             return
         listed = self.remote.sessions.get(self.session_id)

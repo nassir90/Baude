@@ -555,6 +555,7 @@ class MacWeb:
         if not opener:
             send(config, b"release")  # (the view keeps its own copy)
         send(self.view, b"setAllowsBackForwardNavigationGestures:", True, types=(ctypes.c_bool,))
+        send(self.view, b"setAllowsMagnification:", True, types=(ctypes.c_bool,))  # (a pinch zooms it, as Safari's)
         send(self.view, b"setAutoresizingMask:", 2 | 16, types=(ctypes.c_ulong,))  # (sized with the window between
         delegate = self.make_delegate()                                             # polls: its margins kept)
         send(self.view, b"setNavigationDelegate:", delegate, types=(ctypes.c_void_p,))
@@ -686,19 +687,30 @@ class MacWeb:
         return True
 
     parked_in = None  # (the unseen window hosted pages out of sight are kept in: parking)
-    GESTURES = {22: b"scrollWheel:", 29: b"magnifyWithEvent:", 31: b"swipeWithEvent:", 18: b"rotateWithEvent:",
+    GESTURES = {22: b"scrollWheel:", 30: b"magnifyWithEvent:", 31: b"swipeWithEvent:", 18: b"rotateWithEvent:",
                 32: b"smartMagnifyWithEvent:"}  # (an NSEvent's type: what a view's given it with)
+    gesture_to = None  # (a trackpad gesture's, from its start to its momentum's end: its page's view, or "gtk")
 
     @classmethod
     def take_event(cls, event):
         """A wheel's turn or a trackpad's gesture over a page (in Emission's window, or hosted in Baude's; not
         read-only), given to its view as it comes, momentum and all: GTK keeps these for its own surface, so the page
         would never see them. True if it's taken (macos.route_events)."""
-        send, R = macos.objc_send, macos._rect()
+        send = macos.objc_send
         kind = send(event, b"type", ret=ctypes.c_ulong)
         sel = cls.GESTURES.get(kind)
         if sel is None:
             return False
+        R = macos._rect()
+        phase = send(event, b"phase", ret=ctypes.c_ulong)
+        momentum = send(event, b"momentumPhase", ret=ctypes.c_ulong)
+        began = bool(phase & (1 | 32))  # (Began, MayBegin: a gesture's start says where all of it goes, momentum and
+        if not began and (phase or momentum) and cls.gesture_to is not None:  # all, whatever's under it after)
+            to = cls.gesture_to
+            if to == "gtk" or to not in cls.views:
+                return False
+            send(to, sel, event, types=(ctypes.c_void_p,))
+            return True
         f = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p)(
             ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
         at = f(event, objc_sel(b"locationInWindow"))
@@ -728,9 +740,15 @@ class MacWeb:
             box = send(view, b"bounds", ret=R)
             if box.x <= p.x <= box.x + box.w and box.y <= p.y <= box.y + box.h:
                 if getattr(web.window, "blocked", False):  # (read-only: not the page's, nor GTK's)
+                    if began:
+                        cls.gesture_to = "gtk"
                     return True
+                if began:
+                    cls.gesture_to = view
                 send(view, sel, event, types=(ctypes.c_void_p,))
                 return True
+        if began:
+            cls.gesture_to = "gtk"
         return False
 
     @classmethod

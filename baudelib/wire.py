@@ -19,7 +19,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?}
+           env?, start_key?, app_tools?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -51,7 +51,14 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        environment for the session's claude (kept in memory only;
                                                        attach takes it too). start_key: (version 13) an id the client
                                                        picks, kept and listed, so it can tell whether a start whose
-                                                       answer it lost was taken
+                                                       answer it lost was taken. app_tools: (version 16) names of MCP
+                                                       servers this head runs itself (a phone's Meta's tools, which
+                                                       act on the phone), for a claude here: each relayed back to it
+                                                       over this connection (agentproxy.AppTools), allowed without
+                                                       asking; mcp_open {session, conn, name} when its claude starts
+                                                       one, then mcp {conn, line} either way and mcp_close {conn}
+                                                       from either side, as an agent's are (agent). Gone with this
+                                                       connection
     detach {session}
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
@@ -233,7 +240,7 @@ VERSION = 16  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
 # 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
 # gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
-# always_allow added, a session's always_allow; 16: feedback, filed by this host's gh)
+# always_allow added, a session's always_allow; 16: feedback, filed by this host's gh; start's app_tools)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

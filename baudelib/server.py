@@ -231,6 +231,7 @@ class Session:
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
+        self.app_tools = None     # (a head's own tools for its claude, start's app_tools: agentproxy.AppTools; memory only)
         # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
         # subagents' too: parent, the call they're in); its background tasks, by task_id. Not listed, its subagents:
         # their tasks running, task_id -> their Agent call's id; each Agent call, id -> (the call it's in, run in the
@@ -940,6 +941,8 @@ class Server:
                 conn.agent_run.end()
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
+            for tools in list(getattr(conn, "app_tools", ())):  # (its chats' tools that were its own: gone with it)
+                tools.end()
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
@@ -1113,6 +1116,8 @@ class Server:
                 self.agent_runs[run.id] = run
             conn.agent_run = run
             return reply("agent_started", run=run.id)
+        if op in ("mcp", "mcp_close") and msg.get("conn") in getattr(conn, "tool_relays", {}):  # (an app's tools')
+            return conn.tool_relays[msg["conn"]].take(msg)
         if op in ("in", "close", "kill", "mcp", "mcp_close") and getattr(conn, "agent_run", None) is not None:
             return conn.agent_run.take(msg)
         if op == "emission":  # (a Bot's browser tools: its own Emission profile here, started for it if it isn't
@@ -1524,6 +1529,11 @@ class Server:
             raise ValueError(f"{', '.join([*options, *(['fork_from'] if src else [])])}: claude's, not {model}'s")
         if params.get("ask_default") not in (None, "deny", "allow"):
             raise ValueError("ask_default is deny or allow")
+        tools = params.get("app_tools") or []  # (MCP servers the head runs itself: relayed back to it, AppTools)
+        if not isinstance(tools, list) or not all(wire.is_id(t) for t in tools) or len(tools) > 4:
+            raise ValueError("app_tools is a list of up to 4 names")
+        if tools and (conn is None or run["program"] != "claude"):
+            raise ValueError("app_tools are a head's, for a claude here")
         meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
                 "group": self.group_of(params), "title": params.get("title") or None,
                 "prompt": params.get("prompt") or "", "created": time.time(), "options": options,
@@ -1537,6 +1547,8 @@ class Server:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
             s = Session(self, meta)
+            if tools:
+                s.app_tools = agentproxy.AppTools(self, conn, s.id, tools)
             if isinstance(params.get("env"), dict):
                 s.env = clean_env(params["env"])
             self.sessions[s.id] = s
@@ -1551,6 +1563,8 @@ class Server:
                     self.ensure_proc(s)
                     self.send_user(s, meta["prompt"])
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
+                if s.app_tools is not None:
+                    s.app_tools.end()
                 del self.sessions[s.id]
                 if s.proc is not None:
                     s.proc.kill()
@@ -1691,6 +1705,19 @@ class Server:
                     extra[at:at] = rules
                 else:
                     extra += ["--allowedTools", *rules]
+        if s.app_tools is not None and run["program"] == "claude":  # (a head's own tools: relays back to it, never
+            tools = s.app_tools.config()                              # asked about: the head runs them itself)
+            if "--mcp-config" in extra:  # (the mesh's with them, in one)
+                at = extra.index("--mcp-config") + 1
+                extra[at] = json.dumps({"mcpServers": {**json.loads(extra[at])["mcpServers"], **tools}})
+            else:
+                extra += ["--mcp-config", json.dumps({"mcpServers": tools})]
+            rules = [f"mcp__{n}__*" for n in tools]
+            if "--allowedTools" in extra:
+                at = extra.index("--allowedTools") + 1
+                extra[at:at] = rules
+            else:
+                extra += ["--allowedTools", *rules]
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it

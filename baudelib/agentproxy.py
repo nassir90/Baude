@@ -672,6 +672,74 @@ class Run:
         self.server.agent_runs.pop(self.id, None)
 
 
+RELAY_NUMBERS = itertools.count(1)  # (an app's tools' relays: numbered apart from every other's, on any connection)
+
+
+class AppTools:
+    """A chat's MCP servers that are a head's own (start's app_tools: a phone's Meta's tools, which act on the phone):
+    each run by its claude here as a relay (mcp-relay) whose lines go to and from the head over the connection that
+    started the chat, as an agent's MCP servers go to and from its caller (Run): mcp_open {session, conn, name},
+    then mcp {conn, line} either way, mcp_close {conn} from either side. Gone with that connection."""
+
+    def __init__(self, server, conn, session, names):
+        self.server, self.conn, self.session, self.names = server, conn, session, names
+        self.id, self.token = secrets.token_hex(8), secrets.token_hex(16)
+        self.relays, self.lock, self.gone = {}, threading.Lock(), False
+        server.agent_runs[self.id] = self  # (found by mcp_relay, as an agent's run is)
+        if not hasattr(conn, "app_tools"):
+            conn.app_tools, conn.tool_relays = set(), {}
+        conn.app_tools.add(self)
+
+    def config(self):
+        """--mcp-config's servers for them: a relay each, to this host process."""
+        return {n: {"command": sys.executable, "args": [HEADLESS, "mcp-relay", "--socket",
+                                                        os.path.abspath(self.server.socket_path), self.id, n,
+                                                        self.token]} for n in self.names}
+
+    def relay(self, conn, msg):
+        if msg.get("token") != self.token or msg.get("name") not in self.names or self.gone:
+            return None
+        with self.lock:
+            n = next(RELAY_NUMBERS)
+            self.relays[n] = conn
+        conn.agent_relay = (self, n)
+        self.conn.tool_relays[n] = self
+        self.conn.send({"op": "mcp_open", "session": self.session, "conn": n, "name": msg["name"]})
+        return n
+
+    def relay_line(self, n, line):
+        if isinstance(line, str) and n in self.relays:
+            self.conn.send({"op": "mcp", "conn": n, "line": line})
+
+    def relay_gone(self, n):
+        self.conn.tool_relays.pop(n, None)
+        if self.relays.pop(n, None) is not None:
+            self.conn.send({"op": "mcp_close", "conn": n})
+
+    def take(self, msg):
+        """The head's: a line for one of its relays, or one closed."""
+        relay = self.relays.get(msg.get("conn"))
+        if relay is None:
+            return
+        if msg.get("op") == "mcp" and isinstance(msg.get("line"), str):
+            relay.send({"op": "mcp_line", "line": msg["line"]})
+        elif msg.get("op") == "mcp_close":
+            self.relays.pop(msg["conn"], None)
+            self.conn.tool_relays.pop(msg["conn"], None)
+            close_conn(relay)
+
+    def end(self):
+        """The head's gone: its relays let go of (its tools fail for its chat's claude from then on)."""
+        with self.lock:
+            if self.gone:
+                return
+            self.gone = True
+            relays, self.relays = list(self.relays.values()), {}
+        for r in relays:
+            close_conn(r)
+        self.server.agent_runs.pop(self.id, None)
+
+
 def close_conn(conn):
     """A host process's connection (server.Conn) let go of, its socket too: what's at the other end hears it's gone."""
     conn.close()

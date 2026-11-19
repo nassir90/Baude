@@ -16,11 +16,12 @@ def full_redraws():
 
 
 def stay_offscreen():
-    """On macOS, this process's windows never reach the screen, though GTK lays them out and maps them as it would
-    (rendered by hand: GSK_RENDERER=cairo and a Gtk.WidgetPaintable). No Dock icon or menu bar, nothing raised over
-    anyone's work, the app you're in still in front. Called before GTK is loaded: GTK brings an app to the front as its
-    display opens, and orders a window in after its first frame; here those calls do nothing, for good. Elsewhere,
-    nothing (an X server of its own does it there: Xvfb)."""
+    """On macOS, this process's windows never reach the screen where anyone sees them, though GTK lays them out and maps
+    them as it would (rendered by hand: GSK_RENDERER=cairo and a Gtk.WidgetPaintable). No Dock icon or menu bar,
+    nothing raised over anyone's work, the app you're in still in front. Called before GTK is loaded: GTK brings an app
+    to the front as its display opens, and orders a window in after its first frame; here those calls do nothing (a
+    window's put in only by in_unseen, where no one sees it). Elsewhere, nothing (an X server of its own does it there:
+    Xvfb)."""
     if sys.platform != "darwin":
         return
     import ctypes

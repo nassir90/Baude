@@ -472,6 +472,9 @@ class BrowserPane(Gtk.Box):
             w.set_sensitive(not on)
         if self.sid is None:
             return
+        if not on and self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel)
+            self.sized_to = None
+            self.fit_page()
         held = dict(widgets.load_settings().get("browser_read_only") or {})
         if bool(held.get(self.sid)) == on:
             return
@@ -646,7 +649,10 @@ class BrowserPane(Gtk.Box):
 
     def fit_page(self):
         """A streamed Bot's page (an agent's, out of sight: never someone's window) laid out at the panel's shape,
-        once for each size it's shown at."""
+        once for each size it's shown at; not while it's read-only (watched, not disturbed). Its own size again once
+        no one watches it (Emission puts it back)."""
+        if self.read_only.get_active():
+            return
         size = self.page_size()
         if size == self.sized_to:
             return

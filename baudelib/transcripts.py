@@ -344,7 +344,8 @@ def find_session(session_id):
 
 def history_items(lines, sidechain=False, first=None):
     """Visible items from transcript lines: ('user'|'assistant', content, is_error, timestamp, uuid),
-    ('tool_results', content), ('stopped', None) (a turn stopped) or ('artifact', info). Sidechain records are
+    ('tool_results', content), ('stopped', None) (a turn stopped), ('artifact', info), ('compact_boundary', its
+    compactMetadata) then ('compact_summary', the summary written) (a compaction). Sidechain records are
     skipped unless sidechain (a subagent's own transcript is nothing but); meta records always are. first: the uuid of
     the transcript's first user record (first_user_uuid), whose prompt, if it came from outside, is a 'start_prompt'."""
     return [item for line in lines if (item := history_item(line, sidechain, first)) is not None]
@@ -458,6 +459,14 @@ def history_item(line, sidechain=False, first=None):
         if rec.get("frameUrl"):
             return "artifact", {"url": rec["frameUrl"], "title": rec.get("title"), "path": rec.get("path")}
         return None
+    if '"compact_boundary"' in line:  # (Claude Code compacted the conversation here: what it did, its compactMetadata)
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            return None
+        if isinstance(rec, dict) and rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            return ("compact_boundary", rec.get("compactMetadata") or {}) \
+                if sidechain or not rec.get("isSidechain") else None
     if '"type":"user"' not in line and '"type":"assistant"' not in line \
             and '"type": "user"' not in line and '"type": "assistant"' not in line:
         return None

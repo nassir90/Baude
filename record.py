@@ -828,7 +828,9 @@ def parse_records(lines, items, seen=None):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
+    "failed", "summary"}, as Baude's chat says it. Where Claude Code compacted the conversation is {"role": "compact",
+    "text" (widgets.compact_text), "meta" (its compactMetadata), "summary" (what it wrote, once read), "id"}. The prompt a
+    session was started with from outside (its first user
     record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
     keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
@@ -847,6 +849,14 @@ def parse_records(lines, items, seen=None):
             continue
         last = d.get("uuid")
         kind = d.get("type")
+        if kind == "system" and d.get("subtype") == "compact_boundary" and not d.get("isSidechain"):
+            meta = d.get("compactMetadata") or {}
+            items.append({"role": "compact", "text": widgets.compact_text(meta), "meta": meta, "id": d.get("uuid")})
+            continue
+        if d.get("isCompactSummary") and items and items[-1]["role"] == "compact" and not items[-1].get("summary"):
+            items[-1]["summary"] = _text_of((d.get("message") or {}).get("content"))
+            items[-1]["grew"] = True
+            continue
         if kind not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
             continue
         msg = d.get("message") or {}
@@ -1662,7 +1672,7 @@ def chat_text(path, title, cwd):
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
     who = {"user": "You", "start": "Started with"}
     return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
-                                  if it["role"] != "note"])  # (a task's ending: said by neither)
+                                  if it["role"] not in ("note", "compact")])  # (said by neither)
 
 
 def chats_of(notebook, transcripts):
@@ -5510,7 +5520,9 @@ class Reader(Gtk.Box):
                 self.box.remove(row)
             del self.rows[keep:]
         grew = keep and self.items[keep - 1].pop("grew", False)
-        if grew:
+        if grew and self.items[keep - 1]["role"] == "compact":  # (its summary, read after it)
+            self.rows[keep - 1].prose.set_summary(self.items[keep - 1].get("summary"))
+        elif grew:
             self.rows[keep - 1].prose.set_text(self.items[keep - 1]["text"])
         for it in self.items[keep:]:
             it.pop("grew", None)
@@ -5528,6 +5540,14 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "compact":  # (where Claude Code compacted it: its marker, as Baude's chat draws one)
+            mark = widgets.CompactMark(it.get("meta") or {})
+            mark.set_summary(it.get("summary"))
+            row.append(mark)
+            row.prose, row.item = mark, it
             self.rows.append(row)
             self.box.append(row)
             return

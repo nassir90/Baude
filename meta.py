@@ -533,6 +533,10 @@ def report_text(head, messages, limit=REPORT_ITEM, most=None):
                 if it.get("text", "").strip():
                     out.append(it["text"].strip())
                 continue
+            if it["kind"] == "compact":
+                done = it.get("state") == "done"
+                out.append(f"[{widgets.compact_text(it.get('meta')) if done else 'compaction ' + it.get('state', '?')}]")
+                continue
             inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
             out.append(f"[tool {it.get('name') or '?'} · {it.get('state') or '?'}]\n{trimmed(inp, limit)}")
             if it.get("result"):
@@ -554,6 +558,10 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                 try:
                     e = json.loads(raw)
                 except ValueError:
+                    continue
+                if e.get("type") == "system" and e.get("subtype") == "compact_boundary" and not e.get("isSidechain"):
+                    when = (e.get("timestamp") or "").replace("T", " ")[:19]
+                    parts.append(f"## {widgets.compact_text(e.get('compactMetadata'))}" + (f" · {when}" if when else ""))
                     continue
                 if e.get("type") not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
                     continue
@@ -1708,6 +1716,13 @@ class Agent:
             self.chat.context_soon(self)
         elif t == "system" and msg.get("subtype") == "baude_context" and self is self.chat.agent:  # (pi-claude's: the
             self.chat.show_usage(msg.get("usage") or {})  # tokens of the request it's sent, as MLX's server says)
+        if t == "system" and turn is not None and not msg.get("parent_tool_use_id"):  # (compacting: said in the reply)
+            if msg.get("subtype") == "status" and msg.get("status") == "compacting":
+                self.chat._compaction(self, turn, "running", written=msg.get("compact_output_chars"))
+            elif msg.get("subtype") == "status" and msg.get("compact_result") == "failed":
+                self.chat._compaction(self, turn, "failed", error=msg.get("compact_error"))
+            elif msg.get("subtype") == "compact_boundary":
+                self.chat._compaction(self, turn, "done", meta=msg.get("compact_metadata") or {})
         if t == "_stderr":
             self.stderr = (self.stderr + [msg.get("text", "")])[-20:]
             if msg.get("warn") and turn is not None:  # (its tools didn't reach the model's host: over the reply)
@@ -1747,6 +1762,11 @@ class Agent:
                 elif c.get("type") == "text" and not turn.get("streamed") and c.get("text"):
                     turn["text"].append(c["text"])
                     self.chat._said_more(self, turn, c["text"])
+        elif t == "user" and msg.get("isSynthetic") and turn["items"] and turn["items"][-1]["kind"] == "compact" and \
+                turn["items"][-1]["state"] == "done":  # (what it compacted the conversation to: under its marker)
+            content = (msg.get("message") or {}).get("content")
+            self.chat._compaction(self, turn, "done", summary=content if isinstance(content, str) else "\n\n".join(
+                b.get("text") or "" for b in content or () if isinstance(b, dict) and b.get("type") == "text"))
         elif t == "user":  # (what its tools gave back)
             for c in (msg.get("message") or {}).get("content") or []:
                 if isinstance(c, dict) and c.get("type") == "tool_result":
@@ -2690,6 +2710,9 @@ class MetaChat(Gtk.Box):
                 if (text := self.reply_text(it["text"]).strip()):
                     reply.prose = self.prose(text)
                     reply.append(reply.prose)
+            elif it["kind"] == "compact":
+                reply.append(self.compact_mark(it))
+                reply.prose = None
             else:
                 ids = it.get("actions") or []
                 fresh = [i for i in ids if i not in drawn]
@@ -3509,6 +3532,29 @@ class MetaChat(Gtk.Box):
         self.context_soon(agent)
         if agent is self.ask:
             self._refresh_live(turn)
+
+    def _compaction(self, agent, turn, state, **said):
+        """Claude Code compacting the conversation in a turn (running), done (meta: its compact_metadata; summary: what
+        it wrote) or failed (error): an item of the reply, its marker (compact_mark)."""
+        items = turn["items"]
+        item = items[-1] if items and items[-1]["kind"] == "compact" and \
+            (items[-1]["state"] == "running" or "summary" in said) else None
+        if item is None:
+            item = {"kind": "compact", "state": "running"}
+            items.append(item)
+        item.update(state=state, **{k: v for k, v in said.items() if v is not None})
+        if agent is self.ask:
+            self._refresh_live(turn)
+
+    def compact_mark(self, it):
+        """A reply's compaction (_compaction's item), as Baude's chat marks one."""
+        mark = widgets.CompactMark(it.get("meta") or {}) if it.get("state") == "done" else widgets.CompactMark()
+        if it.get("state") == "running":
+            mark.running(it.get("written"))
+        elif it.get("state") != "done":
+            mark.fail(it.get("error"), stopped=it.get("state") == "interrupted")
+        mark.set_summary(it.get("summary"))
+        return mark
 
     def _delta(self, agent, text):
         """(Record's edits say themselves as their cards: nothing more to say here.)"""

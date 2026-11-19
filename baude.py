@@ -16036,10 +16036,16 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         elif st == "api_retry" and not msg.get("parent_tool_use_id"):  # (a subagent's: its own to wait out)
             self.show_retry(msg)
         elif st == "compact_boundary":
-            self.note("— conversation compacted —")
+            self.compacted(msg.get("compact_metadata") or {})
             self.refresh_context()
         elif st == "status":
             self.sync_mode(msg.get("permissionMode"))  # e.g. leaving plan mode
+            if msg.get("status") == "compacting":
+                self.compacting(msg.get("compact_output_chars"))
+            elif msg.get("compact_result") == "failed":
+                self.compact_mark_now().fail(msg.get("compact_error"))
+            elif msg.get("compact_result") == "success":
+                self.refresh_context()
             if msg.get("status") == "requesting" and not self.busy:
                 self.set_busy(True)  # a turn the CLI started itself (e.g. a background task finished)
         elif st == "session_title_changed":
@@ -16054,6 +16060,31 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         elif st not in ("hook_started", "hook_response", "thinking_tokens", "task_summary",
                         "post_turn_summary", "rate_limit_event"):
             self.note(f"[system:{st}]")
+
+    # ---- compaction (claude summarising the conversation to free its window: status "compacting", then compact_boundary)
+    def compact_mark_now(self):
+        """The marker of the compaction under way (widgets.CompactMark), made at the chat's end if there's none."""
+        mark = getattr(self, "compact_mark", None)
+        if mark is None or mark.state != "running" or not mark.is_ancestor(self.transcript):
+            mark = self.compact_mark = self.add(widgets.CompactMark())
+        return mark
+
+    def compacting(self, written=None):
+        """claude compacting the conversation: said where it's happening, as it happens (it can take a minute)."""
+        if not self.busy:
+            self.set_busy(True)
+        self.compact_mark_now().running(written)
+
+    def compacted(self, meta):
+        mark = self.compact_mark_now()
+        mark.finish(meta)
+        self.compact_mark = mark  # (the summary claude says next goes under it: h_user)
+
+    def compact_ended(self):
+        """Its turn's over: a compaction still under way didn't finish."""
+        mark, self.compact_mark = getattr(self, "compact_mark", None), None
+        if mark is not None and mark.state == "running":
+            mark.fail(stopped=True)
 
     # ---- session title (click it in the header to rename)
     def show_title(self, title):
@@ -16227,6 +16258,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def h_assistant(self, msg):
         m, parent = msg["message"], msg.get("parent_tool_use_id")
+        if parent is None and getattr(self, "compact_mark", None) is not None and self.compact_mark.state == "done":
+            self.compact_mark = None  # (the conversation's gone on: a summary only follows its boundary at once)
         if parent is None:  # (what a turn ending in an error last said: the error, said once, not again by h_result)
             said = "".join(c.get("text", "") for c in m.get("content", []) if c.get("type") == "text").strip()
             self.said_last = said.removeprefix("⚠").strip() or self.said_last
@@ -17379,6 +17412,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
 
     def h_user(self, msg):
         content = msg.get("message", {}).get("content")
+        mark = getattr(self, "compact_mark", None)
+        if msg.get("isSynthetic") and mark is not None and mark.state == "done" and not msg.get("parent_tool_use_id"):
+            mark.set_summary(content if isinstance(content, str) else _first_text(content))  # (what it compacted to)
+            self.compact_mark = None
+            return
         if isinstance(content, list):  # a plain string is the echo of our own prompt
             self.render_tool_results(content)
             if not msg.get("parent_tool_use_id"):
@@ -17804,6 +17842,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def render_history(self, items, final=True):
         made = set(self.tool_cards)
         turn_calls, stop_said = [], False  # (the calls drawn since the last message of yours; its stop said)
+        mark = None  # (the last compaction's marker: its summary, the record after it, folded under it)
         for kind, content, *rest in items:
             if kind in ("user", "start_prompt"):
                 turn_calls, stop_said = [], False
@@ -17828,7 +17867,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.task_from_note(content)  # (its card, if it's drawn, says it ended)
                 if (line := self.task_note(content)) is not None:
                     self.add(line)
-            elif kind == "compact_summary":  # (what the CLI wrote for itself on compacting: folded)
+            elif kind == "compact_boundary":  # (where claude compacted it, as it did live: compacted)
+                mark = self.add(widgets.CompactMark(content))
+            elif kind == "compact_summary" and mark is not None and mark.fold is None:
+                mark.set_summary(content)  # (what it wrote for itself on compacting: folded under its marker)
+            elif kind == "compact_summary":
                 fold = Gtk.Expander(label="Summary of the earlier conversation", child=MarkdownView(content))
                 fold.add_css_class("sysnote")
                 self.add(fold)
@@ -18633,6 +18676,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
+        self.compact_ended()
         if self.queued and self.send_after_result is None and not getattr(self.proc, "stop_asked", False) and \
                 self.queue_upto is None:
             self.queue_upto = "all"  # (a turn that ended on its own: what was queued sent, once it's over)

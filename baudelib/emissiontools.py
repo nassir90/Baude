@@ -48,6 +48,10 @@ SCHEMAS = {
                "count": {"type": "integer", "description": "2 for a double click"},
                "modifiers": {"type": "array", "items": {"type": "string", "enum": ["shift", "ctrl", "alt", "cmd"]}}},
               []),
+    "drag": ("Drag with the mouse along a path of points of the last screenshot (pressed at the first, let go at the "
+             "last): to select text, move a slider, drag something into place.",
+             {"path": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+              "tab": TAB, "host": HOST}, ["path"]),
     "hover": ("Move the mouse over an element or a point (menus that open on hover).",
               {"ref": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
     "type": ("Type text into the focused field (or the field with ref: focused first), a key press a character at "
@@ -87,7 +91,7 @@ SCHEMAS = {
 }
 OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab": "close_tab",
        "screenshot": "screenshot", "read_page": "read_page", "find": "find", "get_text": "get_text", "click": "click",
-       "hover": "hover", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
+       "hover": "hover", "drag": "drag", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
        "javascript": "javascript", "console": "console", "network": "network", "resize": "resize",
        "prompts": "prompts", "answer_prompt": "answer_prompt"}
 HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)

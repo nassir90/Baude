@@ -845,8 +845,10 @@ class Server:
                 conn.agent_run.end()
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
+            conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
+                    conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
                     conn.emission_watch.close()
                 except OSError:
                     pass
@@ -874,6 +876,9 @@ class Server:
             conn.send({"op": "error", "req": req, "error": str(e)})
             return
         conn.emission_watch = sock
+        if getattr(conn, "gone", False):  # (its pane went while Emission was started)
+            sock.close()
+            return
         conn.send({"op": "emission_watching", "req": req})
         buffer = b""
         try:

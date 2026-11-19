@@ -1,10 +1,11 @@
-"""A Bot's browser, on the side panel's Browser page: its own Emission (emission.py), wherever its host is, watched and
-driven. Its frames come as the page changes: from an Emission on this machine straight from it (its door), the pixels
-in shared memory, no picture made or copied through anything between; from one elsewhere through its host process
-(wire's emission_watch), each frame a JPEG the size the page is shown at. What you do with it (click, type, keys,
-scroll, its tabs, its address, the prompts a page waits on) goes to it as the Bot's tools do (real input there).
-Read-only: watched, not driven (kept for each Bot, as a setting)."""
+"""A Bot's browser, on the side panel's Browser page: its own Emission (emission.py), on its chat's host or any other it
+uses, watched and driven. Its frames come as the page changes: from an Emission of this machine's own host process
+straight from it (its door), the pixels in shared memory, no picture made or copied through anything between; from one
+elsewhere through its host process (wire's emission_watch), each frame a JPEG the size the page is shown at. What you
+do with it (click, drag, type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order
+it's done, as the Bot's tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
 import json
+import queue
 import socket
 import threading
 import time
@@ -24,47 +25,68 @@ TYPE_MS = 60  # (characters typed this close together: sent as one)
 SCROLL_MS = 50  # (a wheel's or a trackpad's turns this close together: one scroll)
 HOVER_MS = 300  # (the pointer still this long over the page: it hovers there)
 SIZE_MS = 250  # (the page shown at a new size: the frames asked for at it this long after)
+DRAG_PX = 5  # (a press moved this far before it's let go: a drag, not a click)
 KEYS = {"Return": "Enter", "KP_Enter": "Enter", "BackSpace": "Backspace", "Delete": "Delete", "Escape": "Escape",
         "Tab": "Tab", "ISO_Left_Tab": "Tab", "Left": "Left", "Right": "Right", "Up": "Up", "Down": "Down",
-        "Home": "Home", "End": "End", "Page_Up": "PageUp", "Page_Down": "PageDown"}
+        "Home": "Home", "End": "End", "Page_Up": "PageUp", "Page_Down": "PageDown", "space": "Space"}
+
+
+def shared(name):
+    """Shared memory Emission made, opened (not tracked: it's Emission's to unlink, not this process's)."""
+    from multiprocessing import shared_memory
+    try:
+        return shared_memory.SharedMemory(name, track=False)
+    except TypeError:  # (a Python before 3.13: its resource tracker told it isn't this process's)
+        mem = shared_memory.SharedMemory(name)
+        try:
+            from multiprocessing import resource_tracker
+            resource_tracker.unregister(mem._name, "shared_memory")
+        except (ImportError, AttributeError, KeyError):
+            pass
+        return mem
 
 
 class Stream:
-    """A watch of a Bot's Emission, read on a thread of its own: frame(texture, w, h, view) and state(state) are run on
-    the main loop as they come, ended() once it's over."""
+    """A watch of a Bot's Emission, read on a thread of its own: frame(texture, w, h, view, shown), state(state) and
+    ended(why) run on the main loop as they come, never after stop(); shown() acks the frame once it's on screen."""
 
     def __init__(self, remote, bot, size, frame, state, ended):
         self.remote, self.bot, self.size = remote, bot, size
         self.on_frame, self.on_state, self.on_ended = frame, state, ended
         self.stopped, self.lock, self.sock, self.ch = False, threading.Lock(), None, None
-        self.memories = {}  # (shared memory Emission writes frames in, by name: opened once)
+        self.memories, self.mem_lock = {}, threading.Lock()  # (shared memory Emission writes frames in, by name)
         threading.Thread(target=self.run, daemon=True, name="browser-watch").start()
 
+    def later(self, fn):
+        GLib.idle_add(lambda: (None if self.stopped else fn()) and False)
+
     def run(self):
+        why = None
         try:
-            (self.run_here if self.remote.local else self.run_there)()
+            (self.run_here if self.remote.mine else self.run_there)()
         except Exception as e:  # (said in the pane: it can be tried again)
-            why = f"{type(e).__name__}: {e}"
-            if not self.stopped:
-                GLib.idle_add(lambda: self.on_ended(why) and False)
-            return
-        if not self.stopped:
-            GLib.idle_add(lambda: self.on_ended(None) and False)
+            why = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
+        finally:
+            self.close()
+        self.later(lambda: self.on_ended(why))
 
     def run_here(self):
-        """This machine's Emission: its door, frames in shared memory."""
+        """This machine's own Emission: its door, frames in shared memory."""
         pid = emissionlink.bot_profile_id(self.bot["id"])
-        try:
+        for attempt in range(2):
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.door_path(pid))
-        except (FileNotFoundError, ConnectionRefusedError):
-            sock.close()
-            got = self.remote.call({"op": "emission", "bot": self.bot, "call": {"op": "tabs"}}, timeout=60)
-            if got.get("op") == "error":  # (it's started by its host, as the Bot's tools would start it)
-                raise OSError(got.get("error") or "its Emission didn't start")
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.door_path(pid))
+            try:
+                sock.connect(emissionlink.door_path(pid))
+                break
+            except (FileNotFoundError, ConnectionRefusedError):
+                sock.close()
+                if attempt:
+                    raise OSError("its Emission didn't open")
+                got = self.remote.call({"op": "emission", "bot": self.bot, "call": {"op": "tabs"}}, timeout=90)
+                if got.get("op") == "error":  # (started by its host, as the Bot's tools would start it)
+                    raise OSError(got.get("error") or "its Emission didn't start")
         self.sock = sock
+        sock.settimeout(None)
         self.say({"op": "watch", "shm": True, "max_w": self.size[0], "max_h": self.size[1]})
         buffer = b""
         while not self.stopped and (part := sock.recv(1 << 20)):
@@ -75,11 +97,13 @@ class Stream:
 
     def run_there(self):
         """Another host's Emission: through that host process, frames as JPEG."""
-        ch, _info = wire.reach(self.remote.where, timeout=30)
+        ch, _info = wire.reach(self.remote.reach_where(), timeout=30)
         self.ch = ch
+        if self.stopped:
+            return
         ch.send({"op": "emission_watch", "req": 1, "bot": self.bot, "max_w": self.size[0], "max_h": self.size[1]})
         threading.Thread(target=self.ping, daemon=True, name="browser-ping").start()
-        ch.sock.settimeout(None)
+        ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
             if msg.get("op") == "error":
                 raise OSError(msg.get("error") or "its host said no")
@@ -91,39 +115,37 @@ class Stream:
     def ping(self):
         while not self.stopped and self.ch is not None:
             time.sleep(PING_S)
-            if not self.stopped and not self.ch.send({"op": "ping"}):
+            if self.stopped or not self.ch.send({"op": "ping"}):
                 return
 
     def took(self, msg):
+        if self.stopped:
+            return
+        if msg.get("error"):  # (Emission said no: why, in the pane)
+            raise ValueError(msg["error"])
         if "state" in msg:
             state = msg["state"]
-            GLib.idle_add(lambda: self.on_state(state) and False)
+            self.later(lambda: self.on_state(state))
             return
         if "frame" not in msg:
             return
-        w, h = int(msg["w"]), int(msg["h"])
+        w, h, seq = int(msg["w"]), int(msg["h"]), msg["frame"]
         if msg.get("shm"):
-            from multiprocessing import shared_memory
-            name = msg["shm"]
-            if name not in self.memories:
-                for old in self.memories.values():
-                    old.close()
-                self.memories.clear()
-                try:
-                    self.memories[name] = shared_memory.SharedMemory(name, track=False)
-                except TypeError:  # (a Python before 3.13)
-                    self.memories[name] = shared_memory.SharedMemory(name)
-            stride = int(msg["stride"])
-            data = GLib.Bytes.new(bytes(self.memories[name].buf[:stride * h]))
-            self.say({"ack": msg["frame"]})  # (copied: Emission may write the next)
+            with self.mem_lock:
+                name = msg["shm"]
+                if name not in self.memories:
+                    for old in self.memories.values():
+                        old.close()
+                    self.memories = {name: shared(name)}
+                stride = int(msg["stride"])
+                data = GLib.Bytes.new(bytes(self.memories[name].buf[:stride * h]))
             made = lambda: Gdk.MemoryTexture.new(w, h, Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED, data, stride)  # noqa
         else:
             import base64
             data = GLib.Bytes.new(base64.b64decode(msg["jpeg"]))
-            self.say({"ack": msg["frame"]})
             made = lambda: Gdk.Texture.new_from_bytes(data)  # noqa: E731
         view = msg.get("view")
-        GLib.idle_add(lambda: self.on_frame(made(), w, h, view) and False)
+        self.later(lambda: self.on_frame(made(), w, h, view, lambda: self.say({"ack": seq})))
 
     def say(self, line):
         """A line to Emission (here: its door; there: through its host)."""
@@ -140,31 +162,65 @@ class Stream:
         self.size = size
         self.say({"max_w": size[0], "max_h": size[1]})
 
+    def close(self):
+        for closing in (self.sock, self.ch.sock if self.ch is not None else None):
+            if closing is not None:
+                try:
+                    closing.shutdown(socket.SHUT_RDWR)  # (a recv waiting on it woken, the other end told)
+                except OSError:
+                    pass
+                try:
+                    closing.close()
+                except OSError:
+                    pass
+        with self.mem_lock:
+            for mem in self.memories.values():
+                try:
+                    mem.close()
+                except (OSError, BufferError):
+                    pass
+            self.memories = {}
+
     def stop(self):
         self.stopped = True
-        for closing in (self.sock, self.ch):
+        self.close()
+
+
+class Asks:
+    """What's done in the pane, sent to the Bot's Emission one after another, in the order it's done (each answered
+    before the next goes), on a thread of its own: answered(reply) on the main loop."""
+
+    def __init__(self):
+        self.q = queue.Queue()
+        threading.Thread(target=self.run, daemon=True, name="browser-asks").start()
+
+    def put(self, remote, bot, call, answered):
+        self.q.put((remote, bot, call, answered))
+
+    def run(self):
+        while True:
+            remote, bot, call, answered = self.q.get()
             try:
-                if closing is not None:
-                    closing.close()
-            except OSError:
-                pass
-        for mem in self.memories.values():
-            try:
-                mem.close()
-            except (OSError, BufferError):
-                pass
-        self.memories.clear()
+                if remote.mine:  # (straight to its door: no host between)
+                    got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
+                else:
+                    r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
+                    got = r.get("result") if r.get("op") == "emission" else {"error": r.get("error") or "no answer"}
+            except (OSError, ValueError) as e:
+                got = {"error": str(e)}
+            GLib.idle_add(lambda g=got, a=answered: a(g) and False)
 
 
 class BrowserPane(Gtk.Box):
-    """The Browser page: the open Bot's browser, watched while the page is shown."""
+    """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown."""
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.win, self.sid, self.remote, self.name, self.stream = win, None, None, None, None
-        self.frame_size, self.view_size, self.state = (0, 0), None, {}
-        self.typed, self.type_source, self.scroll_due, self.scroll_source = "", None, [0.0, 0.0, 0, 0], None
-        self.hover_source, self.size_source, self.shown_for = None, None, None
+        self.win, self.sid, self.remote, self.home, self.name, self.stream = win, None, None, None, None, None
+        self.frame_size, self.view_size, self.state, self.prompt_ids = (0, 0), None, {}, None
+        self.typed, self.type_source, self.scroll_due, self.scroll_source = "", None, [0.0, 0.0], None
+        self.hover_source, self.size_source, self.pointer, self.drag = None, None, None, None
+        self.asks, self.hosts = Asks(), []
         bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
         self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -177,6 +233,9 @@ class BrowserPane(Gtk.Box):
         self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
             {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
         bar.append(self.address)
+        self.host_pick = Gtk.DropDown(tooltip_text="Whose browser: the Bot's on this host (each host has its own)")
+        self.host_pick.connect("notify::selected", lambda *_: self.host_picked())
+        bar.append(self.host_pick)
         self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only: watch, "
                                           "don't drive (the Bot still does)")
         self.read_only.add_css_class("flat")
@@ -185,8 +244,7 @@ class BrowserPane(Gtk.Box):
         self.append(bar)
         strip = Gtk.Box(spacing=2, margin_start=6, margin_end=6)
         self.tabs = Gtk.Box(spacing=2)
-        tabs_scroll = Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, child=self.tabs)
-        strip.append(tabs_scroll)
+        strip.append(Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, child=self.tabs))
         new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New tab")
         new.add_css_class("flat")
         new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
@@ -202,35 +260,60 @@ class BrowserPane(Gtk.Box):
         self.body.add_named(self.status, "status")
         self.body.add_named(self.picture, "page")
         self.append(self.body)
-        self.input()
-        self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8)
+        self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
         self.said.add_css_class("dim-label")
         self.append(self.said)
-        self.drives = [self.back, self.fwd, self.reload, self.address, new]  # (off while it's read-only)
+        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.tabs, self.prompts]
+        self.input()
         self.connect("notify::mapped", lambda *_: self.watch_if_shown())
-        GLib.timeout_add(500, self.size_check)
+        self.size_timer = GLib.timeout_add(500, self.size_check)
+        self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), self.stop()))
 
-    # (whose browser)
+    # (whose browser, where)
 
     def show(self, info):
-        """The open chat (the sidebar's info, or None): a Bot's browser watched while this page is shown."""
+        """The open chat (the sidebar's info, or None): a Bot's browser watched while this page is shown, on its
+        chat's host to begin with."""
         info = info or {}
         bot = bool(info.get("bot")) and info.get("id") and info.get("remote") is not None
         sid = info.get("id") if bot else None
-        if sid == self.sid and (not bot or info.get("remote") is self.remote):
+        if sid == self.sid and (not bot or info.get("remote") is self.home):
             return
         self.stop()
-        self.sid, self.remote = sid, info.get("remote") if bot else None
+        self.sid, self.home = sid, info.get("remote") if bot else None
+        self.remote = self.home
         self.name = (info.get("bot") or {}).get("name") if bot else None
         held = (widgets.load_settings().get("browser_read_only") or {}).get(sid or "", False)
         self.read_only.set_active(bool(held))
+        self.read_only_set(bool(held))
+        self.list_hosts()
+        self.set_state({})
+        self.watch_if_shown()
+
+    def list_hosts(self):
+        """The hosts that are there (the chat's first): the Bot has a browser of its own on each it's used."""
+        hosts = [self.home] if self.home is not None else []
+        if self.home is not None:
+            hosts += [r for r in self.home.network.alive() if r is not self.home]
+        self.hosts = hosts
+        self.host_pick.set_model(Gtk.StringList.new([r.info.get("name") or r.host for r in hosts]))
+        self.host_pick.set_selected(0)
+        self.host_pick.set_visible(len(hosts) > 1)
+
+    def host_picked(self):
+        i = self.host_pick.get_selected()
+        if self.sid is None or not (0 <= i < len(self.hosts)) or self.hosts[i] is self.remote:
+            return
+        self.stop()
+        self.remote = self.hosts[i]
         self.set_state({})
         self.watch_if_shown()
 
     def watch_if_shown(self):
-        if self.sid is None or self.stream is not None or not self.get_mapped():
-            if not self.get_mapped():
-                self.stop(keep=True)
+        if not self.get_mapped():
+            self.stop(keep=True)
+            return
+        if self.sid is None or self.stream is not None:
             return
         self.say_status("Connecting", f"{self.name or 'The Bot'}'s browser, on its host.")
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
@@ -248,6 +331,8 @@ class BrowserPane(Gtk.Box):
     def ended(self, why):
         self.stream = None
         self.say_status("Not showing", why or "Its Emission went: it's started again when you come back here.")
+        self.said.set_label("Not live: " + (why or "its Emission went") + ". Shown again when you come back here.")
+        self.said.set_visible(True)
 
     def say_status(self, title, text):
         self.status.set_title(title)
@@ -257,14 +342,21 @@ class BrowserPane(Gtk.Box):
 
     # (what comes)
 
-    def got_frame(self, texture, w, h, view):
+    def got_frame(self, texture, w, h, view, shown):
         self.frame_size = (w, h)
+        if view and min(view) > 0:
+            self.view_size = tuple(view)
         self.picture.set_paintable(texture)
         self.body.set_visible_child_name("page")
+        if self.said.get_label().startswith("Not live"):
+            self.said.set_visible(False)
+        shown()  # (on screen: the next may come)
 
     def set_state(self, state):
         self.state = state or {}
-        self.view_size = tuple(self.state.get("view") or ()) or None
+        view = self.state.get("view")
+        if view and min(view) > 0:  # (a page not laid out yet says 0 by 0: not taken)
+            self.view_size = tuple(view)
         tabs = self.state.get("tabs") or []
         while (c := self.tabs.get_first_child()) is not None:
             self.tabs.remove(c)
@@ -282,10 +374,13 @@ class BrowserPane(Gtk.Box):
             b.connect("clicked", lambda _b, tid=t["tab"]: self.ask({"op": "select_tab", "tab": tid}))
             self.tabs.append(b)
         now = next((t for t in tabs if t.get("selected")), None)
-        if now is not None and not self.address.has_focus() and not self.address.get_delegate().has_focus():
+        if now is not None and not self.address.get_delegate().has_focus():
             self.address.set_text(now.get("url") or "")
         self.reload.set_icon_name("process-stop-symbolic" if now and now.get("loading") else "view-refresh-symbolic")
-        self.show_prompts(self.state.get("prompts") or [])
+        prompts = self.state.get("prompts") or []
+        if [p.get("id") for p in prompts] != self.prompt_ids:  # (made again only when they change: what's typed kept)
+            self.prompt_ids = [p.get("id") for p in prompts]
+            self.show_prompts(prompts)
 
     def show_prompts(self, prompts):
         """What the Bot's pages wait on, each a card: answered here, or by the Bot."""
@@ -322,42 +417,31 @@ class BrowserPane(Gtk.Box):
             card.append(row)
             self.prompts.append(card)
 
-    # (what's done here)
+    # (what's done here: in order, one after another)
 
     def tab(self):
         return self.state.get("selected")
 
     def ask(self, call, done=None):
-        """call to the Bot's Emission (as its tools' are: real input there), its answer to done: on this machine
-        straight to its door, elsewhere through its host. Nothing, while it's read-only."""
+        """call to the Bot's Emission (as its tools' are: real input there), after what was asked before it: on this
+        machine straight to its door, elsewhere through its host. Nothing, while it's read-only."""
         if self.sid is None or self.remote is None or self.read_only.get_active():
             return
-        sid = self.sid
+        sid, remote = self.sid, self.remote
 
         def answered(r):
-            if sid != self.sid:
+            if sid != self.sid or remote is not self.remote:
                 return
-            why = r.get("error") if isinstance(r, dict) and (r.get("op") == "error" or r.get("error")) else None
+            why = r.get("error") if isinstance(r, dict) else None
             self.said.set_label(f"The browser said: {why}" if why else "")
             self.said.set_visible(bool(why))
             if done:
                 done(r)
-        if self.remote.local:
-            def there():
-                try:
-                    got = emissionlink.call(emissionlink.bot_profile_id(sid), call, timeout=60)
-                except (OSError, ValueError) as e:
-                    got = {"error": str(e)}
-                GLib.idle_add(lambda: answered(got) and False)
-            threading.Thread(target=there, daemon=True, name="browser-ask").start()
-        else:
-            self.remote.request({"op": "emission", "bot": {"id": sid, "name": self.name}, "call": call}, answered)
+        self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)
 
     def read_only_set(self, on):
         for w in self.drives:
             w.set_sensitive(not on)
-        self.prompts.set_sensitive(not on)
-        self.tabs.set_sensitive(not on)
         if self.sid is None:
             return
         held = dict(widgets.load_settings().get("browser_read_only") or {})
@@ -385,28 +469,53 @@ class BrowserPane(Gtk.Box):
 
     def input(self):
         click = Gtk.GestureClick(button=0)
-        click.connect("pressed", self.clicked)
+        click.connect("released", self.clicked)  # (let go: a press that moved far is a drag's, not a click)
         self.picture.add_controller(click)
+        drag = Gtk.GestureDrag(button=Gdk.BUTTON_PRIMARY)
+        drag.connect("drag-begin", lambda _g, x, y: setattr(self, "drag", [(x, y)]))
+        drag.connect("drag-update", self.dragged)
+        drag.connect("drag-end", self.dropped)
+        self.picture.add_controller(drag)
         scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.BOTH_AXES)
         scroll.connect("scroll", self.scrolled)
         self.picture.add_controller(scroll)
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self.moved)
         self.picture.add_controller(motion)
-        self.pointer = None
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.keyed)
         self.picture.add_controller(keys)
 
     def clicked(self, gesture, n, x, y):
         self.picture.grab_focus()
+        if self.drag and len(self.drag) > 1:
+            return
         at = self.to_page(x, y)
         if at is None:
             return
         self.flush_typing()
-        mods = self.mods(gesture.get_current_event_state())
-        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "count": n,
-                  "button": "right" if gesture.get_current_button() == 3 else "left", "modifiers": mods})
+        b = gesture.get_current_button()
+        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "press": n,
+                  "button": {3: "right", 2: "middle"}.get(b, "left"),
+                  "modifiers": self.mods(gesture.get_current_event_state())})
+
+    def dragged(self, gesture, dx, dy):
+        if self.drag is None:
+            return
+        x0, y0 = self.drag[0]
+        if len(self.drag) > 1 or abs(dx) > DRAG_PX or abs(dy) > DRAG_PX:
+            self.drag.append((x0 + dx, y0 + dy))
+
+    def dropped(self, gesture, dx, dy):
+        path, self.drag = self.drag, None
+        if not path or len(path) < 2:
+            return
+        step = max(1, len(path) // 20)  # (at most about 20 points of it: the shape kept)
+        points = [self.to_page(*p) for p in path[::step] + [path[-1]]]
+        points = [p for p in points if p is not None]
+        if len(points) >= 2:
+            self.flush_typing()
+            self.ask({"op": "drag", "tab": self.tab(), "path": points, "css": True})
 
     def moved(self, _c, x, y):
         self.pointer = (x, y)
@@ -416,7 +525,7 @@ class BrowserPane(Gtk.Box):
 
     def hover(self):
         self.hover_source = None
-        at = self.to_page(*self.pointer) if self.pointer else None
+        at = self.to_page(*self.pointer) if self.pointer and self.drag is None else None
         if at is not None:
             self.ask({"op": "hover", "tab": self.tab(), "x": at[0], "y": at[1], "css": True})
         return False
@@ -432,7 +541,7 @@ class BrowserPane(Gtk.Box):
     def scroll_send(self):
         self.scroll_source = None
         dx, dy = round(self.scroll_due[0]), round(self.scroll_due[1])
-        self.scroll_due[:2] = [0.0, 0.0]
+        self.scroll_due = [0.0, 0.0]
         at = self.to_page(*self.pointer) if self.pointer else None
         if (dx or dy) and at is not None:
             self.ask({"op": "scroll", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "dx": dx, "dy": dy})
@@ -452,8 +561,8 @@ class BrowserPane(Gtk.Box):
         mods = [m for m in self.mods(state) if m != "shift"]
         name = Gdk.keyval_name(keyval) or ""
         ch = chr(Gdk.keyval_to_unicode(keyval)) if Gdk.keyval_to_unicode(keyval) else ""
-        if ch and ch.isprintable() and not mods:  # (text: typed, a few characters at once)
-            self.typed += ch
+        if ch and ch.isprintable() and not mods and (name != "space" or self.typed):
+            self.typed += ch  # (text: typed, a few characters at once; a space alone is the Space key)
             if self.type_source is not None:
                 GLib.source_remove(self.type_source)
             self.type_source = GLib.timeout_add(TYPE_MS, self.flush_typing)
@@ -472,14 +581,15 @@ class BrowserPane(Gtk.Box):
             self.type_source = None
         if self.typed:
             text, self.typed = self.typed, ""
-            self.ask({"op": "type", "tab": self.tab(), "text": text})
+            self.ask({"op": "type", "tab": self.tab(), "text": text, "anywhere": True})
         return False
 
     # (its size)
 
     def wanted_size(self):
         scale = self.get_scale_factor() or 1
-        return (max(200, (self.picture.get_width() or 800) * scale), max(200, (self.picture.get_height() or 600) * scale))
+        return (max(200, (self.picture.get_width() or 800) * scale),
+                max(200, (self.picture.get_height() or 600) * scale))
 
     def size_check(self):
         """The frames asked for at the size the page is shown at, once it's settled there."""

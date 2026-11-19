@@ -885,13 +885,15 @@ class MacWeb:
         """The pointer to (x, y) on the page: what's under it hovered, as a person's mouse would."""
         macos.objc_send(self.view, b"mouseMoved:", self._event(5, x, y), types=(ctypes.c_void_p,))
 
-    def click(self, x, y, button="left", count=1, mods=()):
-        """A real click at (x, y): pointer moved there, pressed, released (count times, as a double click is)."""
+    def click(self, x, y, button="left", count=1, mods=(), press=None):
+        """A real click at (x, y): pointer moved there, pressed, released (count times, as a double click is; press:
+        one press only, its click count that)."""
         flags = sum(MAC_MODS[m] for m in mods)
-        down, up, dsel, usel = ((3, 4, b"rightMouseDown:", b"rightMouseUp:") if button == "right"
-                                else (1, 2, b"mouseDown:", b"mouseUp:"))
+        down, up, dsel, usel = {"right": (3, 4, b"rightMouseDown:", b"rightMouseUp:"),
+                                "middle": (25, 26, b"otherMouseDown:", b"otherMouseUp:")}.get(
+            button, (1, 2, b"mouseDown:", b"mouseUp:"))
         self.move(x, y)
-        for n in range(1, count + 1):
+        for n in ([press] if press else range(1, count + 1)):
             macos.objc_send(self.view, dsel, self._event(down, x, y, n, flags), types=(ctypes.c_void_p,))
             macos.objc_send(self.view, usel, self._event(up, x, y, n, flags), types=(ctypes.c_void_p,))
 
@@ -899,6 +901,15 @@ class MacWeb:
         """The page's size, in CSS pixels (at its zoom of 1: the view's points)."""
         fr = macos.objc_send(self.view, b"frame", ret=macos._rect()) if self.view else None
         return [round(fr.w), round(fr.h)] if fr else None
+
+    def drag(self, points):
+        """A real drag: pressed at the first point, moved through the rest, let go at the last."""
+        x, y = points[0]
+        self.move(x, y)
+        macos.objc_send(self.view, b"mouseDown:", self._event(1, x, y), types=(ctypes.c_void_p,))
+        for x, y in points[1:]:
+            macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
+        macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
     def keyed(self):
         """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
@@ -1454,7 +1465,7 @@ class GtkWeb:
         if at is not None:
             XTest.get().move(*at)
 
-    def click(self, x, y, button="left", count=1, mods=()):
+    def click(self, x, y, button="left", count=1, mods=(), press=None):
         at = self._screen(x, y)
         if at is None:
             raise OSError("real clicks need Emission's own display: a Bot's Emission has one, a window on "
@@ -1462,11 +1473,23 @@ class GtkWeb:
         xt = XTest.get()
         xt.move(*at)
         with xt.held(mods):
-            for _ in range(count):
-                xt.button(3 if button == "right" else 1)
+            for _ in range(1 if press else count):  # (X counts a double click's presses itself)
+                xt.button({"right": 3, "middle": 2}.get(button, 1))
 
     def keyed(self):
         return True
+
+    def drag(self, points):
+        xt = XTest.get()
+        at = [self._screen(x, y) for x, y in points]
+        if xt is None or None in at:
+            raise OSError("a real drag needs Emission's own display")
+        xt.move(*at[0])
+        xt.t.XTestFakeButtonEvent(xt.d, 1, 1, 0)
+        for p in at[1:]:
+            xt.move(*p)
+        xt.t.XTestFakeButtonEvent(xt.d, 1, 0, 0)
+        xt.x.XFlush(xt.d)
 
     def view_size(self):
         return [self.view.get_width(), self.view.get_height()]
@@ -1683,7 +1706,7 @@ class Window(Adw.ApplicationWindow):
             return answer({"agent": self.agent, "profile": self.profile, "tabs": len(self.tabs)})
         if op == "quit":
             answer({"ok": True})
-            GLib.timeout_add(100, lambda: self.get_application().quit() or False)
+            GLib.timeout_add(100, lambda: (self.closing_window(), self.get_application().quit()) and False)
             return None
         if self.Engine is None:
             return answer({"error": "Emission has no page engine on this host"})
@@ -1731,9 +1754,16 @@ class Window(Adw.ApplicationWindow):
         for w in list(self.watchers):
             if state != w.sent_state and w.say({"state": state}):
                 w.sent_state = state
+        if not self.watchers:
+            self.watch_source = None
+            return False
+        if self.watch_capturing and time.monotonic() - self.watch_capturing > 5:
+            self.watch_capturing = False  # (a frame that never came: the next tried)
         tab = self.current()
+        if tab is not None and tab.web.view is not None and min(tab.web.view_size() or [0]) < 50:
+            tab = None  # (not laid out yet: no frame of nothing)
         if tab is not None and tab.web.view is not None and not self.watch_capturing:
-            self.watch_capturing = True
+            self.watch_capturing = time.monotonic()
             want_w = max(w.max_w for w in self.watchers)
             want_h = max(w.max_h for w in self.watchers)
 
@@ -2204,7 +2234,10 @@ class Window(Adw.ApplicationWindow):
     def tick(self):
         if self.done:
             return False
+        if self.watchers:
+            self.used = GLib.get_monotonic_time()  # (watched: in use)
         if self.agent and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and not self.waiting:
+            self.closing_window()
             self.get_application().quit()
             return False
         if self.later:
@@ -2421,6 +2454,7 @@ class Control:
     def __init__(self, win):
         self.win = win
         self.scales = {}  # (each tab's last screenshot's pixels to the page's: by tab id)
+        self.queue = []  # (input waiting its turn: (op, msg, answer), the first being done)
 
     # (tabs)
 
@@ -2476,11 +2510,35 @@ class Control:
             (then or (lambda v: answer({"result": v})))(value)
         t.web.run_js(body if page else PAGE_JS + body, guarded(done, answer), page=page)
 
+    INPUT = {"click", "drag", "hover", "type", "key", "scroll", "form_input", "navigate", "new_tab", "close_tab",
+             "select_tab", "answer_prompt", "resize"}  # (what changes the page: done in the order it came)
+
     def run(self, op, msg, answer):
         fn = getattr(self, "op_" + str(op), None)
         if fn is None:
             raise ValueError(f"no such request: {op}")
-        fn(msg, answer)
+        if op not in self.INPUT:
+            return fn(msg, answer)
+        self.queue.append((fn, msg, answer))
+        if len(self.queue) == 1:
+            self.next_input()
+
+    def next_input(self):
+        """The first of what's waiting done (the next once it's answered, whatever the answer)."""
+        while self.queue:
+            fn, msg, answer = self.queue[0]
+
+            def done(reply, answer=answer):
+                answer(reply)
+                if self.queue and self.queue[0][2] is answer:
+                    self.queue.pop(0)
+                    GLib.idle_add(lambda: self.next_input() and False)
+            try:
+                fn(msg, once(done))
+                return
+            except Exception as e:  # (said, and the next done)
+                answer({"error": str(e) if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: {e}"})
+                self.queue.pop(0)
 
     def op_tabs(self, msg, answer):
         answer({"profile": self.win.profile, "tabs": [self.describe(t) for t in self.win.tabs.values()],
@@ -2583,8 +2641,8 @@ class Control:
 
         def at(x, y, covered):
             started = GLib.get_monotonic_time()
-            t.web.click(x, y, "right" if msg.get("button") == "right" else "left", max(1, int(msg.get("count") or 1)),
-                        mods)
+            t.web.click(x, y, msg.get("button") if msg.get("button") in ("right", "middle") else "left",
+                        max(1, int(msg.get("count") or 1)), mods, press=int(msg["press"]) if msg.get("press") else None)
             if not t.web.keyed():  # (a window that isn't key: what's clicked given focus, as a click would give it)
                 t.web.run_js(PAGE_JS + f"const el = document.elementFromPoint({x}, {y});"
                              "const f = el && el.closest('input, textarea, select, [contenteditable], button, a[href],"
@@ -2592,6 +2650,17 @@ class Control:
             self.settle(t, answer, {"clicked": [round(x), round(y)], **({"covered_by": covered} if covered else {})},
                         started)
         self.point(t, msg, answer, at)
+
+    def op_drag(self, msg, answer):
+        """A drag along path ([[x, y], ...], the page's CSS pixels if css, else the last screenshot's)."""
+        t = self.tab(msg)
+        scale = 1.0 if msg.get("css") else self.scales.get(t.id, 1.0)
+        path = [(float(p[0]) / scale, float(p[1]) / scale) for p in msg.get("path") or [] if len(p) == 2]
+        if len(path) < 2:
+            raise ValueError("a drag needs a path of two points at least")
+        started = GLib.get_monotonic_time()
+        t.web.drag(path)
+        self.settle(t, answer, {"dragged": len(path)}, started)
 
     def op_hover(self, msg, answer):
         t = self.tab(msg)
@@ -2631,9 +2700,10 @@ class Control:
         def ready(_v):
             if next_char():
                 GLib.timeout_add(self.TYPE_GAP_MS, next_char)
+        anywhere = json.dumps(bool(msg.get("anywhere")))
         self.js(t, focus + "const el = document.activeElement;"
-                "if (!em.editable(el)) throw new Error('nothing to type into is focused: click the field, or give "
-                "its ref'); em.typed = el; return true", answer, ready)
+                f"if (!em.editable(el) && !{anywhere}) throw new Error('nothing to type into is focused: click the "
+                "field, or give its ref'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
 
     def op_key(self, msg, answer):
         t = self.tab(msg)
@@ -2800,7 +2870,7 @@ class Watcher:
         self.max_w = max(100, min(3840, int(msg.get("max_w") or 1280)))
         self.max_h = max(100, min(2400, int(msg.get("max_h") or 900)))
         self.seq, self.waiting_since, self.sent_sum, self.sent_state = 0, None, None, None
-        self.memory, self.buffer = None, b""
+        self.memory, self.buffer, self.out, self.writing = None, b"", b"", None
         conn.setblocking(False)
         self.source = GLib.io_add_watch(conn.fileno(), GLib.PRIORITY_DEFAULT,
                                         GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR, self.heard)
@@ -2833,17 +2903,34 @@ class Watcher:
         return True
 
     def say(self, msg):
+        """msg sent without waiting on the watcher: what the socket won't take now is kept, and written as it will
+        (a frame isn't made till it's all gone). False if it's gone."""
+        self.out += (json.dumps(msg) + "\n").encode()
+        return self.flush()
+
+    def flush(self, *_):
         try:
-            self.conn.setblocking(True)
-            self.conn.settimeout(10)
-            self.conn.sendall((json.dumps(msg) + "\n").encode())
-            self.conn.setblocking(False)
+            while self.out:
+                n = self.conn.send(self.out)
+                self.out = self.out[n:]
+        except BlockingIOError:
+            if self.writing is None:
+                self.writing = GLib.io_add_watch(self.conn.fileno(), GLib.PRIORITY_DEFAULT, GLib.IOCondition.OUT,
+                                                 self.flushed)
             return True
         except (OSError, ValueError):
             self.win.unwatch(self)
             return False
+        return True
+
+    def flushed(self, *_):
+        self.writing = None
+        self.flush()
+        return False
 
     def ready(self):
+        if self.out:
+            return False
         if self.waiting_since is not None and time.monotonic() - self.waiting_since > self.ACK_S:
             self.waiting_since = None
         return self.waiting_since is None
@@ -2889,6 +2976,9 @@ class Watcher:
 
     def close(self):
         GLib.source_remove(self.source)
+        if self.writing is not None:
+            GLib.source_remove(self.writing)
+            self.writing = None
         self.drop_memory()
         try:
             self.conn.close()

@@ -10925,8 +10925,8 @@ class SidePanel(Gtk.Box):
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
         self.browser_page.set_visible(bot)
-        self.memory.show(info)
-        self.browser.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
+        self.browser.show(info)
+        self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 
     def reset(self):
         self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)

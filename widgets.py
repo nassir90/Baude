@@ -2213,16 +2213,10 @@ class QueuedTurn(Gtk.Box):
         self.fade.set_value_to(1.0 if on else 0.0)
         self.fade.play()
 
-class SenderTurn(Gtk.Box):
+class SenderTurn(UserTurn):
     """A message to the chat from another than you, as its host's sender store says (a Bot, another chat, a subagent's
     answer held for it): where yours are, grey as a queued one is, with who it's from at its top (the window's
-    sender_bubble). uuid: the message's, once it's in the chat's transcript."""
-
-    def __init__(self, bubble):
-        super().__init__(spacing=6, hexpand=True)
-        self.bubble, self.uuid = bubble, None
-        bubble.set_hexpand(True)  # (its row's width, the bubble at the right of it: halign)
-        self.append(bubble)
+    sender_bubble), and reverted as yours are (uuid: the message's, once it's in the chat's transcript)."""
 
 
 class HeldTurn(Gtk.Box):

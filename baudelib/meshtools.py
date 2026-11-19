@@ -60,7 +60,7 @@ SCHEMAS = {
 }
 
 
-SAYS = 17  # (a host from this version on says who a message is from itself, from input's as: older ones, said here)
+SAYS = 18  # (a host from this version on says who a message is from itself, from input's as: older ones, said here)
 
 
 def _channel(where, timeout=10, as_=None):
@@ -237,7 +237,7 @@ class Mesh:
             end = time.monotonic() + max(5, min(int(timeout_s or WAIT_S), WAIT_MAX_S))
         host = where.get("host") if where.get("via") == "mesh" else None
         said, told = [], wait and self.waiting(host, session, kind, text, offset, end, title=title)
-        again = req or (said_to(session, text, self.me) if text is not None else None)
+        again = req  # (sent again as it was; else what it was asked, from this chat: said in it for an older host)
         try:
             while True:
                 if ch is None:
@@ -263,7 +263,8 @@ class Mesh:
                             return {"session": session, "answer": cut([chat["answer"]]), "error": False}
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
-                        req, skip, said = again, 0, []
+                        req, skip, said = again or said_to(session, text, self.me, self.sender() if (
+                            ch.version or 0) < SAYS else None), 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -301,10 +302,12 @@ class Mesh:
 
     def reattach(self, where, session, end):
         """(channel, attached) for a session whose host went, once it's back (till end, monotonic; one stopping,
-        waited for too): attached live again. (None, what's wrong) if it isn't, or the session's not there."""
+        waited for too): attached live again (the channel's version, its host's). (None, what's wrong) if it isn't, or
+        the session's not there."""
         while True:
             try:
-                ch, _info = self.again(where, end)
+                ch, info = self.again(where, end)
+                ch.version = info.get("version")
                 ch.sock.settimeout(30)
                 ch.send({"op": "attach", "session": session, "live": True, "answers": False, "req": 1})
                 got = ch.reply()

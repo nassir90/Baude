@@ -19,7 +19,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?, as?}
+           env?, start_key?, app_tools?, grace?, as?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -32,14 +32,15 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        Claude's models. ask_timeout: seconds a permission it asks
                                                        waits while nobody who answers is attached, then ask_default
                                                        ("deny", or "allow") answers it. answers: as attach's
-    attach {session, live, answers?}                -> attached {session, asks}; live: claude {session, msg} as it
+    attach {session, live, answers?, app_tools?}    -> attached {session, asks}; live: claude {session, msg} as it
                                                        speaks, exited {session, code} when it stops; deleted
                                                        {session} when it's deleted (nothing to carry on). answers
                                                        (default true; kept for the connection, its last attach's or
                                                        start's): false for a head that won't answer what the session
                                                        asks (a permission): it isn't counted as there to answer, so
                                                        ask_timeout's wait still runs out and ask_default answers, as
-                                                       if nobody were attached. draft: a new chat, listed as
+                                                       if nobody were attached. app_tools: (version 17) the session's
+                                                       app_tools (start's) carried to this connection from now. draft: a new chat, listed as
                                                        draft (a head leaves it out of its lists) and not kept till
                                                        it's written in (its first user input), and gone if nobody's
                                                        attached before it is. ephemeral: a side
@@ -51,24 +52,38 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        environment for the session's claude (kept in memory only;
                                                        attach takes it too). start_key: (version 13) an id the client
                                                        picks, kept and listed, so it can tell whether a start whose
-                                                       answer it lost was taken. as: (version 17) as input's, for
-                                                       the prompt
+                                                       answer it lost was taken. app_tools: (version 17) names of MCP
+                                                       servers this head runs itself (a phone's Meta's tools, which
+                                                       act on the phone), for a claude here: each relayed back to it
+                                                       over this connection (agentproxy.AppTools), allowed without
+                                                       asking; mcp_open {session, conn, name} when its claude starts
+                                                       one, then mcp {conn, line} either way and mcp_close {conn}
+                                                       from either side, as an agent's are (agent); while this
+                                                       connection's gone, their calls fail, till attach's app_tools
+                                                       binds them to the head's new one (a call the head answers
+                                                       after it was failed: mcp_late {conn, line} back to it, as it
+                                                       did run); gone with the session. A detach drops an ephemeral
+                                                       session at once; grace is for a head that's gone.
+                                                       grace: (version 17) seconds an ephemeral session waits for its
+                                                       head to come back (a day at most; else EPHEMERAL_S), its idle
+                                                       claude not stopped meanwhile (it keeps nothing)
+                                                       as: (version 18) as input's, for the prompt
     detach {session}
     input {session, msg, as?}                       -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
                                                        isn't running). A user message without a uuid is given one
-                                                       (its program keeps it: Senders). as: (version 17) the id of
+                                                       (its program keeps it: Senders). as: (version 18) the id of
                                                        one of this host's chats whose mesh tools send it
                                                        (baudelib.meshtools): it's from that chat, not the session's
                                                        user, so the host says so to its agent (said_by) and keeps
                                                        who it's from (Senders); through a tunnel, from the chat its
                                                        relay named, else this one on the member it came from
-    held {session, id, send?}                       -> held {session}: (version 17) a message held for the session
+    held {session, id, send?}                       -> held {session}: (version 18) a message held for the session
                                                        (its held: one its host had for it while nobody was there to
                                                        say whether it should go, a subagent's answer after a restart,
                                                        say) dropped, or sent (send) as input would send it, from
                                                        its sender
-    senders {session}                               -> senders {session, senders: {uuid: sender}, rev}: (version 17)
+    senders {session}                               -> senders {session, senders: {uuid: sender}, rev}: (version 18)
                                                        its messages from others than its user (Senders)
     stop {session, restart?}                        -> stopped {session} (its claude: the next message resumes it;
                                                        restart: those attached aren't told it went)
@@ -130,7 +145,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        on: if this host stops meanwhile, which stops its agent, it
                                                        follows the wait once it's started again, and what the wait
                                                        would have given is held for the session (held), from that
-                                                       chat (sender), till a head sends it or drops it (version 17;
+                                                       chat (sender), till a head sends it or drops it (version 18;
                                                        13: sent to it as its user's message)
     emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
                                                        {state}, many, till emission_watch_end: (version 11) a Bot's
@@ -145,10 +160,29 @@ A client's requests (a "req" it picks comes back on the reply):
     emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
                                                        request, baudelib.emissiontools) to the Emission that has the
                                                        Bot's own profile here, started for it if none has
-    routines {session, routines?}                   -> routines {session, routines}: (version 12) a Bot's routines
-                                                       (baudelib.routines), set if they're given
+    routines {session, set?, delete?}               -> routines {session, routines, clock}: (version 12) a Bot's routines
+                                                       (baudelib.routines): set, one made or changed (by its id),
+                                                       delete, one gone (its id); clock, the host's {zone, offset}
     run_routine {session, id}                       -> routines {session, routines}: one of them run now
     read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
+    list_dir {path}                                 -> dir {path, entries: [{name, dir, size?, ignored}], more}:
+                                                       (version 17) a folder in a session's folder, folders first
+                                                       (.git left out; ignored: git ignores it), at most 2000
+    git {cwd, what, rev?, limit?, skip?, sha?, path?} -> git {what, ...}: (version 17) a session's folder's git, read
+                                                       only (nothing fetched): log, its branch {name, upstream, ahead,
+                                                       behind} and commits [{sha, parents, author, email, at, refs,
+                                                       subject}] (the host's own checkout's too, for a changelog);
+                                                       card (sha): {author, at, message, files [[path, +, -]],
+                                                       branches}; diff (sha, path?): {text, truncated}
+    signal_names {cwd, session?, cli_id?}           -> signal_names {glossary, refs: [{surface, kind, canonical,
+                                                       status, summary, locations}]}: (version 17) the names Signal's
+                                                       glossary has for a session's folder (session: the chat's own
+                                                       mentions), read as they are; nothing looked up or written
+    feedback {note, text, context?}                 -> feedback_filed {url, number, repo}: (version 17) feedback a head
+                                                       with no gh of its own wrote (a phone's), filed as an issue by
+                                                       this host's gh where Send Feedback files it
+                                                       (fixes.submit_issue_target), once for each note (its id);
+                                                       check: true -> feedback_target {repo}, where it would go
     catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
                                                        its sessions' folders, made there (lookup.items: its files,
                                                        branches, Kubernetes objects, what's running on that machine,
@@ -169,7 +203,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        from now on, a link it's made to here (mesh.py)
     relay {to, as?}                                 -> relayed {to}: this connection, from now on, a tunnel to
                                                        member to's host process (hello first, as ever); error if
-                                                       there's no way to it now. as: (version 17) the id of one of
+                                                       there's no way to it now. as: (version 18) the id of one of
                                                        this host's chats whose mesh tools open it: what's sent
                                                        through it is from that chat (input's as), as this host has
                                                        it (its Bot's name or its title), on this host
@@ -187,8 +221,8 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow, held}: its id a UUID the server made as it
-started it (claude's --session-id; what it's resumed by), state "working"
+subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow, held, senders}: its id a UUID the server
+made as it started it (claude's --session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
 is checked against), asks what
@@ -205,10 +239,10 @@ a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None 
 its start's, if it was given one (version 13). acting: whether its turn is at its tools (version 14): from a tool
 call's start in what its agent says till text starts after it, the turn ends or its agent goes; only while it's
 "working" (not while it asks permission). always_allow: (version 15) the tools allowed whenever it asks for them,
-sorted. held: (version 17) messages held for it, oldest first, [{id, text, sender, at (epoch seconds)}]. senders:
-(version 17) its sender store's revision (0 for none: Senders), what a head's copy is checked against.
+sorted. held: (version 18) messages held for it, oldest first, [{id, text, sender, at (epoch seconds)}]. senders:
+(version 18) its sender store's revision (0 for none: Senders), what a head's copy is checked against.
 
-Senders (version 17). A message passed to a session from another than its user (input's as, a held message sent, a
+Senders (version 18). A message passed to a session from another than its user (input's as, a held message sent, a
 subagent's task) has a uuid its program keeps: Claude Code's as its transcript record's, pi's on its session entry
 (pi-claude's /baude-uuid), the host's own transcript's for the others (Server.keep). Its host keeps who it's from,
 by that uuid, beside the session (its state folder's senders/<session>.json), and heads draw a message as from
@@ -251,15 +285,16 @@ import subprocess
 import threading
 import time
 
-VERSION = 17  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 18  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
 # 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
 # gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
 # always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer,
-# emission_unserved, a session's on_phone: a Bot's browser on a phone;
-# 17: input's, start's and relay's as, held, senders, a session's held and senders)
+# emission_unserved, a session's on_phone: a Bot's browser on a phone; 17: feedback, filed by this host's gh; start's
+# app_tools and grace, attach's app_tools, list_dir, git, signal_names;
+# 18: input's, start's and relay's as, held, senders, a session's held and senders)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
@@ -589,9 +624,11 @@ def clean_sender(sender):
 def sender_name(sender):
     """Who a sender is, as a message from it's headed: "Ada, a Bot on lab-mac", "subagent “List” on C"."""
     name, where = sender.get("name") or "", sender.get("host_name")
+    kind = sender.get("kind")
     who = {"bot": f"{name or 'a Bot'}, a Bot", "chat": f"“{name}”" if name else "a chat",
-           "subagent": f"subagent “{name}”" if name else "a subagent", "host": name or "a host"}[sender["kind"]]
-    return who + (f" on {where}" if where and sender["kind"] != "host" else "")
+           "subagent": f"subagent “{name}”" if name else "a subagent", "host": name or "a host"}.get(
+        kind, name or "another")  # (a kind of a newer host's: by its name)
+    return who + (f" on {where}" if where and kind != "host" else "")
 
 
 def said_by(sender, content):

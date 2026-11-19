@@ -472,6 +472,26 @@ def _stopped_mark(content):
     return bool(texts) and all(t.lstrip().startswith(STOPPED) for t in texts)
 
 
+def queued_item(line):
+    """A message sent while a turn ran, as Claude Code keeps it (an attachment, queued_command, not a user record): a
+    'user' item, its uuid the message's own (source_uuid: what it was sent with, what a revert names), or None for
+    one that isn't a message (claude's own, a task's ending)."""
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        return None
+    a = rec.get("attachment") if isinstance(rec, dict) and rec.get("type") == "attachment" else None
+    if not isinstance(a, dict) or a.get("type") != "queued_command" or a.get("isMeta") or rec.get("isSidechain") \
+            or a.get("commandMode", "prompt") != "prompt" or (a.get("origin") or {}).get("kind") == "task-notification":
+        return None
+    content = a.get("prompt")
+    if isinstance(content, str):
+        content = _command_text(strip_reminders(content))
+    if not content:
+        return None
+    return "user", content, False, a.get("timestamp") or rec.get("timestamp"), a.get("source_uuid") or rec.get("uuid")
+
+
 def history_item(line, sidechain=False, first=None):
     """The visible item one transcript line makes (see history_items), or None: a line makes one at most."""
     if '"frame-link"' in line:  # Claude Desktop's record of an artifact it published
@@ -482,6 +502,8 @@ def history_item(line, sidechain=False, first=None):
         if rec.get("frameUrl"):
             return "artifact", {"url": rec["frameUrl"], "title": rec.get("title"), "path": rec.get("path")}
         return None
+    if '"queued_command"' in line[:400]:  # (a message sent while a turn ran: Claude Code keeps it as an attachment)
+        return queued_item(line)
     boundary = '"compact_boundary"' in line  # (Claude Code compacted the conversation here)
     if not boundary and '"type":"user"' not in line and '"type":"assistant"' not in line \
             and '"type": "user"' not in line and '"type": "assistant"' not in line:

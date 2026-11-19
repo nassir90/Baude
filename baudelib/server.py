@@ -16,6 +16,7 @@ import itertools
 import json
 import os
 import queue
+import re
 import select
 import socket
 import subprocess
@@ -25,12 +26,13 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
 DRAFT_S = 30  # (a new chat never written in, nobody attached this long: gone)
 EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
+GRACE_MOST = 24 * 3600  # (start's grace: an ephemeral session waits at most this long for its head to come back)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
@@ -180,6 +182,15 @@ def _write_json(path, data):
     os.replace(tmp, path)
 
 
+def _read_json(path):
+    """A JSON file's data, or None if it isn't there or isn't JSON."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 class Conn:
     """A client's connection: what it's sent goes out on a thread of its own, so a slow one holds nobody up."""
 
@@ -234,6 +245,7 @@ class Session:
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
+        self.app_tools = None     # (a head's own tools for its claude, start's app_tools: agentproxy.AppTools; memory only)
         # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
         # subagents' too: parent, the call they're in); its background tasks, by task_id. Not listed, its subagents:
         # their tasks running, task_id -> their Agent call's id; each Agent call, id -> (the call it's in, run in the
@@ -520,6 +532,9 @@ class Server:
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
+        self.feedback_filed = _read_json(os.path.join(self.state_dir, "feedback-filed.json")) or {}  # (feedback's
+        # notes filed, by id, kept: found before GitHub's search finds them, and after a restart)
+        self.feedback_claims, self.feedback_lock = {}, threading.Lock()  # (notes being filed now: .filing's, here)
         # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
@@ -703,6 +718,8 @@ class Server:
                     return reply("error", error=f"{p} couldn't be moved to the trash: {e}{moved}")
         with self.lock:
             s.deleted = True
+            if s.app_tools is not None:
+                s.app_tools.end()
             s.meta.pop("cut", None)
             self.sessions.pop(s.id, None)
             try:
@@ -715,24 +732,27 @@ class Server:
             self.changed()
         reply("deleted", session=s.id, trashed=went)
 
-    def drop_ephemeral(self, s, later=False):
+    def drop_ephemeral(self, s, later=False, meant=False):
         """(lock held) A side question's session (ephemeral), or a new chat never written in (draft), with nobody
         attached: gone, its claude too (it wrote nothing: --no-session-persistence, or nothing sent). Not at once: a
         head attaches again as it starts its claude again (/cd, a restart of its own), or attaches for the first time
         just after it's made it (a side question's): once nobody's been on it for DRAFT_S (a side question that had a
-        head and lost it: EPHEMERAL_S)."""
+        head and lost it: its grace, or EPHEMERAL_S; meant, its head detached on purpose: EPHEMERAL_S)."""
         if not (s.meta.get("ephemeral") or s.meta.get("draft")) or s.viewers or self.sessions.get(s.id) is not s:
             return
         if not later:
             if s.drop_timer is not None:
                 s.drop_timer.cancel()
-            wait = EPHEMERAL_S if s.meta.get("ephemeral") and s.attached_once else DRAFT_S
+            wait = (EPHEMERAL_S if meant else s.meta.get("grace") or EPHEMERAL_S) if s.meta.get("ephemeral") and \
+                s.attached_once else DRAFT_S
             s.drop_timer = threading.Timer(wait, lambda: self._drop_later(s))
             s.drop_timer.daemon = True
             s.drop_timer.start()
             return
         s.drop_timer = None
         del self.sessions[s.id]
+        if s.app_tools is not None:  # (its head's own tools with it)
+            s.app_tools.end()
         if s.proc is not None:
             s.proc.stopping = True
             s.proc.kill()
@@ -796,7 +816,8 @@ class Server:
         with self.lock:
             self.following.add((s.id, w["session"]))
         try:
-            got = meshtools.Mesh(socket=self.socket_path).follow(w)
+            got = meshtools.Mesh(s.id, self.socket_path).follow(w)  # (as from this chat: what it asked, if it's sent
+            # again, is from it, its relay and its input's as)
         except Exception as e:  # (said to the session as the call would have said it, its host named)
             got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}",
                    **meshtools.Mesh(socket=self.socket_path).named(
@@ -857,6 +878,8 @@ class Server:
             self.restarting = restart
             procs = []
             for s in self.sessions.values():
+                if s.app_tools is not None:  # (the host going: its heads' tools let go of)
+                    s.app_tools.end()
                 if s.proc is None:
                     continue
                 if s.busy or s.asks:  # (cut short: a head offers to carry it on)
@@ -954,6 +977,8 @@ class Server:
                 conn.agent_run.end()
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
+            for tools in list(getattr(conn, "app_tools", ())):  # (its chats' tools that were its own: waiting for it
+                tools.unbind(conn)                               # to attach again, which binds them to it then)
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
@@ -1010,6 +1035,73 @@ class Server:
                 pass
             conn.send({"op": "emission_watch_end", "req": req})
 
+    def feedback(self, msg, reply):
+        """A head's feedback (a phone's, which has no gh) filed as an issue by this host's gh, where Baude's Send
+        Feedback files it (fixes.submit_issue_target): titled by its first line, its context under it, its note's id
+        (note) in its last line, so a try that's asked again finds the issue it made rather than making another.
+        check: where it would be filed, nothing filed."""
+        import fixes  # (no GTK in it: feedback.py's own has)
+        repo = fixes.submit_issue_target()
+        if repo is None:
+            return reply("error", error="this host can't tell where to file it: is its gh signed in?")
+        if msg.get("check"):
+            return reply("feedback_target", repo=repo)
+        text, note = msg.get("text"), msg.get("note")
+        context = [c for c in msg.get("context") or [] if isinstance(c, str)] if isinstance(msg.get("context"), list) else []
+        if not isinstance(text, str) or not text.strip() or not wire.is_id(note or ""):
+            return reply("error", error="feedback needs its text and its note's id")
+        first = next((t for line in text.splitlines() if (t := line.strip().lstrip("#").strip())), "Feedback")
+        title = first if len(first) <= 90 else first[:89].rstrip() + "…"
+        token = f"`baude-note-{note}`"  # (the note's own: an issue ending with it is the note's, whoever filed it)
+        mark = f"_Sent from Baude for Android's Send Feedback, through {self.me['name']}_ {token}"
+        with self.feedback_lock:  # (one filing a note at a time: another for it waits, and has what it made)
+            claim = self.feedback_claims.get(note)
+            mine = claim is None
+            if mine:
+                claim = self.feedback_claims[note] = threading.Event()
+        if not mine:
+            claim.wait(120)
+        if note in self.feedback_filed:
+            if mine:
+                self._unclaim(note, claim)
+            return reply("feedback_filed", repo=repo, **self.feedback_filed[note])
+        if not mine:
+            return reply("error", error="it's being filed already: try again in a moment")
+        try:
+            self._file_feedback(fixes, note, text, context, title, mark, token, repo, reply)
+        finally:
+            self._unclaim(note, claim)
+
+    def _unclaim(self, note, claim):
+        with self.feedback_lock:
+            self.feedback_claims.pop(note, None)
+        claim.set()
+
+    def _file_feedback(self, fixes, note, text, context, title, mark, token, repo, reply):
+        """(the note claimed) Filed, unless an issue of its own is there already (found by its id)."""
+        body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
+                                        else "") + "\n\n" + mark + "\n"
+        ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
+                           f'"baude-note-{note}" in:body', "--json", "number,url,body")
+        if not ok:
+            return reply("error", error=out or "gh issue list failed")
+        try:
+            made = next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().endswith(token)), None)
+        except ValueError:
+            made = None
+        if made is None:
+            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body)
+            url = next((line for line in out.splitlines() if line.startswith("https://")), None) if ok else None
+            if url is None:
+                return reply("error", error=out or "gh issue create failed")
+            number = int(m.group(1)) if (m := re.search(r"/issues/(\d+)", url)) else None
+            made = {"url": url, "number": number}
+        with self.feedback_lock:
+            self.feedback_filed[note] = {"url": made["url"], "number": made.get("number")}
+            _write_json(os.path.join(self.state_dir, "feedback-filed.json"), self.feedback_filed)
+        self.log(f"feedback {note} filed on {repo}: {made['url']}")
+        reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
+
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
@@ -1059,6 +1151,27 @@ class Server:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
             return None
+        if op in ("list_dir", "git", "signal_names"):  # (a session's folder read for a head elsewhere: hostfiles; on a
+            def read():                                  # thread of its own, as git may take a while)
+                try:
+                    if op == "list_dir":
+                        reply("dir", **hostfiles.list_dir(self, msg.get("path")))
+                    else:
+                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
+                except (ValueError, OSError) as e:
+                    reply("error", error=str(e))
+                except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=read, daemon=True, name=op).start()
+            return None
+        if op == "feedback":  # (a head with no gh of its own: its feedback filed by this host's; on a thread of its own)
+            def feedback():
+                try:
+                    self.feedback(msg, reply)
+                except Exception as e:  # noqa: BLE001 (gh gone wrong: said)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=feedback, daemon=True, name="feedback").start()
+            return None
         if op == "link":  # (a head's: a link made from here)
             where = msg.get("where")
             self.mesh.link(where)
@@ -1078,6 +1191,8 @@ class Server:
                 self.agent_runs[run.id] = run
             conn.agent_run = run
             return reply("agent_started", run=run.id)
+        if op in ("mcp", "mcp_close") and msg.get("conn") in getattr(conn, "tool_relays", {}):  # (an app's tools')
+            return conn.tool_relays[msg["conn"]].take(msg)
         if op in ("in", "close", "kill", "mcp", "mcp_close") and getattr(conn, "agent_run", None) is not None:
             return conn.agent_run.take(msg)
         if op == "emission":  # (a Bot's browser tools: its own Emission profile here, started for it if it isn't
@@ -1156,11 +1271,13 @@ class Server:
                 s.viewers.add(conn)
                 if msg.get("live"):
                     s.live.add(conn)
+                if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
+                    s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()))
-            if op == "detach":
+            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
                 s.viewers.discard(conn)
                 s.live.discard(conn)
-                self.drop_ephemeral(s)
+                self.drop_ephemeral(s, meant=True)
                 return None
             if op == "input":
                 self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
@@ -1204,7 +1321,9 @@ class Server:
                 threading.Thread(target=self.delete, args=(s, reply), daemon=True, name="delete").start()
                 return None
             if op == "senders":
-                return reply("senders", session=s.id, senders=dict(self.senders(s)), rev=s.meta.get("senders") or 0)
+                if (have := self.senders(s)) is None:
+                    return reply("error", error="its sender store couldn't be read: see the host's log")
+                return reply("senders", session=s.id, senders=dict(have), rev=s.meta.get("senders") or 0)
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))
@@ -1514,12 +1633,19 @@ class Server:
             raise ValueError(f"{', '.join([*options, *(['fork_from'] if src else [])])}: claude's, not {model}'s")
         if params.get("ask_default") not in (None, "deny", "allow"):
             raise ValueError("ask_default is deny or allow")
+        tools = params.get("app_tools") or []  # (MCP servers the head runs itself: relayed back to it, AppTools)
+        if not isinstance(tools, list) or not all(wire.is_id(t) for t in tools) or len(tools) > 4:
+            raise ValueError("app_tools is a list of up to 4 names")
+        if tools and (conn is None or run["program"] != "claude"):
+            raise ValueError("app_tools are a head's, for a claude here")
         meta = {"id": str(uuid.uuid4()), "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
                 "group": self.group_of(params), "title": params.get("title") or None,
                 "prompt": params.get("prompt") or "", "created": time.time(), "options": options,
                 "fork_from": (src.meta.get("cli_id") or src.id) if src else None,
                 "ask_timeout": float(params["ask_timeout"]) if params.get("ask_timeout") else None,
                 "ask_default": params.get("ask_default") or "deny", "ephemeral": bool(params.get("ephemeral")),
+                "grace": min(float(params["grace"]), GRACE_MOST) if params.get("ephemeral") and
+                isinstance(params.get("grace"), (int, float)) and params["grace"] > 0 else None,
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
@@ -1527,6 +1653,8 @@ class Server:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
             s = Session(self, meta)
+            if tools:
+                s.app_tools = agentproxy.AppTools(self, conn, s.id, tools)
             if isinstance(params.get("env"), dict):
                 s.env = clean_env(params["env"])
             self.sessions[s.id] = s
@@ -1543,13 +1671,16 @@ class Server:
                     self.ensure_proc(s)
                     self.send_user(s, meta["prompt"], self.sent_by(conn, params) if conn is not None else None)
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
+                if s.app_tools is not None:
+                    s.app_tools.end()
                 del self.sessions[s.id]
                 if s.proc is not None:
                     s.proc.kill()
-                try:
-                    os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
-                except OSError:
-                    pass
+                for kept in (os.path.join(self.state_dir, "sessions", f"{s.id}.json"), self.senders_path(s.id)):
+                    try:  # (nor who its prompt was from)
+                        os.remove(kept)
+                    except OSError:
+                        pass
                 raise
             if conn is not None:
                 conn.send({"op": "started", "req": req, "session": s.listing(), "forked": bool(src)})
@@ -1683,6 +1814,19 @@ class Server:
                     extra[at:at] = rules
                 else:
                     extra += ["--allowedTools", *rules]
+        if s.app_tools is not None and run["program"] == "claude":  # (a head's own tools: relays back to it, never
+            tools = s.app_tools.config()                              # asked about: the head runs them itself)
+            if "--mcp-config" in extra:  # (the mesh's with them, in one)
+                at = extra.index("--mcp-config") + 1
+                extra[at] = json.dumps({"mcpServers": {**json.loads(extra[at])["mcpServers"], **tools}})
+            else:
+                extra += ["--mcp-config", json.dumps({"mcpServers": tools})]
+            rules = [f"mcp__{n}__*" for n in tools]
+            if "--allowedTools" in extra:
+                at = extra.index("--allowedTools") + 1
+                extra[at:at] = rules
+            else:
+                extra += ["--allowedTools", *rules]
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
@@ -1817,8 +1961,6 @@ class Server:
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid, "error": str(e)}}})
         on = f"srv_{next(self.rids)}"
-        if sub == "rewind_conversation":  # (once it's made, who what it drops was from goes too: unstamp)
-            s.reverting[on] = request.get("target_message_uuid")
         if sub == "rewind_conversation" and s.kept():  # (pi's and Apple's: the model's cut, by its program; the
             # transcript's, here, once it's made)
             path = os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
@@ -1830,6 +1972,8 @@ class Server:
             s.rewinds[on], index, count, before = found
             msg = {**msg, "request": {**request, "baude_prompt_index": index, "baude_prompt_count": count,
                                       "baude_kept": before}}  # (Apple's, its session made again from them)
+        if sub == "rewind_conversation":  # (once it's made, who what it drops was from goes too: unstamp)
+            s.reverting[on] = request.get("target_message_uuid")
         s.routes[on] = (conn, rid, undo)
         proc.send({**msg, "request_id": on})
         self.changed()
@@ -2095,15 +2239,21 @@ class Server:
         return os.path.join(self.state_dir, "senders", f"{sid}.json")
 
     def senders(self, s):
-        """(lock held) Its sender store, {uuid: sender} in the order kept (read the first time it's wanted)."""
+        """(lock held) Its sender store, {uuid: sender} in the order kept (read the first time it's wanted); None if
+        it's there and can't be read (said in the log; read again the next time, never written over meanwhile)."""
         if s.senders is None:
             try:
                 with open(self.senders_path(s.id), encoding="utf-8") as f:
                     got = json.load(f)
-            except (OSError, ValueError):
+            except FileNotFoundError:
                 got = {}
-            s.senders = {k: v for k, v in got.items() if wire.is_id(k) and isinstance(v, dict)} \
-                if isinstance(got, dict) else {}
+            except (OSError, ValueError) as e:
+                self.log(f"{s.id}: its sender store couldn't be read: {e}")
+                return None
+            if not isinstance(got, dict):
+                self.log(f"{s.id}: its sender store isn't one")
+                return None
+            s.senders = {k: v for k, v in got.items() if wire.is_id(k) and isinstance(v, dict)}
         return s.senders
 
     def write_senders(self, s, senders):
@@ -2119,21 +2269,34 @@ class Server:
 
     def stamp(self, s, said, sender):
         """(lock held) A message passed to a session from another than its user: who it's from kept by its uuid."""
-        if (sender := wire.clean_sender(sender)) is not None and wire.is_id(said or ""):
-            self.write_senders(s, {**self.senders(s), said: sender})
+        if (sender := wire.clean_sender(sender)) is not None and wire.is_id(said or "") and \
+                (have := self.senders(s)) is not None:
+            self.write_senders(s, {**have, said: sender})
 
     def unstamp(self, s, target):
-        """(lock held) A revert made: the message it took back and those after it, as its transcript has them in the
-        order said, gone from its sender store."""
-        have = self.senders(s)
-        path = s.transcript()
-        gone = transcripts.from_record(path, target, have) if have and path else set()
-        if gone:
-            self.write_senders(s, {k: v for k, v in have.items() if k not in gone})
+        """(lock held) A revert made: the message it took back and those after it gone from its sender store. Its own
+        order says which, if it's one of the store's (they're kept as they're sent); else its transcript does, read
+        on a thread of its own, not under the lock (what's stamped meanwhile, after the revert, stays)."""
+        if not (have := self.senders(s)):
+            return
+        if target in have:
+            keys = list(have)
+            self.write_senders(s, {k: have[k] for k in keys[:keys.index(target)]})
+            return
+        path, among = s.transcript(), set(have)
+        if not path:
+            return
+
+        def read():
+            gone = transcripts.from_record(path, target, among)
+            with self.lock:
+                if gone and not s.deleted and self.sessions.get(s.id) is s and (now := self.senders(s)) is not None:
+                    self.write_senders(s, {k: v for k, v in now.items() if k not in gone})
+        threading.Thread(target=read, daemon=True, name="unstamp").start()
 
     def copy_senders(self, src, s):
         """(lock held) A fork's sender store: its source's, as the copy of its conversation has the same messages."""
-        if (have := self.senders(src)):
+        if (have := self.senders(src)):  # (None: unreadable, nothing copied)
             self.write_senders(s, dict(have))
 
     def keep_rewind(self, s, last):
@@ -2276,8 +2439,9 @@ class Server:
 
     def stoppable(self, s):
         """(lock held) Would an idle look stop a session's claude, once it's idle long enough (_look)? Not one at a
-        turn, asking, watched live, stopping already, or whose program forgets what it's said (apple-claude)."""
-        return s.proc is not None and not s.busy and not s.asks and not s.live and \
+        turn, asking, watched live, stopping already, or whose program forgets what it's said (apple-claude, and an
+        ephemeral session's, kept nowhere)."""
+        return s.proc is not None and not s.busy and not s.asks and not s.live and not s.meta.get("ephemeral") and \
             not getattr(s.proc, "stopping", False) and models.program(s.meta.get("model"))["resumes"]
 
     def _notes(self):
@@ -2306,9 +2470,7 @@ class Server:
                 if s.agents is None or s.proc is not None or grew:  # (only a running claude's subagents work)
                     if (agents := s.subagent_files(s.meta.get("path"))) != s.agents:
                         s.agents, self.dirty = agents, True
-                if s.proc is not None and not s.busy and not s.asks and not s.live \
-                        and time.time() - s.used > self.idle_s and not getattr(s.proc, "stopping", False) \
-                        and models.program(s.meta.get("model"))["resumes"]:  # (apple-claude would forget it all)
+                if self.stoppable(s) and time.time() - s.used > self.idle_s:  # (one that'd forget it all, not)
                     self.log(f"{s.id} idle: its claude stopped")
                     s.proc.stopping = True
                     s.proc.close_stdin()

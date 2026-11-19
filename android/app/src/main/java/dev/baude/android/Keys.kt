@@ -2,12 +2,10 @@ package dev.baude.android
 
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import com.jcraft.jsch.Identity
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
-import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -20,7 +18,7 @@ import java.util.Base64
 /** This phone's SSH key: ECDSA P-256 (ecdsa-sha2-nistp256, which every OpenSSH takes), made in the Android Keystore,
  * which signs with it and never gives it out: in the phone's secure hardware, where it has some. Its public half is
  * put in a host's ~/.ssh/authorized_keys by you. */
-class Key(private val private: PrivateKey, public: ECPublicKey, val where: String, val hardware: Boolean) {
+class Key(private val private: PrivateKey, public: ECPublicKey) {
     /** Its public key as ssh has it: string "ecdsa-sha2-nistp256", string "nistp256", string Q (0x04 X Y). */
     val blob: ByteArray = ssh {
         string(ALG.toByteArray())
@@ -78,8 +76,7 @@ object Keys {
         if (!store.containsAlias(ALIAS)) return null
         val entry = store.getEntry(ALIAS, null) as? KeyStore.PrivateKeyEntry
             ?: throw IllegalStateException("its entry isn't a private key")
-        return Key(entry.privateKey, entry.certificate.publicKey as ECPublicKey, where(entry.privateKey),
-            hardware(entry.privateKey))
+        return Key(entry.privateKey, entry.certificate.publicKey as ECPublicKey)
     }
 
     /** A new key, in place of any there was (a host that had the last one in its authorized_keys needs this one): in
@@ -100,36 +97,8 @@ object Keys {
             gen.initialize(spec(false))
             gen.generateKeyPair()
         }
-        return Key(pair.private, pair.public as ECPublicKey, where(pair.private), hardware(pair.private))
+        return Key(pair.private, pair.public as ECPublicKey)
     }
-
-    /** Where the Keystore keeps it, said plainly. */
-    private fun where(key: PrivateKey): String = try {
-        val info = KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java)
-        if (Build.VERSION.SDK_INT >= 31) when (info.securityLevel) {
-            KeyProperties.SECURITY_LEVEL_STRONGBOX -> "Kept in this phone's StrongBox chip"
-            KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "Kept in this phone's secure hardware"
-            KeyProperties.SECURITY_LEVEL_SOFTWARE -> "Kept by Android's Keystore (this phone has no secure hardware for it)"
-            else -> "Kept by Android's Keystore"
-        } else {
-            @Suppress("DEPRECATION")
-            if (info.isInsideSecureHardware) "Kept in this phone's secure hardware"
-            else "Kept by Android's Keystore (this phone has no secure hardware for it)"
-        }
-    } catch (_: Exception) {
-        "Kept by Android's Keystore"
-    }
-
-    /** Is it in secure hardware (a trusted environment, or StrongBox)? */
-    private fun hardware(key: PrivateKey): Boolean = try {
-        val info = KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java)
-        if (Build.VERSION.SDK_INT >= 31) info.securityLevel == KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT ||
-            info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX || info.securityLevel == KeyProperties.SECURITY_LEVEL_UNKNOWN_SECURE
-        else @Suppress("DEPRECATION") info.isInsideSecureHardware
-    } catch (_: Exception) {
-        false
-    }
-
 }
 
 /** The comment a key's line ends with: the phone it's on. */

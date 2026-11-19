@@ -15331,8 +15331,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             toast(self, "It can't be sent: this chat's agent couldn't be started")
             return
         h, sid = turn.held, self.session_id
-        sent = SenderTurn(self.sender_bubble(baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"},
-                                             h["text"].strip()))
+        sent = self.sender_turn(baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}, h["text"], (), None)
         turn.sending = sent
         turn.set_visible(False)
         self.show_held()  # (the queue's box, with nothing else in it, gone meanwhile)
@@ -15647,17 +15646,27 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def senders_came(self, sid):
         """The chat's sender store, fetched: a message of yours drawn before it came that it says is another's
-        drawn as that one's."""
+        drawn as that one's, hidden as it was (a revert not sent yet: in what it hides). The one a pending revert's of
+        is left as it is: the revert goes on with it."""
         if sid != self.session_id or getattr(self, "let_go_done", False):
             return
-        senders = self.chat_senders()
+        senders, rev = self.chat_senders(), self.reverting
         stack = [self.transcript]
         while stack:
             child = stack.pop().get_first_child()
             while child is not None:
                 after = child.get_next_sibling()
-                if isinstance(child, UserTurn) and child.uuid in senders and isinstance(child.get_parent(), Gtk.Box):
+                if isinstance(child, UserTurn) and not isinstance(child, SenderTurn) and child.uuid in senders and \
+                        isinstance(child.get_parent(), Gtk.Box) and (rev is None or child is not rev["turn"]):
                     turn = self.sender_turn(senders[child.uuid], child.text, getattr(child, "atts", ()), child.uuid)
+                    turn.set_visible(child.get_visible())
+                    turn.zoom_hidden = getattr(child, "zoom_hidden", False)
+                    if rev is not None and child in rev["hidden"]:
+                        rev["hidden"][rev["hidden"].index(child)] = turn
+                    for side in ("above", "below"):  # (one a zoom's hidden, to show as it settles: this in its place)
+                        held = (self.zoom_job or {}).get(side) or []
+                        if child in held:
+                            held[held.index(child)] = turn
                     child.get_parent().insert_child_after(turn, child)
                     child.get_parent().remove(child)
                 elif getattr(child, "is_history", False) or getattr(child, "span", None) is not None:
@@ -15666,10 +15675,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def sender_turn(self, sender, text, atts, said):
         """A message from sender, its host's sender store says (uuid said), as the chat draws it: SenderTurn, without
-        the line its host put at its head for its agent (wire.said_by)."""
-        turn = SenderTurn(self.sender_bubble(sender, baudelib.wire.unsaid(text).strip(), atts))
-        turn.uuid = said
-        return turn
+        the line its host put at its head for its agent (wire.said_by). It reverts as yours do (its text put in the
+        box)."""
+        said_text = baudelib.wire.unsaid(text or "").strip()
+        return SenderTurn(self, self.sender_bubble(sender, said_text, atts), said_text, said)
 
     def sender_bubble(self, sender, text, atts=()):
         """A message from sender, not you (its host's sender store's): where yours are, grey (not your accent), as a

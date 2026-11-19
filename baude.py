@@ -8502,6 +8502,14 @@ class SessionSidebar(Gtk.Box):
                 "mtime": now, "prompts": 0, "unsaved": True})
         # (forks are found within a folder, by day too: a fork is in its session's folder. A folder with a server's
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
+        # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)
+        home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items}
+        for key, (_label, _folder, items) in list(groups.items()):
+            for info in list(items):
+                if (up := home.get(info.get("spawned_by"))) is not None and up != key:
+                    items.remove(info)
+                    groups[up][2].append(info)
+        groups = {k: g for k, g in groups.items() if g[2]}
         order_of = lambda items: sorted(items, key=lambda i: (not i.get("unsaved"), -last_used(i)))  # noqa: E731
         groups = {k: [label, folder, fork_tree(order_of(items))] for k, (label, folder, items) in groups.items()}
         if by_date:

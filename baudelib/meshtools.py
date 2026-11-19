@@ -59,13 +59,16 @@ def _channel(where, timeout=10):
 
 
 class Mesh:
-    """The mesh as this host's process has it (this chat's: me, its session id)."""
+    """The mesh as this host's process has it (this chat's: me, its session id; socket: that host process's, if it
+    isn't this user's usual one)."""
 
-    def __init__(self, me=None):
+    def __init__(self, me=None, socket=None):
         self.me = me
+        self.local = {"via": "unix", "path": socket} if socket else {"via": "local"}
+        self.relay = {"path": socket} if socket else {}  # (a member reached through that host process)
 
     def here(self):
-        ch, info = _channel({"via": "local"})
+        ch, info = _channel(self.local)
         ch.close()
         return info
 
@@ -73,27 +76,34 @@ class Mesh:
         here = self.here()
         out = [{"id": here.get("id"), "name": here.get("name"), "here": True, "reachable": True,
                 "models": [m.get("value") for m in here.get("models") or []]}]
-        for m in (here.get("mesh") or {}).get("members") or []:
-            entry = {"id": m.get("id"), "name": m.get("name"), "here": False, "reachable": False, "models": []}
+        members = (here.get("mesh") or {}).get("members") or []
+        found = [{"id": m.get("id"), "name": m.get("name"), "here": False, "reachable": False, "models": []}
+                 for m in members]
+
+        def look(entry):  # (each at once: one that's down takes its time without holding up the rest)
             try:
-                ch, info = _channel({"via": "mesh", "host": m["id"]})
+                ch, info = _channel({"via": "mesh", "host": entry["id"], **self.relay})
                 ch.close()
                 entry.update(reachable=True, models=[x.get("value") for x in info.get("models") or []])
             except (OSError, KeyError, ValueError) as e:
                 entry["error"] = str(e)
-            out.append(entry)
-        return out
+        threads = [threading.Thread(target=look, args=(e,), daemon=True) for e in found if e["id"]]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        return out + found
 
     def where(self, host):
         """Where a host is (wire.reach's), by its id or name; this one for none."""
         if not host:
-            return {"via": "local"}
+            return self.local
         here = self.here()
         if host in (here.get("id"), here.get("name")):
-            return {"via": "local"}
+            return self.local
         for m in (here.get("mesh") or {}).get("members") or []:
             if host in (m.get("id"), m.get("name")):
-                return {"via": "mesh", "host": m["id"]}
+                return {"via": "mesh", "host": m["id"], **self.relay}
         raise ValueError(f"no host {host!r} in the mesh: hosts lists them")
 
     def request(self, where, msg, timeout=30):
@@ -111,14 +121,21 @@ class Mesh:
             ch.close()
 
     def sessions(self, where):
-        return self.request(where, {"op": "subscribe"})["sessions"]
+        """A host's chats, archived ones too."""
+        return self.request(where, {"op": "subscribe", "archived": True})["sessions"]
 
     def find(self, session, host=None):
         """(where, its listing) for a session, on host or wherever in the mesh it is."""
-        places = [self.where(host)] if host else [{"via": "local"}] + [
-            {"via": "mesh", "host": h["id"]} for h in self.hosts() if not h["here"] and h["reachable"]]
+        places = [self.where(host)] if host else [self.local] + [
+            {"via": "mesh", "host": h["id"], **self.relay} for h in self.hosts() if not h["here"] and h["reachable"]]
         for where in places:
-            for s in self.sessions(where):
+            try:
+                listed = self.sessions(where)
+            except (OSError, ValueError):  # (one that's gone meanwhile: the others looked in still)
+                if host:
+                    raise
+                continue
+            for s in listed:
                 if s["id"] == session:
                     return where, s
         raise ValueError(f"no chat {session} {'on ' + host if host else 'in the mesh'}: chats lists them")
@@ -132,15 +149,17 @@ class Mesh:
             if not got or got.get("op") != "attached":
                 raise ValueError((got or {}).get("error") or "the host didn't answer")
             ch.keep_alive()
-            ch.send({"op": "input", "session": session, "msg": {
+            busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
+            ch.send({"op": "input", "session": session, "req": 2, "msg": {
                 "type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}})
-            return self._answer(ch, session, wait, timeout_s)
+            return self._answer(ch, session, wait, timeout_s, skip=1 if busy else 0, req=2)
         finally:
             ch.close()
 
-    def _answer(self, ch, session, wait, timeout_s):
-        """The turn's answer, read off ch (attached, live), or as far as it got."""
-        if not wait:
+    def _answer(self, ch, session, wait, timeout_s, skip=0, req=None):
+        """The turn's answer, read off ch (attached, live), or as far as it got (skip: the answers of turns before it,
+        to pass by; req: what was sent's, its error the answer at once)."""
+        if not wait and req is None:
             return {"session": session, "sent": True}
         end = time.monotonic() + max(5, min(int(timeout_s or WAIT_S), WAIT_MAX_S))
         ch.sock.settimeout(wire.SILENT_S)
@@ -150,12 +169,20 @@ class Mesh:
                 return {"session": session, "answer": None, "still_working": True, "said_so_far": cut(said)}
             if msg.get("op") == "exited" and msg.get("session") == session:
                 return {"session": session, "answer": None, "exited": msg.get("code"), "said_so_far": cut(said)}
+            if req is not None and msg.get("req") == req:  # (what was sent: taken, or not)
+                if msg.get("op") == "error":
+                    raise ValueError(msg.get("error") or "the host didn't take it")
+                if not wait:
+                    return {"session": session, "sent": True}
+                continue
             if msg.get("op") != "claude" or msg.get("session") != session:
                 continue
             m = msg.get("msg") or {}
             if m.get("type") == "assistant":
                 said += [b.get("text") for b in (m.get("message") or {}).get("content") or []
                          if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+            elif m.get("type") == "result" and skip:  # (the turn it was at when this was sent: not its answer)
+                skip, said = skip - 1, []
             elif m.get("type") == "result":
                 answer = m.get("result") if isinstance(m.get("result"), str) else "\n".join(said)
                 return {"session": session, "answer": cut([answer]), "error": bool(m.get("is_error"))}
@@ -211,7 +238,11 @@ class Mesh:
             content = (rec.get("message") or {}).get("content")
             text = content if isinstance(content, str) else "\n".join(
                 b.get("text") for b in content or [] if isinstance(b, dict) and b.get("type") == "text" and b.get("text"))
-            if text.strip():
+            if not text.strip():
+                continue
+            if said and said[-1]["who"] == rec["type"]:  # (a reply in pieces, as claude writes one: one message)
+                said[-1]["text"] += "\n" + text
+            else:
                 said.append({"who": rec["type"], "text": text})
         return {"session": a["session"], "messages": [{**m, "text": cut([m["text"]])} for m in said[-max(1, int(
             a.get("last") or 6)):]]}
@@ -233,11 +264,11 @@ def listed():
             for n, (d, props, req) in SCHEMAS.items()]
 
 
-def serve(me=None, rfile=None, wfile=None):
+def serve(me=None, rfile=None, wfile=None, socket=None):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
     a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
     rfile, wfile = rfile or sys.stdin, wfile or sys.stdout
-    mesh, lock = Mesh(me), threading.Lock()
+    mesh, lock = Mesh(me, socket), threading.Lock()
 
     def send(msg):
         with lock:

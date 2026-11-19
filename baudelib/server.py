@@ -1015,7 +1015,7 @@ class Server:
             if op == "mesh_tools":  # (a chat given the mesh's tools, or not: from its next start)
                 s.meta["mesh_tools"] = bool(msg.get("on"))
                 self.save(s)
-                self.restart_agent(s)
+                self.renew_agent(s)
                 self.changed()
                 return reply("mesh_tools_set", session=s.listing())
             if op == "bot_picture":
@@ -1057,13 +1057,18 @@ class Server:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
-        if getattr(s, "proc", None) is not None:  # (told who it is anew: started again with its next message)
+        self.renew_agent(s)
+        self.changed()
+        return s.listing()
+
+    def renew_agent(self, s):
+        """(under the lock) A session's agent told what it's told at its start anew (a Bot made, its mesh's tools
+        given): started again with its next message, after the turn it's at, if it's running."""
+        if getattr(s, "proc", None) is not None:
             if s.busy:
                 s.renew = True
             else:
                 self.restart_agent(s)
-        self.changed()
-        return s.listing()
 
     @staticmethod
     def restart_agent(s):
@@ -1339,7 +1344,9 @@ class Server:
                 else:
                     extra += ["--allowedTools", *rules]
         if s.mesh_tools() and run["program"] in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
-            servers = {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools"],
+            servers = {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools",
+                                                                            "--socket",
+                                                                            os.path.abspath(self.socket_path)],
                                         "env": {"BAUDE_SESSION": s.id}}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
             if run["program"] == "claude":  # (what it reads asked for no more than a file read is: what it starts or

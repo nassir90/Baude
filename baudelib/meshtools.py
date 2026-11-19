@@ -344,7 +344,7 @@ class Mesh:
             except OSError as e:
                 raise OSError(f"{a.get('host') or 'this host'} wasn't reached within {BACK_S} s: {e}") from None
             if dropped:
-                if (info.get("version") or 0) < 13:  # (it lists no start_key: whether it took it can't be told)
+                if not wire.speaks(info, "start", 13):  # (it lists no start_key: whether it took it can't be told)
                     ch.close()
                     raise ValueError("the host went before it answered")
                 if (sid := self._started(where, params["start_key"])) is not None:  # (taken before it went)

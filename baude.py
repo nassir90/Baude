@@ -7887,7 +7887,8 @@ def can_be_bot(info):
     """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and knows Bots (wire
     version 8), on a model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
     r = info.get("remote")
-    return r is not None and not info.get("dead") and r.state == "alive" and (r.info.get("version") or 1) >= 8 and \
+    return r is not None and not info.get("dead") and r.state == "alive" and \
+        baudelib.wire.speaks(r.info, "bot", 8) and \
         modelslib.model_program(info.get("model")) in ("claude", "pi")
 
 
@@ -9013,7 +9014,7 @@ class SessionSidebar(Gtk.Box):
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
             items[1:1] = [("Bot Settings…", "make_bot"), ("Turn Back into a Chat", "unbot")] if info.get("bot") else \
                 [("Make Bot…", "make_bot")]
-        if can_be_bot(info) and not info.get("bot") and (info["remote"].info.get("version") or 1) >= 9:
+        if can_be_bot(info) and not info.get("bot") and baudelib.wire.speaks(info["remote"].info, "mesh_tools", 9):
             items.insert(2, ("Remove Mesh Tools", "mesh_off") if info.get("mesh_tools") else
                          ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
@@ -19179,7 +19180,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 allowed = self.allowed_in(self.session_id)
                 allowed.add(name)
                 if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
-                    new = (self.remote.info.get("version") or 1) >= 15  # added to its list; an older one's replaced)
+                    # added to its list; an older one's replaced)
+                    new = baudelib.wire.speaks(self.remote.info, "always_allow", 15)
                     self.remote.request({"op": "always_allow", "session": self.session_id,
                                          **({"add": [name]} if new else {"tools": sorted(allowed)})})
             proc.asks.pop(rid, None)

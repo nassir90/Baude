@@ -164,6 +164,7 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line) }
+            if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
             items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, contact?.alwaysOffered ?: true, name) }
             if (contact?.state == "working" && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
@@ -226,7 +227,8 @@ private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String) {
                 .padding(horizontal = 8.dp, vertical = 6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button("Allow", suggested = true) { Mesh.answer(chat, ask, allow = true) }
-            if (alwaysOffered) Button("Always allow ${toolDisplay(ask.tool).first}") {
+            // (a plan's agreed to each time)
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button("Always allow ${toolDisplay(ask.tool).first}") {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }
             Button("Deny", destructive = true) { Mesh.answer(chat, ask, allow = false) }

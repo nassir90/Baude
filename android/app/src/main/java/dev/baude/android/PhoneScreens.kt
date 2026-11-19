@@ -30,8 +30,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,17 +41,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** This phone as a host: its agents, whether it's in the mesh, and what you've let them have (the models that may
- * serve them, who else may talk to them, what they reach). */
+/** This phone as a host: its agents, whether it's in the mesh, the models the mesh serves them, and what they
+ * reach. */
 @Composable
 fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     val c = LocalBaude.current
-    val ctx = LocalContext.current
     Mesh.tick.value // (a host's state, or the agents', changed: drawn again)
     var deleting by remember { mutableStateOf<JSONObject?>(null) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -79,7 +75,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
             Panel(rows = true) {
                 if (agents.isEmpty()) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("No agents on this phone yet.", style = Type.body, color = c.dim)
-                    Button("New Agent", suggested = Inference.allowed().isNotEmpty(), onClick = make)
+                    Button("New Agent", suggested = Inference.found().isNotEmpty(), onClick = make)
                 }
                 agents.forEachIndexed { i, s ->
                     if (i > 0) Rule()
@@ -100,51 +96,29 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
             }
 
             Heading("Models")
-            Text("A model call goes through the mesh to the machine that has the model, and runs there as that " +
-                "machine's own settings say. None serves this phone's agents till you allow it.",
+            Text("What the mesh's machines serve over an API. A model call goes through the mesh to the machine that " +
+                "has the model, and runs there as that machine's own settings say.",
                 style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
             val served = Inference.found().groupBy { it.key }
             Panel(rows = true) {
                 if (served.isEmpty()) Text("No machine in reach serves a model over an API (Ollama, or an " +
                     "OpenAI-compatible server).", style = Type.body, color = c.dim, modifier = Modifier.padding(12.dp))
-                served.entries.forEachIndexed { i, (key, models) ->
+                served.values.forEachIndexed { i, models ->
                     if (i > 0) Rule()
                     val first = models.first()
-                    val on = key in Trust.inference.value
-                    Row(Modifier.fillMaxWidth().clickable { Trust.setServes(ctx, key, !on) }.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("${first.providerName} on ${first.memberName}", style = Type.bold, color = c.fg)
-                            Text(models.joinToString(", ") { it.display }, style = Type.caption, color = c.dim,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Switch(on, { Trust.setServes(ctx, key, it) }, colors = SwitchDefaults.colors(
-                            checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg,
-                            uncheckedTrackColor = c.raised, uncheckedThumbColor = c.dim, uncheckedBorderColor = c.rule))
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text("${first.providerName} on ${first.memberName}", style = Type.bold, color = c.fg)
+                        Text(models.joinToString(", ") { it.display }, style = Type.caption, color = c.dim,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                }
-            }
-
-            Heading("Who may talk to them")
-            Text("Anyone in the mesh sees their chats, as it sees any host's. This says who else may start agents " +
-                "here, write to them, answer what they ask, or stop or delete them.",
-                style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
-            Panel(rows = true) {
-                val now = Trust.talk.value
-                listOf("phone" to ("This phone only" to "Nobody else, from anywhere"),
-                    "hosts" to ("Your hosts too" to "Heads on the machines you've added here"),
-                    "mesh" to ("Anyone in the mesh" to "Every member, and heads on any of them")).forEachIndexed { i, (k, said) ->
-                    if (i > 0) Rule()
-                    Pick(now == k, said.first, said.second) { Trust.setTalk(ctx, k) }
                 }
             }
 
             Heading("What they reach")
             Panel {
                 Text("Files in each agent's own folder on this phone; questions to you; and the mesh's hosts and " +
-                    "chats, through this phone's connections to them. Nothing else of the phone's. Each use is asked " +
-                    "of you first.", style = Type.body, color = c.dim)
+                    "chats, through this phone's connections to them. Nothing else of the phone's. What it asks you " +
+                    "first is as its permission mode says, as in Baude.", style = Type.body, color = c.dim)
             }
         }
     }
@@ -162,7 +136,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     }
 }
 
-/** A new agent on this phone: its name, the model that serves it (of those you've allowed), and what it's to do
+/** A new agent on this phone: its name, the model that serves it (of those the mesh serves), and what it's to do
  * first. */
 @Composable
 fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
@@ -172,10 +146,11 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf<String?>(null) }
     var prompt by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf("default") }
     var said by remember { mutableStateOf<String?>(null) }
     var making by remember { mutableStateOf(false) }
-    val allowed = Inference.allowed()
-    if (model == null || allowed.none { it.value == model }) model = allowed.firstOrNull()?.value
+    val models = Inference.found()
+    if (model == null || models.none { it.value == model }) model = models.firstOrNull()?.value
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
         Bar("New Agent", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
@@ -188,11 +163,19 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
             }
             Heading("Its model")
             Panel(rows = true) {
-                if (allowed.isEmpty()) Text("No model serves this phone yet: allow one under Models, on This phone.",
+                if (models.isEmpty()) Text("No machine in reach serves a model over an API yet (Ollama, or an " +
+                    "OpenAI-compatible server).",
                     style = Type.body, color = c.dim, modifier = Modifier.padding(12.dp))
-                allowed.forEachIndexed { i, m ->
+                models.forEachIndexed { i, m ->
                     if (i > 0) Rule()
                     Pick(model == m.value, m.display, "${m.providerName} on ${m.memberName}") { model = m.value }
+                }
+            }
+            Heading("Its permission mode")
+            Panel(rows = true) {
+                PhoneTools.MODES.forEachIndexed { i, (value, label) ->
+                    if (i > 0) Rule()
+                    Pick(mode == value, label, MODE_SAID[value].orEmpty()) { mode = value }
                 }
             }
             Panel {
@@ -206,11 +189,11 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
                 making = true
                 said = null
                 val main = Handler(Looper.getMainLooper())
-                Mesh.conn("phone")?.request(JSONObject().put("op", "start").put("model", model)
+                Mesh.conn("phone")?.request(JSONObject().put("op", "start").put("model", model).put("mode", mode)
                     .put("bot", JSONObject().put("name", name.trim())).put("prompt", prompt.trim())) { r ->
                     main.post {
                         making = false
-                        if (r.optString("op") == "started") made(r.optString("session"))
+                        if (r.optString("op") == "started") made(r.optJSONObject("session")?.optString("id") ?: "")
                         else said = r.optString("error", "It couldn't be made")
                     }
                 }
@@ -218,6 +201,12 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
         }
     }
 }
+
+/** What each permission mode lets an agent here do without asking you (reads, and a Bot's mesh tools, always). */
+private val MODE_SAID = mapOf("default" to "Asks before it changes a file",
+    "acceptEdits" to "Changes files in its folder without asking", "plan" to "Looks only, then puts its plan to you",
+    "auto" to "Does what it needs without asking", "dontAsk" to "Does only what's always allowed, never asks",
+    "bypassPermissions" to "Asks you nothing but its own questions")
 
 /** A model's value as the agents list says it, by its name in its provider's API. */
 private fun modelSaid(value: String) = value.substringAfterLast("/")

@@ -23,7 +23,12 @@ const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long t
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
 
-private val STREAM_ENDS = setOf("infer_end", "error")
+/** Does a host take op (wire.speaks): as its hello's ops say, where it lists them (a host that speaks only part of the
+ * wire: a phone's); else by its version, the one that brought op. */
+fun speaks(info: JSONObject?, op: String, version: Int): Boolean {
+    val ops = info?.optJSONArray("ops") ?: return (info?.optInt("version", 1) ?: 1) >= version
+    return (0 until ops.length()).any { ops.optString(it) == op }
+}
 
 const val RELAY_RETRY_MS = 10_000L // (a member that's dropped, tried again this often while it's listed: Baude's 10 s)
 
@@ -78,7 +83,6 @@ open class Connection(
     @Volatile private var session: Session? = null
     @Volatile private var end: () -> Unit = {} // (this connection let go of: its ssh, or a member's channel on another's)
     private val calls = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
-    private val streams = ConcurrentHashMap<Int, (JSONObject) -> Unit>() // (requests answered in many lines: stream)
     private val nextReq = AtomicInteger(100)
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
@@ -236,7 +240,7 @@ open class Connection(
                         said = reply.optString("error", "the host said no")
                         end()
                     }
-                    (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
+                    !speaks(server, "bot", MIN_VERSION) -> {
                         said = "this host's Baude is too old for Bots: update it"
                         end()
                     }
@@ -285,9 +289,7 @@ open class Connection(
                         continue // (not a line of the host process's: a shell's greeting, say)
                     }
                     val req = msg.optInt("req", -1)
-                    val call = if (req < 0) null else streams[req]?.also {
-                        if (msg.optString("op") in STREAM_ENDS) streams.remove(req)
-                    } ?: calls.remove(req)
+                    val call = if (req >= 0) calls.remove(req) else null
                     if (call != null) call(msg) else heard(this, msg)
                 }
             }
@@ -323,21 +325,9 @@ open class Connection(
         }
     }
 
-    /** A request whose answer comes in many lines (infer's: infer_head, infer_data..., infer_end), each to then till
-     * one that ends it (infer_end, or an error, the connection's going too). */
-    open fun stream(msg: JSONObject, then: (JSONObject) -> Unit) {
-        val req = nextReq.getAndIncrement()
-        streams[req] = then
-        if (!send(msg.put("req", req))) {
-            streams.remove(req)
-            then(JSONObject().put("op", "error").put("error", "not connected"))
-        }
-    }
-
     private fun failAll() {
-        val waiting = calls.values.toList() + streams.values.toList()
+        val waiting = calls.values.toList()
         calls.clear()
-        streams.clear()
         waiting.forEach { it(JSONObject().put("op", "error").put("error", "the connection went")) }
     }
 

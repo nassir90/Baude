@@ -8,14 +8,13 @@ import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** The tools an agent on this phone has. Android gives an app no shell, and the phone's own data (its pictures,
- * contacts, other apps' files) is the user's to hand over, so these reach only what the app has of its own: files in
- * the agent's folder (Read, Write, Edit, Glob, named and shaped as Claude Code's so heads show them as they show
+/** The tools an agent on this phone has: files in the agent's folder (Read, Write, Edit, Glob, named and shaped as Claude Code's so heads show them as they show
  * claude's); the user, with a question (AskUserQuestion, answered as claude's is); and the mesh, through this phone's
- * own connections to it (mcp__mesh__*, as baudelib.meshtools names a host's): its hosts, their chats, a chat read or
- * sent a message. Each is asked of the user before it runs (PhoneAgent). */
+ * own connections to it (mcp__mesh__*, as baudelib.meshtools names a host's): every host this phone reaches, their
+ * chats, a chat read or sent a message. Each runs as the chat's permission mode has it (need). */
 object PhoneTools {
     const val RESULT_MAX = 40_000 // (characters of a tool's result given back to the model)
+    private val GONE = "This agent's been deleted" to true
     private const val READ_LINES = 2000
     private const val READ_MAX = 256 * 1024
     private const val WAIT_S = 300
@@ -69,13 +68,43 @@ object PhoneTools {
                 "timeout_s" to prop("integer", "How long to wait (default $WAIT_S)"))),
     )
 
+    /** Plan mode's way out, as claude's: the plan put to the user, who says whether to go on with it. */
+    private val EXIT_PLAN = Triple("ExitPlanMode", "In plan mode: put your plan to the user. If they agree, you may " +
+        "carry it out (your file tools work again).", schema(listOf("plan"), "plan" to prop("string", "The plan, in Markdown")))
+
+    /** The permission modes, as claude's (baudelib.claude.MODES): Manual, Accept edits, Plan, Auto, Don't ask, Bypass. */
+    val MODES = listOf("default" to "Manual", "acceptEdits" to "Accept edits", "plan" to "Plan", "auto" to "Auto",
+        "dontAsk" to "Don't ask", "bypassPermissions" to "Bypass permissions")
+    private val READS = setOf("Read", "Glob")
+    private val EDITS = setOf("Write", "Edit")
+    private val MESH_LOOKS = setOf("mcp__mesh__hosts", "mcp__mesh__chats", "mcp__mesh__read_chat") // (meshtools.READ_ONLY)
+
+    /** What a tool call needs, in a chat's permission mode, as a Baude chat's claude has it: "allow" (run, unasked),
+     * "ask" (the user's asked), or why it's refused. Reads and the mesh's looking never asked; a Bot's mesh tools
+     * never asked (as a host's Bot's); edits asked in Manual, run in Accept edits, Auto and Bypass, refused in Plan and
+     * Don't ask; another action (a message to a chat) asked in Manual and Accept edits; a question to you, or a plan
+     * put to you, always asked. */
+    fun need(mode: String, tool: String, bot: Boolean): String = when {
+        tool == "AskUserQuestion" || tool == EXIT_PLAN.first -> "ask"
+        tool in READS || tool in MESH_LOOKS -> "allow"
+        tool.startsWith("mcp__mesh__") && bot -> "allow"
+        mode == "bypassPermissions" -> "allow"
+        mode == "plan" -> "It's plan mode: nothing's changed till the user agrees to your plan (ExitPlanMode)"
+        mode == "dontAsk" -> "It's Don't ask mode: only what's always allowed in this chat runs"
+        tool in EDITS && mode in setOf("acceptEdits", "auto") -> "allow"
+        mode == "auto" -> "allow"
+        else -> "ask"
+    }
+
     private fun schema(required: List<String>, vararg props: Pair<String, JSONObject>) = JSONObject().put("type", "object")
         .put("properties", JSONObject().apply { for ((k, v) in props) put(k, v) }).put("required", JSONArray(required))
 
-    fun names(): List<String> = TOOLS.map { it.first }
+    fun names(mode: String = ""): List<String> = tools(mode).map { it.first }
 
-    /** The tools, as OpenAI's API is given them. */
-    fun schemas(): JSONArray = JSONArray(TOOLS.map { (name, about, params) ->
+    private fun tools(mode: String) = if (mode == "plan") TOOLS + EXIT_PLAN else TOOLS
+
+    /** The tools, as OpenAI's API is given them (ExitPlanMode too, in plan mode). */
+    fun schemas(mode: String): JSONArray = JSONArray(tools(mode).map { (name, about, params) ->
         JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", about)
             .put("parameters", params))
     })
@@ -87,6 +116,7 @@ object PhoneTools {
         "Edit" -> edit(s, input)
         "Glob" -> glob(s, input)
         "AskUserQuestion" -> asked(input)
+        "ExitPlanMode" -> PhoneHost.setMode(s, "default").let { "The user agreed to your plan: carry it out." to false }
         "mcp__mesh__hosts" -> hosts()
         "mcp__mesh__chats" -> chats(input)
         "mcp__mesh__read_chat" -> readChat(input)
@@ -129,9 +159,11 @@ object PhoneTools {
         val path = input.optString("file_path")
         val f = inside(s, path) ?: return outside(path)
         if (f.isDirectory) return "$path is a folder" to true
-        f.parentFile?.mkdirs()
         val text = input.optString("content")
-        f.writeText(text)
+        if (!PhoneHost.live(s) {
+                f.parentFile?.mkdirs()
+                f.writeText(text)
+            }) return GONE
         return "Wrote ${rel(s, f)} (${text.toByteArray().size} bytes)" to false
     }
 
@@ -152,7 +184,7 @@ object PhoneTools {
         if (n == 0) return "old_string isn't in ${rel(s, f)}" to true
         val all = input.optBoolean("replace_all")
         if (n > 1 && !all) return "old_string is in ${rel(s, f)} $n times: give more of it, or replace_all" to true
-        f.writeText(if (all) text.replace(old, new) else text.replaceFirst(old, new))
+        if (!PhoneHost.live(s) { f.writeText(if (all) text.replace(old, new) else text.replaceFirst(old, new)) }) return GONE
         return "Edited ${rel(s, f)}" + (if (all) " ($n places)" else "") to false
     }
 

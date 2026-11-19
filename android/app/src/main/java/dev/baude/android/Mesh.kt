@@ -33,7 +33,7 @@ data class Contact(val hostId: String, val session: JSONObject) {
     /** Whether "always allow" is offered for what it asks, as Baude offers it: for Claude Code's models only (another
      * program's asks each call: models.model_program). */
     val alwaysOffered: Boolean
-        get() = session.optString("model").let { m ->
+        get() = hostId == "phone" || session.optString("model").let { m -> // (this phone's own agents: as claude's)
             !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
                 m.startsWith("agent/") || m.startsWith("mlx-"))
         }
@@ -74,6 +74,7 @@ class Chat(hostId: String, val sid: String) {
     val ends = HashMap<String, Int>()         // (a record's uuid: how many lines were shown up to its end)
     val busy = mutableStateOf(false)
     val said = mutableStateOf<String?>(null)
+    val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     var offset = -1L
@@ -326,10 +327,30 @@ object Mesh {
                 "turn_ended" -> ended(c, msg)
                 "claude" -> open?.let {
                     if (it.hostId != c.id || it.sid != msg.optString("session")) return@let
+                    streamed(it, msg.optJSONObject("msg"))
+                    if (msg.optJSONObject("msg")?.optString("type") == "stream_event") return@let // (its text: no read)
                     val ask = msg.optJSONObject("msg")?.let(Ask::of)
                     if (ask != null && it.asks.none { a -> a.rid == ask.rid }) it.asks.add(ask)
                     read(it)
                 }
+            }
+        }
+    }
+
+    /** What an agent's writing, shown as it comes (claude's stream_event: its text's deltas), and gone once its
+     * message is whole (what its transcript has, read). */
+    private fun streamed(chat: Chat, m: JSONObject?) {
+        m ?: return
+        if (m.optString("type") != "stream_event") {
+            if (m.optString("type") in setOf("assistant", "result")) chat.streaming.value = ""
+            return
+        }
+        if (!m.isNull("parent_tool_use_id")) return
+        val e = m.optJSONObject("event") ?: return
+        when (e.optString("type")) {
+            "message_start" -> chat.streaming.value = ""
+            "content_block_delta" -> e.optJSONObject("delta")?.takeIf { it.optString("type") == "text_delta" }?.let {
+                chat.streaming.value += it.optString("text")
             }
         }
     }
@@ -404,7 +425,7 @@ object Mesh {
             val all = alwaysAllowed(chat) + ask.tool
             allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
             val req = JSONObject().put("op", "always_allow").put("session", chat.sid)
-            if ((c.info?.optInt("version", 1) ?: 1) >= 15) req.put("add", JSONArray(listOf(ask.tool))) // (added to
+            if (speaks(c.info, "always_allow", 15)) req.put("add", JSONArray(listOf(ask.tool))) // (added to
             else req.put("tools", JSONArray(all.sorted())) // its list; an older host's replaced: all that's known here)
             c.request(req) {}
         }

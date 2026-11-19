@@ -9,7 +9,10 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        its code was as it started (None: not a checkout); update,
                                                        None or {to: a commit, waiting: [{session, what}]}: its own
                                                        updater has a newer version ready, and waits for those
-                                                       commands to end before it restarts onto it)
+                                                       commands to end before it restarts onto it; ops, given by a
+                                                       host that speaks only part of these lines (a phone's): the
+                                                       ops it takes, which a head checks (speaks) instead of its
+                                                       version, which it doesn't claim)
     subscribe {archived?}                           -> sessions {sessions}, then again on every change, and ping;
                                                        turn_ended {session, result, is_error, cost, turns,
                                                        duration_ms} as each of its sessions' turns ends. archived:
@@ -233,6 +236,15 @@ HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its h
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
 SILENT_S = 16   # and takes it for gone after this long without a word
+
+
+def speaks(info, op, version=1):
+    """Does a host take op: as its hello's ops say, where it lists them (a host that speaks only part of these lines: a
+    phone's); else by its version, the one that brought op."""
+    ops = (info or {}).get("ops")
+    if isinstance(ops, list):
+        return op in ops
+    return ((info or {}).get("version") or 1) >= version
 
 
 def encode(msg):

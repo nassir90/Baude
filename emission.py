@@ -3941,15 +3941,14 @@ def jpeg(w, h, stride, data, quality=72):
 
 # ---- its logo: Baude's and Record's tile, in a muted yellow (their terracotta's and teal's lightness and saturation),
 # with a cream page on it (their bubble's, without its tail) and a globe cut out of the page through a mask, so every
-# cut is the tile itself: its outline and two parallels, every edge on a whole pixel at 128 px. At 16 px, the same
-# drawn a pixel wide (ICON_SVG_16).
+# cut is the tile itself: a meridian and two parallels. At 16 px, the same a pixel wide, on whole pixels (ICON_SVG_16).
 
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <mask id="cut">
     <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="5">
-      <circle cx="64" cy="64" r="34.5"/>
-      <path d="M22 49.5h84M22 78.5h84"/>
+    <g fill="none" stroke="#000" stroke-width="4.5">
+      <ellipse cx="64" cy="64" rx="22" ry="34"/>
+      <path d="M22 50h84M22 78h84"/>
     </g>
   </mask>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
@@ -3960,7 +3959,7 @@ ICON_SVG_16 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <mask id="cut">
     <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
     <g fill="none" stroke="#000" stroke-width="8">
-      <circle cx="64" cy="64" r="36"/>
+      <ellipse cx="64" cy="64" rx="20" ry="36"/>
       <path d="M22 52h84M22 76h84"/>
     </g>
   </mask>

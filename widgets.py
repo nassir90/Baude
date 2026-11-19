@@ -8303,6 +8303,16 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }
 .tool-card.asking { border-color: @warning_color; }  /* (waiting for you to allow it: the approval's colour) */
+/* a subagent started on the mesh, or a chat there messaged (baude's MeshCard): its line a row, as a subagent's in the
+   side panel is, lit under the pointer as one is (it opens the chat); what the chat said back under it, a reply of
+   its own: in a bubble as yours are, in the raised fill */
+.mesh-card > .tool-card { padding: 0; }
+.mesh-card.error > .tool-card { border-color: @error_color; }
+.mesh-card.asking > .tool-card { border-color: @warning_color; }
+.mesh-card.flash > .tool-card { background: alpha(@accent_bg_color, 0.12); transition: background 400ms; }
+.mesh-card .mesh-head { padding: 7px 10px; border-radius: 7px; }
+.mesh-card .mesh-head.openable:hover { background: alpha(currentColor, 0.05); }
+.mesh-card .mesh-answer { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
 /* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */
 .perm-card { border: 1px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */

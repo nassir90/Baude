@@ -25,7 +25,8 @@ SCHEMAS = {
     "start_subagent": ("Start a new chat (a subagent) on a host of the mesh, with one of its models, give it a task "
                        "and, unless wait is false, wait for its answer. It runs as a chat there (listed in Baude), in "
                        "cwd on that host (its home if none's given), in Auto mode unless another's asked for (Auto at "
-                       "most); it can't ask you for permissions, so what it does ask is refused after a minute. Its id comes back, to message it again (message_chat).",
+                       "most); it can't ask you for permissions, so what it does ask is refused after a minute. Its "
+                       "id and its host's come back, to message it again (message_chat).",
                        {"prompt": {"type": "string", "description": "The task, said in full: it doesn't see this chat"},
                         "host": {"type": "string", "description": "A host's id or name (hosts); this one if none"},
                         "model": {"type": "string", "description": "A model's value on that host (hosts)"},
@@ -107,6 +108,18 @@ class Mesh:
             if host in (m.get("id"), m.get("name")):
                 return {"via": "mesh", "host": m["id"], **self.relay}
         raise ValueError(f"no host {host!r} in the mesh: hosts lists them")
+
+    def named(self, where):
+        """The host where is, as a reply names it: {host: its id, host_name}; as much as is known, never an error
+        (asked before the call, not after: a reply's never lost to this host process restarting meanwhile)."""
+        try:
+            here = self.here()
+        except (OSError, ValueError):
+            return {"host": where.get("host"), "host_name": None}
+        if where.get("host") is None:
+            return {"host": here.get("id"), "host_name": here.get("name")}
+        m = next((m for m in (here.get("mesh") or {}).get("members") or [] if m.get("id") == where["host"]), {})
+        return {"host": where["host"], "host_name": m.get("name")}
 
     def request(self, where, msg, timeout=30):
         ch, _info = _channel(where)
@@ -201,7 +214,9 @@ class Mesh:
                 params[k] = a[k]
         if self.me:
             params["spawned_by"] = self.me
-        ch, _info = _channel(self.where(a.get("host")))
+        where = self.where(a.get("host"))
+        named = self.named(where)
+        ch, _info = _channel(where)
         try:
             ch.sock.settimeout(60)
             ch.send(params)
@@ -210,9 +225,10 @@ class Mesh:
             if r is None or r.get("op") == "error":
                 raise ValueError((r or {}).get("error") or "the host went before it answered")
             ch.keep_alive()
-            return self._answer(ch, r["session"]["id"], a.get("wait", True), a.get("timeout_s") or WAIT_S)
+            got = self._answer(ch, r["session"]["id"], a.get("wait", True), a.get("timeout_s") or WAIT_S)
         finally:
             ch.close()
+        return {**got, **named}
 
     def chats(self, a):
         out = []
@@ -253,7 +269,9 @@ class Mesh:
         if a["session"] == self.me:
             raise ValueError("that's this chat")
         where, _s = self.find(a["session"], a.get("host"))
-        return self.ask(where, a["session"], a["text"], a.get("wait", True), a.get("timeout_s") or WAIT_S)
+        named = self.named(where)
+        return {**self.ask(where, a["session"], a["text"], a.get("wait", True), a.get("timeout_s") or WAIT_S),
+                **named}
 
 
 def cut(parts):

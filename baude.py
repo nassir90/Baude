@@ -12952,7 +12952,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.remote_syncing = {}  # (server key, session id) -> the fetch of its transcript under way (sync_remote)
         self.busy = False
         self.total_cost = 0.0
-        self.always_allow = set()
+        self.always_allowed = {}  # (a chat's session id, None for a new one till it has one: the tools always allowed
+        # in it, here and on its host)
         self.attachments = []
         self.chat_sent, self.listed_begun = False, None  # (the sidebar lists the open chat once it's begun)
         self.pending = {}          # control request id -> (callback(response), refused(error) or None) (request)
@@ -14593,7 +14594,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.reach_where(), self.session_id,
                                        live=not self.resume_pending,  # (this machine's: as Baude's own claude would
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
-                                       always_allow=sorted(self.always_allow))
+                                       always_allow=sorted(self.allowed_in(self.session_id)))
             except OSError as e:
                 refused = isinstance(e, baudelib.client.Refused)
                 if refused:  # (its host there, but the session not to be had)
@@ -14609,6 +14610,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                     self.attach_said = (self.session_id, kind)
         if self.proc is not None:
             self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
+            self.allowed_in(self.session_id).update(self.proc.listing.get("always_allow") or ())  # (what its host
+            # allows it: another head's too)
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -14851,7 +14854,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             proc.send({"type": "control_response", "response": {
                 "subtype": "error", "request_id": msg["request_id"], "error": f"baude: unsupported {req.get('subtype')}"}})
         elif t == "control_request":
-            if req.get("tool_name") in self.always_allow and model_program(proc.model) == "claude":
+            if req.get("tool_name") in self.always_allowed.get(proc.key, ()) and model_program(proc.model) == "claude":
                 proc.respond(msg["request_id"], {"behavior": "allow", "updatedInput": req.get("input", {})})
             else:
                 proc.asks[msg["request_id"]] = msg
@@ -14986,6 +14989,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 "draft"):
             self.draft_group = group or ""
         self.opening_remote = None  # (a network session still being fetched: not opened after all)
+        self.always_allowed.pop(None, None)  # (a new chat: nothing allowed in it yet)
         run_in = self.norm_dir(run_in) if run_in else self.cwd if os.path.isdir(self.cwd) else self.run_cwd
         if run_in != self.run_cwd:
             self.switching_chat = True  # (the new chat's own switches come below)
@@ -16259,8 +16263,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             return
         if st == "init":
             new_id = msg.get("session_id") != self.session_id
-            if new_id and self.session_id is None:  # (a new chat's notification, under its id now)
+            if new_id and self.session_id is None:  # (a new chat's notification, under its id now; what it's allowed)
                 widgets.withdraw_notification(self.chat_key(None))
+                self.allowed_in(msg.get("session_id")).update(self.always_allowed.pop(None, ()))
             self.session_id = msg.get("session_id")
             if new_id:
                 if self.session_id and (self.signal_pending is not None or self.session_id not in
@@ -16688,6 +16693,11 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             view.relink()
         self.panel.signal_page.changed()
         self.on_ref_status()
+
+    def allowed_in(self, session_id):
+        """The tools always allowed in a chat (each chat its own, as its host keeps them; a new one's, till it has an
+        id, under None)."""
+        return self.always_allowed.setdefault(session_id, set())
 
     def chat_key(self, session_id):
         """A chat's notification's key: a new chat's, till it has an id, this window's (seen_chat takes it back then)."""
@@ -19074,7 +19084,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 "subtype": "error", "request_id": rid, "error": f"baude: unsupported {req.get('subtype')}"}})
             return
         name, inp = req.get("tool_name"), req.get("input", {})
-        if name in self.always_allow and name != "AskUserQuestion" and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
+        if name in self.allowed_in(self.session_id) and name != "AskUserQuestion" and model_program(self.model) == "claude":  # (a model on this Mac: always asked)
             self.proc.asks.pop(rid, None)  # (one held while its chat was left: answered now)
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
             return
@@ -19166,10 +19176,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
         def decide(_b, behavior, always=False):  # (answering: always is the answers)
             if always is True:
-                self.always_allow.add(name)
-                if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not)
+                allowed = self.allowed_in(self.session_id)
+                allowed.add(name)
+                if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
+                    new = (self.remote.info.get("version") or 1) >= 15  # added to its list; an older one's replaced)
                     self.remote.request({"op": "always_allow", "session": self.session_id,
-                                         "tools": sorted(self.always_allow)})
+                                         **({"add": [name]} if new else {"tools": sorted(allowed)})})
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})

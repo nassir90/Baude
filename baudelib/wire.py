@@ -60,9 +60,12 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        restart: those attached aren't told it went)
     set_cwd {session, cwd}                          -> cwd_set {session, cwd}: the folder its claude runs in, from its
                                                        next message on (not at a turn)
-    always_allow {session, tools}                   -> allowed {session}: tools allowed whenever its claude asks for
-                                                       them, a head attached or not (kept in memory; attach's
-                                                       always_allow too)
+    always_allow {session, tools | add}             -> allowed {session, tools}: tools allowed whenever its claude
+                                                       asks for them, a head attached or not (kept in memory): tools,
+                                                       these in place of any there were; add (version 15), these
+                                                       added to them, as attach's always_allow adds too (before 15,
+                                                       it replaced them). The reply's tools: all of them now, as a
+                                                       session's always_allow lists them
     archive {session}, unarchive {session}          -> archived / unarchived {session}: its claude stopped, and it's
                                                        listed only to those subscribed with archived (unarchive: to
                                                        all again)
@@ -165,7 +168,7 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot, start_key, acting}: its id a UUID the server made as it started it
+subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow}: its id a UUID the server made as it started it
 (claude's --session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
@@ -182,7 +185,8 @@ ended as it was stopped), so a head can offer to carry it on; None once a user m
 a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8). start_key:
 its start's, if it was given one (version 13). acting: whether its turn is at its tools (version 14): from a tool
 call's start in what its agent says till text starts after it, the turn ends or its agent goes; only while it's
-"working" (not while it asks permission).
+"working" (not while it asks permission). always_allow: (version 15) the tools allowed whenever it asks for them,
+sorted.
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
@@ -218,12 +222,13 @@ import subprocess
 import threading
 import time
 
-VERSION = 14  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 15  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
 # 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
-# gone; 14: a session's acting, emission_watch's state's now and pointer)
+# gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
+# always_allow added, a session's always_allow)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

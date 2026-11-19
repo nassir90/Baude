@@ -1600,6 +1600,7 @@ class Window(Adw.ApplicationWindow):
         self.switching, self.asking, self.later, self.dialogs = False, {}, [], 0  # (later: (when, what), by tick)
         self.status, self.done = None, False
         self.watchers, self.watch_source, self.watch_capturing = [], None, False
+        self.mirroring, self.mirrored = 0, None  # (the mirror's script running since; the tab and page it's of)
         self.watch_fast, self.watch_fast_until = True, 0.0
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd_btn = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -1770,7 +1771,10 @@ class Window(Adw.ApplicationWindow):
         tab = self.current()
         if tab is not None and tab.web.view is not None and min(tab.web.view_size() or [0]) < 50:
             tab = None  # (not laid out yet: no frame of nothing)
-        if tab is not None and tab.web.view is not None and not self.watch_capturing:
+        if tab is not None and any(w.dom for w in self.watchers):
+            self.mirror(tab)
+        if tab is not None and tab.web.view is not None and not self.watch_capturing and \
+                any(not w.dom for w in self.watchers):
             self.watch_capturing = time.monotonic()
             want_w = max(w.max_w for w in self.watchers)
             want_h = max(w.max_h for w in self.watchers)
@@ -1793,6 +1797,36 @@ class Window(Adw.ApplicationWindow):
             self.watch_source = GLib.timeout_add(self.FAST_MS if fast else self.SLOW_MS, self.watch_tick)
             return False
         return True
+
+    def mirror(self, tab):
+        """The page's elements for watchers of them: its whole structure to one that hasn't it (or all, on another
+        page or tab), its changes since to the rest; ops in a hurry: frames often for a while."""
+        if self.mirroring and time.monotonic() - self.mirroring < 5:
+            return
+        url = (tab.last or {}).get("url")
+        fresh = (tab.id, url) != self.mirrored or any(w.dom and not w.dom_sent for w in self.watchers)
+        self.mirroring = time.monotonic()
+
+        def got(text, why):
+            self.mirroring = 0
+            if why is not None:
+                return
+            try:
+                got = json.loads(text)
+            except ValueError:
+                return
+            if got.get("dom"):
+                self.mirrored = (tab.id, url)
+                for w in list(self.watchers):
+                    if w.dom and w.say({"dom": got["dom"]}):
+                        w.dom_sent = True
+            elif got.get("ops") or got.get("focus") is not None:
+                for w in list(self.watchers):
+                    if w.dom and w.dom_sent:
+                        w.say({"ops": got.get("ops") or [], "focus": got.get("focus")})
+                if got.get("ops"):
+                    self.watch_kick()
+        tab.web.run_js(MIRROR_JS + f"return globalThis.__mirror.pull({json.dumps(fresh)})", got)
 
     def take(self, pid, urls):
         """Pages handed over by another Emission, for pid's profile (this window moved to it if it's elsewhere)."""
@@ -2303,6 +2337,83 @@ CONSOLE_JS = r"""
   addEventListener('unhandledrejection', e => put('error', 'unhandled rejection: ' + show(e.reason)));
 })();
 """
+
+MIRROR_JS = r"""
+if (!globalThis.__mirror) globalThis.__mirror = (() => {
+  const ids = new WeakMap(), SKIP = new Set(['SCRIPT', 'NOSCRIPT', 'TEMPLATE']);
+  let n = 0, out = [], on = false, last = '', values = new WeakMap(), scrolls = new Map();
+  const id = node => { let i = ids.get(node); if (!i) { i = ++n; ids.set(node, i); } return i; };
+  const abs = (el, k) => { try { return new URL(el.getAttribute(k), document.baseURI).href; } catch (e) { return el.getAttribute(k); } };
+  const css = el => { try { return [...el.sheet.cssRules].map(r => r.cssText).join('\n'); } catch (e) { return null; } };
+  const ser = node => {
+    if (node.nodeType === 3) return {i: id(node), v: node.data};
+    if (node.nodeType !== 1 || SKIP.has(node.tagName)) return null;
+    const a = {}, t = node.tagName.toLowerCase();
+    for (const at of node.attributes) {
+      if (/^on/i.test(at.name) || (t === 'iframe' && at.name === 'src') || at.name === 'srcdoc') continue;
+      a[at.name] = ['src', 'href', 'poster', 'action'].includes(at.name) ? abs(node, at.name) : at.value;
+    }
+    if (node.srcset) a.srcset = node.srcset;
+    const o = {i: id(node), t, a, c: []};
+    if ('value' in node && ['INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName)) {
+      o.val = node.type === 'password' ? '•'.repeat(node.value.length) : node.value;
+      if (node.type === 'checkbox' || node.type === 'radio') o.chk = node.checked;
+      values.set(node, o.val + '|' + o.chk);
+    }
+    if (t === 'style') { const c = css(node); if (c !== null) { o.css = c; return o; } }
+    for (const ch of node.childNodes) { const s = ser(ch); if (s) o.c.push(s); }
+    return o;
+  };
+  const snap = () => {
+    out = []; scrolls.clear();
+    const adopted = [];
+    try { for (const s of document.adoptedStyleSheets) adopted.push([...s.cssRules].map(r => r.cssText).join('\n')); } catch (e) {}
+    return {url: location.href, base: document.baseURI, root: ser(document.documentElement), adopted,
+            w: innerWidth, h: innerHeight, x: scrollX, y: scrollY};
+  };
+  const mo = new MutationObserver(list => {
+    for (const m of list) {
+      if (m.type === 'childList') {
+        for (const r of m.removedNodes) if (ids.has(r)) out.push({op: 'rm', i: ids.get(r)});
+        for (const a of m.addedNodes) {
+          const s = ser(a);
+          if (!s) continue;
+          let nx = a.nextSibling;
+          while (nx && !ids.has(nx)) nx = nx.nextSibling;
+          out.push({op: 'add', p: id(m.target), b: nx ? ids.get(nx) : null, n: s});
+        }
+        if (m.target.tagName === 'STYLE') { const c = css(m.target); if (c !== null) out.push({op: 'css', i: id(m.target), v: c}); }
+      } else if (m.type === 'attributes') {
+        if (/^on/i.test(m.attributeName)) continue;
+        const el = m.target, k = m.attributeName;
+        const v = el.hasAttribute(k) ? (['src', 'href', 'poster', 'action'].includes(k) ? abs(el, k) : el.getAttribute(k)) : null;
+        if (!(el.tagName === 'IFRAME' && k === 'src')) out.push({op: 'attr', i: id(el), k, v});
+      } else if (m.type === 'characterData') out.push({op: 'text', i: id(m.target), v: m.target.data});
+    }
+  });
+  addEventListener('scroll', e => { const el = e.target; if (el instanceof Element && ids.has(el)) scrolls.set(ids.get(el), el); }, true);
+  const pull = force => {
+    if (!on || force) {
+      if (!on) mo.observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
+      on = true;
+      return {dom: snap()};
+    }
+    const view = [scrollX, scrollY, innerWidth, innerHeight].join(',');
+    if (view !== last) { last = view; out.push({op: 'view', x: scrollX, y: scrollY, w: innerWidth, h: innerHeight}); }
+    for (const [i, el] of scrolls) out.push({op: 'scroll', i, x: el.scrollLeft, y: el.scrollTop});
+    scrolls.clear();
+    const f = document.activeElement;
+    if (f && values.has(f)) {
+      const now = (f.type === 'password' ? '•'.repeat(f.value.length) : f.value) + '|' + (f.type === 'checkbox' || f.type === 'radio' ? f.checked : undefined);
+      if (now !== values.get(f)) { values.set(f, now); out.push({op: 'value', i: id(f), v: now.split('|')[0], chk: f.checked}); }
+    }
+    const got = out; out = [];
+    return {ops: got, focus: f && ids.has(f) ? ids.get(f) : null};
+  };
+  return {pull};
+})();
+"""
+
 
 PAGE_JS = r"""
 if (!globalThis.__em) globalThis.__em = (() => {
@@ -2875,6 +2986,8 @@ class Watcher:
     def __init__(self, win, conn, msg):
         self.win, self.conn = win, conn
         self.shm_wanted = bool(msg.get("shm"))
+        self.dom = msg.get("mode") == "dom"  # (the page's elements, mirrored: no frames)
+        self.dom_sent = False
         self.max_w = max(100, min(3840, int(msg.get("max_w") or 1280)))
         self.max_h = max(100, min(2400, int(msg.get("max_h") or 900)))
         self.seq, self.waiting_since, self.sent_sum, self.sent_state = 0, None, None, None
@@ -2945,7 +3058,7 @@ class Watcher:
 
     def offer(self, w, h, stride, data, total):
         """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last."""
-        if total == self.sent_sum or not self.ready():
+        if self.dom or total == self.sent_sum or not self.ready():
             return
         if w > self.max_w or h > self.max_h:
             w, h, stride, data = scaled(w, h, stride, data, self.max_w, self.max_h)

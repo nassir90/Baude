@@ -235,7 +235,8 @@ class BrowserPane(Gtk.Box):
         self.frame_size, self.view_size, self.state, self.prompt_ids = (0, 0), None, {}, None
         self.typed, self.type_source, self.scroll_due, self.scroll_source = "", None, [0.0, 0.0], None
         self.hover_source, self.size_source, self.pointer, self.drag = None, None, None, None
-        self.asks, self.hosts = Asks(), []
+        self.asks, self.hosts, self.sized_to = Asks(), [], None  # (sized_to: the size a streamed Bot's page was
+        # last laid out at, here)
         bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
         self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -335,6 +336,7 @@ class BrowserPane(Gtk.Box):
 
     def stop(self, keep=False):
         """No more watching (keep: the same Bot's, watched again once the page is shown again)."""
+        self.sized_to = None  # (watched again, or another's: laid out at the panel's size again)
         if self.stream is not None:
             self.stream.stop()
             self.stream = None
@@ -376,6 +378,8 @@ class BrowserPane(Gtk.Box):
         view = self.state.get("view")
         if view and min(view) > 0:  # (a page not laid out yet says 0 by 0: not taken)
             self.view_size = tuple(view)
+            if self.stream is not None and self.state.get("agent"):
+                self.fit_page()
         tabs = self.state.get("tabs") or []
         while (c := self.tabs.get_first_child()) is not None:
             self.tabs.remove(c)
@@ -468,6 +472,14 @@ class BrowserPane(Gtk.Box):
             w.set_sensitive(not on)
         if self.sid is None:
             return
+        if self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel; read-only: the
+            self.sized_to = None                                    # Bot's page at its own size again)
+            if on:
+                self.view_size = None  # (the page's size as it was fitted isn't what it'll be: fitted again after)
+                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True},
+                              lambda _r: None)
+            else:
+                self.fit_page()
         held = dict(widgets.load_settings().get("browser_read_only") or {})
         if bool(held.get(self.sid)) == on:
             return
@@ -618,15 +630,39 @@ class BrowserPane(Gtk.Box):
                 max(200, (self.picture.get_height() or 600) * scale))
 
     def size_check(self):
-        """The frames asked for at the size the page is shown at, once it's settled there."""
-        if self.stream is not None:
-            size = self.wanted_size()
-            if size != self.stream.size and self.size_source is None:
+        """The frames asked for at the size the page is shown at, once it's settled there (and an agent's page laid
+        out at it)."""
+        if self.stream is not None and self.size_source is None:
+            refit = self.state.get("agent") and self.sized_to is not None and self.page_size() != self.sized_to
+            if self.wanted_size() != self.stream.size or refit:
                 self.size_source = GLib.timeout_add(SIZE_MS, self.size_send)
         return True
 
     def size_send(self):
         self.size_source = None
         if self.stream is not None:
-            self.stream.resize(self.wanted_size())
+            if self.wanted_size() != self.stream.size:
+                self.stream.resize(self.wanted_size())
+            if self.state.get("agent"):
+                self.fit_page()
         return False
+
+    def page_size(self):
+        """The side panel's page in CSS pixels: what a Bot's page is laid out at, to fill it."""
+        return (max(200, self.picture.get_width() or self.body.get_width() or 400),
+                max(200, self.picture.get_height() or self.body.get_height() or 600))
+
+    def fit_page(self):
+        """A streamed Bot's page (an agent's, out of sight: never someone's window) laid out at the panel's shape,
+        once for each size it's shown at; not while it's read-only (watched, not disturbed). Its own size again once
+        no one watches it (Emission puts it back)."""
+        if self.read_only.get_active():
+            return
+        size = self.page_size()
+        if size == self.sized_to:
+            return
+        self.sized_to = size
+        if self.view_size and tuple(self.view_size) == size:
+            return
+        self.asks.put(self.remote, {"id": self.sid, "name": self.name},
+                      {"op": "resize", "width": size[0], "height": size[1], "fit": True}, lambda _r: None)

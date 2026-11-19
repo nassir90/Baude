@@ -16,11 +16,12 @@ def full_redraws():
 
 
 def stay_offscreen():
-    """On macOS, this process's windows never reach the screen, though GTK lays them out and maps them as it would
-    (rendered by hand: GSK_RENDERER=cairo and a Gtk.WidgetPaintable). No Dock icon or menu bar, nothing raised over
-    anyone's work, the app you're in still in front. Called before GTK is loaded: GTK brings an app to the front as its
-    display opens, and orders a window in after its first frame; here those calls do nothing, for good. Elsewhere,
-    nothing (an X server of its own does it there: Xvfb)."""
+    """On macOS, this process's windows never reach the screen where anyone sees them, though GTK lays them out and maps
+    them as it would (rendered by hand: GSK_RENDERER=cairo and a Gtk.WidgetPaintable). No Dock icon or menu bar,
+    nothing raised over anyone's work, the app you're in still in front. Called before GTK is loaded: GTK brings an app
+    to the front as its display opens, and orders a window in after its first frame; here those calls do nothing (a
+    window's put in only by in_unseen, where no one sees it). Elsewhere, nothing (an X server of its own does it there:
+    Xvfb)."""
     if sys.platform != "darwin":
         return
     import ctypes
@@ -36,6 +37,7 @@ def stay_offscreen():
     rt = objc_send.rt
     rt.class_getInstanceMethod.restype = rt.method_setImplementation.restype = ctypes.c_void_p
     rt.class_getInstanceMethod.argtypes = rt.method_setImplementation.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    rt.method_getImplementation.restype, rt.method_getImplementation.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
     for cls, sel, ret, args in ((b"NSApplication", b"activateIgnoringOtherApps:", None, (ctypes.c_bool,)),
                                 (b"NSApplication", b"activate", None, ()),
                                 (b"NSApplication", b"setActivationPolicy:", ctypes.c_bool, (ctypes.c_long,)),
@@ -46,10 +48,40 @@ def stay_offscreen():
                                 (b"NSWindow", b"makeKeyWindow", None, ()),
                                 (b"NSWindow", b"makeMainWindow", None, ())):
         method = rt.class_getInstanceMethod(rt.objc_getClass(cls), rt.sel_registerName(sel))
-        if method:  # (kept: the runtime calls it from now on)
+        if method:  # (kept: the runtime calls it from now on; what it did, kept for in_unseen)
+            stay_offscreen.__dict__.setdefault("was", {})[sel] = rt.method_getImplementation(method)
             nothing = ctypes.CFUNCTYPE(ret, ctypes.c_void_p, ctypes.c_void_p, *args)(lambda *_: 0 if ret else None)
             stay_offscreen.__dict__.setdefault("kept", []).append(nothing)
             rt.method_setImplementation(method, ctypes.cast(nothing, ctypes.c_void_p).value)
+
+
+def in_unseen(window):
+    """A window of a process that stays off the screen (stay_offscreen) put in after all, where no one sees it: see-
+    through, clicked through, at the desktop's level under everything, out of Mission Control and window cycling.
+    WebKit draws a page in a window that's in (its animations run, its picture changes), not one that never was."""
+    import ctypes
+    was = stay_offscreen.__dict__.get("was", {}).get(b"orderWindow:relativeTo:")
+    ns = native_window(window)
+    if not ns or not was:
+        return False
+    objc_send(ns, b"setAlphaValue:", 0.0, types=(ctypes.c_double,))
+    objc_send(ns, b"setIgnoresMouseEvents:", True, types=(ctypes.c_bool,))
+    objc_send(ns, b"setHasShadow:", False, types=(ctypes.c_bool,))
+    cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    cg.CGWindowLevelForKey.restype, cg.CGWindowLevelForKey.argtypes = ctypes.c_int32, [ctypes.c_int32]
+    objc_send(ns, b"setLevel:", cg.CGWindowLevelForKey(2), types=(ctypes.c_long,))  # (2: the desktop's)
+    objc_send(ns, b"setCollectionBehavior:", (1 << 3) | (1 << 4) | (1 << 6), types=(ctypes.c_ulong,))  # (transient,
+    # stationary, not cycled to)
+    order = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_long)(was)
+    order(ns, objc_send.rt.sel_registerName(b"orderWindow:relativeTo:"), -1, 0)  # (-1: NSWindowBelow, all of them)
+    return True
+
+
+def out_unseen(window):
+    """A window in_unseen put in, taken out again (its pages not drawn for anyone)."""
+    ns = native_window(window)
+    if ns:
+        objc_send(ns, b"orderOut:", None, types=(__import__("ctypes").c_void_p,))
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):

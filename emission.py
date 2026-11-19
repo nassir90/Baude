@@ -545,6 +545,10 @@ class MacWeb:
                 send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
+        if AGENT["on"] and send(self.view, b"respondsToSelector:", objc_sel(b"_setWindowOcclusionDetectionEnabled:"),
+                                types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(self.view, b"_setWindowOcclusionDetectionEnabled:", False, types=(ctypes.c_bool,))  # (an agent's
+            # window is never in front of anyone: its pages drawn as they change while it's in, unseen: in_unseen)
         if (agent := os.environ.get("EMISSION_USER_AGENT")):
             send(self.view, b"setCustomUserAgent:", macos.ns_string(agent), types=(ctypes.c_void_p,))
         if not opener:
@@ -847,7 +851,7 @@ class MacWeb:
         def got(image, error):
             if not image:
                 why = self._text(send(error, b"localizedDescription")) if error else "no picture"
-                GLib.idle_add(lambda: done(0, 0, 0, None, why) and False)
+                GLib.idle_add(lambda: done(0, 0, 0, None, why) and False, priority=GLib.PRIORITY_HIGH)
                 return
             cgi = send(image, b"CGImageForProposedRect:context:hints:", None, None, None,
                        types=(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p))
@@ -860,7 +864,8 @@ class MacWeb:
             data = ctypes.string_at(cg.CGBitmapContextGetData(ctx), w * 4 * h)
             cg.CGContextRelease(ctx)
             cg.CGColorSpaceRelease(space)
-            GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False)
+            GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False, priority=GLib.PRIORITY_HIGH)  # (not
+            # behind whatever's idle: a frame waiting there kept the next from being taken)
         conf = send(send(b"WKSnapshotConfiguration", b"alloc"), b"init")
         ns = send(self.view, b"window")
         scale = send(ns, b"backingScaleFactor", ret=ctypes.c_double) if ns else 1.0
@@ -1587,11 +1592,15 @@ class Tab:
 
 
 class Window(Adw.ApplicationWindow):
-    FAST_MS, SLOW_MS = 100, 500  # (a watched page's frames: this often while things happen, this often after)
+    # (a watched page's frames: this often while it changes, MID_MS while it changes now and then, a caret blinking
+    # say, SLOW_MS once it's still; Linux's agent draws on a virtual display, in software: half as often there)
+    FAST_MS, MID_MS, SLOW_MS = (16 if sys.platform == "darwin" else 33), 100, 250
+    SAME_FOR_MID = 6  # (this many frames the same in a row: the middle pace)
 
     def __init__(self, app, url, profile, agent=False):
-        """agent: the window of an Emission started for a Bot's tools (its own profile; never shown: on macOS
-        it's kept off the screen, on Linux it's on a display of its own; a page's prompts wait for the tools)."""
+        """agent: the window of an Emission started for a Bot's tools (its own profile; never seen: on macOS it's
+        kept off the screen, put in unseen only while it's watched, on Linux it's on a display of its own; a page's
+        prompts wait for the tools)."""
         super().__init__(application=app, title="Emission", default_width=1280, default_height=900)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
@@ -1600,7 +1609,8 @@ class Window(Adw.ApplicationWindow):
         self.switching, self.asking, self.later, self.dialogs = False, {}, [], 0  # (later: (when, what), by tick)
         self.status, self.done = None, False
         self.watchers, self.watch_source, self.watch_capturing = [], None, False
-        self.watch_fast, self.watch_fast_until = True, 0.0
+        self.watch_fast, self.watch_fast_until, self.watch_same, self.watch_size = True, 0.0, 0, None  # (watch_size:
+        # the window's size before a watcher laid its page out at its own: put back once no one watches)
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd_btn = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
         self.reload_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
@@ -1729,7 +1739,14 @@ class Window(Adw.ApplicationWindow):
                 return answer({"error": "that profile isn't open here"})
         if op == "watch":
             self.watchers.append(Watcher(self, conn, msg))
+            if self.agent and sys.platform == "darwin":  # (watched: its window in, where no one sees it, so WebKit
+                macos.in_unseen(self)                     # draws its pages as they change: a picture that moves)
             return self.watch_kick()
+        if op == "resize" and self.agent and msg.get("restore"):  # (a watcher gone read-only: the Bot's own size
+            if self.watch_size is not None and len(self.watchers) <= 1:  # back, unless another still drives it)
+                self.set_default_size(*self.watch_size)
+                self.watch_size = None
+            return answer({"ok": True})
         self.watch_kick()  # (something's being done: frames often for a while)
         return self.control.run(op, msg, answer)
 
@@ -1738,13 +1755,24 @@ class Window(Adw.ApplicationWindow):
     def watch_kick(self):
         """Frames often (FAST_MS) for a while: the page may be changing."""
         self.watch_fast_until = time.monotonic() + 3
+        self.watch_same = 0
+        if self.watch_source is not None and self.watch_fast != self.FAST_MS:  # (timed slower: timed again, so what
+            GLib.source_remove(self.watch_source)                             # was done shows at once)
+            self.watch_source = None
         if self.watch_source is None and self.watchers:
+            self.watch_fast = self.FAST_MS
             self.watch_source = GLib.timeout_add(self.FAST_MS, self.watch_tick)
 
     def unwatch(self, watcher):
         if watcher in self.watchers:
             self.watchers.remove(watcher)
             watcher.close()
+        if not self.watchers and self.agent:
+            if sys.platform == "darwin":
+                macos.out_unseen(self)  # (no one watching: out again, its pages drawn only as the Bot's tools ask)
+            if self.watch_size is not None:  # (the Bot's page at its own size again: a watcher's is gone with it)
+                self.set_default_size(*self.watch_size)
+                self.watch_size = None
 
     def watch_state(self):
         tab = self.current()
@@ -1780,6 +1808,12 @@ class Window(Adw.ApplicationWindow):
                 if data is None:
                     return
                 total = zlib.crc32(data)
+                if total != getattr(self, "watch_last", None):  # (it's moving, an animation, a video: fast while it
+                    self.watch_last = total                       # does)
+                    self.watch_fast_until = max(self.watch_fast_until, time.monotonic() + 1)
+                    self.watch_same = 0
+                else:
+                    self.watch_same += 1
                 for w in list(self.watchers):
                     w.offer(fw, fh, stride, data, total)
             try:
@@ -1787,10 +1821,11 @@ class Window(Adw.ApplicationWindow):
             except Exception:  # (no frame this time: the next one tried)
                 self.watch_capturing = False
                 sys.excepthook(*sys.exc_info())
-        fast = time.monotonic() < self.watch_fast_until
-        if fast != self.watch_fast:  # (its pace changed: timed again)
-            self.watch_fast = fast
-            self.watch_source = GLib.timeout_add(self.FAST_MS if fast else self.SLOW_MS, self.watch_tick)
+        pace = self.SLOW_MS if time.monotonic() >= self.watch_fast_until else \
+            self.MID_MS if self.watch_same >= self.SAME_FOR_MID else self.FAST_MS
+        if pace != self.watch_fast:  # (its pace changed: timed again)
+            self.watch_fast = pace
+            self.watch_source = GLib.timeout_add(pace, self.watch_tick)
             return False
         return True
 
@@ -2804,8 +2839,14 @@ class Control:
                 lambda got: answer({**self.describe(t), "requests": got}))
 
     def op_resize(self, msg, answer):
-        """The page's size (its viewport) made width by height, CSS pixels."""
+        """The page's size (its viewport) made width by height, CSS pixels. fit: a watcher's (its pane's size), the
+        size the Bot had kept to put back once no one watches; else the Bot's own, kept."""
         t = self.tab(msg)
+        if self.win.agent:  # (as it's done, in its turn: not as it was asked)
+            if not msg.get("fit"):
+                self.win.watch_size = None
+            elif self.win.watch_size is None:
+                self.win.watch_size = self.win.get_default_size()
         w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
         if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
@@ -2879,7 +2920,7 @@ class Watcher:
         self.shm_wanted = bool(msg.get("shm"))
         self.max_w = max(100, min(3840, int(msg.get("max_w") or 1280)))
         self.max_h = max(100, min(2400, int(msg.get("max_h") or 900)))
-        self.seq, self.waiting_since, self.sent_sum, self.sent_state = 0, None, None, None
+        self.seq, self.waiting_since, self.sent_sum, self.sent_state, self.pending = 0, None, None, None, None
         self.memory, self.buffer, self.out, self.writing = None, b"", b"", None
         conn.setblocking(False)
         self.source = GLib.io_add_watch(conn.fileno(), GLib.PRIORITY_DEFAULT,
@@ -2905,11 +2946,13 @@ class Watcher:
                 continue
             if msg.get("ack") == self.seq:
                 self.waiting_since = None
+                if self.pending is not None:  # (the newest frame, taken while it waited: now)
+                    self.offer(*self.pending)
             if msg.get("max_w"):
                 self.max_w = max(100, min(3840, int(msg["max_w"])))
                 self.max_h = max(100, min(2400, int(msg.get("max_h") or self.max_h)))
                 self.sent_sum = None  # (sent again at its new size)
-            self.win.watch_kick()
+                self.win.watch_kick()  # (an ack isn't the page changing: only a new size is)
         return True
 
     def say(self, msg):
@@ -2946,9 +2989,15 @@ class Watcher:
         return self.waiting_since is None
 
     def offer(self, w, h, stride, data, total):
-        """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last."""
-        if total == self.sent_sum or not self.ready():
+        """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last; else kept, the
+        newest, to be sent as soon as it has."""
+        if total == self.sent_sum:
+            self.pending = None  # (back as it was sent: nothing newer to send)
             return
+        if not self.ready():
+            self.pending = (w, h, stride, data, total)
+            return
+        self.pending = None
         if w > self.max_w or h > self.max_h:
             w, h, stride, data = scaled(w, h, stride, data, self.max_w, self.max_h)
         self.seq += 1

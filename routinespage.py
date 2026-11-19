@@ -26,11 +26,13 @@ def when(r):
     return f"{said} at {r.get('at')}"
 
 
-def stamp(t):
+def stamp(t, clock=None):
+    """A time as the host's clock has it (clock: its zone and offset; none known: this machine's)."""
     if not t:
         return "never"
-    d = datetime.datetime.fromtimestamp(t)
-    today = datetime.date.today()
+    zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
+    d = datetime.datetime.fromtimestamp(t, zone)
+    today = datetime.datetime.now(zone).date()
     return d.strftime("%H:%M") if d.date() == today else d.strftime("%a %d %b %H:%M")
 
 
@@ -39,7 +41,7 @@ class RoutinesPage(Gtk.Box):
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.win, self.sid, self.remote, self.routines, self.asked = win, None, None, [], 0
+        self.win, self.sid, self.remote, self.routines, self.asked, self.clock = win, None, None, [], 0, None
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=10, margin_top=8, margin_bottom=4)
         self.title = Gtk.Label(label="Routines", xalign=0, hexpand=True)
         self.title.add_css_class("heading")
@@ -59,14 +61,19 @@ class RoutinesPage(Gtk.Box):
         self.append(Gtk.ScrolledWindow(vexpand=True, child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.append(self.empty)
         self.append(self.said)
-        GLib.timeout_add_seconds(30, self.tick)  # (next and last, said again as time goes)
+        self.timer = GLib.timeout_add_seconds(30, self.tick)  # (next and last, said again as time goes)
+        self.connect("destroy", lambda *_: GLib.source_remove(self.timer))
 
     def show(self, info):
         """The open chat (the sidebar's info, or None): a Bot's routines read from its host."""
         info = info or {}
         bot = bool(info.get("bot")) and info.get("id") and info.get("remote") is not None
-        self.sid, self.remote = (info.get("id"), info.get("remote")) if bot else (None, None)
+        sid, remote = (info.get("id"), info.get("remote")) if bot else (None, None)
+        if sid == self.sid and remote is self.remote:
+            return  # (shown already: the list as it was, kept current by tick and refresh)
+        self.sid, self.remote, self.clock = sid, remote, None
         self.routines = []
+        self.said.set_visible(False)
         self.draw()
         if self.sid is not None:
             self.ask({"op": "routines", "session": self.sid})
@@ -93,11 +100,16 @@ class RoutinesPage(Gtk.Box):
                 return
             self.said.set_visible(False)
             self.routines = r.get("routines") or []
+            self.clock = r.get("clock") or self.clock
             self.draw()
         self.remote.request(msg, got)
 
-    def save(self, routines):
-        self.ask({"op": "routines", "session": self.sid, "routines": routines})
+    def save(self, routine):
+        """One routine made or changed on its host (as it is there: none of the others touched)."""
+        self.ask({"op": "routines", "session": self.sid, "set": routine})
+
+    def delete(self, rid):
+        self.ask({"op": "routines", "session": self.sid, "delete": rid})
 
     def draw(self):
         while (row := self.list.get_row_at_index(0)) is not None:
@@ -105,17 +117,17 @@ class RoutinesPage(Gtk.Box):
         for r in self.routines:
             row = Adw.ActionRow(title=GLib.markup_escape_text(r.get("name") or "Routine"),
                                 subtitle=GLib.markup_escape_text(
-                                    f"{when(r)} · " + ("paused" if r.get("paused") else f"next {stamp(r.get('next'))}")
-                                    + f" · last {stamp(r.get('last'))}"))
+                                    f"{when(r)} · " + ("paused" if r.get("paused") else
+                                                       f"next {stamp(r.get('next'), self.clock)}")
+                                    + f" · last {stamp(r.get('last'), self.clock)}"
+                                    + (f" · {r['error']}" if r.get("error") else "")))
             on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER, tooltip_text="On, or paused")
-            on.connect("notify::active", lambda sw, _p, rid=r["id"]: self.save(
-                [{**x, "paused": not sw.get_active()} if x["id"] == rid else x for x in self.routines]))
+            on.connect("notify::active", lambda sw, _p, x=r: self.save({**x, "paused": not sw.get_active()}))
             row.add_suffix(on)
             for icon, tip, fn in (("media-playback-start-symbolic", "Run now",
                                    lambda rid=r["id"]: self.ask({"op": "run_routine", "session": self.sid, "id": rid})),
                                   ("document-edit-symbolic", "Change", lambda x=r: self.edit(x)),
-                                  ("user-trash-symbolic", "Delete", lambda rid=r["id"]: self.save(
-                                      [x for x in self.routines if x["id"] != rid]))):
+                                  ("user-trash-symbolic", "Delete", lambda rid=r["id"]: self.delete(rid))):
                 b = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER)
                 b.add_css_class("flat")
                 b.connect("clicked", lambda _b, f=fn: f())
@@ -141,16 +153,19 @@ class RoutinesPage(Gtk.Box):
         how.set_selected(1 if r.get("at") else 0)
         box.append(how)
         every = Gtk.Box(spacing=6)
-        amount = Gtk.SpinButton.new_with_range(1, 999, 1)
+        amount = Gtk.SpinButton.new_with_range(5, 999, 1)
         unit = Gtk.DropDown.new_from_strings(["minutes", "hours"])
+        unit.connect("notify::selected", lambda u, _p: amount.set_range(*((1, 744) if u.get_selected() else (5, 999))))
         m = r.get("every") or 60
-        amount.set_value(m // 60 if m % 60 == 0 else m)
         unit.set_selected(1 if m % 60 == 0 else 0)
+        amount.set_value(m // 60 if m % 60 == 0 else m)
         every.append(amount)
         every.append(unit)
         box.append(every)
         daily = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         at = Gtk.Entry(placeholder_text="HH:MM", text=r.get("at") or "09:00", max_width_chars=6)
+        daily.append(Gtk.Label(label="On its host's clock" + (f" ({self.clock['zone']})" if self.clock and
+                                                                self.clock.get("zone") else ""), xalign=0))
         daily.append(at)
         days_row = Gtk.Box(spacing=2)
         days = []
@@ -184,7 +199,6 @@ class RoutinesPage(Gtk.Box):
                 made["every"] = int(amount.get_value()) * (60 if unit.get_selected() == 1 else 1)
             else:
                 made["at"], made["days"] = at.get_text().strip(), [i for i, t in enumerate(days) if t.get_active()]
-            rest = [x for x in self.routines if x["id"] != r.get("id")] if r.get("id") else list(self.routines)
-            self.save(rest + [made] if not r.get("id") else [made if x["id"] == r["id"] else x for x in self.routines])
+            self.save(made)
         dlg.connect("response", answered)
         dlg.present(self.win)

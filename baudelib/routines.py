@@ -8,7 +8,7 @@ import time
 import uuid
 
 MIN_EVERY = 5  # (minutes: a routine no more often than this)
-MAX_EVERY = 60 * 24 * 31
+MAX_EVERY = 60 * 24 * 31  # (and no less often than this: a month)
 DAYS = (0, 1, 2, 3, 4, 5, 6)
 
 
@@ -26,8 +26,10 @@ def clean(r, old=None):
            "last": (old or {}).get("last")}
     if r.get("every") not in (None, ""):
         every = int(r["every"])
-        if not MIN_EVERY <= every <= MAX_EVERY:
+        if every < MIN_EVERY:
             raise ValueError(f"every is in minutes, {MIN_EVERY} at least")
+        if every > MAX_EVERY:
+            raise ValueError("every is a month at most")
         out["every"] = every
     elif r.get("at"):
         if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", str(r["at"])):
@@ -38,8 +40,10 @@ def clean(r, old=None):
         out["at"], out["days"] = "%02d:%s" % (int(str(r["at"]).split(":")[0]), str(r["at"]).split(":")[1]), days
     else:
         raise ValueError("a routine runs every so many minutes (every), or at a time of day (at)")
-    out["next"] = next_run(out, time.time())
-    return out
+    same = old is not None and all(old.get(k) == out.get(k) for k in ("every", "at", "days"))
+    woke = old is not None and old.get("paused") and not out["paused"]
+    out["next"] = old["next"] if same and not woke and old.get("next") else next_run(out, time.time())
+    return out  # (its next run kept, unless when it runs changed, or it's been woken from a pause)
 
 
 def next_run(r, after):
@@ -56,6 +60,12 @@ def next_run(r, after):
     return after + 86400
 
 
+def clock():
+    """The host's clock, as its times of day are: its zone's name and how far ahead of UTC it is now (seconds)."""
+    now = datetime.datetime.now().astimezone()
+    return {"zone": now.tzname(), "offset": int(now.utcoffset().total_seconds())}
+
+
 def due(r, now):
     return not r.get("paused") and r.get("next") is not None and r["next"] <= now
 
@@ -66,6 +76,9 @@ def said(r, now):
     return f"(Your routine “{r['name']}”, {when}.)\n\n{r['prompt']}"
 
 
-def ran(r, now):
-    """r after a run at now: its next one from now (one missed while the host was off isn't run again)."""
-    return {**r, "last": now, "next": next_run(r, now)}
+def ran(r, now, error=None):
+    """r after a run at now (or, error, one that couldn't be): its next one from now (one missed while the host was
+    off isn't run again)."""
+    if error:
+        return {**r, "error": error, "next": next_run(r, now)}
+    return {**{k: v for k, v in r.items() if k != "error"}, "last": now, "next": next_run(r, now)}

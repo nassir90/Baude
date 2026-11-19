@@ -8631,8 +8631,9 @@ class SessionSidebar(Gtk.Box):
             self.track_days()
         for key, label, folder, rows in self.groups():
             shut = key in collapsed and not searching
-            self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
-            if shut:
+            if key != "bots":  # (Bots, first: no heading, their rows say what they are)
+                self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
+            if shut and key != "bots":
                 continue
             limit = None if searching or key in self.expanded or key == "bots" else self.limit(key)
             # (the limit counts top-level sessions: their forks come with them)

@@ -60,7 +60,10 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        one, then mcp {conn, line} either way and mcp_close {conn}
                                                        from either side, as an agent's are (agent); while this
                                                        connection's gone, their calls fail, till attach's app_tools
-                                                       binds them to the head's new one; gone with the session.
+                                                       binds them to the head's new one (a call the head answers
+                                                       after it was failed: mcp_late {conn, line} back to it, as it
+                                                       did run); gone with the session. A detach drops an ephemeral
+                                                       session at once; grace is for a head that's gone.
                                                        grace: (version 17) seconds an ephemeral session waits for its
                                                        head to come back (a day at most; else EPHEMERAL_S), its idle
                                                        claude not stopped meanwhile (it keeps nothing)

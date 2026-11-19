@@ -555,7 +555,7 @@ class Run:
         resume = msg.get("resume") if wire.is_id(msg.get("resume")) else None
         names = [n for n in msg.get("servers") or [] if wire.is_id(n)][:16]
         self.server, self.conn, self.id, self.token = server, conn, secrets.token_hex(8), secrets.token_hex(16)
-        self.relays, self.numbers, self.lock, self.gone = {}, itertools.count(1), threading.Lock(), False
+        self.relays, self.lock, self.gone = {}, threading.Lock(), False
         self.folder = tempfile.mkdtemp(prefix="baude-agent-")
         # (pi's session, the caller's: a copy here for pi to take it up from, said to be this run's folder's, where
         # pi-claude's run; what pi adds to it is sent to the caller as it's added, session.ts)
@@ -642,7 +642,7 @@ class Run:
         if msg.get("token") != self.token or not wire.is_id(msg.get("name")) or self.gone:
             return None
         with self.lock:
-            n = next(self.numbers)
+            n = next(RELAY_NUMBERS)
             self.relays[n] = conn
         conn.agent_relay = (self, n)
         self.conn.send({"op": "mcp_open", "conn": n, "name": msg["name"]})
@@ -672,7 +672,8 @@ class Run:
         self.server.agent_runs.pop(self.id, None)
 
 
-RELAY_NUMBERS = itertools.count(1)  # (an app's tools' relays: numbered apart from every other's, on any connection)
+RELAY_NUMBERS = itertools.count(1)  # (every relay's number, an agent's (Run) and an app's tools' (AppTools): none
+# the same as another's, whichever connection they're on)
 
 
 class AppTools:
@@ -686,7 +687,7 @@ class AppTools:
         self.server, self.session, self.names = server, session, names
         self.id, self.token = secrets.token_hex(8), secrets.token_hex(16)
         self.relays, self.lock, self.gone, self.conn = {}, threading.Lock(), False, None
-        self.asked = {}  # (calls a relay's carried to the head, not answered yet: (relay, JSON-RPC id) -> True)
+        self.asked = {}  # (calls a relay's carried to the head, not answered yet: (relay, its id as JSON) -> its id)
         server.agent_runs[self.id] = self  # (found by mcp_relay, as an agent's run is)
         self.bind(conn)
 
@@ -714,13 +715,14 @@ class AppTools:
             conn.send({"op": "mcp_open", "session": self.session, "conn": n, "name": relay.app_tool})
 
     def unbind(self, conn):
-        """The head's connection gone: what it was asked, answered as failed; asked nothing more till it's back."""
+        """The head's connection gone: what it was asked, answered as failed (by each call's own id); asked nothing more
+        till it's back."""
         with self.lock:
             if self.conn is not conn:
                 return
             self.conn = None
-            asked, self.asked = list(self.asked), {}
-        for n, rid in asked:
+            asked, self.asked = list(self.asked.items()), {}
+        for (n, _key), rid in asked:
             self._fail(n, rid)
 
     def _fail(self, n, rid):
@@ -756,7 +758,7 @@ class AppTools:
         with self.lock:
             to = self.conn
             if to is not None and call:
-                self.asked[(n, json.dumps(msg["id"]))] = True
+                self.asked[(n, json.dumps(msg["id"]))] = msg["id"]
         if to is not None:
             to.send({"op": "mcp", "conn": n, "line": line})
         elif call:
@@ -783,7 +785,12 @@ class AppTools:
             except (ValueError, AttributeError):
                 rid = None
             with self.lock:
-                self.asked.pop((msg["conn"], json.dumps(rid)), None)
+                late = rid is not None and self.asked.pop((msg["conn"], json.dumps(rid)), self) is self
+                to = self.conn
+            if late:  # (answered as failed already, its head away then: it did run, so its head's told, for its
+                if to is not None:  # agent to hear of it rather than do it again)
+                    to.send({"op": "mcp_late", "conn": msg["conn"], "line": msg["line"]})
+                return
             relay.send({"op": "mcp_line", "line": msg["line"]})
         elif msg.get("op") == "mcp_close":
             with self.lock:

@@ -6,20 +6,44 @@ import json
 import os
 import sqlite3
 import subprocess
+import threading
 
 DIR_LIMIT = 2000      # the most entries a folder's listing has
 LOG_LIMIT = 200       # the most commits a log has at once
 DIFF_LIMIT = 400_000  # the most of a diff sent (its first part)
+OUT_LIMIT = 4_000_000  # the most of any git command's output read (it's stopped past that)
+FILES_LIMIT = 500     # the most of a commit's files listed
 FIELDS = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s"
 
 
-def _git(cwd, *args, timeout=20):
+def _git(cwd, *args, timeout=20, limit=OUT_LIMIT):
+    """git's output (its first limit bytes, read as it comes: it's stopped past that), as text whatever its bytes;
+    (None, why) if it failed."""
     try:
-        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
-    except (OSError, subprocess.TimeoutExpired) as e:
+        p = subprocess.Popen(["git", "-C", cwd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             stdin=subprocess.DEVNULL, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    except OSError as e:
         return None, str(e)
-    return (r.stdout, None) if r.returncode == 0 else (None, (r.stderr or r.stdout).strip() or "git failed")
+    timer = threading.Timer(timeout, p.kill)
+    timer.start()
+    try:
+        out, cut = bytearray(), False
+        while len(out) <= limit and (part := p.stdout.read(65536)):
+            out += part
+        if len(out) > limit:
+            cut = True
+            del out[limit:]
+            p.kill()
+        err = p.stderr.read(65536)
+        code = p.wait()
+    finally:
+        timer.cancel()
+        p.stdout.close()
+        p.stderr.close()
+    text = out.decode("utf-8", errors="replace")
+    if code != 0 and not cut:
+        return None, err.decode("utf-8", errors="replace").strip() or text.strip() or "git failed"
+    return text, None
 
 
 def _inside(server, path, checkout=False):
@@ -121,16 +145,17 @@ def git(server, msg):
         p = head.split("\x1f", 6)
         stat, _ = _git(cwd, "show", "--format=", "--numstat", sha)
         files = []
-        for line in (stat or "").splitlines():
+        for line in (stat or "").splitlines()[:FILES_LIMIT]:
             a, r, path = (line.split("\t", 2) + ["", "", ""])[:3]
             files.append([path, None if a == "-" else int(a or 0), None if r == "-" else int(r or 0)])
-        on, _ = _git(cwd, "branch", "--contains", sha, "--format=%(refname:short)")
+        on, _ = _git(cwd, "branch", "--contains", sha, "--format=%(refname:short)", limit=20_000)
         return {"what": what, "sha": p[0], "parents": p[1].split(), "author": p[2], "email": p[3], "at": int(p[4] or 0),
                 "committer": p[5], "message": p[6].strip(), "files": files,
+                "more_files": len((stat or "").splitlines()) > FILES_LIMIT,
                 "branches": [b for b in (on or "").split() if b]}
     if what == "diff":
         path = msg.get("path") if isinstance(msg.get("path"), str) else None
-        text, err = _git(cwd, "show", "--format=", sha, "--", *([path] if path else []))
+        text, err = _git(cwd, "show", "--format=", sha, "--", *([path] if path else []), limit=DIFF_LIMIT + 1)
         if text is None:
             return {"what": what, "error": err}
         return {"what": what, "sha": sha, "path": path, "text": text[:DIFF_LIMIT], "truncated": len(text) > DIFF_LIMIT}

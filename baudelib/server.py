@@ -182,6 +182,15 @@ def _write_json(path, data):
     os.replace(tmp, path)
 
 
+def _read_json(path):
+    """A JSON file's data, or None if it isn't there or isn't JSON."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 class Conn:
     """A client's connection: what it's sent goes out on a thread of its own, so a slow one holds nobody up."""
 
@@ -516,7 +525,8 @@ class Server:
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
-        self.feedback_filed = {}  # (feedback's notes filed this run, by id: found before GitHub's search finds them)
+        self.feedback_filed = _read_json(os.path.join(self.state_dir, "feedback-filed.json")) or {}  # (feedback's
+        # notes filed, by id, kept: found before GitHub's search finds them, and after a restart)
         self.feedback_claims, self.feedback_lock = {}, threading.Lock()  # (notes being filed now: .filing's, here)
         # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
         # for the menu bar's item to say; None while it isn't
@@ -714,18 +724,19 @@ class Server:
             self.changed()
         reply("deleted", session=s.id, trashed=went)
 
-    def drop_ephemeral(self, s, later=False):
+    def drop_ephemeral(self, s, later=False, meant=False):
         """(lock held) A side question's session (ephemeral), or a new chat never written in (draft), with nobody
         attached: gone, its claude too (it wrote nothing: --no-session-persistence, or nothing sent). Not at once: a
         head attaches again as it starts its claude again (/cd, a restart of its own), or attaches for the first time
         just after it's made it (a side question's): once nobody's been on it for DRAFT_S (a side question that had a
-        head and lost it: EPHEMERAL_S)."""
+        head and lost it: its grace, or EPHEMERAL_S; meant, its head detached on purpose: EPHEMERAL_S)."""
         if not (s.meta.get("ephemeral") or s.meta.get("draft")) or s.viewers or self.sessions.get(s.id) is not s:
             return
         if not later:
             if s.drop_timer is not None:
                 s.drop_timer.cancel()
-            wait = (s.meta.get("grace") or EPHEMERAL_S) if s.meta.get("ephemeral") and s.attached_once else DRAFT_S
+            wait = (EPHEMERAL_S if meant else s.meta.get("grace") or EPHEMERAL_S) if s.meta.get("ephemeral") and \
+                s.attached_once else DRAFT_S
             s.drop_timer = threading.Timer(wait, lambda: self._drop_later(s))
             s.drop_timer.daemon = True
             s.drop_timer.start()
@@ -1070,7 +1081,9 @@ class Server:
                 return reply("error", error=out or "gh issue create failed")
             number = int(m.group(1)) if (m := re.search(r"/issues/(\d+)", url)) else None
             made = {"url": url, "number": number}
-        self.feedback_filed[note] = {"url": made["url"], "number": made.get("number")}
+        with self.feedback_lock:
+            self.feedback_filed[note] = {"url": made["url"], "number": made.get("number")}
+            _write_json(os.path.join(self.state_dir, "feedback-filed.json"), self.feedback_filed)
         self.log(f"feedback {note} filed on {repo}: {made['url']}")
         reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
 
@@ -1132,6 +1145,8 @@ class Server:
                         reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
                 except (ValueError, OSError) as e:
                     reply("error", error=str(e))
+                except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
             return None
         if op == "feedback":  # (a head with no gh of its own: its feedback filed by this host's; on a thread of its own)
@@ -1243,10 +1258,10 @@ class Server:
                 if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
                     s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()))
-            if op == "detach":
+            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
                 s.viewers.discard(conn)
                 s.live.discard(conn)
-                self.drop_ephemeral(s)
+                self.drop_ephemeral(s, meant=True)
                 return None
             if op == "input":
                 self.take_input(conn, s, msg.get("msg") or {})

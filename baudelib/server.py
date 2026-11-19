@@ -512,6 +512,7 @@ class Server:
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
+        self.feedback_filed = {}  # (feedback's notes filed this run, by id: found before GitHub's search finds them)
         # stopping, how far along (stop_procs): {"left": claudes still to stop, "total", "restart": to start again},
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
@@ -1009,9 +1010,12 @@ class Server:
         context = [c for c in msg.get("context") or [] if isinstance(c, str)] if isinstance(msg.get("context"), list) else []
         if not isinstance(text, str) or not text.strip() or not wire.is_id(note or ""):
             return reply("error", error="feedback needs its text and its note's id")
-        first = next(line.strip().lstrip("#").strip() for line in text.splitlines() if line.strip())
+        first = next((t for line in text.splitlines() if (t := line.strip().lstrip("#").strip())), "Feedback")
         title = first if len(first) <= 90 else first[:89].rstrip() + "…"
-        mark = f"_Sent from Baude for Android's Send Feedback, through {self.me['name']}_ `baude-note-{note}`"
+        token = f"`baude-note-{note}`"  # (the note's own: an issue ending with it is the note's, whoever filed it)
+        mark = f"_Sent from Baude for Android's Send Feedback, through {self.me['name']}_ {token}"
+        if note in self.feedback_filed:
+            return reply("feedback_filed", repo=repo, **self.feedback_filed[note])
         body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
                                         else "") + "\n\n" + mark + "\n"
         ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
@@ -1019,7 +1023,7 @@ class Server:
         if not ok:
             return reply("error", error=out or "gh issue list failed")
         try:
-            made = next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().endswith(mark)), None)
+            made = next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().endswith(token)), None)
         except ValueError:
             made = None
         if made is None:
@@ -1029,6 +1033,7 @@ class Server:
                 return reply("error", error=out or "gh issue create failed")
             number = int(m.group(1)) if (m := re.search(r"/issues/(\d+)", url)) else None
             made = {"url": url, "number": number}
+        self.feedback_filed[note] = {"url": made["url"], "number": made.get("number")}
         self.log(f"feedback {note} filed on {repo}: {made['url']}")
         reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
 

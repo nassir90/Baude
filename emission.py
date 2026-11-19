@@ -1826,11 +1826,16 @@ class Window(Adw.ApplicationWindow):
         listed = profiles()
         self.profile = next((p["name"] for p in listed if p["id"] == self.profile_id), self.profile)  # (renamed)
         self.who.set_label(self.profile)
+        people, bot_section = Gio.Menu(), Gio.Menu()  # (the Bots' profiles apart, under their heading)
         for i, p in enumerate(listed):
             act = Gio.SimpleAction.new(f"p{i}", None)
             act.connect("activate", lambda *_a, n=p["name"]: self.switch_profile(n))
             group.add_action(act)
-            menu.append(p["name"] + ("  ✓" if p["name"] == self.profile else ""), f"who.p{i}")
+            (bot_section if p.get("bot") else people).append(p["name"] + ("  ✓" if p["name"] == self.profile else ""),
+                                                             f"who.p{i}")
+        menu.append_section(None, people)
+        if bot_section.get_n_items():
+            menu.append_section("Bots", bot_section)
         more = Gio.Menu()
         bots = [p for p in listed if p.get("bot") and p["id"] != self.profile_id]
         mine = next((p for p in listed if p["id"] == self.profile_id), {})

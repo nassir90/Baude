@@ -18,6 +18,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 from baudelib import emissionlink, wire  # noqa: E402
+from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Browser"
 PING_S = 5  # (a host process takes a connection that's said nothing in wire.SILENT_S for gone)
@@ -344,9 +345,10 @@ class BrowserPane(Gtk.Box):
     def ended(self, why):
         self.stream = None
         self.say_status("The browser stopped", "It restarts when you open this page again.")
-        if self.picture.get_paintable() is not None:  # (the last page still shown: said under it, as the status isn't)
-            self.said.set_label("The browser stopped. It restarts when you open this page again.")
-            self.said.set_visible(True)
+        self.said.set_tooltip_text(why or None)
+        self.said.set_label("The browser stopped. It restarts when you open this page again.")
+        self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
+        # as the status isn't)
 
     def say_status(self, title, text):
         self.status.set_title(title)
@@ -447,10 +449,13 @@ class BrowserPane(Gtk.Box):
             if sid != self.sid or remote is not self.remote:
                 return
             why = r.get("error") if isinstance(r, dict) else None
-            gone = why in ("the server isn't there", "the server didn't answer")
-            self.said.set_label("" if not why else "Can't connect to the browser." if gone else
-                                f"Couldn't {DOING.get(call.get('op'), 'do that')}: {why}")
-            self.said.set_visible(bool(why))
+            if why:
+                self.said.set_label("Can't connect to the browser." if why in UNREACHED else
+                                    f"Couldn't {DOING.get(call.get('op'), 'do that')}.")
+                self.said.set_tooltip_text(why)
+                self.said.set_visible(True)
+            elif not self.said.get_label().startswith("The browser stopped"):
+                self.said.set_visible(False)
             if done:
                 done(r)
         self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)

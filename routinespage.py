@@ -94,7 +94,8 @@ class RoutinesPage(Gtk.Box):
             if sid != self.sid or asked != self.asked:
                 return
             if r.get("op") == "error":
-                self.said.set_label(f"Couldn't {doing}: {r.get('error')}")
+                self.said.set_label(f"Couldn't {doing} the routines." if doing == "load" else f"Couldn't {doing} the routine.")
+                self.said.set_tooltip_text(r.get("error") or None)
                 self.said.set_visible(True)
                 return
             self.said.set_visible(False)

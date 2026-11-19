@@ -14,10 +14,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Memory"
 SAVE_MS = 600  # (what's typed, saved this long after the last key)
-UNREACHED = ("the server isn't there", "the server didn't answer")  # (baudelib.client's, its host not reached)
 TRIES = 3  # (a save the Bot's writing came before: sent again on what it wrote, this many times in all)
 _css_loaded = False
 _host_type = None
@@ -187,6 +187,7 @@ class BotMemory(Gtk.Box):
         self.again = False  # (a read wanted, once what's written is in)
         self.after = {}  # (what's written in a Bot's memory left while a save of it was answered: {asked: (text, seen)},
         # sent once it is)
+        self.failed = False  # (the last read failed: read again when it's shown again)
         self.offline = Gtk.Label(wrap=True, xalign=0, visible=False)  # (its host not reached: said above the memory,
         self.offline.add_css_class("memory-offline")                # greyed below it, as it was last read)
         grey = Gtk.CssProvider()
@@ -232,6 +233,7 @@ class BotMemory(Gtk.Box):
         """Read (the page as it is), or not (why: the error said): the memory as it was last read, greyed, not to be
         written in, under a line saying what's wrong (why in its tooltip); nothing read yet, what's wrong in its
         place."""
+        self.failed = not ok
         gone = getattr(self.remote, "state", "alive") != "alive" or why in UNREACHED
         said = "Can't connect to the host." if gone else "Couldn't load the memory."
         if not ok and self.base is None:
@@ -258,6 +260,8 @@ class BotMemory(Gtk.Box):
         info = info or {}
         sid, remote = info.get("id"), info.get("remote")
         bot = bool(info.get("bot")) and sid is not None and remote is not None
+        if bot and sid == self.sid and remote is self.remote and self.failed:
+            return self.refresh()  # (the same Bot, its last read failed: its host may be back)
         if bot and sid == self.sid and remote is self.remote or not bot and self.sid is None:
             return  # (shown already: refresh reads it again)
         if sid is not None and sid == self.sid:

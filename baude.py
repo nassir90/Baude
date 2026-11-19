@@ -8389,7 +8389,8 @@ class SessionSidebar(Gtk.Box):
         # (and the host listed: this machine's again while the one picked is gone)
         seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
                                        s.get("said"), s.get("group"), bool(s.get("archived")))
-                                      for s in network().sessions() if self.shows(s, hosts, groups, assigned)))
+                                      for s in network().sessions() if self.shows(s, hosts, groups, assigned)
+                                      or s["id"] in getattr(self, "listed_remote", ())))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8481,6 +8482,7 @@ class SessionSidebar(Gtk.Box):
         while more := {s["id"] for s in everywhere if s["id"] not in shown and s.get("spawned_by") in shown}:
             shown |= more
             pulled |= more
+        self.listed_remote = shown  # (on_network: what's listed of the network's sessions)
         for info in sorted((remote_info(s) for s in everywhere if s["id"] in shown), key=last_used, reverse=True):
             r = info["remote"]
             if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
@@ -8517,6 +8519,12 @@ class SessionSidebar(Gtk.Box):
             for key, info in lost:
                 groups[key][2].remove(info)
                 home.pop(info["id"], None)
+        archived_ids = {i["id"] for i in gone}  # (archived: under its agent there, if that's there too)
+        while lost := [i for i in gone if i["id"] in pulled and i.get("spawned_by") not in home and
+                       i.get("spawned_by") not in archived_ids]:
+            for info in lost:
+                gone.remove(info)
+                archived_ids.discard(info["id"])
         for key, (_label, _folder, items) in list(groups.items()):
             for info in list(items):
                 if (up := home.get(info.get("spawned_by"))) is not None and up != key:

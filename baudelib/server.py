@@ -1141,7 +1141,7 @@ class Server:
         sent and not yet taken (its Bot still on a turn from before) isn't sent again: the run's skipped."""
         now = time.time()
         if r["id"] in s.routines_out and s.busy:
-            error = "Skipped: previous run still going"
+            error = "skipped: previous run still going"
         else:
             error = None
             self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),

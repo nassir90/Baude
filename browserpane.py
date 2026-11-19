@@ -191,11 +191,16 @@ class Asks:
     before the next goes), on a thread of its own: answered(reply) on the main loop."""
 
     def __init__(self):
-        self.q = queue.Queue()
+        self.q, self.pending = queue.Queue(), 0  # (pending: asked, not answered yet)
         threading.Thread(target=self.run, daemon=True, name="browser-asks").start()
 
     def put(self, remote, bot, call, answered):
-        self.q.put((remote, bot, call, answered))
+        self.pending += 1
+
+        def done(reply):
+            self.pending -= 1
+            answered(reply)
+        self.q.put((remote, bot, call, done))
 
     def run(self):
         while True:
@@ -473,14 +478,11 @@ class BrowserPane(Gtk.Box):
         return round(fx * vw / fw, 1), round(fy * vh / fh, 1)
 
     def input(self):
-        click = Gtk.GestureClick(button=0)
-        click.connect("released", self.clicked)  # (let go: a press that moved far is a drag's, not a click)
-        self.picture.add_controller(click)
-        drag = Gtk.GestureDrag(button=Gdk.BUTTON_PRIMARY)
-        drag.connect("drag-begin", lambda _g, x, y: setattr(self, "drag", [(x, y)]))
-        drag.connect("drag-update", self.dragged)
-        drag.connect("drag-end", self.dropped)
-        self.picture.add_controller(drag)
+        press = Gtk.GestureDrag(button=0)  # (one gesture for press, move, let go: a click or a drag, as it turns out)
+        press.connect("drag-begin", self.pressed)
+        press.connect("drag-update", self.dragged)
+        press.connect("drag-end", self.released)
+        self.picture.add_controller(press)
         scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.BOTH_AXES)
         scroll.connect("scroll", self.scrolled)
         self.picture.add_controller(scroll)
@@ -490,37 +492,42 @@ class BrowserPane(Gtk.Box):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.keyed)
         self.picture.add_controller(keys)
+        self.last_click = (0.0, None, 0)  # (when, where, its count: a double click's second press counted from it)
 
-    def clicked(self, gesture, n, x, y):
+    def pressed(self, gesture, x, y):
         self.picture.grab_focus()
-        if self.drag and len(self.drag) > 1:
-            return
-        at = self.to_page(x, y)
-        if at is None:
-            return
-        self.flush_typing()
-        b = gesture.get_current_button()
-        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "press": n,
-                  "button": {3: "right", 2: "middle"}.get(b, "left"),
-                  "modifiers": self.mods(gesture.get_current_event_state())})
+        self.drag = {"path": [(x, y)], "button": gesture.get_current_button(),
+                     "mods": self.mods(gesture.get_current_event_state())}
 
     def dragged(self, gesture, dx, dy):
         if self.drag is None:
             return
-        x0, y0 = self.drag[0]
-        if len(self.drag) > 1 or abs(dx) > DRAG_PX or abs(dy) > DRAG_PX:
-            self.drag.append((x0 + dx, y0 + dy))
+        x0, y0 = self.drag["path"][0]
+        if len(self.drag["path"]) > 1 or abs(dx) > DRAG_PX or abs(dy) > DRAG_PX:
+            self.drag["path"].append((x0 + dx, y0 + dy))
 
-    def dropped(self, gesture, dx, dy):
-        path, self.drag = self.drag, None
-        if not path or len(path) < 2:
+    def released(self, gesture, dx, dy):
+        press, self.drag = self.drag, None
+        if press is None:
             return
-        step = max(1, len(path) // 20)  # (at most about 20 points of it: the shape kept)
-        points = [self.to_page(*p) for p in path[::step] + [path[-1]]]
-        points = [p for p in points if p is not None]
-        if len(points) >= 2:
-            self.flush_typing()
-            self.ask({"op": "drag", "tab": self.tab(), "path": points, "css": True})
+        path = press["path"]
+        self.flush_typing()
+        if len(path) > 1 and press["button"] == Gdk.BUTTON_PRIMARY:  # (moved while pressed: a drag)
+            step = max(1, len(path) // 20)  # (at most about 20 points of it: the shape kept)
+            points = [p for p in (self.to_page(*q) for q in path[::step] + [path[-1]]) if p is not None]
+            if len(points) >= 2:
+                self.ask({"op": "drag", "tab": self.tab(), "path": points, "css": True})
+            return
+        x, y = path[0]
+        at = self.to_page(x, y)
+        if at is None:
+            return
+        when, where, count = self.last_click
+        near = where is not None and abs(where[0] - x) < 6 and abs(where[1] - y) < 6
+        n = count + 1 if near and time.monotonic() - when < 0.45 else 1  # (pressed again, quickly, in one place)
+        self.last_click = (time.monotonic(), (x, y), n)
+        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "press": n,
+                  "button": {3: "right", 2: "middle"}.get(press["button"], "left"), "modifiers": press["mods"]})
 
     def moved(self, _c, x, y):
         self.pointer = (x, y)
@@ -531,7 +538,7 @@ class BrowserPane(Gtk.Box):
     def hover(self):
         self.hover_source = None
         at = self.to_page(*self.pointer) if self.pointer and self.drag is None else None
-        if at is not None:
+        if at is not None and not self.asks.pending:  # (only with nothing else waiting: never queued behind)
             self.ask({"op": "hover", "tab": self.tab(), "x": at[0], "y": at[1], "css": True})
         return False
 

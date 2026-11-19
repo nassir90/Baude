@@ -568,6 +568,8 @@ class BrowserWindow(Adw.ApplicationWindow):
                 return frames[0] < 2 or behind()
             self.connect("map", lambda *_: self.add_tick_callback(tick))
         self.set_visible(True)
+        if sys.platform != "darwin" and self.main is not None:  # (the Baude window in front again, once it's shown)
+            GLib.timeout_add(100, lambda: self.main is not None and self.main.present() and False)
 
     def keys_to_gtk(self):
         if sys.platform == "darwin":
@@ -585,13 +587,16 @@ class BrowserWindow(Adw.ApplicationWindow):
                 pane.came_back()
 
     def gone(self):
-        """The Baude window it came from closed: gone with it, still out as Baude next starts (kept), and the other
-        Baude windows' side panels showing its Bot's browser again."""
-        main = self.main
+        """The Baude window it came from closed: gone with it, and out again as Baude next starts (kept), unless
+        another Baude window's side panel shows its Bot's browser, which has it again then."""
+        main, taken = self.main, False
         self.drop()
         for pane in list(PANES):
             if pane.sid == self.sid and pane.win is not main and not getattr(pane.win, "let_go_done", False):
                 pane.came_back()
+                taken = True
+        if taken:  # (back in a side panel: not out as Baude next starts)
+            remember()
 
     def drop(self, closing=False):
         """Gone: its page let go of (for the side panel's to have), the window too unless it's closing itself."""
@@ -864,6 +869,8 @@ class BrowserPane(Gtk.Box):
         self.mirror.set_shortcuts(Adw.TabViewShortcuts.NONE)
         self.mirror.connect("notify::selected-page", lambda *_: self.mirror_picked())
         self.mirror.connect("close-page", self.mirror_closing)
+        self.mirror.connect("page-reordered", lambda *_: not self.syncing and GLib.idle_add(  # (moved here: back
+            lambda: self.sync_mirror(self.state.get("tabs") or []) and False))              # where it is there)
         chrome.tab_bar.set_view(self.mirror)
         self.tabs, self.tabs_key, self.strip = chrome.tab_bar, None, chrome.strip
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -887,6 +894,8 @@ class BrowserPane(Gtk.Box):
         if sid == self.sid and (not bot or info.get("remote") is self.home):
             return
         self.stop()
+        import emission
+        self.presence.pointer, self.pointer_seen = emission.BotPointer(), None  # (another Bot's: its own pointer)
         self.sid, self.home, self.info = sid, info.get("remote") if bot else None, info if bot else None
         self.remote = self.home
         self.name = (info.get("bot") or {}).get("name") if bot else None
@@ -1263,20 +1272,22 @@ class BrowserPane(Gtk.Box):
         self.state_prompts()
 
     def sync_mirror(self, tabs):
-        """The stand-ins for a streamed Bot's tabs (in the strip): one for each, named, loading, the one in front
-        picked, as they are there."""
+        """The stand-ins for a streamed Bot's tabs (in the strip): one for each, named, loading, in their order, the
+        one in front picked, as they are there."""
         self.syncing = True
         try:
             ids = [t.get("tab") for t in tabs]
             for tid in [k for k in self.mirrored if k not in ids]:
                 self.mirror.close_page(self.mirrored.pop(tid))
-            for t in tabs:
+            for i, t in enumerate(tabs):
                 page = self.mirrored.get(t.get("tab"))
                 if page is None:
                     page = self.mirrored[t.get("tab")] = self.mirror.append(Gtk.Box())
                 page.set_title(t.get("title") or t.get("url") or "New Tab")
                 page.set_tooltip(t.get("url") or "")
                 page.set_loading(bool(t.get("loading")))
+                if self.mirror.get_page_position(page) != i:  # (in the order they're in there)
+                    self.mirror.reorder_page(page, i)
                 if t.get("selected") and self.mirror.get_selected_page() is not page:
                     self.mirror.set_selected_page(page)
         finally:

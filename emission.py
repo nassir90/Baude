@@ -864,11 +864,11 @@ class MacWeb:
             if not (pointer.shown() or pointer.acting or pointer.glow):  # (made once there's something to draw)
                 return
             self.overlay = MacOverlay(self.view)
-        elif not pointer.busy() and self.overlay.drawn is not None:
-            return
+        accent = getattr(self.window, "accent", None) or (0.21, 0.52, 0.89)
+        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent:
+            return  # (nothing's moved, and the accent's as it was drawn in)
         look = pointer.look()
-        self.overlay.draw(look, getattr(self.window, "accent", None) or (0.21, 0.52, 0.89),
-                          mine=look["tab"] in (None, self.tab_id))
+        self.overlay.draw(look, accent, mine=look["tab"] in (None, self.tab_id))
 
     def show(self, on):
         self.shown = on
@@ -3664,9 +3664,10 @@ class Control:
         if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
         if msg.get("fit"):  # (a pane watching it streamed, its page out of sight: laid out at the pane's shape while
-            self.win.fit_size = (w, h)  # it's watched, the Bot's own size again once it isn't: unwatch)
-            for tab in self.win.tabs.values():
-                tab.web.follow()
+            if self.win.watchers:  # it's watched, the Bot's own size again once it isn't: unwatch; one come after
+                self.win.fit_size = (w, h)  # its watch ended, not)
+                for tab in self.win.tabs.values():
+                    tab.web.follow()
             return answer({**self.describe(t), "size": None})
         self.win.page_size, self.win.fit_size = (w, h), None  # (the Bot's own: kept, a watcher's given up)
         for tab in self.win.tabs.values():

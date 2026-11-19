@@ -56,6 +56,7 @@ class Connection(
     private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
     private val route: (String) -> Connection?,
     private val heard: (Connection, JSONObject) -> Unit,
+    private val subscribes: Boolean = true, // (false: one for a watch of its own, which a connection carries one of)
     private val changed: (Connection) -> Unit,
 ) {
     val id: String get() = place.id
@@ -236,7 +237,8 @@ class Connection(
                         said = "" // (what it said starting: not why it goes later)
                         reached = true
                         set("up")
-                        send(JSONObject().put("op", "subscribe"))
+                        if (subscribes) // (archived ones too: the home screen lists them, folded)
+                            send(JSONObject().put("op", "subscribe").put("archived", true))
                     }
                 }
             }

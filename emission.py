@@ -3395,7 +3395,7 @@ class Control:
                 self.win.view.set_selected_page(page)
                 return t
         if want:
-            raise ValueError(f"no tab {want}: tabs lists them")
+            raise ValueError(f"no tab {want}: tabs_context lists them")
         return self.win.open("about:blank")
 
     def describe(self, t):
@@ -3422,7 +3422,7 @@ class Control:
         """body run in t's page (Emission's world, PAGE_JS's em there; page: the page's own world, for javascript):
         then(result) given what it returned, or the error answered."""
         if t.web.view is None or t not in self.win.tabs.values():
-            answer({"error": f"tab {t.id} has closed: tabs lists the open ones"})
+            answer({"error": f"tab {t.id} has closed: tabs_context lists the open ones"})
             return
         if (waiting := [p for p in self.win.prompts(t) if p["kind"] in ("alert", "confirm", "prompt")]):
             answer({"error": "the page is waiting on its prompt, and runs nothing till it's answered (answer_prompt)",
@@ -3575,7 +3575,7 @@ class Control:
         def read(got):
             text = got["text"]
             if got.get("cut"):
-                text += "\n(… cut short: read a part with ref, or look with find)"
+                text += "\n(… cut short: read a part with ref_id, or look with find)"
             off = [f"{n} {side}" for n, side in ((got.get("above"), "above"), (got.get("below"), "below")) if n]
             if off:
                 text += (f"\n(Not listed: {' and '.join(off).replace(' ', ' elements ', 1)}, more than a screen "
@@ -3623,7 +3623,7 @@ class Control:
             scale = 1.0 if msg.get("css") else self.scales.get(t.id, 1.0)  # (css: the page's own pixels)
             then(float(msg["x"]) / scale, float(msg["y"]) / scale, None)
         else:
-            raise ValueError("a ref, or x and y, says where")
+            raise ValueError("a ref_id, or x and y, says where")
 
     def pointed(self, msg, t, kind, x, y, **more):
         """What the Bot did with the mouse (not the Browser page's own), for its pointer: drawn here if it's hosted,
@@ -3708,7 +3708,7 @@ class Control:
         anywhere = json.dumps(bool(msg.get("anywhere")))
         self.js(t, focus + "const el = document.activeElement;"
                 f"if (!em.editable(el) && !{anywhere}) throw new Error('nothing to type into is focused: click the "
-                "field, or give its ref'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
+                "field, or give its ref_id'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
 
     def op_key(self, msg, answer):
         t = self.tab(msg)
@@ -3869,7 +3869,7 @@ class Control:
     def op_form_input(self, msg, answer):
         t = self.tab(msg)
         if not msg.get("ref"):
-            raise ValueError("form_input needs the field's ref")
+            raise ValueError("form_input needs the field's ref_id")
         self.js(t, f"const el = em.get({json.dumps(msg['ref'])}), v = {json.dumps(msg.get('value'))};"
                 "if (el.tagName === 'SELECT') {"
                 "  const o = [...el.options].find(o => o.value === String(v) || o.text.trim() === String(v));"

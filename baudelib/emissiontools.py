@@ -14,43 +14,44 @@ NAME = "emission"
 HOST_WAIT_S = 85  # (the host's wait on Emission's answer: a page's load is 30 s of it at most)
 WAIT_S = 130  # (a request's answer waited for this long: the host's start of Emission and its wait, and then some)
 
-TAB = {"type": "string", "description": "A tab's id (tabs); the one in front if none"}
+TAB = {"type": "string", "description": "A tab's id (tabs_context); the one in front if none"}
 HOST = {"type": "string", "description": "A host's id or name (mcp__mesh__hosts); this one if none. Each host has "
                                          "its own browser for you, with its own sign-ins"}
-REF = {"type": "string", "description": "An element's ref, as read_page or find gave it (ref_12)"}
+REF = {"type": "string", "description": "An element's ref, as read_page, find or scroll gave it (ref_12)"}
 
 SCHEMAS = {
-    "tabs": ("Your browser's tabs on a host (it's started if it isn't running), the sites it's signed in to, and its "
-             "recent downloads. Each tab's id is what the other tools take.",
-             {"host": HOST, "sites": {"type": "boolean", "description": "Also list the sites it's signed in to"}},
-             []),
-    "new_tab": ("Open a new tab, on an address or a search, and wait for it to load.",
-                {"url": {"type": "string", "description": "An address, or words to search for"}, "host": HOST}, []),
+    "tabs_context": ("Your browser's tabs on a host (it's started if it isn't running), the sites it's signed in "
+                     "to, and its recent downloads. Each tab's id is the tabId the other tools take.",
+                     {"host": HOST, "sites": {"type": "boolean", "description": "Also list the sites it's signed "
+                                                                                 "in to"}}, []),
+    "tabs_create": ("Open a new tab (on an address or a search, if one's given), and wait for it to load.",
+                    {"url": {"type": "string", "description": "An address, or words to search for"}, "host": HOST},
+                    []),
     "navigate": ("Go to an address (or search), or back, forward, or reload, in a tab, and wait for it to load.",
                  {"url": {"type": "string", "description": "An address, words to search for, or back, forward, "
-                                                           "reload"}, "tab": TAB, "host": HOST}, ["url"]),
-    "close_tab": ("Close a tab.", {"tab": TAB, "host": HOST}, ["tab"]),
+                                                           "reload"}, "tabId": TAB, "host": HOST}, ["url"]),
+    "tabs_close": ("Close a tab.", {"tabId": TAB, "host": HOST}, ["tabId"]),
     "screenshot": ("A picture of a tab's page as it's shown, for what text can't show: layout, images, a canvas, "
-                   "how something looks. To read a page, read_page, find and get_text are cheaper. Its pixels are "
+                   "how something looks. To read a page, read_page, find and get_page_text are cheaper. Its pixels are "
                    "what click, scroll and zoom's x and y are in.",
-                   {"tab": TAB, "host": HOST}, []),
+                   {"tabId": TAB, "host": HOST}, []),
     "zoom": ("A region of the last screenshot at full detail, for small text or fine detail: region [x0, y0, x1, "
              "y1] in that screenshot's pixels (click and scroll keep to the screenshot's).",
              {"region": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
-              "tab": TAB, "host": HOST}, ["region"]),
+              "tabId": TAB, "host": HOST}, ["region"]),
     "read_page": ("How to read a page: its elements on screen and a screen above and below, each one's role, name "
-                  "and ref (links, buttons, fields, headings; filter all adds the rest, text too). Refs are what "
-                  "click, type, form_input and scroll take, the same for an element each read.",
-                  {"tab": TAB, "host": HOST, "filter": {"type": "string", "enum": ["interactive", "all"]},
-                   "ref": {"type": "string", "description": "Only this element's part of the page"},
+                  "and ref (links, buttons, fields, headings; filter all adds the rest, text too). A ref is the "
+                  "ref_id click, type, form_input and scroll take, the same for an element each read.",
+                  {"tabId": TAB, "host": HOST, "filter": {"type": "string", "enum": ["interactive", "all"]},
+                   "ref_id": {"type": "string", "description": "Only this element's part of the page"},
                    "max_chars": {"type": "integer"}}, []),
     "find": ("Elements anywhere on the page whose role, name, placeholder, id or link match words: their refs.",
-             {"query": {"type": "string"}, "tab": TAB, "host": HOST}, ["query"]),
-    "get_text": ("The page's text (its main part's, if it has one): to read what it says.",
-                 {"tab": TAB, "host": HOST, "max_chars": {"type": "integer"}}, []),
+             {"query": {"type": "string"}, "tabId": TAB, "host": HOST}, ["query"]),
+    "get_page_text": ("The page's text (its main part's, if it has one): to read what it says.",
+                      {"tabId": TAB, "host": HOST, "max_chars": {"type": "integer"}}, []),
     "click": ("Click an element (by its ref: scrolled to and clicked in its middle) or a point of the last "
               "screenshot, with the mouse, as a person would; then wait for any page it opens.",
-              {"ref": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tab": TAB, "host": HOST,
+              {"ref_id": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tabId": TAB, "host": HOST,
                "button": {"type": "string", "enum": ["left", "right"]},
                "count": {"type": "integer", "description": "2 for a double click"},
                "modifiers": {"type": "array", "items": {"type": "string", "enum": ["shift", "ctrl", "alt", "cmd"]}}},
@@ -58,35 +59,39 @@ SCHEMAS = {
     "drag": ("Drag with the mouse along a path of points of the last screenshot (pressed at the first, let go at the "
              "last): to select text, move a slider, drag something into place.",
              {"path": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
-              "tab": TAB, "host": HOST}, ["path"]),
+              "tabId": TAB, "host": HOST}, ["path"]),
     "hover": ("Move the mouse over an element or a point (menus that open on hover).",
-              {"ref": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
+              {"ref_id": REF, "x": {"type": "number"}, "y": {"type": "number"}, "tabId": TAB, "host": HOST}, []),
     "type": ("Type text into the focused field (or the field with ref: focused first), a key press a character at "
              "a time, as a keyboard types.",
-             {"text": {"type": "string"}, "ref": REF, "tab": TAB, "host": HOST}, ["text"]),
+             {"text": {"type": "string"}, "ref_id": REF, "tabId": TAB, "host": HOST}, ["text"]),
     "key": ("Press keys, one after another (space between them): Enter, Tab, Escape, Backspace, Delete, Up, Down, "
             "Left, Right, Home, End, PageUp, PageDown, a character, or a combination like cmd+a or shift+Tab.",
-            {"keys": {"type": "string"}, "tab": TAB, "host": HOST}, ["keys"]),
+            {"keys": {"type": "string"}, "tabId": TAB, "host": HOST}, ["keys"]),
     "scroll": ("Turn the mouse wheel over an element, a point, or the page's middle: dy (and dx) pixels (dy 600 if "
                "none's given; up is negative). Says what came into view, with refs.",
-               {"dy": {"type": "integer"}, "dx": {"type": "integer"}, "ref": REF, "x": {"type": "number"},
-                "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
-    "form_input": ("Set a form field by its ref: a select's option (value or text), a checkbox or radio (true or "
+               {"dy": {"type": "integer"}, "dx": {"type": "integer"}, "ref_id": REF, "x": {"type": "number"},
+                "y": {"type": "number"}, "tabId": TAB, "host": HOST}, []),
+    "form_input": ("Set a form field by its ref_id: a select's option (value or text), a checkbox or radio (true or "
                    "false), or a field's value.",
-                   {"ref": REF, "value": {}, "tab": TAB, "host": HOST}, ["ref", "value"]),
-    "javascript": ("Run JavaScript in the page (an async function's body: return what you want back, as JSON).",
-                   {"code": {"type": "string"}, "tab": TAB, "host": HOST}, ["code"]),
-    "console": ("What the page has written to its console, and its errors, newest last.",
-                {"tab": TAB, "host": HOST, "pattern": {"type": "string", "description": "Only messages matching "
-                                                                                        "this regular expression"},
-                 "limit": {"type": "integer"}, "clear": {"type": "boolean", "description": "Clear them after"}}, []),
-    "network": ("What the page has loaded (itself and its resources): each URL, its kind, status, time and size.",
-                {"tab": TAB, "host": HOST, "pattern": {"type": "string", "description": "Only URLs matching this "
-                                                                                        "regular expression"},
-                 "limit": {"type": "integer"}}, []),
-    "resize": ("Make the page's size (its viewport) width by height pixels.",
-               {"width": {"type": "integer"}, "height": {"type": "integer"}, "tab": TAB, "host": HOST},
-               ["width", "height"]),
+                   {"ref_id": REF, "value": {}, "tabId": TAB, "host": HOST}, ["ref_id", "value"]),
+    "javascript_tool": ("Run JavaScript in the page (an async function's body: return what you want back, as "
+                        "JSON).", {"code": {"type": "string"}, "tabId": TAB, "host": HOST}, ["code"]),
+    "read_console_messages": ("What the page has written to its console, and its errors, newest last.",
+                              {"tabId": TAB, "host": HOST,
+                               "pattern": {"type": "string", "description": "Only messages matching this regular "
+                                                                            "expression"},
+                               "limit": {"type": "integer"},
+                               "clear": {"type": "boolean", "description": "Clear them after"}}, []),
+    "read_network_requests": ("What the page has loaded (itself and its resources): each URL, its kind, status, time "
+                              "and size.",
+                              {"tabId": TAB, "host": HOST,
+                               "pattern": {"type": "string", "description": "Only URLs matching this regular "
+                                                                            "expression"},
+                               "limit": {"type": "integer"}}, []),
+    "resize_window": ("Make the page's size (its viewport) width by height pixels.",
+                      {"width": {"type": "integer"}, "height": {"type": "integer"}, "tabId": TAB, "host": HOST},
+                      ["width", "height"]),
     "prompts": ("What the pages are waiting for you to answer: an alert, a confirm, a prompt, a site's own sign-in "
                 "box, or files to upload (tools' answers also show them, as prompts).", {"host": HOST}, []),
     "answer_prompt": ("Answer what a page is waiting on (its id from prompts): accept (OK, or false for Cancel), "
@@ -96,17 +101,19 @@ SCHEMAS = {
                        "user": {"type": "string"}, "password": {"type": "string"},
                        "files": {"type": "array", "items": {"type": "string"}}, "host": HOST}, []),
     "browser_batch": ("Several of these tools in one call, done in order, stopping at the first error: actions, "
-                      "each {name, input} as that tool takes it (not javascript, nor browser_batch), each checked "
+                      "each {name, input} as that tool takes it (not javascript_tool, nor browser_batch), each checked "
                       "as it is on its own. Each one's answer comes back, pictures too.",
                       {"actions": {"type": "array", "items": {
                           "type": "object", "properties": {"name": {"type": "string"}, "input": {"type": "object"}},
                           "required": ["name", "input"]}}}, ["actions"]),
 }
-OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab": "close_tab",
-       "screenshot": "screenshot", "zoom": "zoom", "read_page": "read_page", "find": "find", "get_text": "get_text",
-       "click": "click", "hover": "hover", "drag": "drag", "type": "type", "key": "key", "scroll": "scroll",
-       "form_input": "form_input", "javascript": "javascript", "console": "console", "network": "network",
-       "resize": "resize", "prompts": "prompts", "answer_prompt": "answer_prompt"}
+OPS = {"tabs_context": "tabs", "tabs_create": "new_tab", "navigate": "navigate", "tabs_close": "close_tab",
+       "screenshot": "screenshot", "zoom": "zoom", "read_page": "read_page", "find": "find",
+       "get_page_text": "get_text", "click": "click", "hover": "hover", "drag": "drag", "type": "type", "key": "key",
+       "scroll": "scroll", "form_input": "form_input", "javascript_tool": "javascript",
+       "read_console_messages": "console", "read_network_requests": "network", "resize_window": "resize",
+       "prompts": "prompts", "answer_prompt": "answer_prompt"}  # (each tool's op: the ops keep their own names)
+ARGS = {"tabId": "tab", "ref_id": "ref"}  # (the tools' arguments, named as Claude in Chrome's: the ops' names for them)
 HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
 
 
@@ -131,15 +138,29 @@ class Browser:
             raise ValueError("these tools are a Bot's (its chat's id wasn't given)")
         args = dict(args)
         where = self.mesh.where(args.pop("host", None))
-        msg = {**args, "op": OPS[tool]}  # (its op the tool's, whatever the arguments say)
         got = self.mesh.request(where, {"op": "emission", "bot": {"id": self.me, "name": self.bot_name()},
-                                        "call": msg}, timeout=WAIT_S)
-        result = got.get("result") or {}
-        if tool == "tabs" and args.get("sites"):
+                                        "call": request(tool, args)}, timeout=WAIT_S)
+        result = answered(got.get("result") or {})
+        if tool == "tabs_context" and args.get("sites"):
             sites = self.mesh.request(where, {"op": "emission", "bot": {"id": self.me, "name": self.bot_name()},
                                               "call": {"op": "sites"}}, timeout=WAIT_S).get("result") or {}
             result["sites"] = sites.get("sites", [])
         return result
+
+
+def request(tool, args):
+    """A tool's call as its op's request: its arguments named as the ops name them, its op the tool's (whatever the
+    arguments say)."""
+    return {**{ARGS.get(k, k): v for k, v in args.items()}, "op": OPS[tool]}
+
+
+def answered(value):
+    """An op's answer in the tools' names: a tab's id as tabId."""
+    if isinstance(value, dict):
+        return {("tabId" if k == "tab" else k): answered(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [answered(v) for v in value]
+    return value
 
 
 def content(tool, result):
@@ -149,7 +170,7 @@ def content(tool, result):
         image = result.pop("image")
         return [{"type": "image", "data": image, "mimeType": result.pop("mime", "image/jpeg")},
                 {"type": "text", "text": json.dumps(result, indent=1, ensure_ascii=False)}]
-    text = result.pop("page", None) or result.pop("text", None) if tool in ("read_page", "get_text") else None
+    text = result.pop("page", None) or result.pop("text", None) if tool in ("read_page", "get_page_text") else None
     if tool == "scroll":
         text = result.pop("in_view", None)
     out = [{"type": "text", "text": json.dumps(result, indent=1, ensure_ascii=False)}]
@@ -159,8 +180,8 @@ def content(tool, result):
 
 
 BATCH_MAX = 25  # (a batch's actions at most)
-NOT_BATCHED = {"browser_batch", "javascript"}  # (a batch is the tools only: no script in it, nor a batch)
-SAID = ("tab", "title", "url", "loading", "selected")  # (a tab's description: in a batch, said only as it changes)
+NOT_BATCHED = {"browser_batch", "javascript_tool"}  # (a batch is the tools only: no script in it, nor a batch)
+SAID = ("tabId", "title", "url", "loading", "selected")  # (a tab's description: in a batch, said only as it changes)
 
 
 def batch(browser, actions):

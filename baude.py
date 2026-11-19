@@ -9263,9 +9263,7 @@ class SessionSidebar(Gtk.Box):
                 return
             if op == "delete":
                 r.sessions.pop(info["id"], None)
-                if info["id"] == self.win.session_id:
-                    self.win.new_session()
-                BaudeWindow.DRAFTS.pop(info["id"], None)  # (its draft with it)
+                self.win.carry_on(info["id"])
             elif info["id"] in r.sessions:
                 r.sessions[info["id"]] = {**r.sessions[info["id"]], "archived": op == "archive"}
             self.fill()
@@ -9288,9 +9286,7 @@ class SessionSidebar(Gtk.Box):
                     self.win.note(f"no trash here; moved {os.path.basename(path)} to {keep}")
                 except OSError as e:
                     self.win.note(f"couldn't move {os.path.basename(path)} away: {e}")
-        if info["id"] == self.win.session_id:
-            self.win.new_session()
-        BaudeWindow.DRAFTS.pop(info["id"], None)  # (its draft with it)
+        self.win.carry_on(info["id"])
         self.refresh()
 
     def new_hosts(self):
@@ -13172,6 +13168,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             pane.add_controller(hand)
             pane.get_vadjustment().connect("value-changed", BaudeWindow.pane_scrolled)
         network().listen(self.on_network)
+        if BaudeWindow.forget_gone not in network().listeners:  # (once, for the app)
+            network().listen(BaudeWindow.forget_gone)
         providerslib.listen(self.providers_found)  # (Ollama started, a model pulled, an endpoint added: the pickers)
         self.outer = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=self.sidebar,
                                           end_child=self.split, resize_start_child=False, resize_end_child=True,
@@ -14815,14 +14813,24 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         for msg in list(p.asks.values()):
             self.h_control_request(msg)
 
-    def clear_transcript(self, closing=False, keep_box=False):
+    def clear_transcript(self, closing=False, keep_box=False, gone=False):
         """The chat emptied for another (closing: the window's going). Its draft kept for it (keep_draft), the box
-        emptied for the next one's; keep_box: the box left as it is, for the next one (a new conversation for another
-        kind of model: remote_new_conversation)."""
+        emptied for the next one's. keep_box: what's typed in the box goes on to the next one (a new conversation for
+        another kind of model: remote_new_conversation; the chat deleted: carry_on), the rest of its draft (its queue,
+        a revert written over) kept for it, or, gone, dropped with it."""
         self.remember_place()  # (to open it there again)
         key = self.draft_key()  # (what its draft's kept under, below)
         self.restore_scroll = None
         self.chat_sent, self.listed_begun = False, None  # (another chat: nothing sent in it yet)
+        self.carry_box = None  # (a new conversation that opens later doesn't take this box: open_remote)
+        carried = None
+        if keep_box:  # (what's typed: under a revert, the box as it was before it)
+            text = self.reverting["draft"] if self.reverting is not None else widgets.typed_text(self.input)
+            carried = (text, [len(text)] * 2 if self.reverting is not None else widgets.caret_of(self.input),
+                       list(self.attachments))
+            if self.reverting is not None:
+                self.reverting["draft"] = ""
+            self.set_box(widgets.typed_text(self.input) if self.reverting is not None else "", None, [])
         if self.reverting is not None:  # (a revert not sent: gone with its chat, the box as it was before it, and
             rev, self.reverting = self.reverting, None  # what's been written over it in its draft, ahead of that)
             typed = widgets.typed_text(self.input).strip()
@@ -14838,8 +14846,10 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.queued:  # (not sent: in its draft, before what's in the box, as a queued message's revert puts it)
             self.put_ahead([t.text for t in self.queued if t.text], [a for t in self.queued for a in t.atts])
         self.unqueue(list(self.queued))  # (another chat: this one's queue gone from under it)
-        if not keep_box:
+        if not gone:
             self.keep_draft(key)  # (the box this chat's to come back to; the next chat's own put in it: take_draft)
+        if carried is not None:
+            self.set_box(*carried)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
         self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
@@ -14877,11 +14887,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         """The chat's tab shown (from the Feedback tab, a file's code)."""
         self.tabs.show("chat")
 
-    def new_session(self, run_in=None, group=None):
+    def new_session(self, run_in=None, group=None, carry=False):
         """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
         Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that. group:
         the group it's started in (New session with one group picked in ⋮), kept while it's a draft (another folder or
-        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none."""
+        model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none.
+        carry: the open chat's gone (carry_on)."""
         if group is not None or self.remote is None or not (self.remote.sessions.get(self.session_id) or {}).get(
                 "draft"):
             self.draft_group = group or ""
@@ -14897,12 +14908,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         MarkdownView.base_dir = self.run_cwd  # (a network session's folder is its server's: open_remote)
         self.tail.stop()
         self.update_banner()
-        self.clear_transcript()
+        self.clear_transcript(keep_box=carry, gone=carry)
         self.default_mode()
         self.restart_proc(resume=False)
         self.signal_pending, self.switching_chat = None, False
         self.apply_chat_signal()  # (a new chat: links shown, Signal not activated)
-        self.take_draft()  # (a new chat's, if one was left)
+        if not carry:
+            self.take_draft()  # (a new chat's, if one was left)
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
@@ -14942,9 +14954,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.proc = None
             self.set_busy(False)
             toast(self.sidebar, f"That session was deleted on {remote_name(self.remote)}")
-            sid = self.session_id
-            self.new_session()
-            self.DRAFTS.pop(sid, None)  # (its draft with it)
+            self.carry_on(self.session_id)
             return
         if self.remote is not None:
             # (nothing said in the chat. "lost": let go of with no exit said, its host process gone (or restarted onto
@@ -15259,10 +15269,39 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     DRAFTS = {}  # draft_key -> {"text", "caret", "attachments"}
     MAX_DRAFTS = 200
 
+    GONE = set()  # the ids of chats deleted or trashed: forget_draft
+
+    @classmethod
+    def forget_draft(cls, sid):
+        """A chat deleted or trashed (here, in another window, or on its host: forget_gone): its draft gone with it, and
+        nothing kept under its id from now on (draft_key)."""
+        cls.GONE.add(sid)
+        cls.DRAFTS.pop(sid, None)
+
+    LISTED = None  # {host's key: its sessions' ids}, as last listed while it was there: forget_gone
+
+    @classmethod
+    def forget_gone(cls):
+        """The network changed: a chat a host that's there no longer lists (deleted there, by any head) forgotten."""
+        net = network()
+        with net.lock:
+            now = {r.key: set(r.sessions) for r in net.servers.values() if r.state == "alive"}
+        for key, ids in (cls.LISTED or {}).items():
+            for sid in ids - now.get(key, ids):
+                cls.forget_draft(sid)
+        cls.LISTED = {**(cls.LISTED or {}), **now}
+        cls.GONE.difference_update(*now.values())  # (listed again: a host that had lost it has it back)
+
+    def carry_on(self, sid):
+        """The open chat (sid) deleted or trashed: a new chat in its place, what's typed in the box carried into it."""
+        if sid == self.session_id:
+            self.new_session(carry=True)
+        self.forget_draft(sid)
+
     def draft_key(self):
-        """What the open chat's draft is kept under: its id, or "" while it's a new chat."""
+        """What the open chat's draft is kept under: its id, or "" while it's a new chat (or one that's gone)."""
         sid = self.session_id
-        if not sid:
+        if not sid or sid in self.GONE:
             return ""
         if getattr(self, "chat_sent", False):
             return sid
@@ -15295,10 +15334,13 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def join_drafts(first, then):
         """Two drafts for one chat (another window's, and this one's) as one: first's text, then then's (the same text
         once), and what's attached to either; the caret where then's was."""
-        a, b = first["text"].strip(), then["text"].strip()
-        text = a if a == b or not b else b if not a else f"{a}\n\n{b}"
-        shift = len(text) - len(b) if b and text != a else 0
-        caret = [c + shift for c in then["caret"]] if then.get("caret") and b else first.get("caret")
+        a, b = first["text"], then["text"]
+        if not a.strip() or a.strip() == b.strip():
+            text, caret = b, then.get("caret")
+        elif not b.strip():
+            text, caret = a, first.get("caret")
+        else:
+            text, caret = f"{a}\n\n{b}", [c + len(a) + 2 for c in then.get("caret") or [len(b)] * 2]
         seen = [(x.name, x.path, x.data) for x in first["attachments"]]
         atts = first["attachments"] + [x for x in then["attachments"] if (x.name, x.path, x.data) not in seen]
         return {"text": text, "caret": caret, "attachments": atts}

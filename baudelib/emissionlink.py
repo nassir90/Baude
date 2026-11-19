@@ -245,9 +245,10 @@ def call_bot(bot_id, name, msg, timeout=60):
         pass
     try:  # (Baude running here: the browser made in it, its pages shown in its Browser page as they are)
         call("home", {"op": "host", "bot": bot_id, "name": name}, timeout=START_S)
-        return call(pid, msg, timeout)
     except (OSError, ValueError):
         pass
+    else:
+        return call(pid, msg, timeout)  # (its own errors its own: not a reason to start another)
     os.makedirs(data_home(), exist_ok=True)
     log_path = os.path.join(data_home(), f"agent-{pid[:8]}.log")
 

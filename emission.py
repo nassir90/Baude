@@ -11,6 +11,7 @@ widget of its own. On a Linux host with no display it starts one of its own (xvf
 import argparse
 import base64
 import ctypes
+import hashlib
 import html
 import ipaddress
 import json
@@ -3236,26 +3237,109 @@ if (!globalThis.__em) globalThis.__em = (() => {
     if (el === document.activeElement) s += ' focused';
     return s;
   };
-  const read = (root, all, max) => {
-    const out = [];
-    let size = 0;
-    const put = l => { out.push(l); size += l.length + 1; };
+  const keeps = (el, all) => all ? !!role(el) : (acts(el) || role(el) === 'heading');
+  const LEAVES = ['link', 'button', 'option', 'img'];
+  const up = el => el.assignedSlot || el.parentElement || (el.parentNode instanceof ShadowRoot ? el.parentNode.host
+    : null);
+  const boxes = () => {
+    // (the rects of el's ancestors that clip it, a box it's scrolled in: only those its containing blocks are in, so
+    // what's fixed is clipped only from an ancestor that holds fixed things (a transform's, a filter's, …) out, and
+    // what's absolute only from its positioned ancestor out; shadow roots left through their hosts; looked up once a
+    // read)
+    const seen = new Map();
+    const look = p => {
+      if (!seen.has(p)) {
+        const st = getComputedStyle(p), wc = st.willChange || '';
+        seen.set(p, {pos: st.position, clip: st.overflowX === 'visible' && st.overflowY === 'visible' ? null
+          : p.getBoundingClientRect(), holds: st.transform !== 'none' || st.filter !== 'none' ||
+          st.perspective !== 'none' || /paint|layout|strict|content/.test(st.contain || '') ||
+          /transform|filter|perspective/.test(wc)});
+      }
+      return seen.get(p);
+    };
+    return function* (el) {
+      let pos = getComputedStyle(el).position;
+      for (let p = up(el); p && p !== document.body && p !== document.documentElement; p = up(p)) {
+        const box = look(p);
+        if (pos === 'fixed' && !box.holds) continue;
+        if (pos === 'absolute' && box.pos === 'static' && !box.holds) continue;
+        if (box.clip) yield box.clip;
+        pos = box.pos;
+      }
+    };
+  };
+  const read = (root, all, max, near) => {
+    // (near: only what's within that many screens of the viewport, and of any box it's scrolled in; the rest counted,
+    // above and below; null: all of root)
+    const out = [], H = innerHeight, clips = boxes();
+    let size = 0, above = 0, below = 0;
+    let cut = false;
+    const put = l => { if (size + l.length + 1 > max) { cut = true; return; } out.push(l); size += l.length + 1; };
+    const where = el => {
+      if (near === null) return 0;
+      const b = el.getBoundingClientRect();
+      if (b.bottom < -near * H) return -1;
+      if (b.top > (1 + near) * H) return 1;
+      for (const c of clips(el)) {
+        if (b.bottom < c.top - near * c.height) return -1;
+        if (b.top > c.bottom + near * c.height) return 1;
+      }
+      return 0;
+    };
     const walk = (el, depth) => {
-      if (size > max || !(el instanceof Element)) return;
+      if (cut || !(el instanceof Element)) return;
       if (el.matches('script, style, noscript, template, head') || !visible(el)) return;
-      const r = role(el), keep = all ? !!r : (acts(el) || r === 'heading');
+      const r = role(el), keep = keeps(el, all), at = keep || all ? where(el) : 0;
       let d = depth;
-      if (keep) { put(line(el, all ? depth : 0)); d = depth + 1; }
-      if (all) {
+      if (keep && at === 0) { put(line(el, all ? depth : 0)); d = depth + 1; }
+      else if (keep) at < 0 ? above++ : below++;
+      if (all && at === 0) {
         const own = [...el.childNodes].filter(c => c.nodeType === 3).map(c => c.textContent).join(' ');
         if (own.trim() && !(keep && name(el))) put('  '.repeat(d) + '- text "' + clip(own, 300) + '"');
       }
-      if (keep && ['link', 'button', 'option', 'img'].includes(r)) return;
+      if (keep && LEAVES.includes(r)) return;
       for (const c of el.children) walk(c, d);
       if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c, d);
     };
     walk(root, 0);
-    return out.join('\n') + (size > max ? '\n(… cut short: read a part with ref, or look with find)' : '');
+    return {text: out.join('\n'), above, below, cut};
+  };
+  const onscreen = () => {
+    // (read_page's elements, links, buttons, fields and headings, in the viewport now, and not clipped out of it by a
+    // box they're scrolled in: in the page's order)
+    const out = [], W = innerWidth, H = innerHeight, clips = boxes();
+    const shown = el => {
+      const b = el.getBoundingClientRect();
+      let l = Math.max(b.left, 0), t = Math.max(b.top, 0), r = Math.min(b.right, W), bt = Math.min(b.bottom, H);
+      for (const c of clips(el)) {
+        if (r <= l || bt <= t) break;
+        l = Math.max(l, c.left); t = Math.max(t, c.top); r = Math.min(r, c.right); bt = Math.min(bt, c.bottom);
+      }
+      return r > l && bt > t;
+    };
+    const walk = el => {
+      if (!(el instanceof Element) || el.matches('script, style, noscript, template, head') || !visible(el)) return;
+      if (keeps(el, false)) {
+        if (shown(el)) out.push(el);
+        if (LEAVES.includes(role(el))) return;
+      }
+      for (const c of el.children) walk(c);
+      if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c);
+    };
+    walk(document.body);
+    return out;
+  };
+  const came = (before, most, max) => {
+    // (what's in the viewport now that wasn't in before, a Set of elements: at most most lines, max characters)
+    const now = onscreen().filter(el => !before.has(el)), out = [];
+    let size = 0;
+    for (const el of now) {
+      const l = line(el, 0);
+      if (out.length >= most || size + l.length > max) break;
+      out.push(l);
+      size += l.length + 1;
+    }
+    return {lines: out, more: now.length - out.length};
   };
   const find = (q, limit) => {
     q = q.toLowerCase();
@@ -3288,7 +3372,7 @@ if (!globalThis.__em) globalThis.__em = (() => {
     el.dispatchEvent(new Event('input', {bubbles: true}));
     el.dispatchEvent(new Event('change', {bubbles: true}));
   };
-  return {ref, get, read, find, centre, line, editable, setValue, sleep, visible};
+  return {ref, get, read, onscreen, came, find, centre, line, editable, setValue, sleep, visible};
 })();
 const em = globalThis.__em;
 """
@@ -3310,6 +3394,61 @@ def guarded(fn, answer):
     return run
 
 
+REPL_THREW = "\u2063threw"  # (what a REPL's run answers when its text throws: its error)
+REPL_RUN = """let __v;
+try { __v = await (async () => {
+BODY
+})(); } catch (e) { return {"\\u2063threw": String(e) + (e && e.stack ? '\\n' + e.stack : '')}; }
+try { JSON.stringify(__v); return __v === undefined ? null : __v; } catch (e) { return String(__v); }"""
+REPL_SPLITS = 6  # (the last statements tried as the one whose value comes back)
+
+
+def repl_bodies(text):
+    """text, as a REPL reads it, as async function bodies to try in turn: all of it one expression (returned); then,
+    from the last statement back, the statements before one and that one returned; then all of it, returning nothing.
+    Statements are split at a ; or a line's end outside brackets, strings, templates and comments (one that a line
+    goes on past, an operator before or after it, isn't a split)."""
+    text = text.strip().rstrip(";").rstrip()
+    splits, depth, i, n = [], 0, 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "'\"`":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+            continue
+        if text.startswith("//", i):
+            i = text.find("\n", i)
+            i = n if i < 0 else i
+            continue
+        if text.startswith("/*", i):
+            i = text.find("*/", i + 2)
+            i = n if i < 0 else i + 2
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth = max(0, depth - 1)
+            if c == "}" and depth == 0:
+                splits.append(i + 1)
+        elif depth == 0 and c == ";":
+            splits.append(i + 1)
+        elif depth == 0 and c == "\n":
+            before, after = text[:i].rstrip()[-1:], text[i:].lstrip()[:1]
+            if before and after and before not in "+-*/%&|^.,?:=<>([{!~" and after not in "+-*/%&|^.,?:=<>)]}([`":
+                splits.append(i + 1)
+        i += 1
+    bodies, lasts = [f"return ({text}\n);"], set()
+    for at in sorted(set(splits), reverse=True):
+        head, last = text[:at], text[at:].strip()
+        if last and last not in lasts and len(lasts) < REPL_SPLITS:
+            lasts.add(last)
+            bodies.append(f"{head}\nreturn ({last}\n);")
+    bodies.append(text)
+    return bodies
+
+
 class Control:
     """What a Bot's browser tools ask of a window (emissiontools, through the host process and the socket): a request,
     answered with a dict. Input's real (the pointer moved to a place, then pressed; keys one at a time), as computer
@@ -3317,10 +3456,15 @@ class Control:
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
     TYPE_GAP_MS = 12  # (between characters typed: xdotool type's own pace)
     LOAD_S = 30  # (a page's load waited for this long at most)
+    SHOT_MAX = 1024  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
+    ZOOM_MAX = 1568  # (a zoom's longest side: what a model sees whole)
+    NEAR = 1  # (read_page: what's shown, and this many screens above and below it)
+    CAME_LINES, CAME_CHARS = 30, 1500  # (a scroll's answer: at most this much of what came into view)
 
     def __init__(self, win):
         self.win = win
         self.scales = {}  # (each tab's last screenshot's pixels to the page's: by tab id)
+        self.reads = {}  # (each tab's last read_page: what was asked and a hash of what it gave, by tab id)
         self.queue = []  # (input waiting its turn: (op, msg, answer), the first being done)
 
     # (tabs)
@@ -3332,7 +3476,7 @@ class Control:
                 self.win.view.set_selected_page(page)
                 return t
         if want:
-            raise ValueError(f"no tab {want}: tabs lists them")
+            raise ValueError(f"no tab {want}: tabs_context lists them")
         return self.win.open("about:blank")
 
     def describe(self, t):
@@ -3355,11 +3499,11 @@ class Control:
             return False
         GLib.timeout_add(100, look)
 
-    def js(self, t, body, answer, then=None, page=False):
+    def js(self, t, body, answer, then=None, page=False, failed=None):
         """body run in t's page (Emission's world, PAGE_JS's em there; page: the page's own world, for javascript):
-        then(result) given what it returned, or the error answered."""
+        then(result) given what it returned, or the error answered (or given to failed, if there's one)."""
         if t.web.view is None or t not in self.win.tabs.values():
-            answer({"error": f"tab {t.id} has closed: tabs lists the open ones"})
+            answer({"error": f"tab {t.id} has closed: tabs_context lists the open ones"})
             return
         if (waiting := [p for p in self.win.prompts(t) if p["kind"] in ("alert", "confirm", "prompt")]):
             answer({"error": "the page is waiting on its prompt, and runs nothing till it's answered (answer_prompt)",
@@ -3368,7 +3512,7 @@ class Control:
 
         def done(text, why):
             if why is not None:
-                answer({"error": why})
+                (failed or (lambda w: answer({"error": w})))(why)
                 return
             try:
                 value = json.loads(text)
@@ -3423,6 +3567,8 @@ class Control:
         if len(self.win.tabs) == 1:
             self.win.open("about:blank")
         self.win.close_tab(t)
+        self.reads.pop(t.id, None)
+        self.scales.pop(t.id, None)
         answer({"closed": t.id, "tabs": [self.describe(x) for x in self.win.tabs.values() if x is not t]})
 
     def op_navigate(self, msg, answer):
@@ -3433,9 +3579,8 @@ class Control:
 
     # (looking)
 
-    def op_screenshot(self, msg, answer):
-        t = self.tab(msg)
-
+    def picture(self, t, answer, then):
+        """then(pixbuf, view) for t's page as it's shown (view: its size, CSS pixels; the pixbuf may have more)."""
         def sized(view):
             def shot(png, why):
                 if png is None:
@@ -3446,28 +3591,88 @@ class Control:
                 loader = GdkPixbuf.PixbufLoader.new_with_type("png")
                 loader.write(png)
                 loader.close()
-                pic = loader.get_pixbuf()
-                w, h = max(1, int(view["w"])), max(1, int(view["h"]))
-                scale = min(1.0, 1568 / max(w, h))  # (no side over 1568: what a model sees whole)
-                pw, ph = max(1, round(w * scale)), max(1, round(h * scale))
-                flat = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, pw, ph)  # (no alpha: JPEG has none)
-                flat.fill(0xffffffff)
-                pic.composite(flat, 0, 0, pw, ph, 0, 0, pw / pic.get_width(), ph / pic.get_height(),
-                              GdkPixbuf.InterpType.BILINEAR, 255)
-                ok, data = flat.save_to_bufferv("jpeg", ["quality"], ["82"])
-                self.scales[t.id] = scale
-                answer({**self.describe(t), "image": base64.b64encode(data).decode(), "mime": "image/jpeg",
-                        "width": pw, "height": ph,
-                        "note": "x and y for click and scroll are this picture's pixels"})
+                then(loader.get_pixbuf(), {"w": max(1, int(view["w"])), "h": max(1, int(view["h"]))})
             GLib.timeout_add(120, guarded(lambda: t.web.snapshot(guarded(shot, answer)) and False, answer))
         self.js(t, "return {w: innerWidth, h: innerHeight}", answer, sized)
 
+    @staticmethod
+    def jpeg_of(pic, x, y, w, h, pw, ph, quality):
+        """pic's part (x, y, w, h: its pixels) as a pw by ph JPEG, on white (JPEG has no alpha)."""
+        from gi.repository import GdkPixbuf
+        flat = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, pw, ph)
+        flat.fill(0xffffffff)
+        pic.composite(flat, 0, 0, pw, ph, -x * pw / w, -y * ph / h, pw / w, ph / h, GdkPixbuf.InterpType.BILINEAR, 255)
+        return base64.b64encode(flat.save_to_bufferv("jpeg", ["quality"], [str(quality)])[1]).decode()
+
+    def op_screenshot(self, msg, answer):
+        t = self.tab(msg)
+
+        def shot(pic, view):
+            w, h = view["w"], view["h"]
+            scale = min(1.0, self.SHOT_MAX / max(w, h))
+            pw, ph = max(1, round(w * scale)), max(1, round(h * scale))
+            image = self.jpeg_of(pic, 0, 0, pic.get_width(), pic.get_height(), pw, ph, 82)
+            self.scales[t.id] = scale
+            answer({**self.describe(t), "image": image, "mime": "image/jpeg", "width": pw, "height": ph,
+                    "note": "x and y for click, scroll and zoom are this picture's pixels"})
+        self.picture(t, answer, shot)
+
+    def op_zoom(self, msg, answer):
+        """A region of the last screenshot ([x0, y0, x1, y1], its pixels), at the page's own detail: what x and y
+        are in stays the screenshot's."""
+        t = self.tab(msg)
+        region = msg.get("region")
+        if not (isinstance(region, list) and len(region) == 4 and all(isinstance(v, (int, float)) for v in region)
+                and region[2] > region[0] and region[3] > region[1]):
+            raise ValueError("zoom needs a region: [x0, y0, x1, y1], the screenshot's pixels, x1 past x0, y1 past y0")
+
+        if t.id not in self.scales:
+            raise ValueError("zoom is of a screenshot's region: take one first")
+
+        def shot(pic, view):
+            w, h = view["w"], view["h"]
+            scale = self.scales[t.id]
+            k = pic.get_width() / w  # (the picture's pixels to the page's CSS ones: 2 on a Retina display)
+            x0, y0 = max(0.0, region[0] / scale), max(0.0, region[1] / scale)
+            x1, y1 = min(float(w), region[2] / scale), min(float(h), region[3] / scale)
+            if x1 - x0 < 1 or y1 - y0 < 1:
+                return answer({"error": f"that region is off the page (the screenshot is {round(w * scale)} by "
+                                        f"{round(h * scale)})"})
+            px, py, pw, ph = x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k
+            fit = min(1.0, self.ZOOM_MAX / max(pw, ph))
+            ow, oh = max(1, round(pw * fit)), max(1, round(ph * fit))
+            answer({**self.describe(t), "image": self.jpeg_of(pic, px, py, pw, ph, ow, oh, 90), "mime": "image/jpeg",
+                    "width": ow, "height": oh, "region": [round(v) for v in region],
+                    "note": "x and y for click and scroll are still the screenshot's pixels"})
+        self.picture(t, answer, shot)
+
     def op_read_page(self, msg, answer):
+        """The page's elements near what's shown (all of ref's part, if a ref's given); or, if nothing's changed
+        since this tab's last read (its address, and what it gave), a line saying so: once, the next read giving
+        them again."""
         t = self.tab(msg)
         root = f"em.get({json.dumps(msg['ref'])})" if msg.get("ref") else "document.body"
+        near = None if msg.get("ref") else self.NEAR
+
+        def read(got):
+            text = got["text"]
+            if got.get("cut"):
+                text += "\n(… cut short: read a part with ref_id, or look with find)"
+            off = [f"{n} {side}" for n, side in ((got.get("above"), "above"), (got.get("below"), "below")) if n]
+            if off:
+                text += (f"\n(Not listed: {' and '.join(off).replace(' ', ' elements ', 1)}, more than a screen "
+                         "from what's shown. Scroll, or find, reaches them.)")
+            asked = (t.web.state().get("url") or "", msg.get("filter") or "", msg.get("ref") or "",
+                     msg.get("max_chars") or 0)
+            seen = (asked, hashlib.sha1(text.encode()).hexdigest())
+            if self.reads.get(t.id) == seen:
+                del self.reads[t.id]
+                return answer({**self.describe(t), "page": "Unchanged since your last read_page of this tab. (Read "
+                                                           "again if you no longer have it.)"})
+            self.reads[t.id] = seen
+            answer({**self.describe(t), "page": text})
         self.js(t, f"return em.read({root}, {json.dumps(msg.get('filter') == 'all')}, "
-                   f"{int(msg.get('max_chars') or 30000)})",
-                answer, lambda text: answer({**self.describe(t), "page": text}))
+                   f"{int(msg.get('max_chars') or 30000)}, {json.dumps(near)})", answer, read)
 
     def op_find(self, msg, answer):
         t = self.tab(msg)
@@ -3485,9 +3690,39 @@ class Control:
                 lambda text: answer({**self.describe(t), "text": text}))
 
     def op_javascript(self, msg, answer):
+        """text run in the page's own world as a REPL runs it (its last expression's value back, await anywhere): the
+        first of repl_bodies' readings of it that compiles, run (compiled in Emission's world first, where the page's
+        rules on scripts don't reach, without running: a syntax error's left out of the page's console); what it
+        throws said as the error. code: an async function's body, run as it is."""
         t = self.tab(msg)
-        self.js(t, str(msg.get("code") or ""), answer, lambda value: answer({**self.describe(t), "result": value}),
-                page=True)
+        if "text" not in msg:
+            return self.js(t, str(msg.get("code") or ""), answer,
+                           lambda value: answer({**self.describe(t), "result": value}), page=True)
+        bodies = repl_bodies(str(msg.get("text") or ""))
+
+        def ran(value):
+            if isinstance(value, dict) and set(value) == {REPL_THREW}:
+                return answer({"error": value[REPL_THREW]})
+            answer({**self.describe(t), "result": value})
+
+        def run(i):
+            self.js(t, REPL_RUN.replace("BODY", bodies[i]), answer, ran, page=True)
+
+        def tried(i):  # (where it couldn't be compiled there, each reading run in turn until one isn't a SyntaxError)
+            self.js(t, REPL_RUN.replace("BODY", bodies[i]), answer, ran, page=True, failed=lambda why: (
+                tried(i + 1) if "SyntaxError" in str(why) and i + 1 < len(bodies) else answer({"error": why})))
+
+        def chose(got):
+            if got.get("at") is not None:
+                return run(got["at"])
+            if got.get("unchecked"):
+                return tried(0)
+            answer({"error": got.get("why") or "SyntaxError"})
+        self.js(t, f"const bodies = {json.dumps(bodies)}, AF = (async () => {{}}).constructor; let why = null;"
+                   "for (let i = 0; i < bodies.length; i++) {"
+                   "  try { new AF(bodies[i]); return {at: i}; } catch (e) {"
+                   "    if (!(e instanceof SyntaxError)) return {unchecked: true}; why = String(e); } }"
+                   "return {why}", answer, chose)
 
     # (doing)
 
@@ -3523,8 +3758,9 @@ class Control:
                              " [tabindex]'); if (f && f.focus) f.focus(); return true", lambda *_: None)
             if msg.get("quick"):  # (the Browser page's own click: answered done, its page seen in the frames)
                 return answer({"clicked": [round(x), round(y)]})
-            self.settle(t, answer, {"clicked": [round(x), round(y)], **({"covered_by": covered} if covered else {})},
-                        started)
+            k = 1.0 if msg.get("css") else self.scales.get(t.id, 1.0)  # (said in the screenshot's pixels, as asked)
+            self.settle(t, answer, {"clicked": [round(x * k), round(y * k)],
+                                    **({"covered_by": covered} if covered else {})}, started)
         self.point(t, msg, answer, at)
 
     def op_drag(self, msg, answer):
@@ -3657,32 +3893,53 @@ class Control:
                     extra = f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}});"
                 GLib.timeout_add(250, guarded(lambda: self.js(
                     t, under.format(x=x, y=y) + extra + "await em.sleep(120);"
-                    "return {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight, inner}", answer,
-                    lambda where: answer({**self.describe(t), "scrolled": where, "by": how})) and False, answer))
+                    f"const came = em.came(em.seen || new Set(), {self.CAME_LINES}, {self.CAME_CHARS});"
+                    "em.seen = null;"
+                    "return {where: {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight, inner}, came}", answer,
+                    lambda got: answer({**self.describe(t), "scrolled": got["where"], "by": how,
+                                        "in_view": in_view(got["came"])})) and False, answer))
             self.js(t, under.format(x=x, y=y) + "return inner", answer, chosen)
+
+        def in_view(came):
+            if not came["lines"]:
+                return "Nothing new came into view."
+            more = f"\n(… and {came['more']} more: read_page lists them)" if came["more"] else ""
+            return "Came into view:\n" + "\n".join(came["lines"]) + more
+        # (what's in view first: before a ref's element is scrolled to, which may bring things into view itself)
         if msg.get("ref") or msg.get("x") is not None:
-            self.point(t, msg, answer, at)
+            self.js(t, "em.seen = new Set(em.onscreen()); return true", answer,
+                    lambda _v: self.point(t, msg, answer, at))
         else:
-            self.js(t, "return {x: innerWidth / 2, y: innerHeight / 2}", answer, lambda c: at(c["x"], c["y"], None))
+            self.js(t, "em.seen = new Set(em.onscreen()); return {x: innerWidth / 2, y: innerHeight / 2}", answer,
+                    lambda c: at(c["x"], c["y"], None))
 
     def op_console(self, msg, answer):
-        """What the page has said in its console (and its errors), newest last: pattern only those matching."""
+        """What the page has said in its console (and its errors), newest last: pattern, a regular expression, only
+        those matching it; onlyErrors, only errors; clear, forgotten after."""
         t = self.tab(msg)
         self.js(t, "const log = window[Symbol.for('emission.console')] || [];"
-                   f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
-                   f"const got = log.filter(e => !re || re.test(e.text)).slice(-{max(1, int(msg.get('limit') or 50))});"
+                   f"const p = {json.dumps(str(msg.get('pattern') or ''))};"
+                   "let re = null;"
+                   "try { re = p ? new RegExp(p) : null; } catch (e) { re = {test: x => x.includes(p)}; }"
+                   f"const errors = {json.dumps(bool(msg.get('onlyErrors')))};"
+                   "const got = log.filter(e => (!re || re.test(e.text)) && (!errors || e.level === 'error'))"
+                   f".slice(-{max(1, int(msg.get('limit') or 100))});"
                    f"if ({json.dumps(bool(msg.get('clear')))}) log.length = 0; return got", answer,
                 lambda got: answer({**self.describe(t), "console": got}), page=True)
 
     def op_network(self, msg, answer):
-        """What the page has loaded (itself, and its resources), newest last: pattern only URLs matching."""
+        """What the page has loaded (itself, and its resources), newest last: urlPattern, only URLs with it in them;
+        clear, those forgotten after."""
         t = self.tab(msg)
-        self.js(t, f"const re = {json.dumps(msg.get('pattern') or '')} ? new RegExp({json.dumps(msg.get('pattern') or '')}, 'i') : null;"
-                   "return [...performance.getEntriesByType('navigation'), ...performance.getEntriesByType('resource')]"
-                   ".filter(e => !re || re.test(e.name))"
-                   f".slice(-{max(1, int(msg.get('limit') or 50))}).map(e => ({{url: e.name, type: e.initiatorType || "
+        self.js(t, f"const p = {json.dumps(str(msg.get('urlPattern') or ''))}, K = Symbol.for('emission.network');"
+                   "const since = window[K] ?? -1;"
+                   "const got = [...performance.getEntriesByType('navigation'),"
+                   " ...performance.getEntriesByType('resource')]"
+                   ".filter(e => e.startTime > since && (!p || e.name.includes(p)))"
+                   f".slice(-{max(1, int(msg.get('limit') or 100))}).map(e => ({{url: e.name, type: e.initiatorType || "
                    "e.entryType, status: e.responseStatus || null, ms: Math.round(e.duration), "
-                   "bytes: e.transferSize || null}))", answer,
+                   "bytes: e.transferSize || null}));"
+                   f"if ({json.dumps(bool(msg.get('clear')))}) window[K] = performance.now(); return got", answer,
                 lambda got: answer({**self.describe(t), "requests": got}))
 
     def op_resize(self, msg, answer):

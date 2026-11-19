@@ -22,7 +22,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 from baudelib import emissionlink, wire  # noqa: E402
@@ -236,6 +236,7 @@ RELEASED = {}  # (a profile's id: when Baude let go of it, for someone's Emissio
 RELEASED_S = 15
 BUSY_RETRY_S = 10  # (a Bot busy in its own Emission, watched streamed: tried here again this often)
 OFF_S = 60  # (a Bot whose browser couldn't be had here: streamed, and tried here again after this long)
+RETRY_S = 3  # (a BrowserWindow's browser that's stopped, the window in front: watched again after this long)
 HOME = {"app": None}  # (Baude's application, once its home socket's open: where this Mac's Bots' browsers are made)
 
 
@@ -415,7 +416,45 @@ def guard_keys(root):
     root.add_controller(keys)
 
 
+def guard_windows(app):
+    """Each of the app's windows guarded (guard_keys), those opened later too: a Bot's keys, and their text, can come
+    to whichever has the keys. Once, on macOS (where a page is hosted in Baude)."""
+    if sys.platform != "darwin" or app is None or getattr(app, "keys_guarded", False):
+        return
+    app.keys_guarded = True
+    for w in app.get_windows():
+        guard_keys(w)
+    app.connect("window-added", lambda _a, w: guard_keys(w))
+
+
+def refuse_tab_drops(bar, ours):
+    """A tab dragged onto bar (an Adw.TabBar) refused unless ours(where its drag began: a surface, or None) says
+    it's its own: a Bot's tab never moves its page (and its profile's store) into another's view, nor another's
+    into a Bot's, nor a chat's in or out. Taken first (before the bar's own drop targets), and given nowhere."""
+    drop = Gtk.DropTarget.new(Adw.TabPage, Gdk.DragAction.MOVE)
+    drop.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+    def foreign(_target, d):
+        drag = d.get_drag() if d is not None else None
+        return not ours(drag.get_surface() if drag is not None else None)
+    drop.connect("accept", foreign)
+    for signal in ("enter", "motion"):
+        drop.connect(signal, lambda *_: Gdk.DragAction.MOVE)  # (taken, so the bar beneath never sees it)
+    drop.connect("drop", lambda *_: False)
+    bar.add_controller(drop)
+
+
 PANES = set()  # (the side panels' Browser pages)
+ALL = set()  # (every Browser page, the side panels' and BrowserWindows')
+LISTENING = []  # (the network its listings come from, once it's listened to: presence_check's)
+
+
+def listen(network):
+    """Each Browser page shown told as listings change (a turn at its tools or not: presence_check). Once."""
+    if network is None or LISTENING:
+        return
+    LISTENING.append(network)
+    network.listen(lambda: [pane.presence_check() for pane in list(ALL)])
 DISEMBODIED = {}  # (a Bot's chat id: its BrowserWindow, its browser out of the side panel)
 RESTORE = {"left": None}  # (the chats whose browsers were out as Baude last ran: out again once they're listed)
 RESTORE_S = 60
@@ -426,24 +465,37 @@ def remember():
     widgets.save_settings(browser_out=sorted(set(DISEMBODIED) | set(RESTORE["left"] or ())))
 
 
+def baude_window(app, sid=None):
+    """The Baude window a Bot's browser window belongs to: the one with its chat open, else the one in front, else
+    the first (None: none's left)."""
+    shown = [w for w in (app.get_windows() if app is not None else []) if getattr(w, "sidebar", None) is not None
+             and not getattr(w, "let_go_done", False)]
+    return next((w for w in shown if sid is not None and getattr(w, "session_id", None) == sid), None) or \
+        (app.get_active_window() if app.get_active_window() in shown else None) or (shown[0] if shown else None)
+
+
 def restore_windows(win):
-    """The browsers out as Baude last ran, out again (in windows of their own), each once its chat's listed as a Bot's
-    on a host that's up; those never listed in RESTORE_S, forgotten. Once for the process."""
+    """The browsers out as Baude last ran, out again (in windows of their own, behind what's in front), each once
+    its chat's listed as a Bot's on a host that's up, with the Baude window it belongs to (baude_window); those
+    never listed in RESTORE_S, forgotten. Once for the process."""
     if RESTORE["left"] is not None:
         return
     RESTORE["left"] = {sid for sid in widgets.load_settings().get("browser_out") or [] if isinstance(sid, str)}
-    tries = [0]
+    tries, app = [0], win.get_application()
 
     def look():
         tries[0] += 1
-        sidebar = getattr(win, "sidebar", None)
         for sid in list(RESTORE["left"]):
+            main = baude_window(app, sid)
+            if main is None:
+                continue
+            sidebar = getattr(main, "sidebar", None)
             info = sidebar.find_info(sid) if sidebar is not None else None
             r = (info or {}).get("remote")
             if sid in DISEMBODIED or info and info.get("bot") and r is not None and r.state == "alive":
                 RESTORE["left"].discard(sid)
                 if sid not in DISEMBODIED:
-                    BrowserWindow(win, info)
+                    BrowserWindow(main, info, restored=True)
         if RESTORE["left"] and tries[0] < RESTORE_S:
             return True
         if RESTORE["left"]:
@@ -461,7 +513,8 @@ class BrowserWindow(Adw.ApplicationWindow):
     panel page says it's out; closed, it's back there. Out as Baude last ran: out again (restore_windows). main: the
     Baude window it came from (gone, this goes too, to come back next time)."""
 
-    def __init__(self, main, info):
+    def __init__(self, main, info, restored=False):
+        """restored: out again as Baude starts (shown behind the window in front, not taking the keys)."""
         super().__init__(application=main.get_application(), title="Emission", default_width=1180,
                          default_height=820)
         self.main, self.sid, self.done = main, info["id"], False
@@ -482,12 +535,39 @@ class BrowserWindow(Adw.ApplicationWindow):
             keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(accel),
                                                Gtk.CallbackAction.new(lambda *_a, fn=fn: (fn(), True)[1])))
         self.add_controller(keys)
+        refuse_tab_drops(self.pane.tabs, lambda surface: surface is not None and surface == self.get_surface())
         self.connect("close-request", lambda *_: self.put_back(closing=True) or False)
-        self.connect("notify::is-active", lambda *_: self.is_active() and self.pane.stream is None and
-                     self.pane.here is None and self.pane.watch_if_shown())  # (stopped: started again, come back to)
-        self.gone_id = main.connect("destroy", lambda *_: self.drop())
-        self.present()
+        self.connect("notify::is-active", lambda *_: self.is_active() and self.pane.watch_again())  # (stopped:
+        # started again, come back to)
+        self.gone_id = self.get_application().connect("window-removed", lambda _a, w: w is self.main and self.gone())
+        if restored:
+            self.show_behind()
+        else:
+            self.present()
         self.pane.show(info)
+
+    def show_behind(self):
+        """Shown, but behind the Baude window it belongs to, which keeps the keys (put there once it's drawn: GTK
+        brings a window it shows to the front as it draws it first)."""
+        def behind(*_):
+            front = macos.native_window(self.main) if self.main is not None and self.main.get_mapped() else None
+            ns = macos.native_window(self)
+            if front and ns:
+                macos.objc_send(ns, b"orderWindow:relativeTo:", -1, macos.objc_send(front, b"windowNumber",
+                                                                                     ret=ctypes.c_long),
+                                types=(ctypes.c_long, ctypes.c_long))  # (-1: below it)
+                macos.objc_send(front, b"makeKeyWindow")
+            return False
+        if sys.platform == "darwin":
+            import ctypes
+            import macos
+            frames = [0]
+
+            def tick(*_):  # (its second frame: drawn by then)
+                frames[0] += 1
+                return frames[0] < 2 or behind()
+            self.connect("map", lambda *_: self.add_tick_callback(tick))
+        self.set_visible(True)
 
     def keys_to_gtk(self):
         if sys.platform == "darwin":
@@ -504,6 +584,15 @@ class BrowserWindow(Adw.ApplicationWindow):
             if pane.sid == self.sid:
                 pane.came_back()
 
+    def gone(self):
+        """The Baude window it came from closed: gone with it, still out as Baude next starts (kept), and the other
+        Baude windows' side panels showing its Bot's browser again."""
+        main = self.main
+        self.drop()
+        for pane in list(PANES):
+            if pane.sid == self.sid and pane.win is not main and not getattr(pane.win, "let_go_done", False):
+                pane.came_back()
+
     def drop(self, closing=False):
         """Gone: its page let go of (for the side panel's to have), the window too unless it's closing itself."""
         if self.done:
@@ -512,7 +601,8 @@ class BrowserWindow(Adw.ApplicationWindow):
         if DISEMBODIED.get(self.sid) is self:
             DISEMBODIED.pop(self.sid)
         if self.main is not None:
-            self.main.disconnect(self.gone_id)
+            if (app := self.main.get_application() or self.get_application()) is not None:
+                app.disconnect(self.gone_id)
             self.main = None
         self.pane.stop()
         if not closing:
@@ -528,24 +618,22 @@ class Presence(Gtk.Widget):
     def __init__(self, pane):
         import emission
         super().__init__(can_target=False, hexpand=True, vexpand=True)
-        self.pane, self.pointer, self.ticking, self.draw = pane, emission.BotPointer(), None, emission.draw_pointer
+        self.pane, self.pointer, self.ticking = pane, emission.BotPointer(), None
         self.connect("unmap", lambda *_: self.ticking is not None and (self.remove_tick_callback(self.ticking),
                                                                        setattr(self, "ticking", None)))
 
-    glow = None  # (the glow's picture, and the accent it's in)
-
     def draw_glow(self, snapshot, x, y, w, h, rgb):
-        """The glow over the frame at x, y, w by h: macOS's overlay's picture of it (emission.glow_surface), its
+        """The glow over the frame at x, y, w by h: macOS's overlay's picture of it (emission.glow_pixels), its
         corners as they are, its sides stretched along the frame's edges, nothing in the middle."""
         import emission
-        size = emission.GLOW_REACH * 2 + 4
-        if self.glow is None or self.glow[1] != rgb:
-            _surface, pixels = emission.glow_surface(size, rgb)
-            self.glow = (Gdk.MemoryTexture.new(size * 2, size * 2, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
-                                               GLib.Bytes.new(bytes(pixels)), size * 8), rgb)
-        texture, r = self.glow[0], min(emission.GLOW_REACH, w / 2, h / 2)
-        cuts = ((0, emission.GLOW_REACH), (emission.GLOW_REACH, size - emission.GLOW_REACH),
-                (size - emission.GLOW_REACH, size))
+        size, reach = emission.GLOW_REACH * 2 + 4, emission.GLOW_REACH
+        key = (size, rgb)
+        if key not in GLOW_TEXTURES:
+            GLOW_TEXTURES.clear()  # (the accent's changed: the last one's no more use)
+            GLOW_TEXTURES[key] = Gdk.MemoryTexture.new(size * 2, size * 2, Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED,
+                                                       GLib.Bytes.new(emission.glow_pixels(size, rgb, 2)), size * 8)
+        texture, r = GLOW_TEXTURES[key], min(reach, w / 2, h / 2)
+        cuts = ((0, reach), (reach, size - reach), (size - reach, size))
         xs = ((x, x + r), (x + r, x + w - r), (x + w - r, x + w))
         ys = ((y, y + r), (y + r, y + h - r), (y + h - r, y + h))
         for i in range(3):
@@ -558,6 +646,11 @@ class Presence(Gtk.Widget):
                 snapshot.append_texture(texture, Graphene.Rect().init(xs[i][0] - cuts[i][0] * kx,
                                                                       ys[j][0] - cuts[j][0] * ky, size * kx, size * ky))
                 snapshot.pop()
+
+    def accent_changed(self):
+        """(widgets.apply_accent's) Drawn again in the new accent, hosted too."""
+        self.pane.presence_check()
+        self.queue_draw()
 
     def kick(self):
         """Drawn each frame while anything moves."""
@@ -587,19 +680,60 @@ class Presence(Gtk.Widget):
             snapshot.push_opacity(look["glow"])
             self.draw_glow(snapshot, x, y, w, h, rgb)
             snapshot.pop()
-        spots = []
-        if look["x"] is not None and look["alpha"] > 0:
-            spots.append((x + look["x"] * sx - 4, y + look["y"] * sy - 4, 30, 36))
-        for rx, ry, r, _a in look["rings"]:
-            spots.append((x + rx * sx - r - 3, y + ry * sy - r - 3, 2 * r + 6, 2 * r + 6))
-        for hx, hy, *_ in look["hints"]:
-            spots.append((x + hx * sx - 60, y + hy * sy - 60, 130, 130))
-        if spots:
-            left, top = min(p[0] for p in spots), min(p[1] for p in spots)
-            right, bottom = max(p[0] + p[2] for p in spots), max(p[1] + p[3] for p in spots)
-            cr = snapshot.append_cairo(Graphene.Rect().init(left, top, right - left, bottom - top))
-            self.draw(cr, look, rgb, sx, sy, x, y)
+        if hasattr(Gsk, "PathBuilder"):  # (GTK 4.14's: paths drawn, filled and stroked)
+            self.draw_pointer(snapshot, look, rgb, x, y, sx, sy)
         snapshot.pop()
+
+    @staticmethod
+    def rgba(rgb, a):
+        c = Gdk.RGBA()
+        c.red, c.green, c.blue, c.alpha = *rgb, max(0.0, min(1.0, a))
+        return c
+
+    @staticmethod
+    def path(lines, closed=False, circle=None):
+        b = Gsk.PathBuilder.new()
+        if circle is not None:
+            b.add_circle(Graphene.Point().init(circle[0], circle[1]), circle[2])
+        for line in lines:
+            b.move_to(*line[0])
+            for p in line[1:]:
+                b.line_to(*p)
+            if closed:
+                b.close()
+        return b.to_path()
+
+    def draw_pointer(self, snapshot, look, rgb, ox, oy, sx, sy):
+        """look's rings, chevrons and pointer (emission's shapes), the page's point (x, y) at (ox + x * sx,
+        oy + y * sy)."""
+        import emission
+        a, white, winding = look["alpha"], (1, 1, 1), Gsk.FillRule.WINDING
+
+        def stroke(width):
+            st = Gsk.Stroke.new(width)
+            st.set_line_join(Gsk.LineJoin.ROUND)
+            st.set_line_cap(Gsk.LineCap.ROUND)
+            return st
+        for x, y, r, ra in look["rings"]:
+            ring = self.path([], circle=(ox + x * sx, oy + y * sy, r))
+            snapshot.append_fill(ring, winding, self.rgba(rgb, 0.22 * ra * a))
+            snapshot.append_stroke(ring, stroke(emission.RING_EDGE), self.rgba(rgb, ra * a))
+        for x, y, dx, dy, k, ha in look["hints"]:
+            (ux, uy), (cx, cy) = emission.hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
+            lines = self.path(emission.chevrons(cx, cy, ux, uy))
+            snapshot.append_stroke(lines, stroke(5), self.rgba(white, ha * a))
+            snapshot.append_stroke(lines, stroke(2.8), self.rgba(rgb, ha * a))
+        if look["x"] is not None and a > 0:
+            tx, ty = ox + look["x"] * sx, oy + look["y"] * sy
+            dx, dy = emission.ARROW_SHADOW
+            snapshot.append_fill(self.path([emission.arrow_at(tx + dx, ty + dy, look["scale"])], closed=True), winding,
+                                 self.rgba((0, 0, 0), 0.28 * a))
+            arrow = self.path([emission.arrow_at(tx, ty, look["scale"])], closed=True)
+            snapshot.append_fill(arrow, winding, self.rgba(rgb, a))
+            snapshot.append_stroke(arrow, stroke(emission.ARROW_EDGE), self.rgba(white, a))
+
+
+GLOW_TEXTURES = {}  # ((its size, the accent): the glow's texture, made once for each)
 
 
 DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
@@ -660,12 +794,15 @@ class BrowserPane(Gtk.Box):
         self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
         self.connect("unmap", lambda *_: self.stop(keep=True))
         self.size_timer = GLib.timeout_add(500, self.size_check)
-        self.presence_timer = GLib.timeout_add(250, self.presence_check)
-        self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), GLib.source_remove(
-            self.presence_timer), PANES.discard(self), self.stop()))
+        self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), PANES.discard(self),
+                                            ALL.discard(self), self.stop()))
+        ALL.add(self)
         if bound is None:
             PANES.add(self)
             restore_windows(win)
+            if (main_tabs := getattr(getattr(win, "tabs", None), "bar", None)) is not None:  # (Baude's own tabs
+                refuse_tab_drops(main_tabs, lambda surface: surface is None or not any(  # take none of a Bot's
+                    surface == w.get_surface() for w in DISEMBODIED.values()))           # browser's)
 
     def panel_bars(self, over):
         """The side panel's: one bar (back, forward, reload, the address, the host, a new tab, Restart as Native, out
@@ -759,7 +896,9 @@ class BrowserPane(Gtk.Box):
         self.list_hosts()
         self.set_state({})
         self.show_out()
+        listen(getattr(self.home, "network", None))
         self.watch_if_shown()
+        self.presence_check()
 
     def list_hosts(self):
         """The hosts that are there (the chat's first): the Bot has a browser of its own on each it's used."""
@@ -788,8 +927,8 @@ class BrowserPane(Gtk.Box):
             self.out.set_tooltip_text("Put Back in the Side Panel" if out else "Move to Its Own Window")
         finally:
             self.setting = False
-        for w in (self.back, self.fwd, self.reload, self.address, self.new):
-            w.set_visible(not out)
+        for w in (self.back, self.fwd, self.reload, self.address, self.new, self.read_only):
+            w.set_visible(not out)  # (its lock too: the window's, while it's out)
         self.gap.set_visible(out)
         self.host_pick.set_visible(not out and len(self.hosts) > 1)
         if out:
@@ -817,9 +956,13 @@ class BrowserPane(Gtk.Box):
         BrowserWindow(self.win, info)
 
     def came_back(self):
-        """Its window closed: its Bot's browser here again."""
+        """Its window closed: its Bot's browser here again, read-only as it was left there (the setting's)."""
+        held = bool((widgets.load_settings().get("browser_read_only") or {}).get(self.sid or "", False))
+        self.read_only.set_active(held)
+        self.read_only_set(held)
         self.show_out()
         self.watch_if_shown()
+        self.presence_check()
 
     def host_picked(self):
         i = self.host_pick.get_selected()
@@ -877,8 +1020,10 @@ class BrowserPane(Gtk.Box):
 
     def ended(self, why):
         self.stream = None
-        again = "It restarts when you come back to this window." if self.bound is not None else \
+        again = "It restarts in a moment, or when you come back to this window." if self.bound is not None else \
             "It restarts when you open this page again."
+        if self.bound is not None:  # (in front: tried again soon, as it is when it's come back to)
+            GLib.timeout_add_seconds(RETRY_S, lambda: self.bound.is_active() and self.watch_again() and False)
         if why and self.picture.get_paintable() is None:  # (it never showed: why, in its place)
             self.say_status("Couldn't open the browser", why)
         else:
@@ -887,6 +1032,11 @@ class BrowserPane(Gtk.Box):
         self.said.set_label("The browser stopped. " + again)
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
         # as the status isn't)
+
+    def watch_again(self):
+        """A BrowserWindow's browser watched again if it had stopped (not while it's watched, or hosted)."""
+        if self.stream is None and (self.here is None or self.here.win is None):
+            self.watch_if_shown()
 
     # (a Bot of this Mac's: its pages here)
 
@@ -946,9 +1096,9 @@ class BrowserPane(Gtk.Box):
         here.win.blocked = self.read_only.get_active()
         if self.bound is not None:  # (its own tabs, in Emission's strip)
             self.tabs.set_view(here.win.view)
-        for root in {self.get_root(), self.win, *Gtk.Window.list_toplevels()}:  # (each of Baude's windows: a
-            if isinstance(root, Gtk.Window) and not getattr(root, "hosted", False):  # Bot's key's text goes to
-                guard_keys(root)                                         # whichever has the keys, its own or not)
+        if isinstance(self.get_root(), Gtk.Window):
+            guard_keys(self.get_root())
+        guard_windows(self.win.get_application())
         self.presence_check()
         self.here_state()
         if self.here_poll is None:
@@ -983,7 +1133,9 @@ class BrowserPane(Gtk.Box):
     def presence_check(self):
         """The glow as the Bot's turn is (its host's listing: acting, at its tools; not writing to you, not done),
         in the accent: given the pointer drawn over its page (hosted: its window's, drawn by MacOverlay; streamed:
-        Presence's)."""
+        Presence's). As listings change (listen), and as its page is shown or its frames start."""
+        if self.sid is None or not self.get_mapped():  # (nothing for a page out of sight, or a chat's)
+            return False
         listed = (getattr(self.home, "sessions", None) or {}).get(self.sid) or {}
         acting = bool(listed.get("acting")) and listed.get("state") == "working" and not self.is_out() and \
             getattr(self.home, "state", "alive") == "alive"
@@ -996,7 +1148,7 @@ class BrowserPane(Gtk.Box):
         else:
             self.presence.pointer.set_acting(acting and self.stream is not None)
         self.presence.kick()
-        return True
+        return False
 
     def play_pointer(self, log):
         """The Bot's pointer's moves its Emission's told its watchers (a streamed one's), those not played yet,
@@ -1036,10 +1188,14 @@ class BrowserPane(Gtk.Box):
     # (what comes)
 
     def got_frame(self, texture, w, h, view, shown):
+        first = self.picture.get_paintable() is None
         self.frame_size = (w, h)
         if view and min(view) > 0:
             self.view_size = tuple(view)
         self.picture.set_paintable(texture)
+        self.presence.queue_draw()  # (drawn over the frame where it is now)
+        if first:  # (watched from now: the glow as its turn is, a tool call under way already, say)
+            self.presence_check()
         self.body.set_visible_child_name("page")
         if self.said.get_label().startswith("The browser stopped"):
             self.said.set_visible(False)
@@ -1049,6 +1205,8 @@ class BrowserPane(Gtk.Box):
         self.state = state or {}
         view = self.state.get("view")
         if view and min(view) > 0:  # (a page not laid out yet says 0 by 0: not taken)
+            if tuple(view) != self.view_size:
+                self.presence.queue_draw()
             self.view_size = tuple(view)
             if self.stream is not None and self.state.get("agent"):
                 self.fit_page()
@@ -1309,6 +1467,8 @@ class BrowserPane(Gtk.Box):
 
     def hover(self):
         self.hover_source = None
+        if self.stream is None and self.here is None:  # (the last frame of one that's stopped: nothing to hover)
+            return False
         at = self.to_page(*self.pointer) if self.pointer and self.drag is None else None
         if at is not None and not self.asks.pending:  # (only with nothing else waiting: never queued behind)
             self.ask({"op": "hover", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "quick": True})

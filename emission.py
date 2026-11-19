@@ -784,7 +784,7 @@ class MacWeb:
             self.detach()
             send(content, b"addSubview:", self.view, types=(ctypes.c_void_p,))
             self.attached, self.attached_root = content, "parked"
-        w, h = getattr(self.window, "page_size", None) or (1280, 900)
+        w, h = getattr(self.window, "fit_size", None) or getattr(self.window, "page_size", None) or (1280, 900)
         now = send(self.view, b"frame", ret=R)
         if (now.w, now.h) != (w, h):
             send(self.view, b"setFrame:", R(0, 0, w, h), types=(R,))
@@ -1421,48 +1421,17 @@ class BotPointer:
             self.step_t = now
 
 
-def draw_pointer(cr, look, rgb, sx=1.0, sy=1.0, ox=0.0, oy=0.0):
-    """look (BotPointer.look's) drawn with cairo: the page's point (x, y) at (ox + x * sx, oy + y * sy); rgb the
-    accent's (0-1 each). Its rings, its chevrons, then the pointer itself (an arrow in the accent, edged in white)."""
-    a = look["alpha"]
-    for x, y, r, ra in look["rings"]:
-        cr.arc(ox + x * sx, oy + y * sy, r, 0, 2 * math.pi)
-        cr.set_source_rgba(*rgb, 0.22 * ra * a)
-        cr.fill_preserve()
-        cr.set_source_rgba(*rgb, ra * a)
-        cr.set_line_width(2.5)
-        cr.stroke()
-    for x, y, dx, dy, k, ha in look["hints"]:
-        (ux, uy), (cx, cy) = hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
-        draw_chevron(cr, cx, cy, ux, uy, rgb, ha * a)
-    if look["x"] is not None and a > 0:
-        draw_arrow(cr, ox + look["x"] * sx, oy + look["y"] * sy, look["scale"], a, rgb)
+# (what's drawn over a page for the Bot's pointer, as shapes in the page's points: GTK draws them with its own paths,
+# macOS's overlay with Core Animation's)
+
+ARROW = [(0, 0), (0, 21), (5.5, 16.1), (9.1, 24), (12.5, 22.6), (9, 14.9), (16.1, 14.9)]  # (its tip at 0, 0)
+ARROW_SHADOW = (0.6, 1.6)  # (its shadow: this far right and down)
+RING_EDGE, ARROW_EDGE = 2.5, 1.6  # (lines' widths)
 
 
-ARROW = [(0, 0), (0, 21), (5.5, 16.1), (9.1, 24), (12.5, 22.6), (9, 14.9), (16.1, 14.9)]
-
-
-def draw_arrow(cr, x, y, scale, alpha, rgb):
-    """The pointer, its tip at (x, y)."""
-    for dx, dy, fill in ((0.6, 1.6, None), (0, 0, rgb)):  # (its shadow first, a little down)
-        cr.save()
-        cr.translate(x + dx, y + dy)
-        cr.scale(scale, scale)
-        cr.move_to(*ARROW[0])
-        for p in ARROW[1:]:
-            cr.line_to(*p)
-        cr.close_path()
-        if fill is None:
-            cr.set_source_rgba(0, 0, 0, 0.28 * alpha)
-            cr.fill()
-        else:
-            cr.set_source_rgba(*fill, alpha)
-            cr.fill_preserve()
-            cr.set_line_join(1)  # (round)
-            cr.set_line_width(1.6)
-            cr.set_source_rgba(1, 1, 1, alpha)
-            cr.stroke()
-        cr.restore()
+def arrow_at(x, y, scale=1.0):
+    """The pointer's outline, its tip at (x, y)."""
+    return [(x + px * scale, y + py * scale) for px, py in ARROW]
 
 
 def hint_at(x, y, dx, dy, k):
@@ -1474,24 +1443,20 @@ def hint_at(x, y, dx, dy, k):
     return (ux, uy), (x + 9 + ux * d, y + 13 + uy * d)
 
 
-def draw_chevron(cr, cx, cy, ux, uy, rgb, alpha):
-    """Two chevrons, one after the other, at (cx, cy) pointing along (ux, uy)."""
+def chevrons(cx, cy, ux, uy):
+    """Two chevrons, one after the other, at (cx, cy) pointing along (ux, uy): each a line of three points."""
     px, py = -uy, ux
-    cr.set_line_cap(1)
-    cr.set_line_join(1)
-    for width, colour in ((5, (1, 1, 1)), (2.8, rgb)):
-        for back in (-4.5, 3.5):
-            bx, by = cx + ux * back, cy + uy * back
-            cr.move_to(bx - ux * 4 + px * 7, by - uy * 4 + py * 7)
-            cr.line_to(bx + ux * 3, by + uy * 3)
-            cr.line_to(bx - ux * 4 - px * 7, by - uy * 4 - py * 7)
-        cr.set_source_rgba(*colour, alpha)
-        cr.set_line_width(width)
-        cr.stroke()
+    out = []
+    for back in (-4.5, 3.5):
+        bx, by = cx + ux * back, cy + uy * back
+        out.append([(bx - ux * 4 + px * 7, by - uy * 4 + py * 7), (bx + ux * 3, by + uy * 3),
+                    (bx - ux * 4 - px * 7, by - uy * 4 - py * 7)])
+    return out
 
 
 GLOW_STRENGTH = 0.72  # (the glow: how strong it is at the page's edge itself, 0 to 1,
 GLOW_REACH = 80       # and how far in it reaches, in points)
+GLOWS = {}  # ((size, rgb, scale): its picture's pixels, made once)
 
 
 def glow_at(d, depth=GLOW_REACH):
@@ -1499,30 +1464,39 @@ def glow_at(d, depth=GLOW_REACH):
     return GLOW_STRENGTH * (1 - d / depth) ** 2.4 if d < depth else 0.0
 
 
-def glow_surface(size, rgb, scale=2):
-    """The glow for a page size by size points (cairo's, scale pixels a point), each pixel as strong as its edges
-    make it together, so its corners are as soft as its sides (macOS's overlay stretches its middle to the page's
-    size: GTK draws the same with an inset shadow)."""
-    import cairo
+def glow_pixels(size, rgb, scale=2):
+    """The glow for a page size by size points, as size * scale pixels each way (RGBA, premultiplied: a texture's,
+    or a CGImage's), each pixel as strong as its two nearest edges make it together, so its corners are as soft as
+    its sides. What's drawn stretches its middle to the page's size (MacOverlay, browserpane's Presence). Made once
+    for each accent and scale."""
+    key = (size, tuple(round(c, 4) for c in rgb), scale)
+    if key in GLOWS:
+        return GLOWS[key]
+    import array
     n = size * scale
-    edge = [glow_at(min(i, n - 1 - i) / scale) for i in range(n)]
-    r, g, b = (round(c * 255) for c in rgb)
-    data = bytearray(n * n * 4)
-    for y in range(n):
+    half = (n + 1) // 2
+    edge = [glow_at(i / scale) for i in range(half)]
+    r, g, b = (c * 255 for c in rgb)
+    rows = []
+    for y in range(half):
         ey = edge[y]
-        row = bytearray()
-        for x in range(n):
+        left = array.array("I", [0]) * half
+        for x in range(half):
             a = 1 - (1 - edge[x]) * (1 - ey)
-            row += bytes((round(b * a), round(g * a), round(r * a), round(255 * a)))  # (premultiplied BGRA)
-        data[y * n * 4:(y + 1) * n * 4] = row
-    return cairo.ImageSurface.create_for_data(data, cairo.FORMAT_ARGB32, n, n, n * 4), data
+            left[x] = round(r * a) | round(g * a) << 8 | round(b * a) << 16 | round(255 * a) << 24
+        row = left + left[::-1][n % 2:]  # (the right half the left's, mirrored)
+        if sys.byteorder != "little":
+            row.byteswap()
+        rows.append(row.tobytes())
+    GLOWS[key] = b"".join(rows + rows[::-1][n % 2:])  # (the bottom half the top's)
+    return GLOWS[key]
 
 
 class MacOverlay:
     """What's drawn over a hosted page on macOS (its MacWeb's view): a view of its own laid over the page, layers in
     it, that's never hit (clicks, wheels and keys go through to the page) and isn't the page's (the Bot's screenshots
-    are WebKit's picture of the page alone). BotPointer's look drawn in it: the glow, its rings and chevrons, the
-    pointer."""
+    are WebKit's picture of the page alone). BotPointer's look drawn in it: the glow (a picture, its middle stretched),
+    its rings, its chevrons and the pointer (Core Animation's shapes)."""
     klass = None
     kept = []
     RINGS, HINTS = 4, 3
@@ -1549,31 +1523,33 @@ class MacOverlay:
             cls.klass = klass
         return cls.klass
 
-    @staticmethod
-    def image(w, h, draw, surface=None):
-        """An NSImage of w by h points (drawn at twice that) by draw(cr), or of surface (twice that, made)."""
-        import cairo
-        if surface is None:
-            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w * 2, h * 2)
-            cr = cairo.Context(surface)
-            cr.scale(2, 2)
-            draw(cr)
-        import io
-        out = io.BytesIO()
-        surface.write_to_png(out)
-        data = out.getvalue()
-        send = macos.objc_send
-        ns = send(b"NSData", b"dataWithBytes:length:", data, len(data), types=(ctypes.c_char_p, ctypes.c_ulong))
-        img = send(send(b"NSImage", b"alloc"), b"initWithData:", ns, types=(ctypes.c_void_p,))
-        send(img, b"setSize:", MacPoint(w, h), types=(MacPoint,))
-        return img
+    cg = None
 
-    @staticmethod
-    def colour(rgb, a=1.0):
-        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-        cg.CGColorCreateSRGB.restype = ctypes.c_void_p
-        cg.CGColorCreateSRGB.argtypes = [ctypes.c_double] * 4
-        return cg.CGColorCreateSRGB(*rgb, a)
+    @classmethod
+    def graphics(cls):
+        if cls.cg is None:
+            cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg.CGColorCreateSRGB.restype = ctypes.c_void_p
+            cg.CGColorCreateSRGB.argtypes = [ctypes.c_double] * 4
+            cg.CGColorRelease.argtypes = cg.CGPathRelease.argtypes = cg.CGImageRelease.argtypes = [ctypes.c_void_p]
+            cg.CGPathCreateMutable.restype = ctypes.c_void_p
+            cg.CGPathMoveToPoint.argtypes = cg.CGPathAddLineToPoint.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                                                                ctypes.c_double, ctypes.c_double]
+            cg.CGPathCloseSubpath.argtypes = [ctypes.c_void_p]
+            cg.CGColorSpaceCreateDeviceRGB.restype = ctypes.c_void_p
+            cg.CGColorSpaceRelease.argtypes = [ctypes.c_void_p]
+            cg.CGDataProviderCreateWithCFData.restype = ctypes.c_void_p
+            cg.CGDataProviderCreateWithCFData.argtypes = [ctypes.c_void_p]
+            cg.CGDataProviderRelease.argtypes = [ctypes.c_void_p]
+            cg.CGImageCreate.restype = ctypes.c_void_p
+            cg.CGImageCreate.argtypes = [ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t,
+                                         ctypes.c_size_t, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                                         ctypes.c_void_p, ctypes.c_bool, ctypes.c_int]
+            cg.CFDataCreate.restype = ctypes.c_void_p
+            cg.CFDataCreate.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long]
+            cg.CFRelease.argtypes = [ctypes.c_void_p]
+            cls.cg = cg
+        return cls.cg
 
     def __init__(self, view):
         send, R = macos.objc_send, macos._rect()
@@ -1583,38 +1559,90 @@ class MacOverlay:
         send(view, b"addSubview:", self.view, types=(ctypes.c_void_p,))
         root = send(self.view, b"layer")
 
-        def layer():
-            made = send(send(b"CALayer", b"alloc"), b"init")
+        def layer(kind=b"CALayer"):
+            made = send(send(kind, b"alloc"), b"init")
             send(root, b"addSublayer:", made, types=(ctypes.c_void_p,))
             send(made, b"setOpacity:", ctypes.c_float(0.0), types=(ctypes.c_float,))
             return made
         self.glow = layer()
         self.rings = [layer() for _ in range(self.RINGS)]
-        self.hints = [layer() for _ in range(self.HINTS)]
-        self.arrow = layer()
-        self.rgb, self.drawn = None, None
+        self.hints = [layer(b"CAShapeLayer") for _ in range(self.HINTS)]
+        self.arrow = layer(b"CAShapeLayer")
+        self.layers = [self.glow, *self.rings, *self.hints, self.arrow]
+        self.rgb, self.scale, self.drawn, self.arrow_scale = None, None, None, None
+
+    def set_colour(self, layer, sel, rgb, a=1.0):
+        """layer's colour (sel: its setter) made rgb, a: the layer keeps it, so it's let go of here."""
+        cg = self.graphics()
+        c = cg.CGColorCreateSRGB(*rgb, a)
+        macos.objc_send(layer, sel, c, types=(ctypes.c_void_p,))
+        cg.CGColorRelease(c)
+
+    def set_path(self, layer, lines, closed=False):
+        """A shape layer's path: lines, each a list of points (closed: each a shape)."""
+        cg = self.graphics()
+        path = cg.CGPathCreateMutable()
+        for line in lines:
+            cg.CGPathMoveToPoint(path, None, *line[0])
+            for p in line[1:]:
+                cg.CGPathAddLineToPoint(path, None, *p)
+            if closed:
+                cg.CGPathCloseSubpath(path)
+        macos.objc_send(layer, b"setPath:", path, types=(ctypes.c_void_p,))
+        cg.CGPathRelease(path)
+
+    def glow_image(self, rgb, scale):
+        """The glow's picture (glow_pixels), a CGImage given the glow's layer (which keeps it)."""
+        cg, send = self.graphics(), macos.objc_send
+        size = GLOW_REACH * 2 + 4
+        n = size * scale
+        pixels = glow_pixels(size, rgb, scale)
+        data = cg.CFDataCreate(None, pixels, len(pixels))
+        provider = cg.CGDataProviderCreateWithCFData(data)
+        space = cg.CGColorSpaceCreateDeviceRGB()
+        image = cg.CGImageCreate(n, n, 8, 32, n * 4, space, 1, provider, None, False, 0)  # (1: premultiplied, last)
+        send(self.glow, b"setContents:", image, types=(ctypes.c_void_p,))
+        send(self.glow, b"setContentsScale:", float(scale), types=(ctypes.c_double,))  # (its pixels the screen's)
+        R = macos._rect()
+        mid = 4 / size / 2
+        send(self.glow, b"setContentsCenter:", R(0.5 - mid, 0.5 - mid, 2 * mid, 2 * mid), types=(R,))
+        cg.CGImageRelease(image)
+        cg.CGColorSpaceRelease(space)
+        cg.CGDataProviderRelease(provider)
+        cg.CFRelease(data)
 
     def colours(self, rgb):
-        """The accent's (rgb, 0-1 each) given to what's drawn in it."""
-        if rgb == self.rgb:
+        """The accent's (rgb, 0-1 each) given to what's drawn in it, and the glow drawn at its window's scale."""
+        send = macos.objc_send
+        ns = send(self.view, b"window")
+        scale = max(1, round(send(ns, b"backingScaleFactor", ret=ctypes.c_double))) if ns else 2
+        if (rgb, scale) == (self.rgb, self.scale):
             return
-        self.rgb = rgb
-        send, R = macos.objc_send, macos._rect()
-        n = GLOW_REACH * 2 + 4
-        surface, _pixels = glow_surface(n, rgb)  # (its pixels kept while it's drawn from them)
-        send(self.glow, b"setContents:", self.image(n, n, None, surface), types=(ctypes.c_void_p,))
-        send(self.glow, b"setContentsCenter:", R(0.48, 0.48, 0.04, 0.04), types=(R,))
-        self.arrow_size = (21, 29)
-        send(self.arrow, b"setContents:", self.image(*self.arrow_size, lambda cr: draw_arrow(cr, 1.5, 1.2, 1, 1, rgb)),
-             types=(ctypes.c_void_p,))
-        send(self.arrow, b"setAnchorPoint:", MacPoint(1.5 / 21, 1.2 / 29), types=(MacPoint,))
+        if scale != self.scale or rgb != self.rgb:
+            self.glow_image(rgb, scale)
+        self.rgb, self.scale = rgb, scale
         for ring in self.rings:
-            send(ring, b"setBorderWidth:", 2.5, types=(ctypes.c_double,))
-            send(ring, b"setBorderColor:", self.colour(rgb), types=(ctypes.c_void_p,))
-            send(ring, b"setBackgroundColor:", self.colour(rgb, 0.22), types=(ctypes.c_void_p,))
-        self.chevrons = {}
-        for name, (ux, uy) in (("down", (0, 1)), ("up", (0, -1)), ("right", (1, 0)), ("left", (-1, 0))):
-            self.chevrons[name] = self.image(30, 30, lambda cr, ux=ux, uy=uy: draw_chevron(cr, 15, 15, ux, uy, rgb, 1))
+            send(ring, b"setBorderWidth:", RING_EDGE, types=(ctypes.c_double,))
+            self.set_colour(ring, b"setBorderColor:", rgb)
+            self.set_colour(ring, b"setBackgroundColor:", rgb, 0.22)
+        for hint in self.hints:  # (white under the accent: its edge)
+            self.set_colour(hint, b"setStrokeColor:", rgb)
+            self.set_colour(hint, b"setFillColor:", rgb, 0.0)
+            send(hint, b"setLineWidth:", 2.8, types=(ctypes.c_double,))
+            for sel, name in ((b"setLineCap:", "round"), (b"setLineJoin:", "round")):
+                send(hint, sel, macos.ns_string(name), types=(ctypes.c_void_p,))
+            self.set_colour(hint, b"setShadowColor:", (1, 1, 1))
+            send(hint, b"setShadowOpacity:", ctypes.c_float(1.0), types=(ctypes.c_float,))
+            send(hint, b"setShadowRadius:", 1.2, types=(ctypes.c_double,))
+            send(hint, b"setShadowOffset:", MacPoint(0, 0), types=(MacPoint,))
+        self.set_colour(self.arrow, b"setFillColor:", rgb)
+        self.set_colour(self.arrow, b"setStrokeColor:", (1, 1, 1))
+        send(self.arrow, b"setLineWidth:", ARROW_EDGE, types=(ctypes.c_double,))
+        send(self.arrow, b"setLineJoin:", macos.ns_string("round"), types=(ctypes.c_void_p,))
+        self.set_colour(self.arrow, b"setShadowColor:", (0, 0, 0))
+        send(self.arrow, b"setShadowOpacity:", ctypes.c_float(0.28), types=(ctypes.c_float,))
+        send(self.arrow, b"setShadowRadius:", 0.6, types=(ctypes.c_double,))
+        send(self.arrow, b"setShadowOffset:", MacPoint(*ARROW_SHADOW), types=(MacPoint,))
         self.drawn = None
 
     def draw(self, look, rgb, mine=True):
@@ -1634,8 +1662,9 @@ class MacOverlay:
             send(self.glow, b"setOpacity:", f(look["glow"]), types=(f,))
             a = look["alpha"] if mine else 0.0
             if look["x"] is not None:
-                w, h = self.arrow_size
-                send(self.arrow, b"setBounds:", R(0, 0, w * look["scale"], h * look["scale"]), types=(R,))
+                if look["scale"] != self.arrow_scale:
+                    self.arrow_scale = look["scale"]
+                    self.set_path(self.arrow, [arrow_at(0, 0, look["scale"])], closed=True)
                 send(self.arrow, b"setPosition:", MacPoint(look["x"], look["y"]), types=(MacPoint,))
             send(self.arrow, b"setOpacity:", f(a), types=(f,))
             rings = look["rings"] if mine else []
@@ -1650,19 +1679,22 @@ class MacOverlay:
             for i, hint in enumerate(self.hints):
                 if i < len(hints):
                     x, y, dx, dy, k, ha = hints[i]
-                    (ux, uy), at = hint_at(x, y, dx, dy, k)
-                    name = ("down" if uy > 0 else "up") if abs(uy) >= abs(ux) else ("right" if ux > 0 else "left")
-                    send(hint, b"setContents:", self.chevrons[name], types=(ctypes.c_void_p,))
-                    send(hint, b"setBounds:", R(0, 0, 30, 30), types=(R,))
-                    send(hint, b"setPosition:", MacPoint(*at), types=(MacPoint,))
+                    (ux, uy), (cx, cy) = hint_at(x, y, dx, dy, k)
+                    self.set_path(hint, chevrons(cx, cy, ux, uy))
                 send(hint, b"setOpacity:", f(hints[i][5] * a if i < len(hints) else 0.0), types=(f,))
         finally:
             send(b"CATransaction", b"commit")
 
     def close(self):
+        """Gone, and what it drew with let go of (its layers keep its colours, paths and picture)."""
         if self.view:
-            macos.objc_send(self.view, b"removeFromSuperview")
-            macos.objc_send(self.view, b"release")
+            send = macos.objc_send
+            for made in self.layers:
+                send(made, b"removeFromSuperlayer")
+                send(made, b"release")
+            self.layers = []
+            send(self.view, b"removeFromSuperview")
+            send(self.view, b"release")
             self.view = None
 
 
@@ -2319,6 +2351,7 @@ class Window(Adw.ApplicationWindow):
         self.hosted, self.blocked = hosted, False  # (blocked: its pages not to be clicked or typed in, but watched)
         self.open_said = None  # (the pages it has open, as last written down for the next to find: open_pages)
         self.page_size = None  # (hosted: the Bot's own size for its pages, out of sight; None: 1280 by 900)
+        self.fit_size = None  # (hosted, out of sight, watched: the watcher's size for its pages meanwhile)
         self.asked_at = GLib.get_monotonic_time()  # (the Bot's last request: how long it's left its browser alone)
         self.released = None  # (hosted: what lets its profile go when someone's Emission asks for it)
         self.note = None  # (what the Bot's next request is told: this browser's a new one, and what it had's gone)
@@ -2481,6 +2514,10 @@ class Window(Adw.ApplicationWindow):
             if self.watch_size is not None and len(self.watchers) <= 1:  # back, unless another still drives it)
                 self.set_default_size(*self.watch_size)
                 self.watch_size = None
+            if self.fit_size is not None and len(self.watchers) <= 1:
+                self.fit_size = None
+                for tab in self.tabs.values():
+                    tab.web.follow()
             return answer({"ok": True})
         self.watch_kick()  # (something's being done: frames often for a while)
         if self.note and not msg.get("from_pane"):  # (the first of the Bot's requests told what became of the
@@ -2514,6 +2551,10 @@ class Window(Adw.ApplicationWindow):
             if self.watch_size is not None:  # (the Bot's page at its own size again: a watcher's is gone with it)
                 self.set_default_size(*self.watch_size)
                 self.watch_size = None
+            if self.fit_size is not None:
+                self.fit_size = None
+                for tab in self.tabs.values():
+                    tab.web.follow()
 
     def watch_state(self):
         tab = self.current()
@@ -3622,9 +3663,12 @@ class Control:
         w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
         if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
-        if msg.get("fit"):  # (a pane watching it streamed: its frames scaled, the Bot's own size kept)
+        if msg.get("fit"):  # (a pane watching it streamed, its page out of sight: laid out at the pane's shape while
+            self.win.fit_size = (w, h)  # it's watched, the Bot's own size again once it isn't: unwatch)
+            for tab in self.win.tabs.values():
+                tab.web.follow()
             return answer({**self.describe(t), "size": None})
-        self.win.page_size = (w, h)
+        self.win.page_size, self.win.fit_size = (w, h), None  # (the Bot's own: kept, a watcher's given up)
         for tab in self.win.tabs.values():
             tab.web.follow()
         shown = t.place.get_mapped()

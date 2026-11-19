@@ -360,11 +360,13 @@ class Session:
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
 
-def turn_acting(msg, was):
+def turn_acting(msg, was, streamed=False):
     """Whether a turn's at its tools once msg (its agent's own, not a subagent's) has come, was being whether it
-    was before: a tool call's begun (its block started, as it's streamed; or come whole), and it is; text begun, and
-    it isn't (it's writing to you). Thinking, and the rest, leave it as it was: between two calls it's still at them.
-    Its result, or its agent gone, ends it (from_claude, claude_exited)."""
+    was before: a tool call's begun (its block started, as it's streamed; or come whole, as some agents send their
+    calls though they stream their text), and it is; text begun, and it isn't (it's writing to you). streamed: its
+    agent streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say),
+    not looked at. Thinking, and the rest, leave it as it was: between two calls it's still at them. Its result, or
+    its agent gone, ends it (from_claude, claude_exited)."""
     if msg.get("type") == "stream_event":
         event = msg.get("event") or {}
         if event.get("type") != "content_block_start":
@@ -375,6 +377,8 @@ def turn_acting(msg, was):
         kinds = [c.get("type") for c in content if isinstance(c, dict)] if isinstance(content, list) else []
     if any(k in ("tool_use", "server_tool_use") for k in kinds):
         return True
+    if msg.get("type") != "stream_event" and streamed:
+        return was
     return False if "text" in kinds else was
 
 
@@ -1651,7 +1655,8 @@ class Server:
                 exe=run["exe"] if run["program"] != "claude" else self.exe,
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
-        s.used = time.time()
+        s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
+        # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
 
@@ -1867,9 +1872,9 @@ class Server:
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
             if kind == "stream_event" and not msg.get("parent_tool_use_id"):
-                s.streamed = True  # (its blocks said as they start: what's come whole after is late, not looked at)
-            if (kind == "stream_event" or kind == "assistant" and not s.streamed) and \
-                    not msg.get("parent_tool_use_id") and (acting := turn_acting(msg, s.acting)) != s.acting:
+                s.streamed = True  # (its text said as it's written: the same text come whole after is late)
+            if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and \
+                    (acting := turn_acting(msg, s.acting, s.streamed)) != s.acting:
                 s.acting = acting
                 self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
@@ -2009,7 +2014,7 @@ class Server:
         with self.lock:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
-            s.proc, s.busy, s.acting = None, False, False
+            s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)

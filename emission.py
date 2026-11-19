@@ -1334,9 +1334,11 @@ class BotPointer:
         self.acting = bool(on)
 
     def busy(self):
-        """Whether anything's moving (else what's drawn stays as it is)."""
+        """Whether anything's moving, or about to (the glow's hold after the pointer's last move running out): else
+        what's drawn stays as it is, till something's done or the Bot's turn changes."""
         return bool(self.steps or self.step or self.marks) or self.alpha not in (0.0, 1.0) or \
-            self.glow not in (0.0, 1.0) or (self.glow > 0) != self.glowing() or (self.alpha > 0) != self.shown()
+            self.glow not in (0.0, 1.0) or (self.glow > 0) != self.glowing() or (self.alpha > 0) != self.shown() or \
+            time.monotonic() - self.moved < self.GLOW_HOLD_S
 
     def moving(self):
         return bool(self.steps or self.step or self.marks)
@@ -1467,8 +1469,7 @@ def glow_at(d, depth=GLOW_REACH):
 def glow_pixels(size, rgb, scale=2):
     """The glow for a page size by size points, as size * scale pixels each way (RGBA, premultiplied: a texture's,
     or a CGImage's), each pixel as strong as its two nearest edges make it together, so its corners are as soft as
-    its sides. What's drawn stretches its middle to the page's size (MacOverlay, browserpane's Presence). Made once
-    for each accent and scale."""
+    its sides. MacOverlay stretches its middle to the page's size. Made once for each accent and scale."""
     key = (size, tuple(round(c, 4) for c in rgb), scale)
     if key in GLOWS:
         return GLOWS[key]
@@ -1490,6 +1491,28 @@ def glow_pixels(size, rgb, scale=2):
         rows.append(row.tobytes())
     GLOWS[key] = b"".join(rows + rows[::-1][n % 2:])  # (the bottom half the top's)
     return GLOWS[key]
+
+
+def glow_frame(w, h, rgb, scale=1):
+    """The glow for a page w by h pixels, scale pixels a point, whole (as glow_pixels has it: what GTK draws over a
+    streamed page as one texture, not stretched from pieces, which leave seams where they meet): each row its
+    corners' pixels worked out, its middle's put in as one."""
+    import array
+    reach = min(GLOW_REACH * scale, w // 2)
+    edge = [glow_at(i / scale) for i in range(reach)]
+    r, g, b = (c * 255 for c in rgb)
+
+    def pixel(a):
+        return round(r * a) | round(g * a) << 8 | round(b * a) << 16 | round(255 * a) << 24
+    rows = []
+    for y in range((h + 1) // 2):
+        ey = glow_at(y / scale)
+        left = array.array("I", [pixel(1 - (1 - e) * (1 - ey)) for e in edge])
+        row = left + array.array("I", [pixel(ey)]) * (w - 2 * reach) + left[::-1]
+        if sys.byteorder != "little":
+            row.byteswap()
+        rows.append(row.tobytes())
+    return b"".join(rows + rows[::-1][h % 2:])
 
 
 class MacOverlay:

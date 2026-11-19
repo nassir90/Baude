@@ -237,6 +237,7 @@ RELEASED_S = 15
 BUSY_RETRY_S = 10  # (a Bot busy in its own Emission, watched streamed: tried here again this often)
 OFF_S = 60  # (a Bot whose browser couldn't be had here: streamed, and tried here again after this long)
 RETRY_S = 3  # (a BrowserWindow's browser that's stopped, the window in front: watched again after this long)
+ADDRESS_PX = 74  # (the side panel's address at its narrowest: the bar, every button shown, fits the panel)
 HOME = {"app": None}  # (Baude's application, once its home socket's open: where this Mac's Bots' browsers are made)
 
 
@@ -628,29 +629,19 @@ class Presence(Gtk.Widget):
                                                                        setattr(self, "ticking", None)))
 
     def draw_glow(self, snapshot, x, y, w, h, rgb):
-        """The glow over the frame at x, y, w by h: macOS's overlay's picture of it (emission.glow_pixels), its
-        corners as they are, its sides stretched along the frame's edges, nothing in the middle."""
+        """The glow over the frame at x, y, w by h (on device pixels' edges): one texture of it at that size
+        (emission.glow_frame), made once for each size and accent."""
         import emission
-        size, reach = emission.GLOW_REACH * 2 + 4, emission.GLOW_REACH
-        key = (size, rgb)
+        k = self.get_scale_factor() or 1
+        key = (round(w * k), round(h * k), rgb, k)
+        if key[0] <= 0 or key[1] <= 0:
+            return
         if key not in GLOW_TEXTURES:
-            GLOW_TEXTURES.clear()  # (the accent's changed: the last one's no more use)
-            GLOW_TEXTURES[key] = Gdk.MemoryTexture.new(size * 2, size * 2, Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED,
-                                                       GLib.Bytes.new(emission.glow_pixels(size, rgb, 2)), size * 8)
-        texture, r = GLOW_TEXTURES[key], min(reach, w / 2, h / 2)
-        cuts = ((0, reach), (reach, size - reach), (size - reach, size))
-        xs = ((x, x + r), (x + r, x + w - r), (x + w - r, x + w))
-        ys = ((y, y + r), (y + r, y + h - r), (y + h - r, y + h))
-        for i in range(3):
-            for j in range(3):
-                if i == j == 1 or xs[i][1] <= xs[i][0] or ys[j][1] <= ys[j][0]:
-                    continue
-                kx = (xs[i][1] - xs[i][0]) / (cuts[i][1] - cuts[i][0])
-                ky = (ys[j][1] - ys[j][0]) / (cuts[j][1] - cuts[j][0])
-                snapshot.push_clip(Graphene.Rect().init(xs[i][0], ys[j][0], xs[i][1] - xs[i][0], ys[j][1] - ys[j][0]))
-                snapshot.append_texture(texture, Graphene.Rect().init(xs[i][0] - cuts[i][0] * kx,
-                                                                      ys[j][0] - cuts[j][0] * ky, size * kx, size * ky))
-                snapshot.pop()
+            if len(GLOW_TEXTURES) > 4:  # (sizes it's no longer at, an accent no longer picked: let go of)
+                GLOW_TEXTURES.clear()
+            GLOW_TEXTURES[key] = Gdk.MemoryTexture.new(key[0], key[1], Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED,
+                                                       GLib.Bytes.new(emission.glow_frame(*key)), key[0] * 4)
+        snapshot.append_texture(GLOW_TEXTURES[key], Graphene.Rect().init(x, y, w, h))
 
     def accent_changed(self):
         """(widgets.apply_accent's) Drawn again in the new accent, hosted too."""
@@ -680,10 +671,13 @@ class Presence(Gtk.Widget):
         look = self.pointer.look()
         c = widgets.accent_rgba()
         rgb = (c.red, c.green, c.blue)
-        snapshot.push_clip(Graphene.Rect().init(x, y, w, h))
+        k = self.get_scale_factor() or 1
+        cx, cy = round(x * k) / k, round(y * k) / k  # (what's drawn clipped to device pixels' edges: a clip off them
+        cw, ch = round((x + w) * k) / k - cx, round((y + h) * k) / k - cy  # is softened, and so is each one in it)
+        snapshot.push_clip(Graphene.Rect().init(cx, cy, cw, ch))
         if look["glow"] > 0:
             snapshot.push_opacity(look["glow"])
-            self.draw_glow(snapshot, x, y, w, h, rgb)
+            self.draw_glow(snapshot, cx, cy, cw, ch, rgb)
             snapshot.pop()
         if hasattr(Gsk, "PathBuilder"):  # (GTK 4.14's: paths drawn, filled and stroked)
             self.draw_pointer(snapshot, look, rgb, x, y, sx, sy)
@@ -738,7 +732,7 @@ class Presence(Gtk.Widget):
             snapshot.append_stroke(arrow, stroke(emission.ARROW_EDGE), self.rgba(white, a))
 
 
-GLOW_TEXTURES = {}  # ((its size, the accent): the glow's texture, made once for each)
+GLOW_TEXTURES = {}  # ((its pixels' width and height, the accent, the scale): the glow's texture, made once for each)
 
 
 DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
@@ -772,7 +766,14 @@ class BrowserPane(Gtk.Box):
                                  visible=False)  # (a browser of this Mac's streamed: drawn in place instead, at once)
         self.native.add_css_class("flat")
         self.native.connect("clicked", lambda *_: self.restart_native())
-        self.host_pick = Gtk.DropDown(tooltip_text="Host")
+        self.host_pick = Gtk.DropDown(tooltip_text="Host", show_arrow=False)  # (an icon in the bar, its hosts named
+        shown = Gtk.SignalListItemFactory()                                      # in its list: the address keeps its
+        shown.connect("setup", lambda _f, item: item.set_child(Gtk.Image(icon_name="network-server-symbolic")))  # room)
+        self.host_pick.set_factory(shown)
+        named = Gtk.SignalListItemFactory()
+        named.connect("setup", lambda _f, item: item.set_child(Gtk.Label(xalign=0)))
+        named.connect("bind", lambda _f, item: item.get_child().set_label(item.get_item().get_string()))
+        self.host_pick.set_list_factory(named)
         self.host_pick.connect("notify::selected", lambda *_: self.host_picked())
         self.prompts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6)
         self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
@@ -812,15 +813,16 @@ class BrowserPane(Gtk.Box):
     def panel_bars(self, over):
         """The side panel's: one bar (back, forward, reload, the address, the host, a new tab, Restart as Native, out
         in a window, read-only), the tabs under it while there's more than one."""
-        bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
-        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
+        bar = Gtk.Box(spacing=2, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)  # (all of it in the
+        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")           # panel's width)
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
         self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
         for b, url in ((self.back, "back"), (self.fwd, "forward"), (self.reload, "reload")):
             b.add_css_class("flat")
             b.connect("clicked", lambda _b, u=url: self.ask({"op": "navigate", "url": u, "tab": self.tab()}))
             bar.append(b)
-        self.address = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address")
+        self.address = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address", width_chars=4,
+                                 width_request=ADDRESS_PX)  # (its least: ADDRESS_PX, not GTK's own wider one)
         self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
             {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
         bar.append(self.address)
@@ -917,6 +919,7 @@ class BrowserPane(Gtk.Box):
         self.hosts = hosts
         self.host_pick.set_model(Gtk.StringList.new([r.info.get("name") or r.host for r in hosts]))
         self.host_pick.set_selected(0)
+        self.host_pick.set_tooltip_text(f"Host: {hosts[0].info.get('name') or hosts[0].host}" if hosts else "Host")
         self.host_pick.set_visible(len(hosts) > 1)
 
     def is_out(self):
@@ -979,6 +982,7 @@ class BrowserPane(Gtk.Box):
             return
         self.stop()
         self.remote = self.hosts[i]
+        self.host_pick.set_tooltip_text(f"Host: {self.remote.info.get('name') or self.remote.host}")
         self.set_state({})
         self.watch_if_shown()
 

@@ -1,12 +1,17 @@
 """A Bot's browser, on the side panel's Browser page: its own Emission (emission.py), on its chat's host or any other it
-uses, watched and driven. Its frames come as the page changes: from an Emission of this machine's own host process
-straight from it (its door), the pixels in shared memory, no picture made or copied through anything between; from one
-elsewhere through its host process (wire's emission_watch), each frame a JPEG the size the page is shown at. What you
-do with it (click, drag, type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order
-it's done, as the Bot's tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
+uses, watched and driven. A Bot of this Mac's: its Emission in this process (Here), its pages drawn in the page itself,
+as big as it is, nothing streamed (it's the Bot's again, in a process of its own, once Baude's gone). Elsewhere, its
+frames come as the page changes: from an Emission of this machine's own host process straight from it (its door), the
+pixels in shared memory; from one elsewhere through its host process (wire's emission_watch), each frame a JPEG the
+size the page is shown at, the page laid out at the side panel's size. What you do with a streamed one (click, drag,
+type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order it's done, as the Bot's
+tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
 import json
+import os
 import queue
 import socket
+import subprocess
+import sys
 import threading
 import time
 
@@ -221,6 +226,116 @@ class Asks:
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
 
 
+HERE = {}  # (a Bot's chat id: its Here: this Mac's Bots' Emissions in this process, kept while Baude runs)
+IDLE_TAKE_S = 5  # (a Bot's own Emission taken into Baude only once it's been this long without a request)
+HOME = {"app": None}  # (Baude's application, once its home door's open: where this Mac's Bots' browsers are made)
+
+
+def open_home(app):
+    """This Mac's Bots' browsers made in Baude while it runs: its home door (emissionlink.call_bot asks it first, as a
+    Bot's tool reaches for a browser it hasn't got) takes {"op": "host", "bot", "name"}, answered once it's here."""
+    if HOME["app"] is not None or sys.platform != "darwin":
+        return
+    import emission
+    HOME["app"] = app
+
+    def handle(_pid, msg, answer, _conn=None):
+        if msg.get("op") != "host" or not isinstance(msg.get("bot"), str) or not msg["bot"]:
+            return answer({"error": "the home door makes a Bot's browser: host {bot, name}"})
+        here = HERE.get(msg["bot"])
+        if here is None:
+            here = HERE[msg["bot"]] = Here(app, msg["bot"], msg.get("name"))
+        here.when_ready(lambda h: answer({"ok": True} if h.win is not None else {"error": h.why or "not here"}))
+    emission.Door.listen("home", handle)
+
+
+def can_host(remote):
+    """Whether a Bot on this host can have its browser here, in this process: this Mac's own host process's (on
+    Linux an agent's input is the display's own, so it keeps a display of its own, and its pages are streamed)."""
+    return sys.platform == "darwin" and remote is not None and remote.mine
+
+
+class Here:
+    """A Bot of this Mac's browser in this process: its profile taken from the Emission it had (its pages opened here),
+    its door this process's, so the Bot's tools reach it here. ready(here) on the main loop once it's there (win), or
+    it couldn't be (why)."""
+
+    def __init__(self, app, sid, name):
+        self.app, self.sid, self.name, self.pid, self.win, self.why, self.waiting = app, sid, name, None, None, None, []
+        threading.Thread(target=self.take, daemon=True, name="browser-here").start()
+
+    def when_ready(self, fn):
+        if self.win is not None or self.why is not None:
+            fn(self)
+        else:
+            self.waiting.append(fn)
+
+    def take(self):
+        try:
+            pid = emissionlink.bot_profile(self.sid, self.name)
+            urls = []
+            try:
+                info = emissionlink.call(pid, {"op": "info"}, timeout=3)
+                if not info.get("agent"):  # (someone's Emission window has it: watched there instead)
+                    raise OSError("it's open in an Emission window")
+                if info.get("idle_s", IDLE_TAKE_S) < IDLE_TAKE_S:  # (the Bot's using it: not taken mid-task)
+                    raise OSError("busy")
+                tabs = emissionlink.call(pid, {"op": "tabs"}, timeout=10).get("tabs") or []
+                urls = [t["url"] for t in tabs if t.get("url") and t["url"] != "about:blank"]
+                emissionlink.call(pid, {"op": "quit"}, timeout=3)
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass  # (none running)
+            end = time.monotonic() + 10
+            while not emissionlink.lock_profile(pid):
+                if time.monotonic() > end:
+                    raise OSError("its Emission didn't let go of its profile")
+                time.sleep(0.1)
+            GLib.idle_add(lambda: self.made(pid, urls) and False)
+        except (OSError, ValueError) as e:
+            GLib.idle_add(lambda: self.done(str(e)) and False)
+
+    def made(self, pid, urls):
+        try:
+            import emission
+            profile = next(p["name"] for p in emissionlink.profiles() if p["id"] == pid)
+            win = emission.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
+            if win.Engine is None or win.status is not None:
+                why = win.status.get_description() if win.status is not None else "no page engine here"
+                win.closing_window()
+                emission.Door.close(pid)
+                emissionlink.unlock_profile(pid)
+                return self.done(why)
+            for url in urls[1:]:
+                win.open(url)
+            if urls:  # (what the Bot's told, its next request: its pages moved, reloaded)
+                win.note = ("This browser moved into Baude: its pages were opened again from their addresses (what "
+                            "was typed in them, and their history, is gone): " + ", ".join(urls[:10]))
+            win.get_content().set_content(None)  # (its pages, its downloads' banner: the Browser page's to show)
+            if not HOME.get("awake"):
+                HOME["awake"] = True
+                emission.MacWeb.stay_awake()  # (a page of a Bot's runs on while Baude's out of sight)
+            self.pid, self.win = pid, win
+        except Exception as e:  # (streamed instead)
+            emissionlink.unlock_profile(pid)
+            return self.done(f"{type(e).__name__}: {e}")
+        self.done(None)
+
+    def done(self, why):
+        self.why = why
+        if why is not None:  # (asked again next time: a busy Bot's, once it's let it be)
+            HERE.pop(self.sid, None)
+        waiting, self.waiting = self.waiting, []
+        for fn in waiting:
+            fn(self)
+
+    def call(self, call, answered):
+        """call to its Emission, here (answered(reply) on the main loop)."""
+        try:
+            self.win.handle(self.pid, call, answered)
+        except Exception as e:  # (said, as an error of the call's)
+            answered({"error": f"{type(e).__name__}: {e}"})
+
+
 DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
          "navigate": "open the page", "new_tab": "open a tab", "scroll": "scroll", "select_tab": "switch tabs",
          "type": "type", "answer_prompt": "answer"}  # (what a call's error says it couldn't do)
@@ -237,6 +352,10 @@ class BrowserPane(Gtk.Box):
         self.hover_source, self.size_source, self.pointer, self.drag = None, None, None, None
         self.asks, self.hosts, self.sized_to = Asks(), [], None  # (sized_to: the size a streamed Bot's page was
         # last laid out at, here)
+        self.here, self.here_poll, self.here_off, self.here_busy = None, None, set(), None  # (here: the Here shown;
+        # here_off: Bots whose browser couldn't be had here, streamed instead; here_busy: one busy in its own
+        # Emission, streamed till the page is shown again)
+        open_home(win.get_application())
         bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
         self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -331,16 +450,26 @@ class BrowserPane(Gtk.Box):
             return
         if self.sid is None or self.stream is not None:
             return
+        if can_host(self.remote) and self.sid not in self.here_off and self.sid != self.here_busy:
+            return self.show_here()
         self.say_status("Connecting…", "")
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
     def stop(self, keep=False):
         """No more watching (keep: the same Bot's, watched again once the page is shown again)."""
+        self.here_busy = None  # (shown again: a Bot busy before tried here again)
         self.sized_to = None  # (watched again, or another's: laid out at the panel's size again)
         if self.stream is not None:
             self.stream.stop()
             self.stream = None
+        if self.here_poll is not None:
+            GLib.source_remove(self.here_poll)
+            self.here_poll = None
+        if not keep and self.here is not None:
+            if self.here.win is not None and self.here.win.body.get_parent() is self.body:
+                self.body.remove(self.here.win.body)
+            self.here = None
         if not keep:
             self.picture.set_paintable(None)
             self.body.set_visible_child_name("status")
@@ -356,10 +485,61 @@ class BrowserPane(Gtk.Box):
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
         # as the status isn't)
 
+    # (a Bot of this Mac's: its pages here)
+
+    def show_here(self):
+        sid = self.sid
+        if self.here is not None and self.here.sid == sid and self.here.win is not None:
+            return self.here_ready(self.here)
+        here = HERE.get(sid)
+        if here is None:
+            here = HERE[sid] = Here(self.win.get_application(), sid, self.name)
+        self.say_status("Connecting…", "")
+        here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
+
+    def here_ready(self, here):
+        if here.why is not None or here.win is None:  # (couldn't be had here: streamed; a busy Bot's, this time only)
+            if here.why != "busy":
+                self.here_off.add(here.sid)
+            self.here_busy = here.sid
+            return self.watch_if_shown()
+        body = here.win.body
+        if body.get_parent() is not None and body.get_parent() is not self.body:  # (shown in another window's pane:
+            self.here_off.add(here.sid)                                             # streamed in this one)
+            return self.watch_if_shown()
+        if body.get_parent() is None:
+            self.body.add_named(body, "here")
+        self.here = here
+        self.body.set_visible_child_name("here")
+        here.win.blocked = self.read_only.get_active()
+        root = self.get_root()
+        if root is not None and not getattr(root, "keys_back", False):  # (GTK's own widgets clicked: keys theirs
+            root.keys_back = True                                       # again, not the page's)
+            import emission
+            clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+            clicks.connect("pressed", lambda *_: emission.MacWeb.keys_to_gtk(root))
+            root.add_controller(clicks)
+            keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (keys a page has, or a
+            keys.connect("key-pressed", lambda *_: emission.MacWeb.page_has_keys(root))  # Bot's typing in one
+            keys.connect("key-released", lambda *_: emission.MacWeb.page_has_keys(root))  # handed back: not GTK's)
+            root.add_controller(keys)
+        self.here_state()
+        if self.here_poll is None:
+            self.here_poll = GLib.timeout_add(250, self.here_state)
+
+    def here_state(self):
+        if self.here is None or self.here.win is None or not self.get_mapped():
+            self.here_poll = None
+            return False
+        state = self.here.win.watch_state()
+        if state != self.state:
+            self.set_state(state)
+        return True
+
     def say_status(self, title, text):
         self.status.set_title(title)
         self.status.set_description(text)
-        if self.picture.get_paintable() is None:
+        if self.picture.get_paintable() is None and self.here is None:
             self.body.set_visible_child_name("status")
 
     # (what comes)
@@ -471,11 +651,15 @@ class BrowserPane(Gtk.Box):
                 self.said.set_visible(False)
             if done:
                 done(r)
+        if self.here is not None and self.here.win is not None:
+            return self.here.call(call, lambda r: GLib.idle_add(lambda: answered(r) and False))
         self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)
 
     def read_only_set(self, on):
         for w in self.drives:
             w.set_sensitive(not on)
+        if self.here is not None and self.here.win is not None:
+            self.here.win.blocked = on
         if self.sid is None:
             return
         if self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel; read-only: the

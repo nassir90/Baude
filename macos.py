@@ -77,6 +77,42 @@ def in_unseen(window):
     return True
 
 
+def route_events(take):
+    """Each event as it's taken off AppKit's queue (NSApplication's nextEventMatchingMask:...) shown to take(event)
+    first: True, and it's taken, never GTK's (a wheel's turn or a trackpad's gesture over a page of WebKit's own view
+    in a GTK window, which GTK would keep for its surface, given to that view by take, phases and momentum and all).
+    Once for the process."""
+    import ctypes
+    if route_events.__dict__.get("on"):
+        return
+    objc_send(b"NSObject", b"class")  # (the runtime loaded)
+    rt = objc_send.rt
+    rt.class_getInstanceMethod.restype = rt.method_setImplementation.restype = ctypes.c_void_p
+    rt.class_getInstanceMethod.argtypes = rt.method_setImplementation.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    rt.method_getImplementation.restype, rt.method_getImplementation.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
+    method = rt.class_getInstanceMethod(rt.objc_getClass(b"NSApplication"),
+                                        rt.sel_registerName(b"nextEventMatchingMask:untilDate:inMode:dequeue:"))
+    kind = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+                            ctypes.c_void_p, ctypes.c_bool)
+    was = kind(rt.method_getImplementation(method))
+
+    def next_event(app, cmd, mask, until, mode, dequeue):
+        while True:
+            event = was(app, cmd, mask, until, mode, dequeue)
+            if not event or not dequeue:
+                return event
+            try:
+                if not take(event):
+                    return event
+            except Exception:  # (an exception can't cross back into AppKit: said, and the event GTK's)
+                sys.excepthook(*sys.exc_info())
+                return event
+            until = None  # (taken: the next, if one's there now, else none, at once)
+    imp = kind(next_event)
+    route_events.__dict__.update(on=True, kept=(was, imp))
+    rt.method_setImplementation(method, ctypes.cast(imp, ctypes.c_void_p).value)
+
+
 def out_unseen(window):
     """A window in_unseen put in, taken out again (its pages not drawn for anyone)."""
     ns = native_window(window)

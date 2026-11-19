@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -1096,6 +1096,27 @@ class Server:
                 return reply("mesh_tools_set", session=s.listing())
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
+            if op == "routines":  # (a Bot's routines: read, or, routines given, set (each checked, its next run worked
+                if "routines" in msg:  # out); refused for a chat that isn't a Bot)
+                    if not s.meta.get("bot"):
+                        return reply("error", error="routines are a Bot's")
+                    if not isinstance(msg["routines"], list) or len(msg["routines"]) > 50:
+                        return reply("error", error="routines is a list (50 at most)")
+                    had = {r["id"]: r for r in s.meta.get("routines") or []}
+                    try:
+                        s.meta["routines"] = [routines.clean(r, had.get(r.get("id"))) for r in msg["routines"]]
+                    except (ValueError, TypeError) as e:
+                        return reply("error", error=str(e))
+                    self.save(s)
+                    self.changed()
+                    self.woken.set()  # (the next due may be sooner: the watch told)
+                return reply("routines", session=s.id, routines=s.meta.get("routines") or [])
+            if op == "run_routine":  # (one of a Bot's routines run now, its schedule as it was)
+                r = next((r for r in s.meta.get("routines") or [] if r["id"] == msg.get("id")), None)
+                if r is None:
+                    return reply("error", error="no such routine")
+                self.run_routine(s, r, schedule=False)
+                return reply("routines", session=s.id, routines=s.meta.get("routines") or [])
             if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
                 # base_mtime, with what it wrote)
                 mem = self.bot_memory(s, msg.get("text"), msg.get("seen"),
@@ -1104,6 +1125,37 @@ class Server:
                     return reply("error", error=mem.pop("refused"), session=s.id, **mem)
                 return reply("memory", session=s.id, **mem)
         return reply("error", error=f"unknown op {op!r}")
+
+    def run_routine(self, s, r, schedule=True):
+        """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for
+        mid-turn taken after it); its next run worked out from now (schedule), or left as it was (run now)."""
+        now = time.time()
+        self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                  "message": {"role": "user", "content": routines.said(r, now)}})
+        s.meta["routines"] = [routines.ran(x, now) if x["id"] == r["id"] and schedule else
+                              ({**x, "last": now} if x["id"] == r["id"] else x) for x in s.meta.get("routines") or []]
+        self.save(s)
+        self.log(f"routine {r['name']!r} of {s.id} run")
+
+    def routines_due(self):
+        """Routines due now run (each Bot's that are); when the next one's due (seconds from now), or None."""
+        now, soonest = time.time(), None
+        with self.lock:
+            for s in list(self.sessions.values()):
+                if not s.meta.get("bot") or s.meta.get("archived"):
+                    continue
+                for r in list(s.meta.get("routines") or []):
+                    if routines.due(r, now):
+                        try:
+                            self.run_routine(s, r)
+                        except Exception as e:  # noqa: BLE001 (said, and tried again at its next time)
+                            self.log(f"routine {r.get('name')!r} of {s.id} didn't run: {type(e).__name__}: {e}")
+                            s.meta["routines"] = [routines.ran(x, now) if x["id"] == r["id"] else x
+                                                  for x in s.meta.get("routines") or []]
+                for r in s.meta.get("routines") or []:
+                    if not r.get("paused") and r.get("next") is not None:
+                        soonest = r["next"] - now if soonest is None else min(soonest, r["next"] - now)
+        return soonest
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
@@ -1902,6 +1954,8 @@ class Server:
             else:
                 waits = [s.used + self.idle_s - time.time() for s in running if self.stoppable(s)]
                 waits.append(checked + CHECK_SOCKET_S - time.monotonic())
+                if (soon := self.routines_due()) is not None:
+                    waits.append(soon)
                 if not running and self.exit_s:
                     waits.append(quiet + self.exit_s - time.monotonic())
                 elif running:
@@ -1912,13 +1966,15 @@ class Server:
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
-                        and not self.mesh.links and not self.mesh.outs:  # (linked, or making links: the mesh's
-                    # members may want it)
+                        and not self.mesh.links and not self.mesh.outs and self.routines_due() is None:  # (linked,
+                    # or making links: the mesh's members may want it; a routine to run: it's to be here for it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
                     return
             if self.stopped.is_set():
                 return
+            if attached:
+                self.routines_due()
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()

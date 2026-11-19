@@ -162,6 +162,7 @@ from widgets import (  # noqa: E402,F401
 )
 import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
 import browserpane  # noqa: E402  (a Bot's browser, the side panel's Browser page: beside this file)
+import routinespage  # noqa: E402  (a Bot's routines, the side panel's Routines page: beside this file)
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
     file_children, file_icon, find_in_focus, git_ignored, in_code, python_context,
@@ -10600,6 +10601,11 @@ class SidePanel(Gtk.Box):
         self.browser_page = self.stack.add_titled(self.browser, "browser", browserpane.PAGE)
         self.browser_page.set_icon_name("web-browser-symbolic")
         self.browser_page.set_visible(False)
+        # a Bot's routines (routinespage.RoutinesPage): work it's given on a schedule, while the open chat's a Bot
+        self.routines = routinespage.RoutinesPage(win)
+        self.routines_page = self.stack.add_titled(self.routines, "routines", routinespage.PAGE)
+        self.routines_page.set_icon_name("alarm-symbolic")
+        self.routines_page.set_visible(False)
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
@@ -10921,10 +10927,12 @@ class SidePanel(Gtk.Box):
     def bot_changed(self, info):
         """The open chat (info: the sidebar's, or None) a Bot or not: its Memory page shown, and read, or hidden."""
         bot = bool(info and info.get("bot"))
-        if not bot and self.stack.get_visible_child_name() in ("memory", "browser"):
+        if not bot and self.stack.get_visible_child_name() in ("memory", "browser", "routines"):
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
         self.browser_page.set_visible(bot)
+        self.routines_page.set_visible(bot)
+        self.routines.show(info)
         self.browser.show(info)
         self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 
@@ -13630,6 +13638,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
             if getattr(self, "panel", None) is not None and self.panel.memory_page.get_visible():
                 self.panel.memory.refresh()  # (a Bot's turn over: what it kept in its memory, shown)
+                self.panel.routines.refresh()  # (its routines' last and next, as they are now)
             if getattr(self, "queue_upto", None) is not None:  # (queued messages to send now it's over)
                 GLib.idle_add(self.flush_queue)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:

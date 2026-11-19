@@ -135,14 +135,15 @@ python3 emission.py [URL] [--profile NAME]
 A Bot has a browser of its own: its tools (`mcp__emission__…`) drive its own Emission profile, on any host of the
 mesh. On each host its profile is its own there, made when it's first used and named after the Bot. The host process
 starts Emission for it out of sight (no window on screen, no Dock icon; on Linux, a virtual display of its own), and
-it goes after half an hour unused. Its tools are named as Claude in Chrome's are: tabs_context, tabs_create,
-tabs_close, navigate, read_page and find (the page's elements, with refs; read_page lists what's on screen and a
-screen above and below), get_page_text, screenshot (1024 px on its long side at most) and zoom (a region of it at full
-detail), click, hover, drag, type, key, scroll (which says what came into view), form_input, javascript_tool,
-read_console_messages, read_network_requests, resize_window, browser_batch (several of them in one call), and prompts
-and answer_prompt for what a page asks (an alert, a confirm, a site's sign-in, files to upload). Clicks and keys are
-real input: the pointer is moved to a place and pressed, and keys go one at a time. A Bot only ever reaches its own
-profile, never yours or another Bot's.
+it goes after half an hour unused. Where a tool does what one of Claude in Chrome's does, it has that tool's name, and
+its arguments' names where they mean the same (the tab tools without its _mcp; the mouse and keys as tools of their
+own, not one computer tool): tabs_context, tabs_create, tabs_close, navigate, read_page and find (the page's elements,
+with refs; read_page lists what's on screen and a screen above and below), get_page_text, screenshot (1024 px on its
+long side at most) and zoom (a region of it at full detail), click, hover, drag, type, key, scroll (which says what
+came into view), form_input, javascript_tool, read_console_messages, read_network_requests, resize_window,
+browser_batch (several of them in one call), and prompts and answer_prompt for what a page asks (an alert, a confirm,
+a site's sign-in, files to upload). Clicks and keys are real input: the pointer is moved to a place and pressed, and
+keys go one at a time. A Bot only ever reaches its own profile, never yours or another Bot's.
 
 To sign a Bot in to a site, open its profile from Emission's profile menu (its Emission steps aside) and sign in
 there, or choose Copy Sign-ins to a Bot… in your own profile to copy your sign-ins for the sites you pick. Pages say

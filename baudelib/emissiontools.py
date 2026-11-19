@@ -15,10 +15,10 @@ HOST_WAIT_S = 85  # (the host's wait on Emission's answer: a page's load is 30 s
 WAIT_S = 130  # (a request's answer waited for this long: the host's start of Emission and its wait, and then some)
 
 S, N, B = {"type": "string"}, {"type": "number"}, {"type": "boolean"}
-TAB = S  # (tabId: a tab's id, from tabs_context; the one in front if none)
+TAB = {"type": "string", "description": "tabs_context's"}  # (the one in front if none)
 HOST = {"type": "string", "description": "A mesh host (mcp__mesh__hosts); none: this one"}
 REF = {"type": "string", "description": "ref_12: from read_page, find or scroll"}
-SHOT = "x, y: the last screenshot's pixels"  # (said where a tool takes them)
+SHOT = "x, y: the last screenshot's pixels, CSS ones before a tab's first"  # (said where a tool takes them)
 
 SCHEMAS = {
     "tabs_context": ("Your browser's tabs (started if need be) and recent downloads; sites: the sites it's signed in "
@@ -30,48 +30,53 @@ SCHEMAS = {
                  {"url": S, "tabId": TAB, "host": HOST}, ["url"]),
     "tabs_close": ("Close a tab.", {"tabId": TAB, "host": HOST}, ["tabId"]),
     "screenshot": ("A picture of the page, for what text can't show: layout, images, a canvas, how it looks. "
-                   "read_page, find and get_page_text read pages for less. Its pixels are what x, y are in.",
+                   "read_page, find and get_page_text read pages for less. Its pixels are click, hover, drag, scroll "
+                   "and zoom's x, y.",
                    {"tabId": TAB, "host": HOST}, []),
     "zoom": ("The page as it is now, at full detail, in region [x0, y0, x1, y1] of the last screenshot's pixels "
              "(which x, y stay in).",
              {"region": {"type": "array", "items": N, "minItems": 4, "maxItems": 4}, "tabId": TAB, "host": HOST},
              ["region"]),
     "read_page": ("How to read a page: its elements on screen and a screen above and below (links, buttons, "
-                  "fields, headings; filter all: the rest, text too), each with its role, name and ref, the same each "
-                  "read. "
-                  "ref_id: only that element's part.",
+                  "fields, headings; filter all: the rest, text too), each with its role, name and ref; refs stay the "
+                  "same between reads. ref_id: only that element's part.",
                   {"tabId": TAB, "host": HOST, "filter": {"type": "string", "enum": ["interactive", "all"]},
                    "ref_id": S, "max_chars": N}, []),
     "find": ("Elements anywhere on the page matching words (role, name, placeholder, id, link), with refs.",
              {"query": S, "tabId": TAB, "host": HOST}, ["query"]),
     "get_page_text": ("The page's text (its main part's, if it has one).", {"tabId": TAB, "host": HOST,
                                                                             "max_chars": N}, []),
-    "click": (f"Click ref_id's element (its middle) or x, y, as a person would ({SHOT}); count 2: a double click.",
-              {"ref_id": REF, "x": N, "y": N, "tabId": TAB, "host": HOST,
+    "click": (f"Click ref's element (its middle) or x, y, as a person would ({SHOT}); count 2: a double click.",
+              {"ref": REF, "x": N, "y": N, "tabId": TAB, "host": HOST,
                "button": {"type": "string", "enum": ["left", "right"]}, "count": N,
                "modifiers": {"type": "array", "items": {"type": "string", "enum": ["shift", "ctrl", "alt", "cmd"]}}},
               []),
     "drag": (f"Drag along path [[x, y], ...] ({SHOT}): select text, move a slider, drag into place.",
              {"path": {"type": "array", "items": {"type": "array", "items": N}}, "tabId": TAB, "host": HOST},
              ["path"]),
-    "hover": (f"Move the mouse over ref_id's element or x, y ({SHOT}).",
-              {"ref_id": REF, "x": N, "y": N, "tabId": TAB, "host": HOST}, []),
-    "type": ("Type text, key by key, into the focused field (or ref_id's, focused first).",
-             {"text": S, "ref_id": REF, "tabId": TAB, "host": HOST}, ["text"]),
+    "hover": (f"Move the mouse over ref's element or x, y ({SHOT}).",
+              {"ref": REF, "x": N, "y": N, "tabId": TAB, "host": HOST}, []),
+    "type": ("Type text, key by key, into the focused field (or ref's, focused first).",
+             {"text": S, "ref": REF, "tabId": TAB, "host": HOST}, ["text"]),
     "key": ("Press keys in turn, a space between: Enter, Tab, Escape, Backspace, Delete, Up, Down, Left, Right, Home, "
             "End, PageUp, PageDown, a character, or a combination like cmd+a.",
             {"keys": S, "tabId": TAB, "host": HOST}, ["keys"]),
-    "scroll": (f"Turn the mouse wheel over ref_id's element, x, y ({SHOT}) or the middle, by dy, dx CSS pixels (dy "
+    "scroll": (f"Turn the mouse wheel over ref's element, x, y ({SHOT}) or the middle, by dy, dx CSS pixels (dy "
                "600 if none; up is negative). Says what came into view, with refs.",
-               {"dy": N, "dx": N, "ref_id": REF, "x": N, "y": N, "tabId": TAB, "host": HOST}, []),
-    "form_input": ("Set ref_id's field: a select's option (value or text), a checkbox or radio (true, false), or a "
-                   "value.", {"ref_id": REF, "value": {}, "tabId": TAB, "host": HOST}, ["ref_id", "value"]),
-    "javascript_tool": ("Run an async function's body in the page and return its JSON value. Its coordinates are CSS "
-                        "pixels, not the screenshot's.", {"code": S, "tabId": TAB, "host": HOST}, ["code"]),
-    "read_console_messages": ("The page's console messages and errors, newest last (pattern: a regex they match).",
-                              {"tabId": TAB, "host": HOST, "pattern": S, "limit": N, "clear": B}, []),
-    "read_network_requests": ("What the page loaded: each URL, its kind, status, time and size (pattern: a regex "
-                              "they match).", {"tabId": TAB, "host": HOST, "pattern": S, "limit": N}, []),
+               {"dy": N, "dx": N, "ref": REF, "x": N, "y": N, "tabId": TAB, "host": HOST}, []),
+    "form_input": ("Set ref's field: a select's option (value or text), a checkbox or radio (true, false), or a "
+                   "value.", {"ref": REF, "value": {}, "tabId": TAB, "host": HOST}, ["ref", "value"]),
+    "javascript_tool": ("Run text in the page as a REPL does: top-level await works, and the last expression's value "
+                        "comes back (no return needed). Its coordinates are CSS pixels, not the screenshot's.",
+                        {"action": {"type": "string", "enum": ["javascript_exec"]}, "text": S, "tabId": TAB,
+                         "host": HOST}, ["text"]),
+    "read_console_messages": ("The page's console messages and errors, newest last: pattern, a regex they match; "
+                              "onlyErrors; clear: forget them after.",
+                              {"tabId": TAB, "host": HOST, "pattern": S, "onlyErrors": B, "limit": N, "clear": B},
+                              []),
+    "read_network_requests": ("What the page loaded: each URL, its kind, status, time and size; urlPattern: words "
+                              "in the URL; clear: forget them after.",
+                              {"tabId": TAB, "host": HOST, "urlPattern": S, "limit": N, "clear": B}, []),
     "resize_window": ("Make the page's viewport width by height CSS pixels.",
                       {"width": N, "height": N, "tabId": TAB, "host": HOST}, ["width", "height"]),
     "prompts": ("What pages wait on you to answer: an alert, confirm or prompt, a site's sign-in box, files to "
@@ -93,6 +98,7 @@ OPS = {"tabs_context": "tabs", "tabs_create": "new_tab", "navigate": "navigate",
        "read_console_messages": "console", "read_network_requests": "network", "resize_window": "resize",
        "prompts": "prompts", "answer_prompt": "answer_prompt"}  # (each tool's op: the ops keep their own names)
 ARGS = {"tabId": "tab", "ref_id": "ref"}  # (the tools' arguments, named as Claude in Chrome's: the ops' names for them)
+NAMING_TABS = ("tabs", "prompts")  # (an answer's lists whose entries name a tab: tabId there, as at its top)
 HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
 
 
@@ -128,18 +134,30 @@ class Browser:
 
 
 def request(tool, args):
-    """A tool's call as its op's request: its arguments named as the ops name them, its op the tool's (whatever the
-    arguments say)."""
-    return {**{ARGS.get(k, k): v for k, v in args.items()}, "op": OPS[tool]}
+    """A tool's call as its op's request: only the arguments its schema has (none of the ops' own, the Browser page's,
+    nor other names for them), named as the ops name them; its op the tool's."""
+    props = SCHEMAS[tool][1]
+    if tool == "javascript_tool" and args.get("action") not in (None, "javascript_exec"):
+        raise ValueError("javascript_tool's action is javascript_exec")
+    return {**{ARGS.get(k, k): v for k, v in args.items() if k in props and k not in ("host", "action")},
+            "op": OPS[tool]}
 
 
-def answered(value):
-    """An op's answer in the tools' names: a tab's id as tabId."""
-    if isinstance(value, dict):
-        return {("tabId" if k == "tab" else k): answered(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [answered(v) for v in value]
-    return value
+def answered(result):
+    """An op's answer in the tools' names: a tab's id as tabId, at its top and in its tabs and prompts (its page's own
+    data, a script's result, left as it is)."""
+    def named(d):
+        return {("tabId" if k == "tab" else k): v for k, v in d.items()} if isinstance(d, dict) else d
+    out = named(result)
+    if not isinstance(out, dict):
+        return out
+    for key in NAMING_TABS:
+        if isinstance(out.get(key), list):
+            out[key] = [named(e) for e in out[key]]
+            for e in out[key]:
+                if isinstance(e, dict) and isinstance(e.get("prompts"), list):
+                    e["prompts"] = [named(x) for x in e["prompts"]]
+    return out
 
 
 def content(tool, result):
@@ -195,6 +213,9 @@ def batch(browser, actions, cancelled=None):
     for i, (name, args) in enumerate(steps, 1):
         if cancelled is not None and cancelled.is_set():
             raise Cancelled()
+        if name in ("read_page", "get_page_text"):  # (cut to what fits by the page itself: what read_page says it
+            cap = int(args.get("max_chars") or 30000)  # gave, for its unchanged note, is what's given)
+            args = {**args, "max_chars": max(1, min(cap, room - 600))} if room - 600 < cap else args
         try:
             result = browser.call(name, args)
         except Exception as e:
@@ -213,13 +234,16 @@ def batch(browser, actions, cancelled=None):
         texts[0]["text"] = f"{i}. {name}" + (": " + texts[0]["text"] if result else "")
         for j, c in enumerate(texts):
             if len(c["text"]) > room:
-                keep = c["text"][:room] if room > 0 else f"{i}. {name}" if j == 0 else ""
-                c["text"] = keep + "\n(… trimmed: the batch's answer is at its limit)"
+                c["text"] = c["text"][:room] if room > 0 else f"{i}. {name}" if j == 0 else ""
+                if not trimmed:
+                    c["text"] += "\n(… the rest trimmed: the batch's answer is at its limit)"
                 trimmed = True
             room -= len(c["text"])
+        texts = [c for c in texts if c["text"]]
         pictures = [c for c in got if c["type"] == "image"]
         if pictures and size > room:
-            texts.append({"type": "text", "text": "(its picture left out: the batch's answer is at its limit)"})
+            if not trimmed:
+                texts.append({"type": "text", "text": "(… the rest trimmed: the batch's answer is at its limit)"})
             pictures, trimmed = [], True
         room -= size if pictures else 0
         out += texts[:1] + pictures + texts[1:]  # (each picture after the line naming it)
@@ -243,8 +267,11 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
 
     cancels = {}  # (each call's being done: its id's event, set if it's cancelled)
 
+    def key(mid):
+        return json.dumps(mid, sort_keys=True)  # (any id a key: a malformed one can't end the loop)
+
     def call(mid, name, args):
-        cancelled = cancels.setdefault(mid, threading.Event())
+        cancelled = cancels.setdefault(key(mid), threading.Event())
         try:
             if name not in SCHEMAS:
                 raise ValueError(f"no tool {name}")
@@ -260,37 +287,44 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
         except Exception as e:  # (said to the model, which may try again)
             result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True}
         finally:
-            cancels.pop(mid, None)
+            cancels.pop(key(mid), None)
         if result is not None and not cancelled.is_set():  # (a cancelled call's answered with nothing, as MCP has it)
             send({"jsonrpc": "2.0", "id": mid, "result": result})
     listed = [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props,
                                                             **({"required": req} if req else {})}}
               for n, (d, props, req) in SCHEMAS.items()]
+
+    def take(msg):
+        method, mid = msg.get("method"), msg.get("id")
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        if method == "notifications/cancelled":  # (a call given up on: a batch stops before its next action, and
+            if (ev := cancels.get(key(params.get("requestId")))) is not None:  # nothing's said for it)
+                ev.set()
+            return
+        if mid is None:
+            return
+        if method == "initialize":
+            send({"jsonrpc": "2.0", "id": mid, "result": {
+                "protocolVersion": params.get("protocolVersion") or "2025-06-18",
+                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+        elif method == "tools/list":
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed}})
+        elif method == "tools/call":
+            args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+            cancels.setdefault(key(mid), threading.Event())
+            threading.Thread(target=call, args=(mid, params.get("name"), args), daemon=True).start()
+        else:
+            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
     for line in rfile:
         try:
             msg = json.loads(line)
         except ValueError:
             continue
-        method, mid = msg.get("method"), msg.get("id")
-        if method == "notifications/cancelled":  # (a call given up on: a batch stops before its next action, and
-            gone = (msg.get("params") or {}).get("requestId")  # nothing's said for it)
-            if gone in cancels:
-                cancels[gone].set()
-            continue
-        if mid is None:
-            continue
-        if method == "initialize":
-            send({"jsonrpc": "2.0", "id": mid, "result": {
-                "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
-        elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed}})
-        elif method == "tools/call":
-            p = msg.get("params") or {}
-            cancels.setdefault(mid, threading.Event())
-            threading.Thread(target=call, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
-        else:
-            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
+        try:
+            if isinstance(msg, dict):
+                take(msg)
+        except Exception:  # (a message that's wrong: said, and the next one read)
+            sys.excepthook(*sys.exc_info())
 
 
 if __name__ == "__main__":

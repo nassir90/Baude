@@ -16,6 +16,7 @@ import itertools
 import json
 import os
 import queue
+import re
 import select
 import socket
 import subprocess
@@ -993,6 +994,44 @@ class Server:
                 pass
             conn.send({"op": "emission_watch_end", "req": req})
 
+    def feedback(self, msg, reply):
+        """A head's feedback (a phone's, which has no gh) filed as an issue by this host's gh, where Baude's Send
+        Feedback files it (fixes.submit_issue_target): titled by its first line, its context under it, its note's id
+        (note) in its last line, so a try that's asked again finds the issue it made rather than making another.
+        check: where it would be filed, nothing filed."""
+        import fixes  # (no GTK in it: feedback.py's own has)
+        repo = fixes.submit_issue_target()
+        if repo is None:
+            return reply("error", error="this host can't tell where to file it: is its gh signed in?")
+        if msg.get("check"):
+            return reply("feedback_target", repo=repo)
+        text, note = msg.get("text"), msg.get("note")
+        context = [c for c in msg.get("context") or [] if isinstance(c, str)] if isinstance(msg.get("context"), list) else []
+        if not isinstance(text, str) or not text.strip() or not wire.is_id(note or ""):
+            return reply("error", error="feedback needs its text and its note's id")
+        first = next(line.strip().lstrip("#").strip() for line in text.splitlines() if line.strip())
+        title = first if len(first) <= 90 else first[:89].rstrip() + "…"
+        mark = f"_Sent from Baude for Android's Send Feedback, through {self.me['name']}_ `baude-note-{note}`"
+        body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
+                                        else "") + "\n\n" + mark + "\n"
+        ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
+                           f'"baude-note-{note}" in:body', "--json", "number,url,body")
+        if not ok:
+            return reply("error", error=out or "gh issue list failed")
+        try:
+            made = next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().endswith(mark)), None)
+        except ValueError:
+            made = None
+        if made is None:
+            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body)
+            url = next((line for line in out.splitlines() if line.startswith("https://")), None) if ok else None
+            if url is None:
+                return reply("error", error=out or "gh issue create failed")
+            number = int(m.group(1)) if (m := re.search(r"/issues/(\d+)", url)) else None
+            made = {"url": url, "number": number}
+        self.log(f"feedback {note} filed on {repo}: {made['url']}")
+        reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
+
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
@@ -1041,6 +1080,14 @@ class Server:
                 except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
+            return None
+        if op == "feedback":  # (a head with no gh of its own: its feedback filed by this host's; on a thread of its own)
+            def feedback():
+                try:
+                    self.feedback(msg, reply)
+                except Exception as e:  # noqa: BLE001 (gh gone wrong: said)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=feedback, daemon=True, name="feedback").start()
             return None
         if op == "link":  # (a head's: a link made from here)
             where = msg.get("where")

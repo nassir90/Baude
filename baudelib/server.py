@@ -913,7 +913,7 @@ class Server:
         try:
             emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.door_path(emissionlink.bot_profile(bot["id"], None)))
+            sock.connect(emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None)))
             sock.sendall((json.dumps({"op": "watch", **size}) + "\n").encode())
         except (OSError, ValueError) as e:
             conn.send({"op": "error", "req": req, "error": str(e)})

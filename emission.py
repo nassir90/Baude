@@ -40,11 +40,11 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
-                                   data_home, door_path, forget_profile, hand_over, leftovers, lock_profile,
+                                   data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, profile_id, profiles, rename_profile, unlock_profile)
 
 
-class Door:
+class ProfileSocket:
     """This process taking requests for the profiles it has (each one's lock held: no one else listens there): a
     line of JSON each, answered with one, maybe later (a screenshot, a script)."""
     open = {}
@@ -54,9 +54,9 @@ class Door:
         """handle(pid, request, answer) run for each request to pid's profile; answer(dict) sends its answer."""
         if pid in cls.open:
             return
-        path = door_path(pid)
+        path = profile_socket(pid)
         try:
-            os.unlink(path)  # (a door left by an Emission that's gone: its lock's ours now)
+            os.unlink(path)  # (a socket left by an Emission that's gone: its lock's ours now)
         except OSError:
             pass
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -111,7 +111,7 @@ class Door:
             GLib.source_remove(source)
             srv.close()
             try:
-                os.unlink(door_path(pid))
+                os.unlink(profile_socket(pid))
             except OSError:
                 pass
 
@@ -1907,29 +1907,29 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def give_back(self, pid):
-        """A Bot's profile this window had, let go of (its door now, its lock once WebKit's let go of its store):
+        """A Bot's profile this window had, let go of (its socket now, its lock once WebKit's let go of its store):
         the Bot's own Emission can have it again."""
-        Door.close(pid)
+        ProfileSocket.close(pid)
         held = GtkWeb.sessions.pop(pid, None)
         if held is not None:
             GtkWeb.given_back[pid] = held  # (taken up again if this window comes back to it first)
 
         def let_go():
-            if pid != self.profile_id and pid not in Door.open:
+            if pid != self.profile_id and pid not in ProfileSocket.open:
                 GtkWeb.given_back.pop(pid, None)
                 unlock_profile(pid)
         self.later.append((GLib.get_monotonic_time() + 10_000_000, let_go))
 
     def have(self, pid):
-        """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
+        """pid's profile this process's (its lock, and its socket for others' pages), or False if another Emission
         has it."""
         if not lock_profile(pid):
             return False
-        Door.listen(pid, self.handle)
+        ProfileSocket.listen(pid, self.handle)
         return True
 
     def handle(self, pid, msg, answer, conn=None):
-        """A request at pid's door: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
+        """A request at pid's socket: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
         (Control's), for pid's profile (this window moved to it if it's elsewhere)."""
         op = msg.get("op")
         busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
@@ -2198,7 +2198,7 @@ class Window(Adw.ApplicationWindow):
                 self.say("Couldn't copy the sign-ins", why)
             else:
                 self.say("Sign-ins copied", f"“{bot['name']}” is now signed in to {', '.join(sites)}.")
-        if bot["id"] == self.profile_id or bot["id"] in Door.open:  # (it's this window's, or this process's)
+        if bot["id"] == self.profile_id or bot["id"] in ProfileSocket.open:  # (it's this window's, or this process's)
             self.Engine.add_cookies(bot["id"], cookies, done)
             return
 
@@ -2249,7 +2249,7 @@ class Window(Adw.ApplicationWindow):
                 return
             if why:
                 if pid != self.profile_id:
-                    Door.close(pid)
+                    ProfileSocket.close(pid)
                     unlock_profile(pid)
                 self.say(f"Couldn't remove “{name}”", why)
                 return
@@ -2258,7 +2258,7 @@ class Window(Adw.ApplicationWindow):
                 os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
             except OSError:
                 pass
-            Door.close(pid)
+            ProfileSocket.close(pid)
             unlock_profile(pid)
             self.refresh_profiles()
         self.Engine.remove_store(pid, removed)
@@ -2730,7 +2730,7 @@ def guarded(fn, answer):
 
 
 class Control:
-    """What a Bot's browser tools ask of a window (emissiontools, through the host process and the door): a request,
+    """What a Bot's browser tools ask of a window (emissiontools, through the host process and the socket): a request,
     answered with a dict. Input's real (the pointer moved to a place, then pressed; keys one at a time), as computer
     use's is; a page's text comes from the page itself, and what's on it is named by refs read_page and find give."""
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)

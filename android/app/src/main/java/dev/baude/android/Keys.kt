@@ -1,14 +1,11 @@
 package dev.baude.android
 
-import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import com.jcraft.jsch.Identity
-import com.jcraft.jsch.JSch
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.math.BigInteger
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -37,8 +34,9 @@ class Key(private val private: PrivateKey, public: ECPublicKey, val where: Strin
     /** Its fingerprint, as ssh-keygen -l shows it. */
     val fingerprint: String get() = fingerprintOf(blob)
 
-    /** What JSch signs with: the Keystore, asked to sign each time (SHA256withECDSA, its DER made ssh's r and s). */
-    fun identity(): Identity = object : Identity {
+    /** What JSch signs with: the Keystore, asked to sign each time (SHA256withECDSA, its DER made ssh's r and s).
+     * failed: why it couldn't sign, if it couldn't (JSch hears only that there's no signature). */
+    fun identity(failed: (String) -> Unit = {}): Identity = object : Identity {
         override fun setPassphrase(passphrase: ByteArray?) = true
         override fun getPublicKeyBlob(): ByteArray = blob
         override fun getSignature(data: ByteArray): ByteArray? = try {
@@ -52,7 +50,8 @@ class Key(private val private: PrivateKey, public: ECPublicKey, val where: Strin
                 string(ALG.toByteArray())
                 string(ssh { string(r.toByteArray()); string(s.toByteArray()) })
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            failed(e.message ?: e.javaClass.simpleName)
             null
         }
         override fun getAlgName() = ALG
@@ -67,28 +66,23 @@ class Key(private val private: PrivateKey, public: ECPublicKey, val where: Strin
     }
 }
 
-/** A key from before keys were kept in the Keystore: a file in the app's own storage, still offered to hosts till you
- * forget it, so a host that has only it lets this phone in meanwhile. */
-class OldKey(private val private: ByteArray, private val public: ByteArray) {
-    val line: String get() = String(public).trim()
-    val fingerprint: String get() = fingerprintOf(Base64.getDecoder().decode(line.split(" ")[1]))
-
-    fun addTo(jsch: JSch) = jsch.addIdentity("baude-old", private, public, null)
-}
-
 object Keys {
     private const val ALIAS = "baude-ssh"
 
     private fun store() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-    fun load(): Key? = try {
-        val entry = store().getEntry(ALIAS, null) as? KeyStore.PrivateKeyEntry
-        entry?.let { Key(it.privateKey, it.certificate.publicKey as ECPublicKey, where(it.privateKey), hardware(it.privateKey)) }
-    } catch (_: Exception) {
-        null
+    /** The key, or null if none's been made; an exception if the Keystore couldn't be read (not the same: a key may
+     * well be there). */
+    fun load(): Key? {
+        val store = store()
+        if (!store.containsAlias(ALIAS)) return null
+        val entry = store.getEntry(ALIAS, null) as? KeyStore.PrivateKeyEntry
+            ?: throw IllegalStateException("its entry isn't a private key")
+        return Key(entry.privateKey, entry.certificate.publicKey as ECPublicKey, where(entry.privateKey),
+            hardware(entry.privateKey))
     }
 
-    /** A new key, in place of any there was (a host that had the old one in its authorized_keys needs this one): in
+    /** A new key, in place of any there was (a host that had the last one in its authorized_keys needs this one): in
      * the phone's StrongBox if it has one, else its trusted environment (or, on a phone with neither, Android's
      * software Keystore). */
     fun make(): Key {
@@ -136,20 +130,6 @@ object Keys {
         false
     }
 
-    private fun oldFiles(ctx: Context) = File(ctx.filesDir, "id_baude") to File(ctx.filesDir, "id_baude.pub")
-
-    fun old(ctx: Context): OldKey? {
-        val (prv, pub) = oldFiles(ctx)
-        return if (prv.exists() && pub.exists()) OldKey(prv.readBytes(), pub.readBytes()) else null
-    }
-
-    /** The old key's files written over and removed. */
-    fun forgetOld(ctx: Context) {
-        for (f in oldFiles(ctx).toList()) {
-            if (f.exists()) f.writeBytes(ByteArray(f.length().toInt()))
-            f.delete()
-        }
-    }
 }
 
 /** The comment a key's line ends with: the phone it's on. */

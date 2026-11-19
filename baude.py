@@ -14609,6 +14609,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                     self.attach_said = (self.session_id, kind)
         if self.proc is not None:
             self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
+            self.always_allow |= set(self.proc.listing.get("always_allow") or ())  # (what its host allows: another
+            # head's too)
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -19167,9 +19169,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         def decide(_b, behavior, always=False):  # (answering: always is the answers)
             if always is True:
                 self.always_allow.add(name)
-                if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not)
+                if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
+                    new = (self.remote.info.get("version") or 1) >= 15  # added to its list; an older one's replaced)
                     self.remote.request({"op": "always_allow", "session": self.session_id,
-                                         "tools": sorted(self.always_allow)})
+                                         **({"add": [name]} if new else {"tools": sorted(self.always_allow)})})
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})

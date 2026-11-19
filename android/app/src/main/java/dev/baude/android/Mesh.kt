@@ -9,9 +9,11 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.app.NotificationCompat
@@ -62,8 +64,10 @@ class Ask(val rid: String, val tool: String, val input: JSONObject, val toolUseI
     }
 }
 
-/** A chat open: its lines, read from its transcript on its host (more read as it grows), what's sent to it. */
-class Chat(val hostId: String, val sid: String) {
+/** A chat open: its lines, read from its transcript on its host (more read as it grows), what's sent to it. hostId:
+ * the connection it's on (a member's, till that machine's reached as a host of yours: then that host's). */
+class Chat(hostId: String, val sid: String) {
+    var hostId by mutableStateOf(hostId)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
     val preparing = mutableStateOf(0)         // (picked, still being read)
@@ -71,6 +75,7 @@ class Chat(val hostId: String, val sid: String) {
     val busy = mutableStateOf(false)
     val said = mutableStateOf<String?>(null)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
+    val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     var offset = -1L
     var reading = false
     var again = false
@@ -88,14 +93,19 @@ object Mesh {
     val sessions = mutableStateMapOf<String, List<JSONObject>>() // (a connection's id: its host's sessions)
     val pictures = mutableStateMapOf<String, ImageBitmap?>()
     val key = mutableStateOf<Key?>(null)
-    val old = mutableStateOf<OldKey?>(null) // (a key kept in a file, from before the Keystore's: offered till forgotten)
+    val keyError = mutableStateOf<String?>(null) // (why the Keystore's key couldn't be read, or made: none made then)
+    val making = mutableStateOf(false) // (a key being made, off the main thread)
     val members = mutableStateMapOf<String, JSONObject>() // (a member of a host's mesh, by its id: its record, as the
     // host it's reached through lists it: id, name, host, hops, through)
     @Volatile private var routes = emptyMap<String, Connection>() // (a member: the host that's up and reaches it in
     // fewest hops)
     private val allowed = HashMap<String, MutableSet<String>>() // (a chat: the tools you've always allowed it here)
+    private val listedBy = HashMap<String, MutableSet<String>>() // (a host of yours: the members it's listed)
+    private val moved = HashMap<String, String>() // (a member's connection id: the host of yours its machine is now)
+    private val askNotes = HashMap<String, MutableSet<String>>() // (a chat, "connection/session": the asks notified)
     var open: Chat? = null
     var shown = false // (the app in front: no notification for the chat open)
+    private var visible = false // (the app on screen: the chat open answers what it asks)
     private val conns = HashMap<String, Connection>()
     private val catchUp = HashSet<String>() // (hosts back after a drop: Bots' turns that ended meanwhile, notified)
     private var started = false
@@ -104,13 +114,7 @@ object Mesh {
         if (started) return
         started = true
         app = ctx.applicationContext
-        key.value = Keys.load()
-        old.value = Keys.old(app)
-        if (old.value != null && key.value == null) key.value = try { // (from a key in a file: one in the Keystore
-            Keys.make()                                                 // made at once, the old still offered)
-        } catch (_: Exception) {
-            null
-        }
+        readKey()
         hosts.addAll(HostStore.load(app))
         channel()
         hosts.forEach { connect(it) }
@@ -127,22 +131,37 @@ object Mesh {
 
     // ---- hosts
 
+    /** The Keystore's key read (again): none, or why it couldn't be read, which isn't the same (it's never made anew
+     * for that). */
+    fun readKey() {
+        try {
+            key.value = Keys.load()
+            keyError.value = null
+        } catch (e: Exception) {
+            keyError.value = "This phone's key couldn't be read from the Keystore: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** A new key made, off the main thread, and each host tried again with it. */
     fun makeKey() {
-        key.value = Keys.make()
-        hosts.forEach { connect(it) } // (the new key: each host tried again with it)
+        if (making.value) return
+        making.value = true
+        kotlin.concurrent.thread(name = "make-key", isDaemon = true) {
+            val made = runCatching { Keys.make() }
+            main.post {
+                making.value = false
+                made.onSuccess {
+                    key.value = it
+                    keyError.value = null
+                    hosts.forEach { h -> connect(h) }
+                }.onFailure { keyError.value = "A key couldn't be made: ${it.message ?: it.javaClass.simpleName}" }
+            }
+        }
     }
 
-    /** The old key's file gone: hosts that have only it in their authorized_keys don't let this phone in. */
-    fun forgetOld() {
-        Keys.forgetOld(app)
-        old.value = null
-        hosts.forEach { connect(it) }
-    }
-
-    /** What this phone signs in with: its Keystore key, and the old one in a file till it's forgotten. */
-    private fun identify(jsch: JSch) {
-        key.value?.let { jsch.addIdentity(it.identity(), null) }
-        old.value?.addTo(jsch)
+    /** What this phone signs in with: its Keystore key. */
+    private fun identify(jsch: JSch, failed: (String) -> Unit) {
+        key.value?.let { jsch.addIdentity(it.identity(failed), null) }
     }
 
     fun addHost(host: Host) {
@@ -159,13 +178,15 @@ object Mesh {
         conns.remove(host.id)?.stop()
         states.remove(host.id)
         sessions.remove(host.id)
+        listedBy.remove(host.id)
+        moved.values.removeAll { it == host.id }
         meshed()
         if (hosts.isEmpty()) app.stopService(Intent(app, MeshService::class.java))
     }
 
     fun connect(host: Host) {
         conns.remove(host.id)?.stop()
-        if (key.value == null && old.value == null) return
+        if (key.value == null) return
         start(Connection(app, Place.Direct(host), ::identify, { routes[it] }, ::heard) { conn -> main.post { changed(conn) } })
     }
 
@@ -185,17 +206,29 @@ object Mesh {
     /** (a host's info changed, or whether it's up) Each member of its mesh reached through it, as Baude reaches each
      * member through its own machine's host process (client.Network.meshed): one that's a host of yours already
      * reached so, not through another; each through the host that's up and lists it in fewest hops; one that's no
-     * longer listed by any kept, as it was last seen, till one lists it again. */
+     * longer listed by any kept, as it was last seen, till one lists it again, and let go of once no host of yours
+     * has listed it. A machine whose key is waiting on you (not trusted yet, or changed) isn't reached through
+     * another either, till you've said. */
     private fun meshed() {
-        val direct = conns.values.filter { it.place is Place.Direct }
-        val known = direct.mapNotNull { it.info?.optString("id")?.ifBlank { null } }.toSet()
+        val known = HashMap<String, Host>() // (machines that are hosts of yours: reached so)
+        val held = ArrayList<Host>()        // (hosts whose key is waiting on you)
+        for (h in hosts) {
+            val c = conns[h.id]
+            (c?.info?.optString("id")?.takeIf(::isId) ?: HostStore.machine(app, h))?.let { known.putIfAbsent(it, h) }
+            if (c?.state == "key") held.add(h)
+        }
+        fun heldBy(m: JSONObject?): Host? = if (m == null) null else held.firstOrNull { h -> // (its machine, by its id
+            HostStore.machine(app, h) == m.optString("id") || h.address.lowercase() in listOf("host", "bonjour", "name")
+                .mapNotNull { m.optString(it).lowercase().ifBlank { null } }.flatMap { listOf(it, "$it.local") }
+        }                                                                    // or the names its record gives it)
         val best = HashMap<String, Pair<JSONObject, Connection>>()
         for (h in hosts) {
             val c = conns[h.id]?.takeIf { it.state == "up" } ?: continue
-            val list = c.info?.optJSONObject("mesh")?.optJSONArray("members").list()
-            for (m in list) {
-                val id = m.optString("id").ifBlank { null } ?: continue
-                if (id in known) continue
+            val seen = listedBy.getOrPut(h.id) { HashSet() }
+            for (m in c.info?.optJSONObject("mesh")?.optJSONArray("members").list()) {
+                val id = m.optString("id").takeIf(::isId) ?: continue
+                seen.add(id)
+                if (id in known || heldBy(m) != null) continue
                 val now = best[id]
                 if (now == null || m.optInt("hops", 99) < now.first.optInt("hops", 99)) best[id] = m to c
             }
@@ -205,6 +238,7 @@ object Mesh {
             members[id] = JSONObject(pair.first.toString()).put("route", pair.second.host?.label)
             val c = conns["mesh:$id"]
             if (c == null) {
+                moved.remove("mesh:$id") // (reached through the mesh again: its chats here, not a host's)
                 start(Connection(app, Place.Member(id), ::identify, { routes[it] }, ::heard) { conn ->
                     main.post { changed(conn) }
                 })
@@ -214,16 +248,35 @@ object Mesh {
             c.listed = true
             if (back) c.kick()
         }
+        val kept = hosts.flatMap { listedBy[it.id].orEmpty() }.toSet()
         for (c in conns.values.filter { it.place is Place.Member }.toList()) {
             val id = (c.place as Place.Member).member
-            if (id in known) { // (a host of yours now: reached so)
-                c.stop()
-                conns.remove(c.id)
-                states.remove(c.id)
-                sessions.remove(c.id)
-                members.remove(id)
-            } else if (id !in best) c.listed = false
+            val mine = known[id] ?: heldBy(members[id]) // (a host of yours: reached so, or not till you've said of its
+            when {                                     // key; the chat open on it moved there)
+                mine != null -> {
+                    moved[c.id] = mine.id
+                    open?.let { chat ->
+                        if (chat.hostId != c.id) return@let
+                        chat.hostId = mine.id
+                        attach(chat)
+                        read(chat)
+                    }
+                    drop(c)
+                }
+                id !in kept -> drop(c) // (no host of yours lists it any more)
+                id !in best -> c.listed = false
+            }
         }
+    }
+
+    /** A member's connection let go of, and its Bots with it. */
+    private fun drop(c: Connection) {
+        c.stop()
+        conns.remove(c.id)
+        states.remove(c.id)
+        sessions.remove(c.id)
+        members.remove(c.id.removePrefix("mesh:"))
+        tick.value++
     }
 
     /** Hosts whose key you've said not to trust ("host id fingerprint"), this run: not asked again till you tap one. */
@@ -232,13 +285,14 @@ object Mesh {
     /** The key a host showed trusted (you've compared its fingerprint), and the host tried again. */
     fun trust(host: Host, shown: ShownKey) {
         HostStore.trust(app, host, shown.type, shown.blob)
-        connect(host)
-    }
+        hosts.filter { it.address == host.address && it.port == host.port }.forEach { connect(it) } // (each that's
+    }                                                                                              // there: its key)
 
     private fun changed(c: Connection) {
         if (conns[c.id] !== c) return
         tick.value++
         if (c.state == "up") {
+            c.host?.let { h -> c.info?.optString("id")?.takeIf(::isId)?.let { HostStore.setMachine(app, h, it) } }
             if (sessions[c.id] != null) catchUp.add(c.id)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
@@ -276,32 +330,54 @@ object Mesh {
         }
     }
 
-    /** (a host listed its sessions) The open chat's asks kept as its host has them (gone once answered, here or in
-     * Baude, or its claude's gone); and a Bot that's started asking, out of sight, notified. */
+    /** (a host listed its sessions) The open chat's asks kept as its host has them: gone at once once answered
+     * (here, in Baude, or its claude's gone), and fetched again (attach) if it lists one that isn't here. A Bot that's
+     * started asking, out of sight, notified once for each ask, and the notification taken back once it's answered,
+     * wherever. */
     private fun asked(c: Connection, before: List<JSONObject>?, now: List<JSONObject>) {
         fun rids(s: JSONObject?) = s?.optJSONArray("asks").list().map { it.optString("request_id") }.toSet()
         open?.let { chat ->
             if (chat.hostId != c.id) return@let
             val listed = rids(now.firstOrNull { it.optString("id") == chat.sid })
-            val t = android.os.SystemClock.elapsedRealtime()
-            for (a in chat.asks.toList()) {
-                if (a.rid in listed) a.seen = true
-                else if (a.seen || t - a.at > 5_000) chat.asks.remove(a)
+            chat.asks.removeAll { it.rid !in listed }
+            val missing = listed - chat.asks.map { it.rid }.toSet() - chat.fetched
+            if (missing.isNotEmpty()) {
+                chat.fetched.addAll(missing)
+                attach(chat)
             }
         }
-        if (before == null) return
+        val nm = NotificationManagerCompat.from(app)
         for (s in now) {
+            val sid = s.optString("id")
+            val key = "${c.id}/$sid"
+            val listed = rids(s)
+            val notified = askNotes.getOrPut(key) { HashSet() }
+            for (rid in notified.filter { it !in listed }) { // (answered: its notification taken back)
+                nm.cancel("ask:$key/$rid", ASK_NOTE)
+                notified.remove(rid)
+            }
             if (s.optJSONObject("bot") == null) continue
-            val was = rids(before.firstOrNull { it.optString("id") == s.optString("id") })
-            val new = s.optJSONArray("asks").list().filter { it.optString("request_id") !in was }
-            if (new.isEmpty()) continue
             val chat = open
-            if (shown && chat != null && chat.hostId == c.id && chat.sid == s.optString("id")) continue
-            val contact = contact(c.id, s.optString("id")) ?: continue
-            val tool = new.first().optString("tool")
-            notify(contact, if (tool == "AskUserQuestion") "Has a question for you" else "Waiting for your answer: " +
-                toolTitle(tool))
+            val inFront = shown && chat != null && chat.hostId == c.id && chat.sid == sid
+            for (ask in s.optJSONArray("asks").list()) {
+                val rid = ask.optString("request_id")
+                if (rid in notified) continue
+                notified.add(rid)
+                if (inFront || (before == null && shown)) continue // (in front, or there as the app opened: seen)
+                val contact = contact(c.id, sid) ?: continue
+                val tool = ask.optString("tool")
+                post(contact, if (tool == "AskUserQuestion") "Has a question for you"
+                    else "Waiting for your answer: " + toolTitle(tool), "ask:$key/$rid")
+            }
         }
+    }
+
+    /** The tools its host allows the chat whenever it asks (a session's always_allow, version 15), and those you've
+     * allowed from here. */
+    fun alwaysAllowed(chat: Chat): Set<String> {
+        val listed = sessions[chat.hostId]?.firstOrNull { it.optString("id") == chat.sid }?.optJSONArray("always_allow")
+        val host = (0 until (listed?.length() ?: 0)).map { listed!!.optString(it) }
+        return host.toSet() + allowed["${chat.hostId}/${chat.sid}"].orEmpty()
     }
 
     /** An ask answered, as Baude answers it: claude's control_response for it, sent as the chat's input. allow: Allow
@@ -321,9 +397,12 @@ object Mesh {
         val msg = JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
             .put("request_id", ask.rid).put("response", response))
         if (always) {
-            val tools = allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.apply { add(ask.tool) }
-            c.request(JSONObject().put("op", "always_allow").put("session", chat.sid)
-                .put("tools", JSONArray(tools.sorted()))) {}
+            val all = alwaysAllowed(chat) + ask.tool
+            allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
+            val req = JSONObject().put("op", "always_allow").put("session", chat.sid)
+            if ((c.info?.optInt("version", 1) ?: 1) >= 15) req.put("add", JSONArray(listOf(ask.tool))) // (added to
+            else req.put("tools", JSONArray(all.sorted())) // its list; an older host's replaced: all that's known here)
+            c.request(req) {}
         }
         c.request(JSONObject().put("op", "input").put("session", chat.sid).put("msg", msg)) { r ->
             if (r.optString("op") == "error") main.post {
@@ -358,7 +437,8 @@ object Mesh {
 
     // ---- a chat
 
-    fun openChat(hostId: String, sid: String): Chat {
+    fun openChat(at: String, sid: String): Chat {
+        val hostId = moved[at] ?: at // (a member's, its machine a host of yours since: that host's)
         open?.let { if (it.hostId == hostId && it.sid == sid) return it }
         close()
         val chat = Chat(hostId, sid)
@@ -375,10 +455,19 @@ object Mesh {
         open = null
     }
 
-    /** The chat attached to live, as one that answers what it asks (its asks, as they are, shown to answer). */
+    /** The app on screen, or not: the chat open attached again as one that answers what it asks, or doesn't (so a
+     * Bot's ask_timeout runs out while the phone's put away, as if nobody were there; its notification still comes). */
+    fun onScreen(now: Boolean) {
+        if (visible == now) return
+        visible = now
+        open?.let { attach(it) }
+    }
+
+    /** The chat attached to live, as one that answers what it asks while the app's on screen (its asks, as they are,
+     * shown to answer). */
     private fun attach(chat: Chat) {
         conns[chat.hostId]?.request(JSONObject().put("op", "attach").put("session", chat.sid).put("live", true)
-            .put("answers", true)) { r ->
+            .put("answers", visible)) { r ->
             if (r.optString("op") != "attached") return@request
             val asks = r.optJSONArray("asks").list().mapNotNull(Ask::of)
             main.post {
@@ -479,7 +568,8 @@ object Mesh {
     private fun channel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = app.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH))
+            nm.createNotificationChannel(NotificationChannel(MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH)
+                .apply { lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE }) // (locked: who, not what)
             nm.createNotificationChannel(NotificationChannel(LINKED, "Connected", NotificationManager.IMPORTANCE_MIN))
         }
     }
@@ -536,12 +626,19 @@ object Mesh {
         val before = notified[contact.id]
         if (before != null && before.first == text && now - before.second < 120_000) return // (the same turn, told
         notified[contact.id] = text to now                                                  // twice: once)
+        post(contact, text, null)
+    }
+
+    /** A notification for a Bot that opens its chat: what it said (one a Bot, each in place of the last), or one of
+     * its asks (tag: its own, taken back once it's answered). On the lock screen, only which Bot wrote or is asking:
+     * what it said shows once the phone's unlocked. */
+    private fun post(contact: Contact, text: String, tag: String?) {
         if (Build.VERSION.SDK_INT >= 33 &&
             app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return
         val intent = Intent(app, MainActivity::class.java).putExtra("host", contact.hostId).putExtra("session", contact.id)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        val pending = PendingIntent.getActivity(app, contact.id.hashCode(), intent,
+        val pending = PendingIntent.getActivity(app, (tag ?: contact.id).hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(app, MESSAGES)
             .setSmallIcon(R.drawable.ic_baude)
@@ -550,14 +647,22 @@ object Mesh {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(2000)))
             .setContentIntent(pending)
             .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(NotificationCompat.Builder(app, MESSAGES)
+                .setSmallIcon(R.drawable.ic_baude)
+                .setContentTitle(contact.name)
+                .setContentText(if (tag != null) "Waiting for your answer" else "New message")
+                .build())
             .build()
         try {
-            NotificationManagerCompat.from(app).notify(contact.id.hashCode(), n)
+            if (tag != null) NotificationManagerCompat.from(app).notify(tag, ASK_NOTE, n)
+            else NotificationManagerCompat.from(app).notify(contact.id.hashCode(), n)
         } catch (_: SecurityException) {
         }
     }
 
     const val MESSAGES = "messages"
+    private const val ASK_NOTE = 2 // (an ask's notification: its tag says which)
     const val LINKED = "linked"
     private const val TAIL = 400_000L // (a chat's transcript read from its last this much, the first time)
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")

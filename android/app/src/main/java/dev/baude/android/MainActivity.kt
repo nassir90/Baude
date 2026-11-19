@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BaudeTheme {
                 val now = screen.value
-                BackHandler(now.size > 1) { back() }
+                BackHandler(now[0] != "contacts") { back() } // (Hosts too: back to your Bots)
                 when (now[0]) {
                     "chat" -> ChatScreen(now[1], now[2], ::back)
                     "hosts" -> HostsScreen(::back)
@@ -64,6 +64,16 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putStringArrayList("screen", ArrayList(screen.value))
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Mesh.onScreen(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        Mesh.onScreen(false)
     }
 
     override fun onResume() {

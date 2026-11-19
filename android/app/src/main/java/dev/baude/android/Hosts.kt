@@ -66,7 +66,16 @@ object HostStore {
     }
 
     fun forget(ctx: Context, host: Host) {
-        prefs(ctx).edit().remove(keyName(host)).apply()
+        prefs(ctx).edit().remove(keyName(host)).remove(machineName(host)).apply()
+    }
+
+    private fun machineName(host: Host) = "machine:${host.address}:${host.port}"
+
+    /** The id the host's host process last said it has (its hello's), or null if it's never been reached. */
+    fun machine(ctx: Context, host: Host): String? = prefs(ctx).getString(machineName(host), null)
+
+    fun setMachine(ctx: Context, host: Host, id: String) {
+        if (machine(ctx, host) != id) prefs(ctx).edit().putString(machineName(host), id).apply()
     }
 }
 

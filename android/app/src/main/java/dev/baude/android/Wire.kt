@@ -20,6 +20,9 @@ const val SILENT_MS = 16_000L // (wire.SILENT_S: silent this long, the other end
 const val MIN_VERSION = 8     // (wire's version 8: Bots)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
 const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long to open)
+/** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
+fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
+
 const val RELAY_RETRY_MS = 10_000L // (a member that's dropped, tried again this often while it's listed: Baude's 10 s)
 
 /** What ssh offers and takes here: what Android's own crypto has, P-256's ECDH and ECDSA, RSA and AES. */
@@ -50,7 +53,7 @@ sealed class Place {
 class Connection(
     private val ctx: Context,
     val place: Place,
-    private val identify: (JSch) -> Unit,
+    private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
     private val route: (String) -> Connection?,
     private val heard: (Connection, JSONObject) -> Unit,
     private val changed: (Connection) -> Unit,
@@ -126,6 +129,7 @@ class Connection(
     @Volatile private var heardAt = 0L // (SystemClock.elapsedRealtime of the last byte heard)
     private val wake = LinkedBlockingQueue<Unit>() // (kick: the wait between tries cut short)
     @Volatile private var said = "" // (what ssh, or the host's command, last said on stderr: why it went)
+    @Volatile private var signError: String? = null // (why this phone's key couldn't sign, this try)
 
     /** Tried again now, not after the wait (the network's back, or a member's listed again). */
     fun kick() {
@@ -147,7 +151,8 @@ class Connection(
     private fun open(): ChannelExec = when (val p = place) {
         is Place.Direct -> {
             val jsch = JSch()
-            identify(jsch)
+            signError = null
+            identify(jsch) { signError = it }
             val repo = TrustedKeys(ctx, p.host)
             lastRepo = repo
             jsch.hostKeyRepository = repo
@@ -316,6 +321,7 @@ class Connection(
     private fun plain(e: Exception): String {
         val m = e.message ?: e.javaClass.simpleName
         return when {
+            signError != null -> "this phone's key couldn't sign: $signError"
             m.contains("Auth fail", true) -> "this phone's key isn't in the host's authorized_keys"
             m.contains("timeout", true) || m.contains("timed out", true) -> "the host didn't answer"
             m.contains("UnknownHost", true) || e is java.net.UnknownHostException -> "no such host"

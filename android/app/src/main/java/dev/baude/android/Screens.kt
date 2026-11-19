@@ -76,7 +76,7 @@ fun Contacts(open: (Contact) -> Unit, hosts: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Baude", end = { IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts) })
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
-        if ((Mesh.key.value == null && Mesh.old.value == null) || Mesh.hosts.isEmpty()) {
+        if (Mesh.key.value == null || Mesh.hosts.isEmpty()) {
             GreyBanner("Add a host to see its Bots.", onClick = hosts)
         }
         for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)}: ${conn.why ?: "no answer"}", onClick = hosts)
@@ -122,7 +122,8 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
-    val contact = Mesh.contact(hostId, sid)
+    val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
+    val contact = Mesh.contact(at, sid)
     val name = contact?.name ?: "Bot"
     var text by androidx.compose.runtime.saveable.rememberSaveable(hostId, sid) { mutableStateOf("") }
     val files = chat.files
@@ -150,9 +151,9 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
         if (n > 0) list.animateScrollToItem(n - 1)
     }
     Mesh.tick.value
-    val conn = Mesh.conn(hostId)
+    val conn = Mesh.conn(at)
     Column(Modifier.fillMaxSize().background(c.inside).imePadding()) {
-        Bar(name, subtitle = Mesh.label(hostId), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
+        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             lead = { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) })
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
@@ -226,6 +227,9 @@ private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean) {
             }
             Button("Deny", destructive = true) { Mesh.answer(chat, ask, allow = false) }
         }
+        val always = Mesh.alwaysAllowed(chat)
+        if (always.isNotEmpty()) Text("Always allowed in this chat: " + always.sorted().joinToString(", ") {
+            toolDisplay(it).first }, style = Type.caption, color = c.dim)
     }
 }
 
@@ -474,21 +478,25 @@ fun HostsScreen(back: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<Host?>(null) }
     var renewing by remember { mutableStateOf(false) }
-    var forgetting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             end = { IconButton(Icons.Filled.Add, "Add Host") { adding = true } })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val key = Mesh.key.value
-            val old = Mesh.old.value
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("This phone's key", style = Type.title, color = c.fg)
-                if (key == null) {
+                val error = Mesh.keyError.value
+                if (key == null && error != null) {
+                    Text(error, style = Type.body, color = c.destructive)
+                    Button("Try Again", suggested = true) { Mesh.readKey() }
+                } else if (key == null) {
                     Text("Make a key for this phone, then put its public half in each host's ~/.ssh/authorized_keys. " +
-                        "It's made in this phone's secure hardware and never leaves it.", style = Type.body, color = c.dim)
-                    Button("Make Key", suggested = true) { Mesh.makeKey() }
+                        "It's made and kept in Android's Keystore, which signs with it and never gives it out.",
+                        style = Type.body, color = c.dim)
+                    if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
+                    else Button("Make Key", suggested = true) { Mesh.makeKey() }
                 } else {
                     Text("Put this line in each host's ~/.ssh/authorized_keys.", style = Type.body, color = c.dim)
                     SelectionContainer {
@@ -516,15 +524,8 @@ fun HostsScreen(back: () -> Unit) {
                         }
                         Button("New Key") { renewing = true }
                     }
-                }
-                if (old != null) Column(Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(8.dp))
-                    .background(c.warning.copy(alpha = 0.12f)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Moving to the new key", style = Type.bold, color = c.fg)
-                    Text("This phone's old key, kept in a file, is still offered to your hosts so they let it in " +
-                        "meanwhile. On each host, put the line above in ~/.ssh/authorized_keys in place of the old " +
-                        "key's, then forget the old key.", style = Type.caption, color = c.fg)
-                    Text("Old key: ${old.fingerprint}", style = Type.caption, color = c.dim)
-                    Button("Forget Old Key", destructive = true) { forgetting = true }
+                    if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
+                    error?.let { Text(it, style = Type.caption, color = c.destructive) }
                 }
             }
             if (Mesh.hosts.isEmpty()) Text("No hosts yet. Add one as user@host: over Tailscale, its Tailscale name.",
@@ -538,7 +539,7 @@ fun HostsScreen(back: () -> Unit) {
                               else "Its key isn't trusted yet: tap to check it") to
                         (if (conn.shown?.changed == true) c.destructive else c.warning)
                     "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
-                    else -> (if (key == null && old == null) "Make this phone's key first" else "Not connected") to c.dim
+                    else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
                 }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)
@@ -570,10 +571,6 @@ fun HostsScreen(back: () -> Unit) {
         text = { Text("Hosts that have the current key need the new one in their authorized_keys.") },
         confirmButton = { Button("Make Key", destructive = true) { Mesh.makeKey(); renewing = false } },
         dismissButton = { Button("Cancel") { renewing = false } }, containerColor = c.dialog)
-    if (forgetting) AlertDialog(onDismissRequest = { forgetting = false }, title = { Text("Forget the old key?") },
-        text = { Text("Hosts that have only the old key in their authorized_keys won't let this phone in.") },
-        confirmButton = { Button("Forget Old Key", destructive = true) { Mesh.forgetOld(); forgetting = false } },
-        dismissButton = { Button("Cancel") { forgetting = false } }, containerColor = c.dialog)
 }
 
 /** The members of your hosts' mesh: each reached through a host of yours that's up (the one that reaches it in fewest

@@ -355,7 +355,7 @@ class Session:
                 "acting": self.acting and self.busy and not self.asks,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
-                "mesh_tools": self.mesh_tools(),
+                "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
@@ -1122,8 +1122,9 @@ class Server:
                 if s.drop_timer is not None:  # (a head back on it: not dropped after all)
                     s.drop_timer.cancel()
                     s.drop_timer = None
-                if isinstance(msg.get("always_allow"), list):  # (tools a head always allows: allowed here, attached
-                    s.always_allow = {t for t in msg["always_allow"] if isinstance(t, str)}  # or not: kept in memory)
+                if isinstance(msg.get("always_allow"), list):  # (tools a head always allows: added to those allowed
+                    s.always_allow |= {t for t in msg["always_allow"] if isinstance(t, str)}  # here, kept in memory)
+                    self.changed()
                 if isinstance(msg.get("env"), dict):  # (a head here: its claude's environment, from its next start)
                     s.env = clean_env(msg["env"])
                 s.viewers.add(conn)
@@ -1144,9 +1145,13 @@ class Server:
                     s.proc.restarting = bool(msg.get("restart"))
                     s.proc.kill()
                 return reply("stopped", session=s.id)
-            if op == "always_allow":  # (tools a head always allows: allowed here as claude asks, with or without it)
-                s.always_allow = {t for t in msg.get("tools") or [] if isinstance(t, str)}
-                return reply("allowed", session=s.id)
+            if op == "always_allow":  # (tools a head always allows: allowed here as claude asks, with or without it;
+                if isinstance(msg.get("add"), list):  # add: these too, tools: these in place of all there were)
+                    s.always_allow |= {t for t in msg["add"] if isinstance(t, str)}
+                else:
+                    s.always_allow = {t for t in msg.get("tools") or [] if isinstance(t, str)}
+                self.changed()
+                return reply("allowed", session=s.id, tools=sorted(s.always_allow))
             if op == "set_cwd":  # (/cd: claude carries on there, from its next message: started again in it)
                 cwd = os.path.realpath(os.path.expanduser(msg.get("cwd") or ""))
                 if not os.path.isdir(cwd):

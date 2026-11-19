@@ -76,6 +76,7 @@ from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, 
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
+import baudelib.server  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
@@ -1656,10 +1657,13 @@ def glossary_text(folders):
     return "\n\n".join(parts)
 
 
-def bot_started(path):
-    """Is a chat's transcript one a Bot started on the mesh (a host lists it with spawned_by)? As far as the hosts
-    looked for say: none looked for yet, no."""
+def bot_started(path, kept=True):
+    """Is a chat's transcript one a Bot started on the mesh (its host keeps it with spawned_by)? This machine's host
+    process's own, as it keeps them (read, not asked: no connection made; not if kept is False); another host's, as
+    the hosts looked for list them (none looked for yet: no)."""
     sid = os.path.basename(path or "").removesuffix(".jsonl")
+    if kept and (meta := baudelib.server.kept_session(sid)) is not None:
+        return bool(meta.get("spawned_by"))
     return bool(_NETWORK) and any(s.get("spawned_by") and sid in (s["id"], s.get("cli_id"))
                                   for s in network().sessions())
 
@@ -5342,6 +5346,7 @@ class Reader(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.path, self.items, self.rows = win, None, [], []
+        self.spawned = False  # (read as a chat a Bot started: bot_started, as it was when its reading began)
         self.waiting = None
         self.stack = Gtk.Stack(vexpand=True)
         self.empty = Adw.StatusPage(icon_name="baude-claude-symbolic", title="No chat open",
@@ -5406,7 +5411,12 @@ class Reader(Gtk.Box):
             self.mark_nouns_soon()
             return
         self.path = chat["path"] if chat else None
+        self.read_from_start()
+
+    def read_from_start(self):
+        """The chat drawn again from its start: as it's first shown, or once it's known to be a Bot's (bot_changed)."""
         self.items, self.seen = [], {}
+        self.spawned = bot_started(self.path)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         self.rows, self.picks, self.picking = [], [], None
@@ -5417,6 +5427,12 @@ class Reader(Gtk.Box):
             self.follow.stick = True
             self.tail.start(self.path, 0)
             self.tail.read(new=False)  # (and its nouns marked: mark_nouns_soon)
+
+    def bot_changed(self):
+        """The hosts changed: a chat a host now lists as one a Bot started (bot_started), drawn again so (a Bot's chat
+        stays one: what this machine's host process keeps was read as it was first shown)."""
+        if self.path and not self.spawned and bot_started(self.path, kept=False):
+            self.read_from_start()
 
     def mark_nouns_soon(self):
         """In a moment (the chat may still be coming in): the "the X"s its replies take as known, that nothing in it
@@ -5512,7 +5528,7 @@ class Reader(Gtk.Box):
         """What's been added to the chat (livefeed.Tail, the moment it's written): its prose drawn, a reply written in
         several records the one it's part of, grown."""
         n = len(self.items)
-        parse_records(lines, self.items, self.seen, bot_started(self.path))
+        parse_records(lines, self.items, self.seen, self.spawned)
         keep = n  # (a revert took back what's after the record it keeps: those rows go)
         if n and (len(self.items) < n or self.rows[n - 1].item is not self.items[n - 1]):
             keep = next(i for i, row in enumerate(self.rows) if i >= len(self.items) or row.item is not self.items[i])
@@ -8175,6 +8191,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         wasn't sent it, sent first: list_notes); what's in its way said (show_host_state); this machine's host process
         on other code than Record's, said (check_host_code)."""
         self.check_host_code()
+        for reader in [c for c in self.tabs.children() if isinstance(c, Reader) and c.chat]:
+            reader.bot_changed()
         store = self.store
         for r in network().remotes():  # (the one picked, known by another key now: by that one)
             if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:

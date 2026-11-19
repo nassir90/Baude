@@ -77,6 +77,7 @@ from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 import baudelib.server  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
+from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
@@ -7309,7 +7310,7 @@ class Settings(Adw.PreferencesDialog):
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
         group.add(widgets.settings_switch(f"Show in {'Applications' if sys.platform == 'darwin' else 'application menu'}",
-                                          launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
+                                          applist.launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
                                           "win.launcher"))
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")  # (the text's and the icons' are Baude's too)
@@ -9277,17 +9278,7 @@ ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 
 def icon_png(size=1024, macos=True):
     """The logo as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
-    gi.require_version("GdkPixbuf", "2.0")
-    from gi.repository import GdkPixbuf
-    svg = ICON_SVG
-    if macos:
-        k = 112 * 1024 / 824  # (the tile is 112 of the SVG's 128)
-        svg = svg.replace('viewBox="0 0 128 128"', f'viewBox="{64 - k / 2} {64 - k / 2} {k} {k}"')
-    loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
-    loader.set_size(size, size)
-    loader.write(svg.encode())
-    loader.close()
-    return loader.get_pixbuf().save_to_bufferv("png", [], [])[1]
+    return applist.icon_png(ICON_SVG, size, macos)
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):
@@ -9353,81 +9344,21 @@ def launch_command():
     return [sys.executable, os.path.realpath(__file__)]
 
 
-def launchers(app_id, name):
-    """Where install puts an app's launcher: its .app (macOS), else its .desktop entry and its logo."""
-    if sys.platform == "darwin":
-        return [os.path.expanduser(f"~/Applications/{name}.app")]
-    share = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return [os.path.join(share, "applications", f"{app_id}.desktop"),
-            os.path.join(share, "icons", "hicolor", "scalable", "apps", f"{app_id}.svg")]
-
-
-def remove(paths):
-    """The paths that were there, removed."""
-    there = [p for p in paths if os.path.exists(p)]
-    for p in there:
-        if os.path.isdir(p):
-            shutil.rmtree(p)
-        else:
-            os.remove(p)
-    return there
-
-
 def install():
-    """macOS: ~/Applications/Record.app (an .icns of the logo, started through the login shell for Homebrew's PATH).
-    Linux: a .desktop entry and the logo in the user's hicolor theme."""
-    import shlex
-    import struct
-    if sys.platform == "darwin":
-        import plistlib
-        app = os.path.expanduser("~/Applications/Record.app")
-        contents = os.path.join(app, "Contents")
-        os.makedirs(os.path.join(contents, "MacOS"), exist_ok=True)
-        os.makedirs(os.path.join(contents, "Resources"), exist_ok=True)
-        with open(os.path.join(contents, "Info.plist"), "wb") as f:
-            plistlib.dump({"CFBundleName": "Record", "CFBundleDisplayName": "Record", "CFBundleIdentifier": APP_ID,
-                           "CFBundlePackageType": "APPL", "CFBundleExecutable": "Record", "CFBundleIconFile": "Record",
-                           "LSApplicationCategoryType": "public.app-category.productivity",
-                           "NSHighResolutionCapable": True}, f)
-        entries = b"".join(kind + struct.pack(">I", 8 + len(png)) + png for kind, png in
-                           ((k, icon_png(n)) for k, n in ((b"ic07", 128), (b"ic08", 256), (b"ic09", 512),
-                                                          (b"ic10", 1024))))
-        with open(os.path.join(contents, "Resources", "Record.icns"), "wb") as f:
-            f.write(b"icns" + struct.pack(">I", 8 + len(entries)) + entries)
-        script = os.path.join(contents, "MacOS", "Record")
-        with open(script, "w") as f:
-            f.write('#!/bin/sh\ncd "$HOME"\nexec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '
-                    + " ".join(shlex.quote(a) for a in launch_command()) + ' "$@"\n')
-        os.chmod(script, 0o755)
-        lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
-                      "/Support/lsregister")
-        if os.path.exists(lsregister):  # (listed now, ⌘Space too: they find it in time, a minute or more)
-            subprocess.run([lsregister, "-f", app], capture_output=True, check=False)
-        if shutil.which("mdimport"):
-            subprocess.run(["mdimport", app], capture_output=True, check=False)
-        return app
-    share = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    icon = os.path.join(share, "icons", "hicolor", "scalable", "apps", f"{APP_ID}.svg")
-    desktop = os.path.join(share, "applications", f"{APP_ID}.desktop")
-    entry = "\n".join(["[Desktop Entry]", "Type=Application", "Name=Record",
-                       "Comment=Read AI prose with a peer who knows what you know",
-                       "Exec=" + " ".join(shlex.quote(a) for a in launch_command()), f"Icon={APP_ID}",
-                       "Terminal=false", "Categories=Utility;GTK;", f"StartupWMClass={APP_ID}", ""])
-    for path, data in ((icon, ICON_SVG), (desktop, entry)):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.write(data)
-    return desktop
+    """macOS: ~/Applications/Record.app (an .icns of the logo). Linux: a .desktop entry and the logo in the user's
+    hicolor theme. Where it is."""
+    return applist.install(APP_ID, "Record", ICON_SVG, launch_command(), "public.app-category.productivity",
+                           ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"])[0]
 
 
 def installed():
     """Whether Record is in the platform's list of apps (Settings → Show in Applications)."""
-    return os.path.exists(launchers(APP_ID, "Record")[0])
+    return os.path.exists(applist.launchers(APP_ID, "Record")[0])
 
 
 def uninstall():
     """Record's launcher: what was removed."""
-    return remove(launchers(APP_ID, "Record"))
+    return applist.uninstall(APP_ID, "Record")
 
 
 def restart_path():

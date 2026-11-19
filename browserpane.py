@@ -518,6 +518,10 @@ class BrowserWindow(Adw.ApplicationWindow):
         """restored: out again as Baude starts (shown behind the window in front, not taking the keys)."""
         super().__init__(application=main.get_application(), title="Emission", default_width=1180,
                          default_height=820)
+        if sys.platform != "darwin":  # (Emission's logo, not Baude's, where a title bar or a task list shows it)
+            import emission
+            if emission.themed_icon() is not None:
+                self.set_icon_name(emission.APP_ID)
         self.main, self.sid, self.done = main, info["id"], False
         DISEMBODIED[self.sid] = self
         remember()
@@ -878,9 +882,10 @@ class BrowserPane(Gtk.Box):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.append(self.mirror)
         content.append(self.prompts)
-        content.append(over)
+        content.append(widgets.inside(over, under_bar=True))  # (set into the frame, as the other apps' windows are)
         content.append(self.said)
         frame = Adw.ToolbarView(content=content, vexpand=True)
+        frame.add_css_class("baude-frame")  # (the bars on the frame: widgets.CSS)
         frame.add_top_bar(chrome.bar)
         frame.add_top_bar(chrome.strip)
         self.append(frame)

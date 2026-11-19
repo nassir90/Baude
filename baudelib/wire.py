@@ -19,7 +19,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?}
+           env?, start_key?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -49,7 +49,9 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        id, made the host's (resumed by it; started: as it is, if
                                                        it's the host's already). env: a head on this machine's
                                                        environment for the session's claude (kept in memory only;
-                                                       attach takes it too)
+                                                       attach takes it too). start_key: (version 13) an id the client
+                                                       picks, kept and listed, so it can tell whether a start whose
+                                                       answer it lost was taken
     detach {session}
     input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
@@ -102,6 +104,15 @@ A client's requests (a "req" it picks comes back on the reply):
     mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
+    waits_on {session, on: {session, host, kind,     -> waits_on {session}: (version 13) the session's agent waits on
+              text, offset, until}, done?}             another chat's answer (on: that chat, on member host, None for
+                                                       this host; kind "subagent" or "chat", text what it was asked,
+                                                       offset its transcript's size as it was asked, until when the
+                                                       wait ends, epoch seconds), or done: no longer.
+                                                       Kept with the session (not listed) while its turn goes on: if
+                                                       this host stops meanwhile, which stops its agent, it follows
+                                                       the wait once it's started again and sends the session what the
+                                                       wait would have given, as its user's message
     emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
                                                        {state}, many, till emission_watch_end: (version 11) a Bot's
                                                        browser here watched (Baude's Browser pane)
@@ -148,8 +159,8 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot}: its id a UUID the server made as it started it (claude's --session-id;
-what it's resumed by), state "working"
+subagents, asks, cli_id, commands, cut, bot, start_key}: its id a UUID the server made as it started it (claude's
+--session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
 is checked against), asks what
@@ -162,7 +173,8 @@ but those in a subagent running in the background), and its background tasks but
 background: background true) from their start to their notification; none once its claude's gone. cut: when (epoch
 seconds) the host process stopped its claude at a turn or asking (shutting down, a quit, a restart; not a turn that
 ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input). bot:
-a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8).
+a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8). start_key:
+its start's, if it was given one (version 13).
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
@@ -198,11 +210,12 @@ import subprocess
 import threading
 import time
 
-VERSION = 12  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 13  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
-# 12: routines, run_routine)
+# 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
+# gone)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

@@ -30,15 +30,15 @@ data class Contact(val hostId: String, val session: JSONObject) {
     val said: Double get() = session.optDouble("said", session.optDouble("updated", 0.0))
     val state: String get() = session.optString("state", "stopped")
     val asking: Boolean get() = (session.optJSONArray("asks")?.length() ?: 0) > 0
-    /** Whether "always allow" is offered for what it asks, as Baude offers it: for Claude Code's models only (another
-     * program's asks each call: models.model_program). */
-    val alwaysOffered: Boolean
-        get() = session.optString("model").let { m ->
-            !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
-                m.startsWith("agent/") || m.startsWith("mlx-"))
-        }
+    val alwaysOffered: Boolean get() = alwaysOffered(session.optString("model"))
     val pictureKey: String get() = "$hostId/$id/${session.optJSONObject("bot")?.opt("picture")}"
 }
+
+/** Whether "always allow" is offered for what a chat asks, as Baude offers it: for Claude Code's models only
+ * (another program's asks each call: models.model_program). */
+fun alwaysOffered(m: String?): Boolean = m == null ||
+    !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
+        m.startsWith("agent/") || m.startsWith("mlx-"))
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
@@ -66,19 +66,28 @@ class Ask(val rid: String, val tool: String, val input: JSONObject, val toolUseI
 
 /** A chat open: its lines, read from its transcript on its host (more read as it grows), what's sent to it. hostId:
  * the connection it's on (a member's, till that machine's reached as a host of yours: then that host's). */
-class Chat(hostId: String, val sid: String) {
+class Chat(hostId: String, sid: String) {
+    var sid by mutableStateOf(sid)
     var hostId by mutableStateOf(hostId)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
     val preparing = mutableStateOf(0)         // (picked, still being read)
     val ends = HashMap<String, Int>()         // (a record's uuid: how many lines were shown up to its end)
     val busy = mutableStateOf(false)
+    val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
+    val artifacts = mutableStateListOf<Artifact>() // (what it published, newest first: the Artifacts page)
+    val agents = mutableStateListOf<Subagent>()    // (the subagents it started, newest first: the Subagents page)
+    val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
+    val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
     var reading = false
     var again = false
+    var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
+
+    fun send(text: String, files: List<Picked>) = sender?.invoke(text, files) ?: Mesh.send(this, text, files)
 }
 
 /** The mesh as this app has it: your hosts, a connection to each, their Bots, the chat open, notifications as a Bot
@@ -90,7 +99,10 @@ object Mesh {
     val hosts = mutableStateListOf<Host>()
     val states = mutableStateMapOf<String, Connection>() // (host id: its connection, whose state is read)
     val tick = mutableStateOf(0) // (a connection's state changed: what reads it drawn again)
-    val sessions = mutableStateMapOf<String, List<JSONObject>>() // (a connection's id: its host's sessions)
+    val sessions = mutableStateMapOf<String, List<JSONObject>>() // (a connection's id: its host's sessions, drafts
+    // and archived ones too, which the home screen leaves out or folds)
+    val listeners = ArrayList<(String, JSONObject) -> Unit>() // (what a host says, as it's heard, on the main thread:
+    // the pages' own, by the connection's id)
     val pictures = mutableStateMapOf<String, ImageBitmap?>()
     val key = mutableStateOf<Key?>(null)
     val keyError = mutableStateOf<String?>(null) // (why the Keystore's key couldn't be read, or made: none made then)
@@ -138,7 +150,7 @@ object Mesh {
             key.value = Keys.load()
             keyError.value = null
         } catch (e: Exception) {
-            keyError.value = "This phone's key couldn't be read from the Keystore: ${e.message ?: e.javaClass.simpleName}"
+            keyError.value = "This phone's key couldn't be read: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 
@@ -298,18 +310,56 @@ object Mesh {
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
         if (c.place is Place.Direct) meshed()
-    }
+        if (c.state == "up") for (l in listeners.toList()) l(c.id, JSONObject().put("op", "connected")) // (its pages:
+    }                                                                                                    // attached again)
 
     fun conn(hostId: String): Connection? = conns[hostId]
+
+    /** A request to a host, its reply on the main thread (an error one if it isn't connected). */
+    fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {
+        val c = conns[hostId]
+        if (c == null) {
+            then(JSONObject().put("op", "error").put("error", "the server isn't there"))
+            return
+        }
+        c.request(msg) { r -> main.post { then(r) } }
+    }
+
+    fun post(block: () -> Unit) {
+        main.post(block)
+    }
+
+    fun later(ms: Long, block: () -> Unit) {
+        main.postDelayed(block, ms)
+    }
+
+    /** A session as its host lists it, or null. */
+    fun session(hostId: String, sid: String): JSONObject? = sessions[hostId]?.firstOrNull { it.optString("id") == sid }
+
+    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (offers): (id,
+     * label), your hosts first. */
+    fun reached(op: String? = null): List<Pair<String, String>> = conns.values
+        .filter { it.state == "up" && (op == null || offers(it.id, op)) }
+        .sortedWith(compareBy({ it.place is Place.Member }, { label(it.id).lowercase() })).map { it.id to label(it.id) }
+
+    /** Another connection to where hostId is, for a watch of its own (it doesn't subscribe): started; stop it when
+     * it's done with. */
+    fun watch(hostId: String, heard: (Connection, JSONObject) -> Unit, changed: (Connection) -> Unit): Connection? {
+        val c = conns[hostId] ?: return null
+        return Connection(app, c.place, ::identify, { routes[it] }, heard, subscribes = false) { w ->
+            main.post { changed(w) }
+        }.also { it.start() }
+    }
 
     // ---- what the hosts say
 
     private fun heard(c: Connection, msg: JSONObject) {
         main.post {
             if (conns[c.id] !== c) return@post
+            for (l in listeners.toList()) l(c.id, msg)
             when (msg.optString("op")) {
                 "sessions" -> {
-                    val now = msg.optJSONArray("sessions").list().filter { !it.optBoolean("draft") }
+                    val now = msg.optJSONArray("sessions").list()
                     val before = sessions[c.id]
                     sessions[c.id] = now
                     msg.optJSONObject("server")?.let { // (its mesh as it is now)
@@ -325,6 +375,7 @@ object Mesh {
                 "emission_unserved" -> PhoneBrowser.unserved(c, msg)
                 "claude" -> open?.let {
                     if (it.hostId != c.id || it.sid != msg.optString("session")) return@let
+                    msg.optJSONObject("msg")?.let { m -> if (m.optString("type") == "system") task(it, m) }
                     val ask = msg.optJSONObject("msg")?.let(Ask::of)
                     if (ask != null && it.asks.none { a -> a.rid == ask.rid }) it.asks.add(ask)
                     read(it)
@@ -455,6 +506,8 @@ object Mesh {
     fun close() {
         val chat = open ?: return
         conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", chat.sid))
+        for (q in chat.btw) if (q.sid.isNotEmpty()) // (its side questions let go of with it, as Baude's window's are)
+            conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", q.sid))
         open = null
     }
 
@@ -503,6 +556,7 @@ object Mesh {
                     chat.offset = next
                     for (line in lines) {
                         when (line.kind) {
+                            "use", "result", "task", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
                                 val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
@@ -519,6 +573,77 @@ object Mesh {
                     read(chat)
                 }
             }
+        }
+    }
+
+    /** A line the pages note, not the chat (parse's use, result, task and link): an artifact published, a subagent
+     * started or ended. */
+    private fun noted(chat: Chat, line: Line) {
+        val o = try {
+            JSONObject(line.text)
+        } catch (_: Exception) {
+            return
+        }
+        when (line.kind) {
+            "use" -> {
+                chat.uses[o.optString("id")] = o
+                if (isAgent(o.optString("name"))) {
+                    val input = o.optJSONObject("input") ?: JSONObject()
+                    val a = Subagent(o.optString("id"), input.optString("description").ifBlank { "Subagent" },
+                        input.optString("subagent_type"), input.optString("prompt"))
+                    chat.agents.removeAll { it.toolUseId == a.toolUseId }
+                    chat.agents.add(0, a)
+                }
+            }
+            "result" -> {
+                val use = chat.uses.remove(o.optString("id")) ?: return
+                val text = o.optString("text")
+                if (isAgent(use.optString("name"))) {
+                    val a = chat.agents.firstOrNull { it.toolUseId == use.optString("id") } ?: return
+                    a.agentId.value = Regex("agentId: ([A-Za-z0-9_-]+)").find(text)?.groupValues?.get(1)
+                    if (!text.startsWith("Async agent launched"))
+                        a.status.value = if (o.optBoolean("is_error")) "failed" else "completed"
+                } else artifact(use, text)?.let { added(chat, it) }
+            }
+            "task" -> {
+                val a = chat.agents.firstOrNull { it.agentId.value == o.optString("task_id") ||
+                    it.toolUseId == o.optString("tool_use_id") } ?: return
+                o.optString("status").ifBlank { null }?.let { a.status.value = it }
+            }
+            "link" -> for (url in o.optJSONArray("urls").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it) } })
+                if (chat.artifacts.none { it.url == url }) chat.artifacts.add(0, Artifact(url, "Claude artifact"))
+        }
+    }
+
+    /** A subagent's task as claude tells of it live (task_started, task_progress, task_updated, task_notification):
+     * listed as it starts, its status, what it's doing and what it's used kept. */
+    private fun task(chat: Chat, m: JSONObject) {
+        if (!m.optString("subtype").startsWith("task_")) return
+        val tool = m.optString("tool_use_id")
+        var a = chat.agents.firstOrNull { it.toolUseId == tool || it.agentId.value == m.optString("task_id") }
+        if (a == null) {
+            if (m.optString("subtype") != "task_started" || m.optString("task_type") != "local_agent") return
+            a = Subagent(tool, m.optString("description").ifBlank { "Subagent" }, m.optString("subagent_type"),
+                m.optString("prompt"))
+            chat.agents.add(0, a)
+        }
+        m.optString("task_id").ifBlank { null }?.let { if (a.agentId.value == null) a.agentId.value = it }
+        m.optJSONObject("usage")?.let { a.usage.value = it }
+        val status = m.optString("status").ifBlank { m.optJSONObject("patch")?.optString("status") }
+        when (m.optString("subtype")) {
+            "task_progress" -> m.optString("description").ifBlank { null }?.let { a.activity.value = it }
+            "task_notification", "task_updated" -> if (!status.isNullOrBlank()) a.status.value = status
+        }
+    }
+
+    /** An artifact added, or what's known of one updated in its place (a known title never made "Claude artifact"). */
+    private fun added(chat: Chat, a: Artifact) {
+        val i = chat.artifacts.indexOfFirst { it.url == a.url }
+        if (i < 0) chat.artifacts.add(0, a)
+        else {
+            val was = chat.artifacts[i]
+            chat.artifacts[i] = Artifact(a.url, if (a.title == "Claude artifact") was.title else a.title,
+                a.version ?: was.version, a.icon ?: was.icon, a.description ?: was.description, a.path ?: was.path)
         }
     }
 
@@ -680,9 +805,10 @@ fun JSONArray?.list(): List<JSONObject> = if (this == null) emptyList() else (0 
 
 /** A transcript's lines (claude's JSONL) as a chat shows them, by Baude's rules (transcripts.history_item): what you
  * wrote (reminders a client put before it left out), what the agent said and did, notes (the conversation
- * compacted, a background task ended, a turn stopped), and reverts' marks. cutFirst: it starts partway into a line,
- * which is left out. */
-fun parse(text: String, cutFirst: Boolean): List<Line> {
+ * compacted, a background task ended, a turn stopped), and reverts' marks; and those the side pages note, not shown
+ * (use: an Artifact or Agent call, result: a call's result, task: a background task's end, link: artifacts' links
+ * said). cutFirst: it starts partway into a line, which is left out. sidechain: a subagent's own (its records are). */
+fun parse(text: String, cutFirst: Boolean, sidechain: Boolean = false): List<Line> {
     val out = ArrayList<Line>()
     val rows = text.split("\n").let { if (cutFirst) it.drop(1) else it }
     for (row in rows) {
@@ -698,17 +824,17 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
             continue
         }
         val uuid = if (o.isNull("uuid")) null else o.optString("uuid").ifBlank { null }
-        record(o, type, uuid, out)
+        record(o, type, uuid, out, sidechain)
         if (uuid != null) out.add(Line("record", "", uuid)) // (where it ends: a revert to it cuts there)
     }
     return out
 }
 
 /** The lines one record shows (none, for most). */
-private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<Line>) {
+private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<Line>, sidechain: Boolean) {
     run {
         if (type != "user" && type != "assistant") return
-        if (o.optBoolean("isMeta") || o.optBoolean("isSidechain")) return
+        if (o.optBoolean("isMeta") || (o.optBoolean("isSidechain") && !sidechain)) return
         if (o.optBoolean("isCompactSummary")) {
             out.add(Line("note", "The conversation was compacted", uuid))
             return
@@ -726,7 +852,10 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                     if (type == "user") {
                         t = LEADING_REMINDERS.replace(t, "").trim()
                         when {
-                            t.startsWith("<task-notification") -> out.add(Line("note", "A background task ended", uuid))
+                            t.startsWith("<task-notification") -> {
+                                out.add(Line("note", "A background task ended", uuid))
+                                out.add(Line("task", taskNote(t).toString(), uuid))
+                            }
                             t.startsWith(STOPPED) -> out.add(Line("note", "Stopped", uuid))
                             t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
@@ -734,11 +863,22 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                         }
                     } else if (t.isNotBlank()) {
                         out.add(Line(if (o.optBoolean("isApiErrorMessage")) "error" else "bot", t.trim(), uuid))
+                        val urls = ARTIFACT_URL.findAll(t).map { it.value }.toList()
+                        if (urls.isNotEmpty()) out.add(Line("link", JSONObject().put("urls", JSONArray(urls)).toString(), uuid))
                     }
                 }
                 "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))
                 "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document"), uuid))
-                "tool_use" -> if (type == "assistant") out.add(Line("tool", toolLine(b), uuid))
+                "tool_use" -> if (type == "assistant") {
+                    out.add(Line("tool", toolLine(b), uuid))
+                    val name = b.optString("name")
+                    if (isAgent(name) || name.substringAfterLast("__") == "Artifact") out.add(Line("use",
+                        JSONObject().put("id", b.optString("id")).put("name", name)
+                            .put("input", b.optJSONObject("input") ?: JSONObject()).toString(), uuid))
+                }
+                "tool_result" -> if (type == "user") out.add(Line("result", JSONObject()
+                    .put("id", b.optString("tool_use_id")).put("is_error", b.optBoolean("is_error"))
+                    .put("text", resultText(b.opt("content"))).toString(), uuid))
             }
         }
     }
@@ -756,12 +896,12 @@ private val LEADING_REMINDERS = Regex("""\A(?:\s*<system-reminder>.*?</system-re
 private const val STOPPED = "[Request interrupted by user"
 private val NOT_TYPED = listOf("<system-reminder", "<local-command", "<command-", "Caveat:", "<ci-monitor-event")
 
-private fun toolLine(b: JSONObject): String {
+fun toolLine(b: JSONObject): String {
     val name = b.optString("name")
     val input = b.optJSONObject("input") ?: JSONObject()
     val what = input.optString("description").ifBlank { input.optString("command") }
         .ifBlank { input.optString("file_path") }.ifBlank { input.optString("url") }.ifBlank { input.optString("pattern") }
-    return if (what.isBlank()) name else "$name · ${what.lines().first().take(80)}"
+    return if (what.isBlank()) toolTitle(name) else "${toolTitle(name)} · ${what.lines().first().take(80)}"
 }
 
 /** A tool's name as Baude says it (tool_display): (its title, its source), an MCP tool's (mcp__<server>__<tool>)

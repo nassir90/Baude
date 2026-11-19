@@ -161,6 +161,7 @@ from widgets import (  # noqa: E402,F401
     set_markup_safe, themed_icon, time_ago, time_tip, toast, view_bar, walk,
 )
 import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
+import browserpane  # noqa: E402  (a Bot's browser, the side panel's Browser page: beside this file)
 from codeview import (  # noqa: E402,F401
     CODE_LIMIT, CodePage, CodeView, FILE_ICON_KINDS, FileIgnores, FileNode, FilesPage,
     file_children, file_icon, find_in_focus, git_ignored, in_code, python_context,
@@ -10594,6 +10595,11 @@ class SidePanel(Gtk.Box):
         self.memory_page = self.stack.add_titled(self.memory, "memory", "Memory")
         self.memory_page.set_icon_name("document-edit-symbolic")
         self.memory_page.set_visible(False)
+        # a Bot's browser (browserpane.BrowserPane): its own Emission, watched and driven, while the open chat's a Bot
+        self.browser = browserpane.BrowserPane(win)
+        self.browser_page = self.stack.add_titled(self.browser, "browser", browserpane.PAGE)
+        self.browser_page.set_icon_name("web-browser-symbolic")
+        self.browser_page.set_visible(False)
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
@@ -10915,10 +10921,12 @@ class SidePanel(Gtk.Box):
     def bot_changed(self, info):
         """The open chat (info: the sidebar's, or None) a Bot or not: its Memory page shown, and read, or hidden."""
         bot = bool(info and info.get("bot"))
-        if not bot and self.stack.get_visible_child_name() == "memory":
+        if not bot and self.stack.get_visible_child_name() in ("memory", "browser"):
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
-        self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
+        self.browser_page.set_visible(bot)
+        self.memory.show(info)
+        self.browser.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 
     def reset(self):
         self.agent_expand.finish()  # (a subagent opening or closing: not drawn on over what's gone)
@@ -13011,6 +13019,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
                                                   self.panel.memory.stop(),  # (what's written in a Bot's memory saved)
+                                                  self.panel.browser.stop(),  # (its watch let go of)
                                                   self.drop_signal(), GLib.idle_add(self.let_go)) and False)
 
         motion = Gtk.EventControllerMotion(propagation_phase=Gtk.PropagationPhase.CAPTURE)

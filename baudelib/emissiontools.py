@@ -90,7 +90,7 @@ OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab"
        "hover": "hover", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
        "javascript": "javascript", "console": "console", "network": "network", "resize": "resize",
        "prompts": "prompts", "answer_prompt": "answer_prompt"}
-HOST_OPS = {*OPS.values(), "sites"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
+HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
 
 
 class Browser:

@@ -102,6 +102,10 @@ A client's requests (a "req" it picks comes back on the reply):
     mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
+    emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
+                                                       {state}, many, till emission_watch_end: (version 11) a Bot's
+                                                       browser here watched (Baude's Browser pane)
+    emission_watch_say {line: {ack?, max_w?, max_h?}} -> nothing: a frame taken (ack: its frame), or the pane's size
     emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
                                                        request, baudelib.emissiontools) to the Emission that has the
                                                        Bot's own profile here, started for it if none has
@@ -191,10 +195,10 @@ import subprocess
 import threading
 import time
 
-VERSION = 10  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 11  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
-# 10: emission, a Bot's browser here)
+# 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

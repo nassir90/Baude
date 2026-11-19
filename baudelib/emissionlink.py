@@ -88,10 +88,15 @@ def add_profile(name):
         return profile_id(name)
 
 
+def bot_profile_id(bot_id):
+    """A Bot's own profile's id on any host (its name, or whether it's been made yet, aside)."""
+    return str(uuid.uuid5(PROFILE_SPACE, "bot:" + bot_id))
+
+
 def bot_profile(bot_id, name):
     """The id of a Bot's own profile on this host (made if it has none; named after the Bot, again if it's renamed;
     name None: as it's named now)."""
-    pid = str(uuid.uuid5(PROFILE_SPACE, "bot:" + bot_id))
+    pid = bot_profile_id(bot_id)
     with changing():
         return _bot_profile(pid, bot_id, name)
 
@@ -189,8 +194,8 @@ def door_path(pid):
     for macOS's limit on socket paths)."""
     from baudelib import wire
     name = hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock"
-    base = os.path.join(wire.runtime_dir(), "emission")  # (the host process's folder: found the same from ssh as at
-    if len(os.path.join(os.path.abspath(base), name).encode()) > 100:  # the screen, unlike $TMPDIR)
+    base = os.path.abspath(os.path.join(wire.runtime_dir(), "emission"))  # (the host process's folder: found the
+    if len(os.path.join(base, name).encode()) > 100:  # same from ssh as at the screen, unlike $TMPDIR)
         base = os.path.join(tempfile.gettempdir() if sys.platform != "darwin" else "/tmp", f"emission-{os.getuid()}")
     else:
         wire.own_dir(wire.runtime_dir())
@@ -241,10 +246,13 @@ def call_bot(bot_id, name, msg, timeout=60):
 
     def start():
         with open(log_path, "ab") as log:
+            env = dict(os.environ)
+            if env.get("BAUDE_RUNTIME_DIR"):  # (its folders as this process has them: it starts in another)
+                env["BAUDE_RUNTIME_DIR"] = os.path.abspath(env["BAUDE_RUNTIME_DIR"])
             return subprocess.Popen([sys.executable, EMISSION, "--agent", "--bot", bot_id,
                                      *(["--name", str(name)] if name else [])],
                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
-                                    cwd=os.path.dirname(EMISSION))
+                                    cwd=os.path.dirname(EMISSION), env=env)
     proc = start()
     end = time.monotonic() + START_S
     while True:

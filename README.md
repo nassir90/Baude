@@ -118,6 +118,20 @@ python3 baude.py --install   # add Baude to your application menu
 python3 record.py            # Record
 ```
 
+## Emission
+
+`emission.py` is Baude's browser, a window of its own for now: tabs, back and forward, an address bar that searches
+too, and profiles (made, renamed and removed from the profile menu). Each profile keeps its own cookies and logins, so
+a site signed in to once stays signed in there. A profile is open in one Emission at a time: start another on it,
+and its page opens as a tab in the one already there. Downloads go to your
+Downloads folder. Pages are WebKit's: Apple's WKWebView on macOS 14 or later, and WebKitGTK 6.0 on Linux
+(`gir1.2-webkit-6.0` on Debian and Ubuntu, `webkitgtk-6.0` on Arch). On a Linux host with no display it starts a
+virtual one of its own, with `xvfb-run` installed (package `xvfb`).
+
+```bash
+python3 emission.py [URL] [--profile NAME]
+```
+
 ## Sessions on the network
 
 `baude_headless.py` is a machine's host process for Claude Code sessions: one for each user, which owns that user's

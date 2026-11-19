@@ -988,8 +988,9 @@ class MacWeb:
             send(self.view, sel, ev, types=(ctypes.c_void_p,))
         return True
 
-    def wheel(self, x, y, dx, dy):
-        """A real scroll wheel's turn over (x, y): dy pixels down (dx right), in a few steps, as a wheel's are."""
+    def wheel(self, x, y, dx, dy, quick=False):
+        """A real scroll wheel's turn over (x, y): dy pixels down (dx right), in a few steps, as a wheel's are (quick:
+        in one, as a trackpad's many small ones are each)."""
         send = macos.objc_send
         cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
         cg.CGEventCreateScrollWheelEvent2.restype = ctypes.c_void_p
@@ -1009,7 +1010,7 @@ class MacWeb:
         top = send(send(send(b"NSScreen", b"screens"), b"objectAtIndex:", 0, types=(ctypes.c_ulong,)), b"frame",
                    ret=macos._rect()).h
         self.move(x, y)  # (the pointer there first: what's under it is what the wheel turns)
-        steps = max(1, min(12, round(max(abs(dx), abs(dy)) / 100)))
+        steps = 1 if quick else max(1, min(12, round(max(abs(dx), abs(dy)) / 100)))
         for i, (tx, ty) in enumerate([(round(dx / steps), round(dy / steps))] * steps):
             if i:
                 time.sleep(0.02)  # (a wheel's turns come apart, not at once)
@@ -1532,7 +1533,7 @@ class GtkWeb:
             xt.key(ch)
         return True
 
-    def wheel(self, x, y, dx, dy):
+    def wheel(self, x, y, dx, dy, quick=False):
         at = self._screen(x, y)
         if at is None:
             raise OSError("a real wheel needs Emission's own display")
@@ -2692,6 +2693,8 @@ class Control:
                 t.web.run_js(PAGE_JS + f"const el = document.elementFromPoint({x}, {y});"
                              "const f = el && el.closest('input, textarea, select, [contenteditable], button, a[href],"
                              " [tabindex]'); if (f && f.focus) f.focus(); return true", lambda *_: None)
+            if msg.get("quick"):  # (the Browser page's own click: answered done, its page seen in the frames)
+                return answer({"clicked": [round(x), round(y)]})
             self.settle(t, answer, {"clicked": [round(x), round(y)], **({"covered_by": covered} if covered else {})},
                         started)
         self.point(t, msg, answer, at)
@@ -2705,10 +2708,14 @@ class Control:
             raise ValueError("a drag needs a path of two points at least")
         started = GLib.get_monotonic_time()
         t.web.drag(path)
+        if msg.get("quick"):
+            return answer({"dragged": len(path)})
         self.settle(t, answer, {"dragged": len(path)}, started)
 
     def op_hover(self, msg, answer):
         t = self.tab(msg)
+        if msg.get("quick"):
+            return self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), answer({"hovered": True})))
         self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), GLib.timeout_add(
             80, lambda: answer(self.describe(t)) and False)))
 
@@ -2798,6 +2805,15 @@ class Control:
                  " el = el.parentElement;"
                  "const inner = !!el && el !== document.body && el !== document.documentElement;"
                  "const s = inner ? el : document.scrollingElement;")
+        if msg.get("quick") and msg.get("x") is not None:  # (the Browser page's own wheel: turned, nothing waited for;
+            def turned(x, y, _c):                               # with no display of its own, by script, as below)
+                try:
+                    t.web.wheel(x, y, dx, dy, quick=True)
+                except OSError:
+                    t.web.run_js(under.format(x=x, y=y) + f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}});"
+                                 "return true", lambda *_: None, page=True)
+                answer({"scrolled": [dx, dy]})
+            return self.point(t, msg, answer, turned)
 
         def at(x, y, _c):
             def chosen(inner):

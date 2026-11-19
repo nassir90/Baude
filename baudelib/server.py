@@ -1061,8 +1061,9 @@ class Server:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
-        if op == "input" and self.makes_folder(msg.get("msg") or {}):  # (its worktree removed: made again first, not
-            self.restore_folder(conn, msg.get("session"))               # under the lock, which git would hold up)
+        if op == "input" and self.makes_folder(msg.get("msg") or {}) or op == "held" and msg.get("send"):
+            self.restore_folder(conn, msg.get("session"))  # (its worktree removed: made again first, not under the
+            # lock, which git would hold up)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")

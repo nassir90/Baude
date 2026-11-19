@@ -864,6 +864,9 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda e=said, g=msg.get("gone"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": e, **({"gone": g} if g else {})}))
         self.ch.close()
+        answering, self.answering = self.answering, {}  # (asked on it, not answered: no answer's coming)
+        for done in answering.values():
+            self.dispatch(lambda done=done: done({"op": "error", "error": "the connection to its host dropped"}))
         if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
             code = "lost" if self.code is None else self.code
             self.dispatch(lambda: self.on_exit(code))

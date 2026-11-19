@@ -14846,6 +14846,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             self.transcript.remove(c)
             discard(c)
         self.unqueue(list(self.queued))  # (another chat: this one's queue gone with it)
+        self.held_after_revert = None
         for t in getattr(self, "held_turns", {}).values():  # (and what its host holds for it: the next one's own)
             if t.get_parent() is self.queue_box:
                 self.queue_box.remove(t)
@@ -15102,7 +15103,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.queue_box.remove(t)
             if self.queue_upto is t:  # (what was to be sent up to: the one before it, if any's left before it)
                 self.queue_upto = None
-        self.queue_box.set_visible(bool(self.queued or getattr(self, "held_turns", None)))
+        self.queue_box.set_visible(bool(self.queued or any(t.get_visible() for t in
+                                                            getattr(self, "held_turns", {}).values())))
 
     def queue_drop(self, turn):
         self.unqueue([turn])
@@ -15185,8 +15187,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if self.busy:
             toast(self, "It can be sent once this turn's over")
             return
-        if self.composer_box.gates:  # (its host gone, the connection dropped: nothing's sent)
-            toast(self, "It can't be sent while this chat's host isn't there")
+        if gates := self.composer_box.gates:  # (what's in the way of sending, said as it is)
+            toast(self, "It can't be sent while " + (
+                "this chat's context is exhausted: pick a model with a bigger window, or clear it"
+                if "exhausted" in gates else "the connection to this chat's host is down" if "network" in gates
+                else "this chat's host isn't there" if "host" in gates else "nothing can be sent in this chat"))
             return
         if self.reverting is not None:
             if not self.revert_asked():
@@ -15206,6 +15211,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                                              {"kind": "host"}, said.strip()))
         turn.sending = sent
         turn.set_visible(False)
+        self.show_held()  # (the queue's box, with nothing else in it, gone meanwhile)
         self.add(sent)
         self.stick_bottom, self.restore_scroll = True, None
         self.proc.stop_asked = False
@@ -15227,12 +15233,25 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         self.proc.held(h["id"], True, done)
 
     def held_drop(self, turn):
-        """Its ✕: dropped, here and by its host."""
-        if turn.sending:
+        """Its ✕: dropped by its host, and here once it has; its host's no said, and it's kept."""
+        if turn.sending or self.remote is None:
             return
-        if self.remote is not None:
-            self.remote.request({"op": "held", "session": self.session_id, "id": turn.held["id"]})
-        self.show_held(gone={turn.held["id"]})
+        h, sid = turn.held, self.session_id
+        turn.sending = "dropping"  # (left as it is meanwhile: show_held)
+        turn.set_visible(False)
+        self.show_held()
+
+        def done(answer):
+            turn.sending = None
+            if self.session_id != sid:
+                return
+            if answer.get("op") != "error":
+                self.show_held(gone={h["id"]})
+                return
+            turn.set_visible(True)
+            self.show_held()
+            toast(self, f"Not deleted: {answer.get('error') or 'its host said no'}")
+        self.remote.request({"op": "held", "session": sid, "id": h["id"]}, done)
 
     def recorded_cwd(self):
         """Where the open chat ran, for the host process to take it up in: its worktree even if it's gone (made again
@@ -15463,6 +15482,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
     def cancel_revert(self, restore_draft=True):
         """Esc on a revert not sent: what it hid shown again, and the box as it was before."""
         rev, self.reverting = self.reverting, None
+        self.held_after_revert = None  # (a held message's ↑ that made it: not sent after it either)
         if rev is None:
             return
         for widget in rev["hidden"]:
@@ -15486,14 +15506,17 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 took = self.take_up()
                 if took is False:  # (This Mac's host process isn't there yet: started, and sent once it is)
                     self.note(f"Starting {THIS_MACHINE}'s host process…")
+                    self.held_after_revert = None  # (what's in the box is what goes, once it is)
                     self.local_server(lambda _r: self.reverting is rev and not self.revert_asked() and
                                       self.commit_revert())
                     return
                 if took is None:
+                    self.held_after_revert = None
                     return
             if self.proc is None:
                 self.start_proc()
             if self.proc is None:
+                self.held_after_revert = None
                 self.note(f"Couldn't revert: {self.program_name()} isn't running")
                 return
         finally:
@@ -15507,7 +15530,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         rev["asked"] = (self.proc, rid)
 
     def revert_refused(self, rev, why):
-        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again)."""
+        """claude wouldn't revert: said, and the revert's still not sent (Esc puts it back; Ctrl/⌘+Enter asks again);
+        nor a held message whose ↑ asked for it (held_after_revert: ↑ again)."""
+        self.held_after_revert = None
         if rev["asked"] is not None:
             rev["asked"][0].stop_asked = False  # (its turn not stopped by it: an error that ends it is said, h_result)
         rev["asked"] = None
@@ -15541,10 +15566,9 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                 self.send_after_result) else None
             self.send_after_result = None
         self.set_busy(False)
-        if (held := getattr(self, "held_after_revert", None)) is not None:  # (a held message's ↑ made it: that sent)
-            self.held_after_revert = None
-            if held.get_parent() is self.queue_box:
-                self.held_send(held)
+        held, self.held_after_revert = getattr(self, "held_after_revert", None), None
+        if held is not None and held.get_parent() is self.queue_box:  # (a held message's ↑ made it: that sent)
+            self.held_send(held)
             return False
         self.on_send()
         return False

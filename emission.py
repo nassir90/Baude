@@ -6,6 +6,7 @@ window through the Objective-C runtime (macos.objc_send: there's no PyObjC); on 
 widget of its own. On a Linux host with no display it starts one of its own (xvfb-run).
 
     python3 emission.py [URL] [--profile NAME]
+    python3 emission.py --install | --uninstall   # app-menu launcher with the logo (per user)
 """
 import argparse
 import base64
@@ -31,7 +32,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 APP_ID = "dev.baude.Emission"
 HOME_PAGE = "https://duckduckgo.com/"
@@ -41,6 +42,7 @@ SCREEN = (3840, 2400)  # (the virtual display a Linux agent's Emission is on: re
 AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long without a request)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, profile_id, profiles, rename_profile, unlock_profile)
@@ -1580,6 +1582,9 @@ class MacOverlay:
         self.view = send(send(self.make_class(), b"alloc"), b"initWithFrame:", send(view, b"bounds", ret=R), types=(R,))
         send(self.view, b"setWantsLayer:", True, types=(ctypes.c_bool,))
         send(self.view, b"setAutoresizingMask:", 2 | 16, types=(ctypes.c_ulong,))
+        clip = objc_sel(b"setClipsToBounds:")  # (the pointer at the page's edge cut off there, not drawn on the frame)
+        if send(self.view, b"respondsToSelector:", clip, types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(self.view, b"setClipsToBounds:", True, types=(ctypes.c_bool,))
         send(view, b"addSubview:", self.view, types=(ctypes.c_void_p,))
         root = send(self.view, b"layer")
 
@@ -2424,6 +2429,10 @@ class Window(Adw.ApplicationWindow):
         self.body = body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         body.append(self.banner)
         frame = Adw.ToolbarView(content=body)  # (its bar: back, forward, reload, the address, its profile)
+        if not agent and not hosted:  # (a window that's seen: its pages set into the frame, as Baude's and Record's)
+            import widgets
+            widgets.inside(body, under_bar=True)
+            frame.add_css_class("baude-frame")
         frame.add_top_bar(bar)
         frame.add_top_bar(strip)
         self.set_content(frame)
@@ -4187,10 +4196,108 @@ def jpeg(w, h, stride, data, quality=72):
     return flat.save_to_bufferv("jpeg", ["quality"], [str(quality)])[1]
 
 
+# ---- its logo: Baude's and Record's tile, in a muted yellow (their terracotta's and teal's lightness and saturation),
+# with a cream page on it (their bubble's, without its tail) and a globe cut out of the page through a mask, so every
+# cut is the tile itself: a meridian and two parallels. At 16 px, the same a pixel wide, on whole pixels (ICON_SVG_16).
+
+ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <mask id="cut">
+    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
+    <g fill="none" stroke="#000" stroke-width="4.5">
+      <ellipse cx="64" cy="64" rx="22" ry="34"/>
+      <path d="M22 50h84M22 78h84"/>
+    </g>
+  </mask>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
+  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
+</svg>
+"""
+ICON_SVG_16 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <mask id="cut">
+    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
+    <g fill="none" stroke="#000" stroke-width="8">
+      <ellipse cx="64" cy="64" rx="20" ry="36"/>
+      <path d="M22 52h84M22 76h84"/>
+    </g>
+  </mask>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
+  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
+</svg>
+"""
+
+
+def icon_png(size=1024, mac=True):
+    """The logo as a PNG; mac: with the margin macOS's own icons have (the tile 824 of 1024)."""
+    return applist.icon_png(ICON_SVG, size, mac)
+
+
+def dock_icon():
+    """macOS: the Dock shows the logo, not Python's rocket (GTK's icon names don't reach a Python process's tile)."""
+    png = icon_png()
+    send = macos.objc_send
+    data = send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
+    image = send(send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    send(send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image, types=(ctypes.c_void_p,))
+
+
+def themed_icon():
+    """Elsewhere, windows take the logo from the icon theme by name (APP_ID): it's put in an icon folder of
+    Emission's own (16 px's its own drawing), found there whether or not Emission's in the application menu. Once a
+    display (each window asks). Its path (None: not written)."""
+    display = Gdk.Display.get_default()
+    if display is not None and getattr(display, "emission_icon", None):
+        return display.emission_icon
+    root, path = os.path.join(data_home(), "icons"), None
+    try:
+        for size, svg in (("scalable", ICON_SVG), ("16x16", ICON_SVG_16)):
+            there = os.path.join(root, "hicolor", size, "apps", f"{APP_ID}.svg")
+            if not os.path.exists(there) or open(there).read() != svg:
+                os.makedirs(os.path.dirname(there), exist_ok=True)
+                with open(there, "w") as f:
+                    f.write(svg)
+            path = path or there
+    except OSError:
+        return None
+    if display is not None:
+        Gtk.IconTheme.get_for_display(display).add_search_path(root)
+        display.emission_icon = path
+    return path
+
+
+def install():
+    """Emission in the platform's list of apps, for this user (applist): macOS's ~/Applications/Emission.app, Linux's
+    .desktop entry and logo. What it wrote."""
+    return applist.install(APP_ID, "Emission", ICON_SVG, [sys.executable, os.path.realpath(__file__), "%u"],
+                           "public.app-category.productivity",
+                           ["GenericName=Web Browser", "Comment=Baude's browser", "Categories=Network;WebBrowser;GTK;"],
+                           small=ICON_SVG_16)
+
+
+def uninstall():
+    """Emission's launcher removed: what was there."""
+    return applist.uninstall(APP_ID, "Emission")
+
+
 class App(Adw.Application):
     def __init__(self, url, profile, agent=False):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.url, self.profile, self.agent = url, profile, agent
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        if self.agent:  # (never seen: no logo, no look)
+            return
+        GLib.set_application_name("Emission")
+        import widgets
+        widgets.load_css()  # (Baude's look: the frame, the inside set into it)
+        widgets.theme_css()  # (whose stylesheet that's drawn over: libadwaita's, or a GTK_THEME's)
+        if sys.platform == "darwin":
+            try:
+                dock_icon()
+            except Exception as e:  # (Python's Dock tile isn't worth not starting over)
+                print("emission: dock_icon:", e, file=sys.stderr)
+        elif themed_icon() is not None:
+            Gtk.Window.set_default_icon_name(APP_ID)
 
     def do_activate(self):
         Window(self, self.url, self.profile, self.agent).present()
@@ -4216,7 +4323,16 @@ def main():
     p.add_argument("--bot", help="a Bot's chat id: its own profile (made if it has none)")
     p.add_argument("--name", help="the Bot's name, with --bot")
     p.add_argument("--agent", action="store_true", help="for the Bot's tools: out of sight, gone when idle")
+    inst = p.add_mutually_exclusive_group()
+    inst.add_argument("--install", action="store_true", help="add Emission to your list of apps (per user) and exit")
+    inst.add_argument("--uninstall", action="store_true", help="remove Emission from your list of apps and exit")
     a = p.parse_args()
+    if a.install:
+        print("\n".join(f"installed {path}" for path in install()))
+        return 0
+    if a.uninstall:
+        print("\n".join(f"removed {path}" for path in uninstall()) or "Emission was not installed")
+        return 0
     if a.agent and not a.bot:
         p.error("--agent is for a Bot's Emission: --bot too")
     if (why := with_display(own=a.agent)) is not None:

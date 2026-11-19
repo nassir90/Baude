@@ -76,6 +76,8 @@ from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, 
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
+import baudelib.server  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
+from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
@@ -824,13 +826,16 @@ def _is_noise(text):
                                   "This session is being continued from a previous conversation"))
 
 
-def parse_records(lines, items, seen=None):
+def parse_records(lines, items, seen=None, spawned=False):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
-    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
-    keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
+    "failed", "summary"}, as Baude's chat says it. Where Claude Code compacted the conversation is {"role": "compact",
+    "text" (widgets.compact_text), "meta" (its compactMetadata), "summary" (what it wrote, once read), "id"}. The prompt
+    a session was started with from outside (its first user record, not typed: started_outside) is {"role": "start",
+    "text", "id"}, drawn at the chat's top, unless a Bot started the chat on the mesh (spawned: bot_started), whose
+    task is a message of yours as any prompt is. A revert (rewind_mark) takes back the items after the record it keeps;
+    seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
         if last:  # (the record before: how many items there were once it was read)
@@ -847,6 +852,16 @@ def parse_records(lines, items, seen=None):
             continue
         last = d.get("uuid")
         kind = d.get("type")
+        if kind == "system" and d.get("subtype") == "compact_boundary" and not d.get("isSidechain"):
+            meta = d.get("compactMetadata") or {}
+            items.append({"role": "compact", "text": widgets.compact_text(meta), "meta": meta, "id": d.get("uuid")})
+            continue
+        if d.get("isCompactSummary"):  # (under its boundary's: the messages a partial compaction kept between them)
+            mark = next((it for it in reversed(items) if it["role"] == "compact"), None)
+            if mark is not None and not mark.get("summary"):
+                mark["summary"] = _text_of((d.get("message") or {}).get("content"))
+                seen.setdefault("\0summaries", []).append(mark)
+            continue
         if kind not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
             continue
         msg = d.get("message") or {}
@@ -854,7 +869,7 @@ def parse_records(lines, items, seen=None):
         if kind == "user":
             first = "\0first user" not in seen  # (kept with seen: the file's first user record is read once)
             seen["\0first user"] = True
-            if first and started_outside(d) and not _is_noise(text):
+            if first and started_outside(d) and not spawned and not _is_noise(text):
                 items.append({"role": "start", "text": text, "id": d.get("uuid")})
                 continue
             if _is_noise(text) or d.get("toolUseResult") is not None:
@@ -1654,15 +1669,31 @@ def glossary_text(folders):
     return "\n\n".join(parts)
 
 
+def bot_started(path, kept=True):
+    """Is a chat's transcript one a Bot started on the mesh (its host keeps it with spawned_by)? This machine's host
+    process's own, as it keeps them (read, not asked: no connection made; not if kept is False); another host's, as
+    the hosts looked for list them (none looked for yet: no)."""
+    sid = os.path.basename(path or "").removesuffix(".jsonl")
+    if kept and (meta := baudelib.server.kept_session(sid)) is not None:
+        return bool(meta.get("spawned_by"))
+    return bool(_NETWORK) and any(s.get("spawned_by") and sid in (s["id"], s.get("cli_id"))
+                                  for s in network().sessions())
+
+
 def chat_text(path, title, cwd):
     """What's shown of a chat (parse_records: what's said, not the tools' calls or what they gave back), as Markdown."""
     items = []
     with open(path, encoding="utf-8", errors="replace") as f:
-        parse_records(f, items)
+        parse_records(f, items, spawned=bot_started(path))
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
     who = {"user": "You", "start": "Started with"}
-    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
-                                  if it["role"] != "note"])  # (a task's ending: said by neither)
+
+    def said(it):
+        if it["role"] != "compact":
+            return f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}"
+        summary = it.get("summary")  # (a compaction: what it did, and what it wrote)
+        return f"*{it['text']}*" + (f"\n\n**Summary of the earlier conversation:**\n\n{summary}" if summary else "")
+    return "\n\n".join([head] + [said(it) for it in items if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
 def chats_of(notebook, transcripts):
@@ -5332,6 +5363,7 @@ class Reader(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.path, self.items, self.rows = win, None, [], []
+        self.spawned = False  # (read as a chat a Bot started: bot_started, as it was when its reading began)
         self.waiting = None
         self.stack = Gtk.Stack(vexpand=True)
         self.empty = Adw.StatusPage(icon_name="baude-claude-symbolic", title="No chat open",
@@ -5396,7 +5428,12 @@ class Reader(Gtk.Box):
             self.mark_nouns_soon()
             return
         self.path = chat["path"] if chat else None
+        self.read_from_start()
+
+    def read_from_start(self):
+        """The chat drawn again from its start: as it's first shown, or once it's known to be a Bot's (bot_changed)."""
         self.items, self.seen = [], {}
+        self.spawned = bot_started(self.path)
         while (c := self.box.get_first_child()) is not None:
             self.box.remove(c)
         self.rows, self.picks, self.picking = [], [], None
@@ -5407,6 +5444,12 @@ class Reader(Gtk.Box):
             self.follow.stick = True
             self.tail.start(self.path, 0)
             self.tail.read(new=False)  # (and its nouns marked: mark_nouns_soon)
+
+    def bot_changed(self):
+        """The hosts changed: a chat a host now lists as one a Bot started (bot_started), drawn again so (a Bot's chat
+        stays one: what this machine's host process keeps was read as it was first shown)."""
+        if self.path and not self.spawned and bot_started(self.path, kept=False):
+            self.read_from_start()
 
     def mark_nouns_soon(self):
         """In a moment (the chat may still be coming in): the "the X"s its replies take as known, that nothing in it
@@ -5502,7 +5545,7 @@ class Reader(Gtk.Box):
         """What's been added to the chat (livefeed.Tail, the moment it's written): its prose drawn, a reply written in
         several records the one it's part of, grown."""
         n = len(self.items)
-        parse_records(lines, self.items, self.seen)
+        parse_records(lines, self.items, self.seen, self.spawned)
         keep = n  # (a revert took back what's after the record it keeps: those rows go)
         if n and (len(self.items) < n or self.rows[n - 1].item is not self.items[n - 1]):
             keep = next(i for i, row in enumerate(self.rows) if i >= len(self.items) or row.item is not self.items[i])
@@ -5512,6 +5555,10 @@ class Reader(Gtk.Box):
         grew = keep and self.items[keep - 1].pop("grew", False)
         if grew:
             self.rows[keep - 1].prose.set_text(self.items[keep - 1]["text"])
+        for mark in self.seen.pop("\0summaries", ()):  # (a compaction's summary, read after it was drawn)
+            row = next((r for r in reversed(self.rows[:keep]) if r.item is mark), None)
+            if row is not None:
+                row.prose.set_summary(mark["summary"])
         for it in self.items[keep:]:
             it.pop("grew", None)
             self._add(it)
@@ -5528,6 +5575,14 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "compact":  # (where Claude Code compacted it: its marker, as Baude's chat draws one)
+            mark = widgets.CompactMark(it.get("meta") or {})
+            mark.set_summary(it.get("summary"))
+            row.append(mark)
+            row.prose, row.item = mark, it
             self.rows.append(row)
             self.box.append(row)
             return
@@ -7255,7 +7310,7 @@ class Settings(Adw.PreferencesDialog):
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
         group.add(widgets.settings_switch(f"Show in {'Applications' if sys.platform == 'darwin' else 'application menu'}",
-                                          launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
+                                          applist.launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
                                           "win.launcher"))
         page.add(group)
         sizes = Adw.PreferencesGroup(title="Size")  # (the text's and the icons' are Baude's too)
@@ -8165,6 +8220,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         wasn't sent it, sent first: list_notes); what's in its way said (show_host_state); this machine's host process
         on other code than Record's, said (check_host_code)."""
         self.check_host_code()
+        for reader in [c for c in self.tabs.children() if isinstance(c, Reader) and c.chat]:
+            reader.bot_changed()
         store = self.store
         for r in network().remotes():  # (the one picked, known by another key now: by that one)
             if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:
@@ -9224,17 +9281,7 @@ ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
 
 def icon_png(size=1024, macos=True):
     """The logo as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
-    gi.require_version("GdkPixbuf", "2.0")
-    from gi.repository import GdkPixbuf
-    svg = ICON_SVG
-    if macos:
-        k = 112 * 1024 / 824  # (the tile is 112 of the SVG's 128)
-        svg = svg.replace('viewBox="0 0 128 128"', f'viewBox="{64 - k / 2} {64 - k / 2} {k} {k}"')
-    loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
-    loader.set_size(size, size)
-    loader.write(svg.encode())
-    loader.close()
-    return loader.get_pixbuf().save_to_bufferv("png", [], [])[1]
+    return applist.icon_png(ICON_SVG, size, macos)
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):
@@ -9300,81 +9347,21 @@ def launch_command():
     return [sys.executable, os.path.realpath(__file__)]
 
 
-def launchers(app_id, name):
-    """Where install puts an app's launcher: its .app (macOS), else its .desktop entry and its logo."""
-    if sys.platform == "darwin":
-        return [os.path.expanduser(f"~/Applications/{name}.app")]
-    share = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return [os.path.join(share, "applications", f"{app_id}.desktop"),
-            os.path.join(share, "icons", "hicolor", "scalable", "apps", f"{app_id}.svg")]
-
-
-def remove(paths):
-    """The paths that were there, removed."""
-    there = [p for p in paths if os.path.exists(p)]
-    for p in there:
-        if os.path.isdir(p):
-            shutil.rmtree(p)
-        else:
-            os.remove(p)
-    return there
-
-
 def install():
-    """macOS: ~/Applications/Record.app (an .icns of the logo, started through the login shell for Homebrew's PATH).
-    Linux: a .desktop entry and the logo in the user's hicolor theme."""
-    import shlex
-    import struct
-    if sys.platform == "darwin":
-        import plistlib
-        app = os.path.expanduser("~/Applications/Record.app")
-        contents = os.path.join(app, "Contents")
-        os.makedirs(os.path.join(contents, "MacOS"), exist_ok=True)
-        os.makedirs(os.path.join(contents, "Resources"), exist_ok=True)
-        with open(os.path.join(contents, "Info.plist"), "wb") as f:
-            plistlib.dump({"CFBundleName": "Record", "CFBundleDisplayName": "Record", "CFBundleIdentifier": APP_ID,
-                           "CFBundlePackageType": "APPL", "CFBundleExecutable": "Record", "CFBundleIconFile": "Record",
-                           "LSApplicationCategoryType": "public.app-category.productivity",
-                           "NSHighResolutionCapable": True}, f)
-        entries = b"".join(kind + struct.pack(">I", 8 + len(png)) + png for kind, png in
-                           ((k, icon_png(n)) for k, n in ((b"ic07", 128), (b"ic08", 256), (b"ic09", 512),
-                                                          (b"ic10", 1024))))
-        with open(os.path.join(contents, "Resources", "Record.icns"), "wb") as f:
-            f.write(b"icns" + struct.pack(">I", 8 + len(entries)) + entries)
-        script = os.path.join(contents, "MacOS", "Record")
-        with open(script, "w") as f:
-            f.write('#!/bin/sh\ncd "$HOME"\nexec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '
-                    + " ".join(shlex.quote(a) for a in launch_command()) + ' "$@"\n')
-        os.chmod(script, 0o755)
-        lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
-                      "/Support/lsregister")
-        if os.path.exists(lsregister):  # (listed now, ⌘Space too: they find it in time, a minute or more)
-            subprocess.run([lsregister, "-f", app], capture_output=True, check=False)
-        if shutil.which("mdimport"):
-            subprocess.run(["mdimport", app], capture_output=True, check=False)
-        return app
-    share = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    icon = os.path.join(share, "icons", "hicolor", "scalable", "apps", f"{APP_ID}.svg")
-    desktop = os.path.join(share, "applications", f"{APP_ID}.desktop")
-    entry = "\n".join(["[Desktop Entry]", "Type=Application", "Name=Record",
-                       "Comment=Read AI prose with a peer who knows what you know",
-                       "Exec=" + " ".join(shlex.quote(a) for a in launch_command()), f"Icon={APP_ID}",
-                       "Terminal=false", "Categories=Utility;GTK;", f"StartupWMClass={APP_ID}", ""])
-    for path, data in ((icon, ICON_SVG), (desktop, entry)):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.write(data)
-    return desktop
+    """macOS: ~/Applications/Record.app (an .icns of the logo). Linux: a .desktop entry and the logo in the user's
+    hicolor theme. Where it is."""
+    return applist.install(APP_ID, "Record", ICON_SVG, launch_command(), "public.app-category.productivity",
+                           ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"])[0]
 
 
 def installed():
     """Whether Record is in the platform's list of apps (Settings → Show in Applications)."""
-    return os.path.exists(launchers(APP_ID, "Record")[0])
+    return os.path.exists(applist.launchers(APP_ID, "Record")[0])
 
 
 def uninstall():
     """Record's launcher: what was removed."""
-    return remove(launchers(APP_ID, "Record"))
+    return applist.uninstall(APP_ID, "Record")
 
 
 def restart_path():

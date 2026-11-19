@@ -111,6 +111,8 @@ class Remote:
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
+        self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
+        self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
@@ -266,6 +268,29 @@ class Remote:
         if ch is None or not ch.send({**msg, "req": req}):
             self.calls.pop(req, None)
             reply({"op": "error", "error": "the server isn't there"})
+
+    def senders_of(self, session_id):
+        """Who a session's messages from others than its user are from, by their uuids, as its host's sender store
+        had them when it was last fetched (sync_senders): {uuid: sender}."""
+        return (self.senders.get(session_id) or (0, {}))[1]
+
+    def sync_senders(self, session_id, done):
+        """Its host's sender store for a session fetched, if what's here is older than it lists (its senders): done()
+        once a newer one's here (through dispatch)."""
+        listed = (self.sessions.get(session_id) or {}).get("senders") or 0
+        have = self.senders.get(session_id)
+        if (have[0] if have else 0) == listed or session_id in self.fetching:
+            return
+        self.fetching.add(session_id)
+
+        def got(r):
+            self.fetching.discard(session_id)
+            if r.get("op") != "senders" or not isinstance(r.get("senders"), dict):
+                return
+            self.senders[session_id] = (r.get("rev") or 0, {k: v for k, v in r["senders"].items()
+                                                            if wire.is_id(k) and isinstance(v, dict)})
+            done()
+        self.request({"op": "senders", "session": session_id}, got)
 
     def call(self, msg, timeout=30):
         """A request, waited for (not on the main loop): the reply, or an error one."""

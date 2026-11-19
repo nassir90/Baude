@@ -2012,6 +2012,117 @@ class ContextUsage(Gtk.Box):
                               "What's used is said once its session starts" if total else "Context window usage")
 
 
+def compact_text(meta):
+    """What a compaction did, as its marker says it: "Conversation compacted automatically · 167k tokens of context →
+    18k · 41s". meta: a compact_boundary's compact_metadata as claude streams it (trigger, pre_tokens, post_tokens,
+    duration_ms) or its compactMetadata as the transcript keeps it (preTokens, postTokens, durationMs)."""
+    meta = meta if isinstance(meta, dict) else {}
+    how = {"auto": " automatically", "manual": " (/compact)"}.get(meta.get("trigger"), "")
+    pre, post = meta.get("pre_tokens", meta.get("preTokens")), meta.get("post_tokens", meta.get("postTokens"))
+    took = meta.get("duration_ms", meta.get("durationMs"))
+    parts = ["Conversation compacted" + how]
+    if isinstance(pre, int) and pre > 0:
+        parts.append(f"{fmt_tokens(pre)} tokens of context" + (f" → {fmt_tokens(post)}" if isinstance(post, int)
+                                                                 and post > 0 else ""))
+    if isinstance(took, (int, float)) and took >= 1000:
+        secs = round(took / 1000)
+        parts.append(f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s")
+    return " · ".join(parts)
+
+
+def compact_said(msg):
+    """What a message of claude's stream says of a compaction, as (what, detail), or None:
+      ("running", characters of summary written or None): its status "compacting";
+      ("failed", claude's compact_error or None): its status null, compact_result "failed";
+      ("succeeded", None): compact_result "success" (its compact_boundary next);
+      ("ended", None): its status null with no result (a PreCompact hook blocked it, it had nothing to do): none made;
+      ("done", compact_metadata): compact_boundary;
+      ("summary", text): the summary it wrote, as the message after its boundary (isSynthetic, its content a string;
+      not a message of the conversation's replayed).
+    A subagent's (parent_tool_use_id) are its own."""
+    if not isinstance(msg, dict) or msg.get("parent_tool_use_id"):
+        return None
+    kind, sub = msg.get("type"), msg.get("subtype")
+    if kind == "system" and sub == "compact_boundary":
+        return "done", msg.get("compact_metadata") or {}
+    if kind == "system" and sub == "status" and msg.get("status") == "compacting":
+        return "running", msg.get("compact_output_chars")
+    if kind == "system" and sub == "status" and msg.get("status") is None:
+        result = msg.get("compact_result")
+        if result == "failed":
+            return "failed", msg.get("compact_error")
+        if result == "success":
+            return "succeeded", None
+        return None if "permissionMode" in msg else ("ended", None)  # (a mode changed says its status too)
+    content = (msg.get("message") or {}).get("content")
+    if kind == "user" and msg.get("isSynthetic") and not msg.get("isReplay") and isinstance(content, str):
+        return "summary", content
+    return None
+
+
+class CompactMark(Gtk.Box):
+    """Where Claude Code compacted a conversation (summarised what came before, to free its context window), in a chat
+    (Baude's, Record's reader, Meta's): a quiet line between two rules. While it runs (claude's status "compacting"),
+    "Compacting the conversation", its dots going, and how much of the summary is written where claude says it;
+    done (compact_boundary), what it did (compact_text); failed or cut short, that. The summary it wrote, once known (the
+    message claude adds after the boundary; the transcript's isCompactSummary record), folded under it (set_summary)."""
+
+    def __init__(self, meta=None):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6, margin_bottom=6)
+        self.add_css_class("compact-mark")
+        row, said = Gtk.Box(spacing=10), Gtk.Box()
+        self.label = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, selectable=True)
+        self.label.add_css_class("sysnote")
+        self.dots = WorkingDots()
+        self.dots.add_css_class("sysnote")
+        self.dots.set_margin_start(2)
+        said.append(self.label)
+        said.append(self.dots)
+        for w in (Gtk.Separator(hexpand=True, valign=Gtk.Align.CENTER), said,
+                  Gtk.Separator(hexpand=True, valign=Gtk.Align.CENTER)):
+            row.append(w)
+        self.append(row)
+        self.fold = None
+        self.set_tooltip_text("Claude Code summarised the conversation so far, to free its context window: the summary "
+                              "stands in for what came before")
+        self.finish(meta) if meta is not None else self.running()
+
+    def running(self, written=None):
+        """Under way; written: how many characters of the summary claude says it's written (an automatic one's)."""
+        self.state = "running"
+        self.label.set_text("Compacting the conversation" +
+                            (f" · {written:,} characters of summary written" if isinstance(written, int) and written > 0
+                             else ""))
+        self.label.remove_css_class("error")
+        self.dots.set_working(True)
+
+    def finish(self, meta):
+        self.state = "done"
+        self.dots.set_working(False)
+        self.label.remove_css_class("error")
+        self.label.set_text(compact_text(meta))
+
+    def fail(self, error=None, stopped=False):
+        """It failed (claude's compact_result "failed", and its compact_error if it gave one), or its turn ended before
+        it did (stopped)."""
+        self.state = "failed"
+        self.dots.set_working(False)
+        self.label.set_text("Compaction didn't finish" if stopped else
+                            "Compaction failed" + (f": {error}" if error else ""))
+        self.label.add_css_class("error")
+
+    def set_summary(self, text):
+        if not text or self.fold is not None:
+            return
+        head = Gtk.Label(label="Summary of the earlier conversation")
+        head.add_css_class("sysnote")
+        body = MarkdownView(text)
+        body.set_margin_start(18)
+        body.set_margin_bottom(6)
+        self.fold = Gtk.Expander(label_widget=head, child=body)
+        self.append(self.fold)
+
+
 class UserTurn(Gtk.Box):
     """A message of yours in a conversation (Baude's chat, a side question's, Meta's): the whole width of it is its row,
     its bubble at the right. With the pointer anywhere in the row, a revert button fades in just outside the bubble,
@@ -2103,13 +2214,13 @@ class QueuedTurn(Gtk.Box):
         self.fade.play()
 
 class SenderTurn(Gtk.Box):
-    """A message to the chat from another than you (baudelib.wire.said_by: a Bot, another chat, a subagent's answer
-    held for it): where yours are, grey as a queued one is, with who it's from at its top (the window's
-    sender_bubble)."""
+    """A message to the chat from another than you, as its host's sender store says (a Bot, another chat, a subagent's
+    answer held for it): where yours are, grey as a queued one is, with who it's from at its top (the window's
+    sender_bubble). uuid: the message's, once it's in the chat's transcript."""
 
     def __init__(self, bubble):
         super().__init__(spacing=6, hexpand=True)
-        self.bubble = bubble
+        self.bubble, self.uuid = bubble, None
         bubble.set_hexpand(True)  # (its row's width, the bubble at the right of it: halign)
         self.append(bubble)
 
@@ -8399,6 +8510,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: 0.85em; opacity: 0.6; }
+.compact-mark label.error { opacity: 1; }
 .composer-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
@@ -8643,6 +8755,26 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 """
 
 
+def tree_line(x, top, mid, end):
+    """One parent's line in a tree (TreeList, TreeListView): down at x from top (under the parent) to mid (its last
+    child's middle), then a corner across to end (just short of that child). end None: that child is out of sight
+    below, and the line runs on down to mid with no corner."""
+    if mid <= top or end is not None and end <= x:
+        return []
+    down = Graphene.Rect().init(x, top, 1, mid - top + 1)
+    return [down] if end is None else [down, Graphene.Rect().init(x + 1, mid, end - x - 1, 1)]
+
+
+def snapshot_tree_lines(widget, snapshot, rects):
+    """A tree's lines (tree_line's rectangles), in the widget's text colour, faint."""
+    if not rects:
+        return
+    color = widget.get_color()
+    color.alpha *= 0.3
+    for rect in rects:
+        snapshot.append_color(color, rect)
+
+
 class TreeList(Gtk.ListBox):
     """A ListBox whose nested rows hang off one joined line per parent, like a file tree: down from
     under the parent's anchor to its last (visible) child, then a corner across to it. Rows nest by
@@ -8669,25 +8801,84 @@ class TreeList(Gtk.ListBox):
         for p, child in last.items():
             ok, pb = p.tree_anchor.compute_bounds(self)
             ok2, cb = child.tree_anchor.compute_bounds(self)
-            if not (ok and ok2):
-                continue
-            x = round(pb.get_x() + self.line_x)
-            top = round(pb.get_y() + pb.get_height() + 1)
-            mid = round(cb.get_y() + cb.get_height() / 2)
-            end = round(cb.get_x() - 4)
-            if mid > top and end > x:
-                out += [Graphene.Rect().init(x, top, 1, mid - top + 1), Graphene.Rect().init(x + 1, mid, end - x - 1, 1)]
+            if ok and ok2:
+                out += tree_line(round(pb.get_x() + self.line_x), round(pb.get_y() + pb.get_height() + 1),
+                                 round(cb.get_y() + cb.get_height() / 2), round(cb.get_x() - 4))
         return out
 
     def do_snapshot(self, snapshot):
         Gtk.ListBox.do_snapshot(self, snapshot)
         if self.lines is None:
             self.lines = self.tree_lines()
-        if self.lines:
-            color = self.get_color()
-            color.alpha *= 0.3
-            for rect in self.lines:
-                snapshot.append_color(color, rect)
+        snapshot_tree_lines(self, snapshot, self.lines)
+
+
+class TreeListView(Gtk.ListView):
+    """TreeList's lines on a ListView of a Gtk.TreeListModel, whose rows are TreeExpanders: one joined line per open
+    folder, down from under its anchor to its last child, then a corner across to it. A row's `tree_anchor` (on its
+    TreeExpander; the expander itself if it has none) is what the line starts under and points at. Only the rows in
+    sight have widgets, so a parent scrolled out of sight above has its line come in from the top, and one whose last
+    child is out of sight below has its line run on down off the bottom."""
+
+    def __init__(self, line_x=5, **kw):
+        super().__init__(**kw)
+        self.line_x = line_x
+        self.lines = None
+
+    def do_size_allocate(self, width, height, baseline):
+        Gtk.ListView.do_size_allocate(self, width, height, baseline)
+        self.lines = None  # (scrolled, opened or closed: it's laid out again, and drawn again, though no row in sight
+        self.queue_draw()  # moved: a row past the bottom added or gone changes where a line ends)
+
+    def tree_lines(self):
+        shown, height = {}, self.get_height()  # (the rows in sight, by place: row, its widget's and anchor's bounds)
+        step, w = 0, self.get_first_child()  # (step: how far in a level is, read off a nested row's indent)
+        while w is not None:
+            exp = w.get_first_child()
+            row = exp.get_list_row() if isinstance(exp, Gtk.TreeExpander) else None
+            ok, wb = w.compute_bounds(self)
+            ok2, ab = getattr(exp, "tree_anchor", exp).compute_bounds(self) if row is not None else (False, None)
+            if ok and ok2 and w.is_drawable() and wb.get_y() < height and wb.get_y() + wb.get_height() > 0:
+                shown[row.get_position()] = (row, wb, ab)
+                if not step and row.get_depth() and exp.get_child() is not None:
+                    ok3, kb = exp.get_child().compute_bounds(exp)
+                    step = kb.get_x() / row.get_depth() if ok3 else 0
+            w = w.get_next_sibling()
+        if not shown:
+            return []
+        first, last = min(shown), max(shown)
+        top = min(wb.get_y() for _r, wb, _a in shown.values())
+        bottom = max(wb.get_y() + wb.get_height() for _r, wb, _a in shown.values())
+        parents = {}
+        for row, _wb, ab in shown.values():
+            depth, p = row.get_depth(), row.get_parent()
+            while p is not None and p.get_position() not in parents:
+                parents[p.get_position()] = (p, ab, depth)  # (with a row under it, to place it across by)
+                p = p.get_parent()
+        out = []
+        for pos, (p, ub, depth) in parents.items():
+            kids = p.get_children()
+            n = kids.get_n_items() if kids is not None else 0
+            end = p.get_child_row(n - 1).get_position() if n else -1
+            if end < first or pos > last:
+                continue
+            if pos in shown:
+                pb = shown[pos][2]
+                x, y = pb.get_x() + self.line_x, pb.get_y() + pb.get_height() + 1
+            else:  # (above: as far left of the row under it as it's levels up from it)
+                x, y = ub.get_x() - (depth - p.get_depth()) * step + self.line_x, top - 1
+            if end in shown:
+                cb = shown[end][2]
+                out += tree_line(round(x), round(y), round(cb.get_y() + cb.get_height() / 2), round(cb.get_x() - 4))
+            else:
+                out += tree_line(round(x), round(y), round(bottom + 1), None)
+        return out
+
+    def do_snapshot(self, snapshot):
+        Gtk.ListView.do_snapshot(self, snapshot)
+        if self.lines is None:
+            self.lines = self.tree_lines()
+        snapshot_tree_lines(self, snapshot, self.lines)
 
 
 def sidebar_action(icon, label, tip, fn):

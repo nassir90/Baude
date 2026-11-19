@@ -72,6 +72,7 @@ fun pages(bot: Boolean): List<Page> = listOfNotNull(
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit) {
     val c = LocalBaude.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
+    Meta.opener = open
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     Mesh.tick.value
     val s = Mesh.session(at, sid)

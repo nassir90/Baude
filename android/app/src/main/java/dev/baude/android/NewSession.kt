@@ -33,16 +33,18 @@ import org.json.JSONObject
  * first, and its model, effort and permission mode. Started empty, it's a draft till it's written in. host: the one
  * it's on (fixed), or null to pick. */
 @Composable
-fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String, String) -> Unit) {
+fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String, String) -> Unit,
+               given: JSONObject? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
     val up = Mesh.reached()
-    var at by remember { mutableStateOf(host ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
+    var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
+        ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
     fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.optString("home")?.ifBlank { null } } ?: "~"
-    var cwd by remember { mutableStateOf(home(at)) }
-    var group by remember { mutableStateOf(at?.let { Mesh.conn(it)?.info?.optString("group") }.orEmpty()) }
-    var prompt by remember { mutableStateOf("") }
+    var cwd by remember { mutableStateOf(given?.str("folder") ?: home(at)) }
+    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { Mesh.conn(it)?.info?.optString("group") }.orEmpty()) }
+    var prompt by remember { mutableStateOf(given?.str("prompt").orEmpty()) }
     var model by remember { mutableStateOf<String?>(null) }
     var effort by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf("auto") }

@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Mesh.start(this)
+        HomePrefs.load(this)
         MeshService.keep(this)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)
@@ -31,8 +32,10 @@ class MainActivity : ComponentActivity() {
                 val now = screen.value
                 BackHandler(now[0] != "contacts") { back() } // (Hosts too: back to the home screen)
                 when (now[0]) {
-                    "chat" -> ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
-                        feedback = { go(listOf("feedback", now[1], now[2])) })
+                    "chat" -> androidx.compose.runtime.key(now[1], now[2]) { // (another chat: its own pages, from Chat)
+                        ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
+                            feedback = { go(listOf("feedback", now[1], now[2])) })
+                    }
                     "hosts" -> HostsScreen(::back)
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },

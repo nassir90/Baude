@@ -61,12 +61,15 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /** How the home screen lists (Baude's sidebar settings, kept on this phone): grouped by folder or by date, the
- * sections folded, the groups shown (none picked: every one), the host shown ("all": every host's). */
+ * sections folded, the groups shown (none picked: every one), the host shown ("all": every host's); and the groups
+ * as this phone has them (Baude's group_names and chat_groups): those made here, and each chat moved to one. */
 object HomePrefs {
     val by = mutableStateOf("folder")
     val collapsed = mutableStateListOf<String>()
     val groups = mutableStateListOf<String>()
     val host = mutableStateOf("all")
+    val made = mutableStateListOf<String>()
+    val chatGroups = androidx.compose.runtime.mutableStateMapOf<String, String>() // ("host/session": its group here)
     private var ctx: Context? = null
 
     fun load(c: Context) {
@@ -77,12 +80,16 @@ object HomePrefs {
         collapsed.addAll(p.getStringSet("collapsed", setOf("archived")).orEmpty())
         groups.addAll(p.getStringSet("groups", emptySet()).orEmpty())
         host.value = p.getString("host", "all") ?: "all"
+        made.addAll(p.getStringSet("made", emptySet()).orEmpty())
+        val moved = org.json.JSONObject(p.getString("chat_groups", "{}") ?: "{}")
+        for (k in moved.keys()) chatGroups[k] = moved.optString(k)
     }
 
     fun save() {
         ctx?.getSharedPreferences("home", Context.MODE_PRIVATE)?.edit()?.putString("by", by.value)
             ?.putStringSet("collapsed", collapsed.toSet())?.putStringSet("groups", groups.toSet())
-            ?.putString("host", host.value)?.apply()
+            ?.putString("host", host.value)?.putStringSet("made", made.toSet())
+            ?.putString("chat_groups", org.json.JSONObject(chatGroups.toMap()).toString())?.apply()
     }
 
     /** The folder a new session on a host starts in, as last given (Baude's remote_folders). */
@@ -106,6 +113,7 @@ data class Section(val key: String, val label: String, val hostId: String?, val 
 
 /** The group a session's in, as Baude's chat_group has it from a host: its group, unless it's the host's own. */
 fun groupOf(hostId: String, s: JSONObject): String {
+    HomePrefs.chatGroups["$hostId/${s.optString("id")}"]?.let { return it } // (moved here: this phone's say)
     val g = if (s.isNull("group")) "" else s.optString("group")
     return if (g == Mesh.conn(hostId)?.info?.optString("group")) "" else g
 }
@@ -307,6 +315,7 @@ private fun SessionRow(item: Item, onClick: () -> Unit) {
     val c = LocalBaude.current
     val s = item.s
     Row(Modifier.fillMaxWidth().padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
+        .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
         .clickable(onClick = onClick).padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         val title = s.str("title") ?: "(untitled)"
@@ -323,7 +332,9 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
     val c = LocalBaude.current
     val contact = Contact(item.hostId, item.s)
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
-    Row(Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp))
+        .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
+        .clickable(onClick = onClick)
         .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Avatar(contact.name, Mesh.pictures[contact.pictureKey])
         Spacer(Modifier.width(Gap.avatarGap))
@@ -397,9 +408,7 @@ private fun ViewMenu() {
             Heading("Group by")
             MenuChoice("Folder", HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
             MenuChoice("Date", HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
-            val names = Mesh.sessions.keys.flatMap { id ->
-                Mesh.conn(id)?.info?.optJSONArray("groups").strings() - (Mesh.conn(id)?.info?.optString("group") ?: "")
-            }.filter { it.isNotBlank() }.distinct().sorted()
+            val names = MetaTools.groupNames()
             if (names.isNotEmpty()) {
                 HorizontalDivider(color = c.rule)
                 Heading("Groups")

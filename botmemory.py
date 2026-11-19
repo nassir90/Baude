@@ -17,6 +17,7 @@ import widgets  # noqa: E402
 
 PAGE = "Memory"
 SAVE_MS = 600  # (what's typed, saved this long after the last key)
+UNREACHED = ("the server isn't there", "the server didn't answer")  # (baudelib.client's, its host not reached)
 TRIES = 3  # (a save the Bot's writing came before: sent again on what it wrote, this many times in all)
 _css_loaded = False
 _host_type = None
@@ -228,9 +229,16 @@ class BotMemory(Gtk.Box):
             self.editor.clamp.set_tightening_threshold(100_000 if full else 400)
 
     def reached(self, ok, why=None):
-        """Its host reached (the page as it is), or not: the memory as it was last read, greyed, not to be written
-        in, and why above it."""
-        self.offline.set_label("Can't connect to the host. Showing the last saved copy." if not ok else "")
+        """Read (the page as it is), or not (why: the error said): the memory as it was last read, greyed, not to be
+        written in, under a line saying what's wrong (why in its tooltip); nothing read yet, what's wrong in its
+        place."""
+        gone = getattr(self.remote, "state", "alive") != "alive" or why in UNREACHED
+        said = "Can't connect to the host." if gone else "Couldn't load the memory."
+        if not ok and self.base is None:
+            self.offline.set_visible(False)
+            return self._status(said.rstrip("."), "It's shown once the host is back." if gone else why or "")
+        self.offline.set_label(f"{said} Showing the last saved copy." if not ok else "")
+        self.offline.set_tooltip_text(why if not ok and not gone else None)
         self.offline.set_visible(not ok)
         if self.editor is not None:
             self.editor.set_sensitive(ok)
@@ -291,16 +299,16 @@ class BotMemory(Gtk.Box):
         if asked != self.asked:
             return
         if reply.get("op") == "error":
-            return self.reached(False, reply.get("error") or "it said nothing more")
+            return self.reached(False, reply.get("error") or "no reason given")
         if self.dirty or self.saving is not None or self.sending:
             self.again = True  # (written in since it was asked for: that's saved, then it's read again)
             return
         self._take(reply)
 
     def _take(self, reply):
-        self.reached(True)
         """The memory as its host has it (a read's, or a save's reply), the page showing it, unless it does already:
         what's accepted, and the Bot's changes since, as Record's proposals; the caret where it was."""
+        self.reached(True)
         text = reply.get("text") or ""
         seen = reply.get("seen")
         seen = text if seen is None else seen  # (a host that keeps no seen: what's there taken as accepted)
@@ -358,7 +366,7 @@ class BotMemory(Gtk.Box):
         if not self.dirty or self.sid is None or self.remote is None or self.base is None or self.sending:
             return False
         if getattr(self.remote, "state", "alive") != "alive":
-            widgets.toast(self, "The memory isn't saved yet: its host isn't there")
+            widgets.toast(self, "Not saved yet: can't connect to the host")
             return False  # (still to save: with the next change, or read)
         self.dirty = False
         self._send(self.asked, self.sid, self.remote, self.base, self.written(), self.editor.kept())
@@ -372,7 +380,7 @@ class BotMemory(Gtk.Box):
         if base.get("theirs") is not None:
             text = merge(base["text"], ours, base["theirs"])
             if text is None:
-                widgets.toast(self, "The Bot changed the lines you'd changed: what it wrote is shown as its changes")
+                widgets.toast(self, "The Bot changed the same lines. Its version is shown as changes to accept or reject.")
                 text = base["theirs"]
         if asked == self.asked:
             self.sending += 1

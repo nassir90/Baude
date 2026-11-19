@@ -220,6 +220,11 @@ class Asks:
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
 
 
+DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
+         "navigate": "open the page", "new_tab": "open a tab", "scroll": "scroll", "select_tab": "switch tabs",
+         "type": "type", "answer_prompt": "answer"}  # (what a call's error says it couldn't do)
+
+
 class BrowserPane(Gtk.Box):
     """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown."""
 
@@ -262,8 +267,7 @@ class BrowserPane(Gtk.Box):
         self.append(self.prompts)
         self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
                                    focusable=True)
-        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Browser", vexpand=True,
-                                     description="No pages open")
+        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="No pages open", vexpand=True)
         self.body = Gtk.Stack(vexpand=True)
         self.body.add_named(self.status, "status")
         self.body.add_named(self.picture, "page")
@@ -340,9 +344,9 @@ class BrowserPane(Gtk.Box):
     def ended(self, why):
         self.stream = None
         self.say_status("The browser stopped", "It restarts when you open this page again.")
-        self.said.set_label("Can't connect to the browser.")
-        self.said.set_tooltip_text(why or None)
-        self.said.set_visible(True)
+        if self.picture.get_paintable() is not None:  # (the last page still shown: said under it, as the status isn't)
+            self.said.set_label("The browser stopped. It restarts when you open this page again.")
+            self.said.set_visible(True)
 
     def say_status(self, title, text):
         self.status.set_title(title)
@@ -358,7 +362,7 @@ class BrowserPane(Gtk.Box):
             self.view_size = tuple(view)
         self.picture.set_paintable(texture)
         self.body.set_visible_child_name("page")
-        if self.said.get_label().startswith("Can't connect"):
+        if self.said.get_label().startswith("The browser stopped"):
             self.said.set_visible(False)
         shown()  # (on screen: the next may come)
 
@@ -443,8 +447,9 @@ class BrowserPane(Gtk.Box):
             if sid != self.sid or remote is not self.remote:
                 return
             why = r.get("error") if isinstance(r, dict) else None
-            self.said.set_label("Couldn't reach the browser" if why else "")
-            self.said.set_tooltip_text(why or None)
+            gone = why in ("the server isn't there", "the server didn't answer")
+            self.said.set_label("" if not why else "Can't connect to the browser." if gone else
+                                f"Couldn't {DOING.get(call.get('op'), 'do that')}: {why}")
             self.said.set_visible(bool(why))
             if done:
                 done(r)

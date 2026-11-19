@@ -1613,7 +1613,7 @@ class Window(Adw.ApplicationWindow):
                                                                       self.current().web.focus()))
         new_tab = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
         new_tab.connect("clicked", lambda *_: self.open(HOME_PAGE))
-        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile: its cookies and logins its own")
+        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile")
         bar = Adw.HeaderBar()
         for w in (self.back_btn, self.fwd_btn, self.reload_btn):
             bar.pack_start(w)
@@ -1809,7 +1809,7 @@ class Window(Adw.ApplicationWindow):
             if self.status is None:
                 if self.view.get_parent() is not None:
                     self.body.remove(self.view)
-                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages here",
+                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages",
                                              vexpand=True)
                 self.body.append(self.status)
             self.status.set_description(why)
@@ -1881,12 +1881,11 @@ class Window(Adw.ApplicationWindow):
 
         def got(cookies, why):
             if why:
-                self.say("Couldn't read this profile's sign-ins", why)
+                self.say("Couldn't read the sign-ins", why)
                 return
             sites = sites_of(cookies)
             if not sites:
-                self.say("No sign-ins here", f"“{self.profile}” has no cookies for any site yet: sign in to sites "
-                         "here first.")
+                self.say("No sign-ins yet", "Sign in to some sites in this profile first.")
                 return
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             to = Gtk.DropDown.new_from_strings([b["name"] for b in bots])
@@ -1923,9 +1922,9 @@ class Window(Adw.ApplicationWindow):
         in one process only, its)."""
         def done(n, why):
             if why:
-                self.say("Not copied", why)
+                self.say("Couldn't copy the sign-ins", why)
             else:
-                self.say("Copied", f"“{bot['name']}” is signed in to {', '.join(sites)} now ({n} cookies).")
+                self.say("Sign-ins copied", f"“{bot['name']}” is now signed in to {', '.join(sites)}.")
         if bot["id"] == self.profile_id or bot["id"] in Door.open:  # (it's this window's, or this process's)
             self.Engine.add_cookies(bot["id"], cookies, done)
             return
@@ -1978,7 +1977,7 @@ class Window(Adw.ApplicationWindow):
                 if pid != self.profile_id:
                     Door.close(pid)
                     unlock_profile(pid)
-                self.say(f"“{name}” wasn't removed", why)
+                self.say(f"Couldn't remove “{name}”", why)
                 return
             forget_profile(name)
             try:
@@ -1997,7 +1996,7 @@ class Window(Adw.ApplicationWindow):
             return True
         pid = profile_id(name)
         if pid is None:
-            self.say("No such profile", f"There's no profile called “{name}” now.")
+            self.say("Profile not found", f"“{name}” no longer exists.")
             return False
         if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
             urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]

@@ -43,9 +43,7 @@ class RoutinesPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.sid, self.remote, self.routines, self.asked, self.clock = win, None, None, [], 0, None
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=10, margin_top=8, margin_bottom=4)
-        self.title = Gtk.Label(label="Routines", xalign=0, hexpand=True)
-        self.title.add_css_class("heading")
-        head.append(self.title)
+        head.append(Gtk.Box(hexpand=True))  # (the page's name is the switcher's: New routine at the end)
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New routine")
         add.add_css_class("flat")
         add.connect("clicked", lambda *_: self.edit(None))
@@ -89,7 +87,8 @@ class RoutinesPage(Gtk.Box):
     def ask(self, msg):
         self.asked += 1
         asked, sid = self.asked, self.sid
-        doing = "run" if msg.get("op") == "run_routine" else "save" if "set" in msg or "delete" in msg else "load"
+        doing = "run" if msg.get("op") == "run_routine" else "save" if "set" in msg else "delete" if "delete" in msg \
+            else "load"
 
         def got(r):
             if sid != self.sid or asked != self.asked:
@@ -119,7 +118,7 @@ class RoutinesPage(Gtk.Box):
                                 subtitle=GLib.markup_escape_text(
                                     f"{when(r)} · " + ("paused" if r.get("paused") else
                                                        f"next {stamp(r.get('next'), self.clock)}")
-                                    + f" · last {stamp(r.get('last'), self.clock)}"
+                                    + (f" · last {stamp(r.get('last'), self.clock)}" if r.get("last") else "")
                                     + (f" · {r['error']}" if r.get("error") else "")))
             on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER, tooltip_text="Turn off to pause")
             on.connect("notify::active", lambda sw, _p, x=r: self.save({**x, "paused": not sw.get_active()}))

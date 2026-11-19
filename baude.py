@@ -8700,7 +8700,7 @@ class SessionSidebar(Gtk.Box):
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         sid = self.win.session_id
         if mine and not q and self.win.chat_begun() and (self.win.remote is None or self.win.remote.mine) and \
-                (picked is None or chat_group({"id": sid}, assigned) in picked) and \
+                (picked is None or self.open_group(assigned) in picked) and \
                 not any(i["id"] == sid for g in groups.values() for i in g[2]):
             key, label = session_group(self.win.cwd)
             groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
@@ -8827,10 +8827,14 @@ class SessionSidebar(Gtk.Box):
         if by_date:
             self.track_days()
         listed = self.groups()
-        if not searching:  # (the groups of the chats listed, for new_group: not the open one not saved yet, nor a
-            # chat an agent started, listed under it whatever its group)
-            self.listed_groups = {chat_group(info, self.assigned) for *_k, rows in listed for info, _d, _l in rows
-                                  if info["id"] and not info.get("unsaved") and not info.get("spawned_by")}
+        if not searching:  # (the groups of the chats listed on the host picked, for new_group: not the open one not
+            # saved yet, an archived one, one Meta's changed or deleted and not kept so, nor a chat an agent started,
+            # listed under it whatever its group)
+            self.listed_groups = {chat_group(info, self.assigned) for key, *_f, rows in listed if key != "archived"
+                                  for info, _d, _l in rows if info["id"] and not info.get("unsaved")
+                                  and not info.get("ghost") and info["id"] not in self.marks
+                                  and not info.get("spawned_by")}
+            self.listed_host = self.shown_host()
         for key, label, folder, rows in listed:
             shut = key in collapsed and not searching
             if key != "bots":  # (Bots, first: no heading, their rows say what they are)
@@ -9360,26 +9364,35 @@ class SessionSidebar(Gtk.Box):
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 
-    def new_group(self):
-        """The group a new chat's put in: the one group picked in ⋮, or the one group the chats listed are in (fill's
-        listed_groups: the others picked have none listed); with several, the open chat's if it's one of them, else
-        none ("")."""
+    def new_group(self, host=None):
+        """The group a new chat on a host (its key; None: the one picked beside New session) is put in: the one group
+        picked in ⋮, or, on the host whose chats are listed, the one group they're in (fill's listed_groups: the
+        others picked have none listed); with several, the open chat's if it's one of them, else none ("")."""
         picked, listed = self.group_filter(), getattr(self, "listed_groups", set())
         if picked is not None and len(picked) == 1:
             return next(iter(picked))
-        if len(listed) == 1:
+        if len(listed) == 1 and (host or self.shown_host()) == getattr(self, "listed_host", None):
             return next(iter(listed))
         if picked is None:
             return ""
+        group = self.open_group()
+        return group if group in picked else ""
+
+    def open_group(self, assigned=None):
+        """The open chat's group (chat_group): a new one's, not written in yet, the group it was started in."""
         win, sid = self.win, self.win.session_id
         r = win.remote
         if sid is None or r is not None and r.sessions.get(sid, {}).get("draft"):
-            group = getattr(win, "draft_group", "")  # (a new chat still: the group it was started in)
-        elif r is not None and sid in r.sessions:
-            group = chat_group(remote_info({**r.sessions[sid], "server": r}))
-        else:
-            group = chat_group({"id": sid})
-        return group if group in picked else ""
+            return getattr(win, "draft_group", "")
+        if r is not None and sid in r.sessions:
+            return chat_group(remote_info({**r.sessions[sid], "server": r}), assigned)
+        return chat_group({"id": sid}, assigned)
+
+    def put_in(self, group):
+        """A new chat's group (new_group) picked in ⋮ too, if it isn't (no group, say), so the chat's listed."""
+        picked = self.group_filter()
+        if picked is not None and group not in picked:
+            self.filtered(sidebar_groups=sorted(picked | {group}))
 
     def mine_listed(self):
         """Is a new chat here listed (this machine's host picked in New session's dropdown, and No group in ⋮: it's in
@@ -9398,12 +9411,9 @@ class SessionSidebar(Gtk.Box):
             toast(self, said)
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
-        elif self.mine_listed() and not self.new_group():
-            self.win.switch_to(lambda: self.win.new_session(group=""))
-        elif not host_old():
-            picked, group = self.group_filter(), self.new_group()
-            if picked is not None and group not in picked:  # (no group: listed in ⋮ too, as remote_started does)
-                self.filtered(sidebar_groups=sorted(picked | {group}))
+        elif self.mine_listed() or not host_old():
+            group = self.new_group(HERE_HOST)
+            self.put_in(group)  # (as remote_started does)
             self.win.switch_to(lambda: self.win.new_session(group=group))
         else:
             self.win.ask_remote_start(hosts=self.host_filter())
@@ -15526,9 +15536,8 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
             return
         self.outgrown = False  # (another model's window: as its usage says)
         if self.remote is not None and model_program(value) != model_program(was):
-            label = self.model_said(value)
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
-            self.remote_new_conversation(value, label)  # (a network session: a new one, on its server)
+            self.remote_new_conversation(value)  # (a network session: a new one, on its server)
             return
         if getattr(self, "busy", False) and self.proc is not None and \
                 (model_program(value) != model_program(was) or model_program(value) == "pi" or
@@ -15962,7 +15971,11 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         if not os.path.isdir(path):
             self.note(f"not a folder: {path}")
             return
-        self.new_session(path, group=self.sidebar.new_group() or None)
+        draft = self.session_id is None or self.remote is not None and \
+            (self.remote.sessions.get(self.session_id) or {}).get("draft")
+        group = self.sidebar.new_group(HERE_HOST) or (getattr(self, "draft_group", "") if draft else "")
+        self.sidebar.put_in(group)
+        self.new_session(path, group=group)
 
     def change_cwd(self, path):
         path = self.norm_dir(os.path.join(self.run_cwd, path))  # relative to the folder claude runs in
@@ -18107,7 +18120,7 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
         local_server). A prompt, a folder and a group (new_group's, if it has one);
         the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
         (remote_started)."""
-        group = self.sidebar.new_group() or None
+        group = self.sidebar.new_group(HERE_HOST if here else host_key(server) if server is not None else None) or None
         if here:
             servers = [r for r in network().alive() if host_key(r) == HERE_HOST][:1]
         else:
@@ -18360,13 +18373,12 @@ class BaudeWindow(Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
                    "draft": True, **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))
 
-    def remote_new_conversation(self, model, label):
+    def remote_new_conversation(self, model):
         """Another kind of model picked in a network session (Claude's to Apple's, say): as in a chat here, a new
         conversation, but on the same server, in the same folder and group, opened to be written in."""
         r, listed = self.remote, self.remote.sessions.get(self.session_id) or {}
         effort = self.local_effort if model_program(model) == "pi" else self.effort
         mode = "default" if "codex" in (model_program(model), model_program(self.model)) else self.mode
-        self.note(f"model → {label}: a new conversation on {remote_name(r)}")
         r.request({"op": "start", "prompt": "", "cwd": listed.get("cwd") or "~", "model": model, "effort": effort,
                    "mode": mode, "group": listed.get("group"), "draft": True,
                    **({"env": claudelib.claude_env()} if r.mine else {})},

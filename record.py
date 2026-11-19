@@ -824,13 +824,15 @@ def _is_noise(text):
                                   "This session is being continued from a previous conversation"))
 
 
-def parse_records(lines, items, seen=None):
+def parse_records(lines, items, seen=None, spawned=False):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
     "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
-    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top. A revert (rewind_mark) takes back the items after the record it
-    keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
+    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top, unless a Bot
+    started the chat on the mesh (spawned: bot_started), whose task is a message of yours as any prompt is. A revert
+    (rewind_mark) takes back the items after the record it keeps; seen: each record's uuid -> how many items there
+    were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
         if last:  # (the record before: how many items there were once it was read)
@@ -854,7 +856,7 @@ def parse_records(lines, items, seen=None):
         if kind == "user":
             first = "\0first user" not in seen  # (kept with seen: the file's first user record is read once)
             seen["\0first user"] = True
-            if first and started_outside(d) and not _is_noise(text):
+            if first and started_outside(d) and not spawned and not _is_noise(text):
                 items.append({"role": "start", "text": text, "id": d.get("uuid")})
                 continue
             if _is_noise(text) or d.get("toolUseResult") is not None:
@@ -1654,11 +1656,19 @@ def glossary_text(folders):
     return "\n\n".join(parts)
 
 
+def bot_started(path):
+    """Is a chat's transcript one a Bot started on the mesh (a host lists it with spawned_by)? As far as the hosts
+    looked for say: none looked for yet, no."""
+    sid = os.path.basename(path or "").removesuffix(".jsonl")
+    return bool(_NETWORK) and any(s.get("spawned_by") and sid in (s["id"], s.get("cli_id"))
+                                  for s in network().sessions())
+
+
 def chat_text(path, title, cwd):
     """What's shown of a chat (parse_records: what's said, not the tools' calls or what they gave back), as Markdown."""
     items = []
     with open(path, encoding="utf-8", errors="replace") as f:
-        parse_records(f, items)
+        parse_records(f, items, spawned=bot_started(path))
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
     who = {"user": "You", "start": "Started with"}
     return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
@@ -5502,7 +5512,7 @@ class Reader(Gtk.Box):
         """What's been added to the chat (livefeed.Tail, the moment it's written): its prose drawn, a reply written in
         several records the one it's part of, grown."""
         n = len(self.items)
-        parse_records(lines, self.items, self.seen)
+        parse_records(lines, self.items, self.seen, bot_started(self.path))
         keep = n  # (a revert took back what's after the record it keeps: those rows go)
         if n and (len(self.items) < n or self.rows[n - 1].item is not self.items[n - 1]):
             keep = next(i for i, row in enumerate(self.rows) if i >= len(self.items) or row.item is not self.items[i])

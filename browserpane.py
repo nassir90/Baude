@@ -1,7 +1,7 @@
 """A Bot's browser, on the side panel's Browser page: its own Emission (emission.py), on its chat's host or any other it
 uses, watched and driven. A Bot of this Mac's: its Emission in this process (Here), its pages drawn in the page itself,
 as big as it is, nothing streamed (it's the Bot's again, in a process of its own, once Baude's gone). Elsewhere, its
-frames come as the page changes: from an Emission of this machine's own host process straight from it (its door), the
+frames come as the page changes: from an Emission of this machine's own host process straight from it (its socket), the
 pixels in shared memory; from one elsewhere through its host process (wire's emission_watch), each frame a JPEG the
 size the page is shown at, the page laid out at the side panel's size. What you do with a streamed one (click, drag,
 type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order it's done, as the Bot's
@@ -77,12 +77,12 @@ class Stream:
         self.later(lambda: self.on_ended(why))
 
     def run_here(self):
-        """This machine's own Emission: its door, frames in shared memory."""
+        """This machine's own Emission: its socket, frames in shared memory."""
         pid = emissionlink.bot_profile_id(self.bot["id"])
         for attempt in range(2):
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                sock.connect(emissionlink.door_path(pid))
+                sock.connect(emissionlink.profile_socket(pid))
                 break
             except (FileNotFoundError, ConnectionRefusedError):
                 sock.close()
@@ -155,7 +155,7 @@ class Stream:
         self.later(lambda: self.on_frame(made(), w, h, view, lambda: self.say({"ack": seq})))
 
     def say(self, line):
-        """A line to Emission (here: its door; there: through its host)."""
+        """A line to Emission (here: its socket; there: through its host)."""
         with self.lock:
             try:
                 if self.sock is not None:
@@ -214,7 +214,7 @@ class Asks:
             remote, bot, call, answered = self.q.get()
             try:
                 got = None
-                if remote.mine:  # (straight to its door: no host between)
+                if remote.mine:  # (straight to its socket: no host between)
                     try:
                         got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
                     except (FileNotFoundError, ConnectionRefusedError):
@@ -233,11 +233,11 @@ RELEASED = {}  # (a profile's id: when Baude let go of it, for someone's Emissio
 RELEASED_S = 15
 BUSY_RETRY_S = 10  # (a Bot busy in its own Emission, watched streamed: tried here again this often)
 OFF_S = 60  # (a Bot whose browser couldn't be had here: streamed, and tried here again after this long)
-HOME = {"app": None}  # (Baude's application, once its home door's open: where this Mac's Bots' browsers are made)
+HOME = {"app": None}  # (Baude's application, once its home socket's open: where this Mac's Bots' browsers are made)
 
 
 def open_home(app, ours):
-    """This Mac's Bots' browsers made in Baude while it runs: its home door (emissionlink.call_bot asks it first, as a
+    """This Mac's Bots' browsers made in Baude while it runs: its home socket (emissionlink.call_bot asks it first, as a
     Bot's tool reaches for a browser it hasn't got) takes {"op": "host", "bot", "name"}, answered once it's here.
     ours(bot): whether that's a Bot whose chat is on this Mac (another's Bot, using this Mac's browser, has an Emission
     of its own, as before)."""
@@ -248,14 +248,14 @@ def open_home(app, ours):
 
     def handle(_pid, msg, answer, _conn=None):
         if msg.get("op") != "host" or not isinstance(msg.get("bot"), str) or not msg["bot"]:
-            return answer({"error": "the home door makes a Bot's browser: host {bot, name}"})
+            return answer({"error": "the home socket makes a Bot's browser: host {bot, name}"})
         if not ours(msg["bot"]):
             return answer({"error": "not a Bot of this Mac's"})
         here = HERE.get(msg["bot"])
         if here is None:
             here = HERE[msg["bot"]] = Here(app, msg["bot"], msg.get("name"))
         here.when_ready(lambda h: answer({"ok": True} if h.win is not None else {"error": h.why or "not here"}))
-    emission.Door.listen("home", handle)
+    emission.ProfileSocket.listen("home", handle)
 
 
 def can_host(remote):
@@ -266,7 +266,7 @@ def can_host(remote):
 
 class Here:
     """A Bot of this Mac's browser in this process: its profile taken from the Emission it had (its pages opened here),
-    its door this process's, so the Bot's tools reach it here. ready(here) on the main loop once it's there (win), or
+    its socket this process's, so the Bot's tools reach it here. ready(here) on the main loop once it's there (win), or
     it couldn't be (why)."""
 
     def __init__(self, app, sid, name, force=False):
@@ -319,7 +319,7 @@ class Here:
                 why = win.status.get_description() if win.status is not None else "no page engine here"
                 win.closing_window()
                 win.destroy()
-                emission.Door.close(pid)
+                emission.ProfileSocket.close(pid)
                 emissionlink.unlock_profile(pid)
                 return self.done(why)
             for url in urls[1:]:
@@ -335,13 +335,13 @@ class Here:
                 HOME["awake"] = True
                 emission.MacWeb.stay_awake()  # (a page of a Bot's runs on while Baude's out of sight)
             self.pid, self.win = pid, win
-        except Exception as e:  # (streamed instead: its window and door, if it got that far, let go of)
+        except Exception as e:  # (streamed instead: its window and socket, if it got that far, let go of)
             try:
                 import emission
                 if "win" in locals():
                     win.closing_window()
                     win.destroy()
-                emission.Door.close(pid)
+                emission.ProfileSocket.close(pid)
             except Exception:
                 sys.excepthook(*sys.exc_info())
             emissionlink.unlock_profile(pid)
@@ -373,10 +373,11 @@ class Here:
             win.body.get_parent().remove(win.body)
         win.closing_window()
         win.destroy()
-        emission.Door.close(self.pid)
+        emission.ProfileSocket.close(self.pid)
         pid = self.pid
         RELEASED[pid] = time.monotonic()
-        GLib.timeout_add(2000, lambda: pid not in emission.Door.open and emissionlink.unlock_profile(pid) and False)
+        GLib.timeout_add(2000, lambda: pid not in emission.ProfileSocket.open and emissionlink.unlock_profile(pid)
+                         and False)
         # (WebKit's store let go of first; not if it's been taken here again meanwhile)
 
     def done(self, why):
@@ -753,7 +754,7 @@ class BrowserPane(Gtk.Box):
 
     def ask(self, call, done=None):
         """call to the Bot's Emission (as its tools' are: real input there), after what was asked before it: on this
-        machine straight to its door, elsewhere through its host. Nothing, while it's read-only."""
+        machine straight to its socket, elsewhere through its host. Nothing, while it's read-only."""
         if self.sid is None or self.remote is None or self.read_only.get_active():
             return
         sid, remote = self.sid, self.remote

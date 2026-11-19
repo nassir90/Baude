@@ -1,7 +1,7 @@
-"""Emission's profiles and its door, without GTK: what emission.py keeps, and what a host process uses to reach the
+"""Emission's profiles and their sockets, without GTK: what emission.py keeps, and what a host process uses to reach the
 Emission that has a profile (a Bot's, started for it if none has), as a Bot's browser tools ask (emissiontools).
 
-A profile is open in one Emission process at a time (its lock); that process listens at the profile's door, a socket
+A profile is open in one Emission process at a time (its lock); that process listens on the profile's Unix socket, one
 only this user can open, for requests a line of JSON each, its answer a line of JSON."""
 import fcntl
 import hashlib
@@ -18,7 +18,7 @@ import uuid
 PROFILE_SPACE = uuid.UUID("6b1f0d3e-3c4e-4f51-9b0e-7a1e5e6d2c11")  # (a profile named before ids: its name's uuid)
 DEFAULT = "Default"
 EMISSION = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emission.py")
-START_S = 30  # (a Bot's Emission started: its door waited for this long)
+START_S = 30  # (a Bot's Emission started: its socket waited for this long)
 
 
 def data_home():
@@ -189,9 +189,9 @@ def unlock_profile(pid):
         os.close(fd)
 
 
-# ------------------------------------------------------------------- the door --
+# ----------------------------------------------------------------- the socket --
 
-def door_path(pid):
+def profile_socket(pid):
     """Where the Emission that has pid's profile takes requests (a socket in a folder only this user can open; short,
     for macOS's limit on socket paths)."""
     from baudelib import wire
@@ -209,7 +209,7 @@ def call(pid, msg, timeout=60):
     went), ValueError for what it said went wrong."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
-        s.connect(door_path(pid))
+        s.connect(profile_socket(pid))
         s.sendall((json.dumps(msg) + "\n").encode())
         raw = b""
         while not raw.endswith(b"\n"):
@@ -267,7 +267,7 @@ def call_bot(bot_id, name, msg, timeout=60):
         try:
             return call(pid, msg, timeout)
         except (FileNotFoundError, ConnectionRefusedError):
-            if proc.poll() == 0:  # (it found the profile someone's, with no door yet: tried again a moment on)
+            if proc.poll() == 0:  # (it found the profile someone's, with no socket yet: tried again a moment on)
                 time.sleep(0.5)
                 proc = start()
                 continue

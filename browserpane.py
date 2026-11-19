@@ -475,6 +475,7 @@ class BrowserPane(Gtk.Box):
         if self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel; read-only: the
             self.sized_to = None                                    # Bot's page at its own size again)
             if on:
+                self.view_size = None  # (the page's size as it was fitted isn't what it'll be: fitted again after)
                 self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True},
                               lambda _r: None)
             else:

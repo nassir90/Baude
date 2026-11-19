@@ -1742,16 +1742,11 @@ class Window(Adw.ApplicationWindow):
             if self.agent and sys.platform == "darwin":  # (watched: its window in, where no one sees it, so WebKit
                 macos.in_unseen(self)                     # draws its pages as they change: a picture that moves)
             return self.watch_kick()
-        if op == "resize" and self.agent:  # (a watcher's: fit, the page laid out at its pane's size, its own kept to
-            if msg.get("restore"):           # put back, as restore asks or once no one watches; the Bot's: its own)
-                if self.watch_size is not None:
-                    self.set_default_size(*self.watch_size)
-                    self.watch_size = None
-                return answer({"ok": True})
-            if not msg.get("fit"):
+        if op == "resize" and self.agent and msg.get("restore"):  # (a watcher gone read-only: the Bot's own size
+            if self.watch_size is not None and len(self.watchers) <= 1:  # back, unless another still drives it)
+                self.set_default_size(*self.watch_size)
                 self.watch_size = None
-            elif self.watch_size is None:
-                self.watch_size = self.get_default_size()
+            return answer({"ok": True})
         self.watch_kick()  # (something's being done: frames often for a while)
         return self.control.run(op, msg, answer)
 
@@ -2844,8 +2839,14 @@ class Control:
                 lambda got: answer({**self.describe(t), "requests": got}))
 
     def op_resize(self, msg, answer):
-        """The page's size (its viewport) made width by height, CSS pixels."""
+        """The page's size (its viewport) made width by height, CSS pixels. fit: a watcher's (its pane's size), the
+        size the Bot had kept to put back once no one watches; else the Bot's own, kept."""
         t = self.tab(msg)
+        if self.win.agent:  # (as it's done, in its turn: not as it was asked)
+            if not msg.get("fit"):
+                self.win.watch_size = None
+            elif self.win.watch_size is None:
+                self.win.watch_size = self.win.get_default_size()
         w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
         if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")

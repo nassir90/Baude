@@ -337,12 +337,18 @@ object Mesh {
             .put("offset", (size - 64_000).coerceAtLeast(0))) { r ->
             val data = r.optString("data", "")
             val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
-            val last = parse(text, cutFirst = true).lastOrNull { it.kind == "bot" }?.text ?: return@request
+            val last = parse(text, cutFirst = true).lastOrNull { it.kind == "bot" || it.kind == "error" }?.text ?: return@request
             main.post { notify(contact, last) }
         }
     }
 
+    private val notified = HashMap<String, Pair<String, Long>>() // (a Bot: what it was last notified for, and when)
+
     private fun notify(contact: Contact, text: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val before = notified[contact.id]
+        if (before != null && before.first == text && now - before.second < 120_000) return // (the same turn, told
+        notified[contact.id] = text to now                                                  // twice: once)
         if (Build.VERSION.SDK_INT >= 33 &&
             app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return
@@ -356,7 +362,6 @@ object Mesh {
             .setContentText(text.take(200))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(2000)))
             .setContentIntent(pending)
-            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .build()
         try {
@@ -428,12 +433,12 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                         when {
                             t.startsWith("<task-notification") -> out.add(Line("note", "A background task ended", uuid))
                             t.startsWith(STOPPED) -> out.add(Line("note", "Stopped", uuid))
-                            t.startsWith("<command-name>") -> out.add(Line("you", command(t), uuid))
+                            t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
                             else -> out.add(Line("you", t, uuid))
                         }
                     } else if (t.isNotBlank()) {
-                        out.add(Line(if (o.optBoolean("isApiErrorMessage")) "note" else "bot", t.trim(), uuid))
+                        out.add(Line(if (o.optBoolean("isApiErrorMessage")) "error" else "bot", t.trim(), uuid))
                     }
                 }
                 "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))

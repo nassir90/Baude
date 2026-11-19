@@ -204,7 +204,7 @@ private fun Said(line: Line) {
         }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
-        "note" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
+        "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }
     }

@@ -65,6 +65,7 @@ class Connection(
     private fun loop() {
         var wait = 1_000L
         while (!stopped) {
+            wake.clear() // (a wake from before this try: not one for after it)
             var reached = false
             try {
                 reached = run()
@@ -85,7 +86,6 @@ class Connection(
                 failAll()
             }
             if (reached) wait = 1_000L // (it was up: tried again at once, then more slowly each time it fails)
-            wake.clear()
             wait = if (wake.poll(wait, TimeUnit.MILLISECONDS) != null) 1_000L // (the network's back: now)
             else (wait * 2).coerceAtMost(30_000L)
         }

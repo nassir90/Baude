@@ -423,8 +423,6 @@ private fun ViewMenu() {
     }
 }
 
-fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }
-
 /** A menu as libadwaita's popover is: its own fill, rounded. */
 @Composable
 fun Popover(open: Boolean, dismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {

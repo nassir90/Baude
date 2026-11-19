@@ -43,6 +43,11 @@ os.environ["RECORD_NOUNS"] = "off"  # (no NLTK fetched by uv for the chats read 
 os.environ["BAUDE_GH"] = ""  # (no issue filed on GitHub for the feedback saved here)
 os.environ["BAUDE_KEEP_FILING"] = "0"  # (nor a note going up by itself, to a stand-in gh, mid-test)
 os.environ["BAUDE_UPDATE"] = "0"  # (no git fetched, no restart onto a new version)
+# nor this machine's host process, nor ssh's shared connections (and through them the mesh): a folder of the run's own
+# (short: a socket's path is), as test_baude's
+os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="bd-", dir="/tmp")
+os.environ["BAUDE_SSH"] = "false"  # (nor anywhere over ssh: a host added by hand is never reached)
+os.environ["BAUDE_MENU_BAR"] = "0"  # (nor an item in the real menu bar, from a host process a test starts)
 FAKE = os.path.join(TMP, "fake-claude")
 with open(FAKE, "w") as f:
     f.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(os.path.join(HERE, "fake_record_claude.py"))} "$@"\n')

@@ -736,8 +736,10 @@ class Server:
             self.following.add((s.id, w["session"]))
         try:
             got = meshtools.Mesh(socket=self.socket_path).follow(w)
-        except Exception as e:  # (said to the session as the call would have said it)
-            got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}"}
+        except Exception as e:  # (said to the session as the call would have said it, its host named)
+            got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}",
+                   **meshtools.Mesh(socket=self.socket_path).named(
+                       {"via": "mesh", "host": w["host"]} if w.get("host") else {"via": "local"})}
         with self.lock:
             self.following.discard((s.id, w["session"]))
             if self.stopped.is_set() or self.sessions.get(s.id) is not s or s.deleting:

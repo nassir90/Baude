@@ -217,6 +217,8 @@ class Mesh:
         try:
             while True:
                 if ch is None:
+                    if not wait:  # (sent and not waited for: not followed, nor matched to what's said in it)
+                        return {"session": session, "sent": True, "lost": True}
                     ch, got = self.reattach(where, session, min(end, time.monotonic() + BACK_S))
                     if ch is None:
                         return {"session": session, "answer": None, "lost": True, "said_so_far": cut(said),

@@ -38,6 +38,35 @@ kotlin {
     jvmToolchain(17)
 }
 
+/** emission.py's PAGE_JS and REPL_RUN, as the phone's browser runs them (assets emission/page.js, emission/repl.js):
+ * read from it as the app's built, so its pages are read and driven by the one script Emission's are. */
+abstract class EmissionJs : DefaultTask() {
+    @get:InputFile abstract val source: RegularFileProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val py = source.get().asFile.readText()
+        fun string(name: String): String {
+            val m = Regex("(?s)\\n$name = (r?)\"\"\"(.*?)\"\"\"").find(py) ?: throw GradleException("no $name in emission.py")
+            return if (m.groupValues[1] == "r") m.groupValues[2] else m.groupValues[2].replace("\\\\", "\\")
+        }
+        val dir = outputDir.get().asFile.resolve("emission")
+        dir.mkdirs()
+        dir.resolve("page.js").writeText(string("PAGE_JS"))
+        dir.resolve("repl.js").writeText(string("REPL_RUN"))
+    }
+}
+
+val emissionJs = tasks.register<EmissionJs>("emissionJs") {
+    source.set(rootProject.layout.projectDirectory.file("../emission.py"))
+    outputDir.set(layout.buildDirectory.dir("generated/emissionJs"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(emissionJs, EmissionJs::outputDir) }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

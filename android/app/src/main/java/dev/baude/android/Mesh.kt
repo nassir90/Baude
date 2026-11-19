@@ -320,6 +320,7 @@ object Mesh {
                     open?.let { if (it.hostId == c.id) read(it) } // (its first read, or what it missed)
                 }
                 "turn_ended" -> ended(c, msg)
+                "emission_call" -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
                 "claude" -> open?.let {
                     if (it.hostId != c.id || it.sid != msg.optString("session")) return@let
                     val ask = msg.optJSONObject("msg")?.let(Ask::of)

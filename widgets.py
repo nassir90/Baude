@@ -7889,6 +7889,38 @@ class ChoiceDropDown(Gtk.DropDown):
             self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
         self._quietly(swap)
 
+    def set_dimmed(self, values):
+        """Those values greyed in its list (a host out of reach, say), still there to pick. Its list's rows are its
+        own from the first call: each a label, and the tick on the one picked, as GTK's own are."""
+        self.dimmed = set(values)
+        if getattr(self, "rows", None) is None:
+            self.rows = set()
+            factory = Gtk.SignalListItemFactory()
+            factory.connect("setup", self._row_setup)
+            factory.connect("bind", self._row_bind)
+            factory.connect("unbind", lambda _f, item: self.rows.discard(item))
+            self.set_list_factory(factory)
+            self.connect("notify::selected", lambda *_: [self._row_bind(None, item) for item in list(self.rows)])
+        for item in list(self.rows):
+            self._row_bind(None, item)
+
+    def _row_setup(self, _factory, item):
+        row = Gtk.Box(spacing=6)
+        row.append(Gtk.Label(xalign=0, hexpand=True))
+        row.append(Gtk.Image(icon_name="object-select-symbolic"))
+        item.set_child(row)
+
+    def _row_bind(self, _factory, item):
+        row, at = item.get_child(), item.get_position()
+        if row is None or item.get_item() is None:
+            return
+        self.rows.add(item)
+        label, tick = row.get_first_child(), row.get_last_child()
+        label.set_text(item.get_item().get_string())
+        value = self.values[at] if at < len(self.values) else None
+        (label.add_css_class if value in self.dimmed else label.remove_css_class)("dim-label")
+        tick.set_opacity(1 if at == self.get_selected() else 0)
+
     def select(self, value):
         """Show `value` as selected (appending it if unknown) without firing on_pick."""
         def pick():

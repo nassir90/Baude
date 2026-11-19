@@ -9329,7 +9329,8 @@ class SessionSidebar(Gtk.Box):
         if r.state == "alive" and not r.deactivated:
             return None
         name = remote_name(r)
-        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment" \
+        why = f": {r.error}" if r.error else ""  # (why it's out of reach, as the last try to reach it said)
+        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment{why}" \
             if r.state == "dead" else f"Looking for {name} on the network…"
 
     def show_host_state(self):
@@ -9352,6 +9353,8 @@ class SessionSidebar(Gtk.Box):
         hosts = self.new_hosts()
         self.host_dd.set_choices(hosts)
         self.host_dd.select(self.shown_host())
+        self.host_dd.set_dimmed({key for key, _name, note in self.known_hosts() if note == "gone"})  # (out of reach:
+        # greyed, and picked, why's said: show_host_state)
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
         # no other host to pick)
 

@@ -464,6 +464,7 @@ class Server:
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
+        self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 
     def bind(self):
@@ -698,6 +699,10 @@ class Server:
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
         self.mesh.start()
+        with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
+            waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
+        for s, w in waits:
+            threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -721,6 +726,40 @@ class Server:
             self.accepted = time.monotonic()
             threading.Thread(target=self.serve, args=(sock,), daemon=True, name="client").start()
         self.listener.close()
+
+    def answer_wait(self, s, w):
+        """A wait of a session's agent (waits_on's: a subagent's answer, or a chat's) that this host's stop cut short:
+        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that sent to the
+        session as its user's message, which carries it on. Stopped again meanwhile: kept, for the next start."""
+        with self.lock:
+            self.following.add((s.id, w["session"]))
+        try:
+            got = meshtools.Mesh(socket=self.socket_path).follow(w)
+        except Exception as e:  # (said to the session as the call would have said it)
+            got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}"}
+        with self.lock:
+            self.following.discard((s.id, w["session"]))
+            if self.stopped.is_set() or self.sessions.get(s.id) is not s or s.deleting:
+                return
+            waits = [x for x in s.meta.get("waits_on") or [] if x["session"] != w["session"]]
+            s.meta["waits_on"] = waits or None
+            self.save(s)
+            self.log(f"{s.id}: the answer it waited on from {w['session']} sent to it")
+            try:
+                self.take_input(None, s, {"type": "user", "message": {"role": "user", "content": [
+                    {"type": "text", "text": meshtools.told(w, got)}]}})
+            except OSError as e:  # (its folder gone, say)
+                self.log(f"{s.id}: couldn't be sent it: {e}")
+
+    def drop_waits(self, s):
+        """(lock held) Its agent's waits (waits_on) let go of, but those answered for it (answer_wait): its turn's
+        over, or its claude's gone otherwise than by this host's stop (stopped by a head, say), so nothing waits on
+        them."""
+        waits = s.meta.get("waits_on") or []
+        kept = [w for w in waits if (s.id, w["session"]) in self.following]
+        if len(kept) != len(waits):
+            s.meta["waits_on"] = kept or None
+            self.save(s)
 
     def shutdown(self, if_idle=False, restart=None):
         """Goodbye on the network, every claude stopped (asked to end, then made to: what it's written is kept, and
@@ -1089,6 +1128,19 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
+                on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
+                if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):
+                    return reply("error", error="waits_on needs on: {session, host (None: this one)}")
+                waits = [w for w in s.meta.get("waits_on") or [] if w["session"] != on["session"]]
+                if not msg.get("done"):
+                    waits.append({"session": on["session"], "host": on.get("host"),
+                                  "kind": "chat" if on.get("kind") == "chat" else "subagent",
+                                  "text": on["text"] if isinstance(on.get("text"), str) else None,
+                                  "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
+                s.meta["waits_on"] = waits or None
+                self.save(s)
+                return reply("waits_on", session=s.id)
             if op == "mesh_tools":  # (a chat given the mesh's tools, or not: from its next start)
                 s.meta["mesh_tools"] = bool(msg.get("on"))
                 self.save(s)
@@ -1771,6 +1823,8 @@ class Server:
                 self.save(s)
             if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
                 self.restart_agent(s)
+            if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
+                self.drop_waits(s)
             if kind == "result":
                 for message, said in s.queued:
                     self.keep(s, "user", message, said)
@@ -1911,6 +1965,8 @@ class Server:
                     "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
             s.waiting_init = []
             self.drop_routes(s)
+            if not self.stopped.is_set():
+                self.drop_waits(s)
             if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
                 # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)

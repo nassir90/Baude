@@ -102,6 +102,14 @@ A client's requests (a "req" it picks comes back on the reply):
     mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
+    waits_on {session, on: {session, host, kind,     -> waits_on {session}: (version 13) the session's agent waits on
+              text, until}, done?}                     another chat's answer (on: that chat, on member host, None for
+                                                       this host; kind "subagent" or "chat", text what it was asked,
+                                                       until when the wait ends, epoch seconds), or done: no longer.
+                                                       Kept with the session (not listed) while its turn goes on: if
+                                                       this host stops meanwhile, which stops its agent, it follows
+                                                       the wait once it's started again and sends the session what the
+                                                       wait would have given, as its user's message
     emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
                                                        {state}, many, till emission_watch_end: (version 11) a Bot's
                                                        browser here watched (Baude's Browser pane)
@@ -198,11 +206,11 @@ import subprocess
 import threading
 import time
 
-VERSION = 12  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 13  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
-# 12: routines, run_routine)
+# 12: routines, run_routine; 13: waits_on, a session's waits_on, info's mesh gone)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

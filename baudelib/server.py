@@ -72,6 +72,36 @@ def state_home():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "server")
 
 
+def kept_sessions(state_dir=None):
+    """The sessions a host process keeps in its state folder (None: this machine's), each one's settings as it saved
+    them (Server.save), read as it loads them, whether it's running or not."""
+    folder = os.path.join(state_dir or state_home(), "sessions")
+    out = []
+    for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        try:
+            with open(os.path.join(folder, entry), encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict) and wire.is_id(meta.get("id")):
+            out.append(meta)
+    return out
+
+
+def kept_session(sid, state_dir=None):
+    """The settings this machine's host process keeps for a session (kept_sessions), by its id or claude's (cli_id),
+    or None: not one of its own."""
+    if wire.is_id(sid or ""):
+        try:
+            with open(os.path.join(state_dir or state_home(), "sessions", f"{sid}.json"), encoding="utf-8") as f:
+                meta = json.load(f)
+            if isinstance(meta, dict) and meta.get("id") == sid:
+                return meta
+        except (OSError, ValueError):
+            pass
+    return next((m for m in kept_sessions(state_dir) if sid and m.get("cli_id") == sid), None)
+
+
 def lock_path(state_dir=None):
     """The lock a host process holds while it runs (one each): in its state folder, named for this machine."""
     return os.path.join(state_dir or state_home(), f"host-{wire.safe_name(socket.gethostname().split('.')[0])}.lock")
@@ -430,13 +460,8 @@ class Server:
         _write_json(me, self.me)
         providers.found()  # (this machine's inference providers looked for now: there by the time a head says hello)
         self.sessions = {}
-        folder = os.path.join(self.state_dir, "sessions")
-        for entry in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        for meta in kept_sessions(self.state_dir):
             try:
-                with open(os.path.join(folder, entry), encoding="utf-8") as f:
-                    meta = json.load(f)
-                if not wire.is_id(meta.get("id")):
-                    continue
                 self.sessions[meta["id"]] = Session(self, meta)
                 meta.pop("tags", None)  # (an older server kept tags: not read, and gone at its next save)
             except (OSError, ValueError, KeyError, TypeError):

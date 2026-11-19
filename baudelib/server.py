@@ -845,6 +845,13 @@ class Server:
                 conn.agent_run.end()
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
+            conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
+            if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
+                try:
+                    conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
+                    conn.emission_watch.close()
+                except OSError:
+                    pass
             with self.lock:
                 self.conns.discard(conn)
                 for s in list(self.sessions.values()):
@@ -855,6 +862,43 @@ class Server:
                     self.drop_ephemeral(s)
             conn.close()
             ch.close()
+
+    def emission_watch(self, conn, req, bot, msg):
+        """A Bot's Emission here (started if it isn't) watched for conn: its frames (as JPEG) and state, a message
+        each (emission_frame), till either end goes (emission_watch_end)."""
+        size = {k: int(msg[k]) for k in ("max_w", "max_h") if isinstance(msg.get(k), int)}
+        try:
+            emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(emissionlink.door_path(emissionlink.bot_profile(bot["id"], None)))
+            sock.sendall((json.dumps({"op": "watch", **size}) + "\n").encode())
+        except (OSError, ValueError) as e:
+            conn.send({"op": "error", "req": req, "error": str(e)})
+            return
+        conn.emission_watch = sock
+        if getattr(conn, "gone", False):  # (its pane went while Emission was started)
+            sock.close()
+            return
+        conn.send({"op": "emission_watching", "req": req})
+        buffer = b""
+        try:
+            while (part := sock.recv(1 << 20)):
+                buffer += part
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    try:
+                        conn.send({"op": "emission_frame", "req": req, **json.loads(line)})
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+        finally:
+            conn.emission_watch = None
+            try:
+                sock.close()
+            except OSError:
+                pass
+            conn.send({"op": "emission_watch_end", "req": req})
 
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
@@ -940,6 +984,23 @@ class Server:
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
+        if op == "emission_watch":  # (a Browser pane elsewhere: a Bot's Emission here watched, its frames carried on
+            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection)
+            if not isinstance(bot.get("id"), str) or not bot["id"] or getattr(conn, "emission_watch", None):
+                return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
+            threading.Thread(target=self.emission_watch, args=(conn, req, bot, msg), daemon=True,
+                             name="emission-watch").start()
+            return None
+        if op == "emission_watch_say":  # (what the pane says back: a frame taken, its new size)
+            line = msg.get("line") if isinstance(msg.get("line"), dict) else {}
+            line = {k: line[k] for k in ("ack", "max_w", "max_h") if isinstance(line.get(k), int)}
+            sock = getattr(conn, "emission_watch", None)
+            if sock is not None and line:
+                try:
+                    sock.sendall((json.dumps(line) + "\n").encode())
+                except OSError:
+                    pass
             return None
         if op == "mcp_relay":  # (one of an agent's MCP servers: a relay, carried to its caller)
             run = self.agent_runs.get(msg.get("run"))

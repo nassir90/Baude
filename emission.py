@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import zlib
 
 import macos  # noqa: E402  (no GTK: before it's loaded)
 import gi  # noqa: E402
@@ -93,6 +94,9 @@ class Door:
                     conn.close()
             answer = once(answer)
             try:
+                if msg.get("op") == "watch":
+                    handle(pid, msg, answer, conn)  # (its connection kept: frames go on it, acks come back)
+                    return True
                 handle(pid, msg, answer)
             except Exception as e:  # (said to whoever asked, and in the log)
                 sys.excepthook(*sys.exc_info())
@@ -815,6 +819,51 @@ class MacWeb:
         send(self.view, b"takeSnapshotWithConfiguration:completionHandler:", None,
              Blocks.once(got, types=(ctypes.c_void_p, ctypes.c_void_p)), types=(ctypes.c_void_p, ctypes.c_void_p))
 
+    cg = None
+
+    @classmethod
+    def coregraphics(cls):
+        if cls.cg is None:
+            cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg.CGColorSpaceCreateDeviceRGB.restype = ctypes.c_void_p
+            cg.CGBitmapContextCreate.restype = ctypes.c_void_p
+            cg.CGBitmapContextCreate.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_size_t,
+                                                 ctypes.c_size_t, ctypes.c_void_p, ctypes.c_uint32]
+            cg.CGContextDrawImage.argtypes = [ctypes.c_void_p, macos._rect(), ctypes.c_void_p]
+            cg.CGBitmapContextGetData.restype = ctypes.c_void_p
+            cg.CGBitmapContextGetData.argtypes = [ctypes.c_void_p]
+            cg.CGContextRelease.argtypes = cg.CGColorSpaceRelease.argtypes = [ctypes.c_void_p]
+            cg.CGImageGetWidth.restype = cg.CGImageGetHeight.restype = ctypes.c_size_t
+            cg.CGImageGetWidth.argtypes = cg.CGImageGetHeight.argtypes = [ctypes.c_void_p]
+            cls.cg = cg
+        return cls.cg
+
+    def frame(self, max_w, max_h, done):
+        """The page as it's shown, as raw pixels: done(width, height, stride, RGBA bytes (premultiplied), None), at
+        most max_w by max_h (its shape kept), or done(..., None, why). Drawn straight from WebKit's picture into
+        a bitmap of that size: no image file made between."""
+        send, cg = macos.objc_send, self.coregraphics()
+
+        def got(image, error):
+            if not image:
+                why = self._text(send(error, b"localizedDescription")) if error else "no picture"
+                GLib.idle_add(lambda: done(0, 0, 0, None, why) and False)
+                return
+            cgi = send(image, b"CGImageForProposedRect:context:hints:", None, None, None,
+                       types=(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p))
+            iw, ih = cg.CGImageGetWidth(cgi), cg.CGImageGetHeight(cgi)
+            scale = min(1.0, max_w / max(1, iw), max_h / max(1, ih))
+            w, h = max(1, int(iw * scale)), max(1, int(ih * scale))
+            space = cg.CGColorSpaceCreateDeviceRGB()
+            ctx = cg.CGBitmapContextCreate(None, w, h, 8, w * 4, space, 1)  # (RGBA, premultiplied: kCGImageAlphaPremultipliedLast)
+            cg.CGContextDrawImage(ctx, macos._rect()(0, 0, w, h), cgi)
+            data = ctypes.string_at(cg.CGBitmapContextGetData(ctx), w * 4 * h)
+            cg.CGContextRelease(ctx)
+            cg.CGColorSpaceRelease(space)
+            GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False)
+        send(self.view, b"takeSnapshotWithConfiguration:completionHandler:", None,
+             Blocks.once(got, types=(ctypes.c_void_p, ctypes.c_void_p)), types=(ctypes.c_void_p, ctypes.c_void_p))
+
     def _event(self, kind, x, y, count=1, flags=0):
         """A mouse event at (x, y) on the page (CSS pixels from its top left), in its window's terms."""
         send, R = macos.objc_send, macos._rect()
@@ -836,15 +885,31 @@ class MacWeb:
         """The pointer to (x, y) on the page: what's under it hovered, as a person's mouse would."""
         macos.objc_send(self.view, b"mouseMoved:", self._event(5, x, y), types=(ctypes.c_void_p,))
 
-    def click(self, x, y, button="left", count=1, mods=()):
-        """A real click at (x, y): pointer moved there, pressed, released (count times, as a double click is)."""
+    def click(self, x, y, button="left", count=1, mods=(), press=None):
+        """A real click at (x, y): pointer moved there, pressed, released (count times, as a double click is; press:
+        one press only, its click count that)."""
         flags = sum(MAC_MODS[m] for m in mods)
-        down, up, dsel, usel = ((3, 4, b"rightMouseDown:", b"rightMouseUp:") if button == "right"
-                                else (1, 2, b"mouseDown:", b"mouseUp:"))
+        down, up, dsel, usel = {"right": (3, 4, b"rightMouseDown:", b"rightMouseUp:"),
+                                "middle": (25, 26, b"otherMouseDown:", b"otherMouseUp:")}.get(
+            button, (1, 2, b"mouseDown:", b"mouseUp:"))
         self.move(x, y)
-        for n in range(1, count + 1):
+        for n in ([press] if press else range(1, count + 1)):
             macos.objc_send(self.view, dsel, self._event(down, x, y, n, flags), types=(ctypes.c_void_p,))
             macos.objc_send(self.view, usel, self._event(up, x, y, n, flags), types=(ctypes.c_void_p,))
+
+    def view_size(self):
+        """The page's size, in CSS pixels (at its zoom of 1: the view's points)."""
+        fr = macos.objc_send(self.view, b"frame", ret=macos._rect()) if self.view else None
+        return [round(fr.w), round(fr.h)] if fr else None
+
+    def drag(self, points):
+        """A real drag: pressed at the first point, moved through the rest, let go at the last."""
+        x, y = points[0]
+        self.move(x, y)
+        macos.objc_send(self.view, b"mouseDown:", self._event(1, x, y), types=(ctypes.c_void_p,))
+        for x, y in points[1:]:
+            macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
+        macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
     def keyed(self):
         """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
@@ -1348,6 +1413,32 @@ class GtkWeb:
             done(texture.save_to_png_bytes().get_data(), None)
         self.view.get_snapshot(WebKit.SnapshotRegion.VISIBLE, WebKit.SnapshotOptions.NONE, None, got)
 
+    def frame(self, max_w, max_h, done):
+        """As MacWeb's: the page's pixels, done(width, height, stride, RGBA bytes, None) or (..., None, why)."""
+        WebKit = self.WebKit
+        from gi.repository import Gdk
+
+        def got(view, result):
+            try:
+                texture = view.get_snapshot_finish(result)
+            except GLib.Error as e:
+                done(0, 0, 0, None, e.message)
+                return
+            loader = Gdk.TextureDownloader.new(texture)
+            loader.set_format(Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED)
+            data, stride = loader.download_bytes()
+            w, h = texture.get_width(), texture.get_height()
+            scale = min(1.0, max_w / max(1, w), max_h / max(1, h))
+            if scale < 1.0:
+                gi.require_version("GdkPixbuf", "2.0")
+                from gi.repository import GdkPixbuf
+                pic = GdkPixbuf.Pixbuf.new_from_bytes(data, GdkPixbuf.Colorspace.RGB, True, 8, w, h, stride)
+                w, h = max(1, int(w * scale)), max(1, int(h * scale))
+                pic = pic.scale_simple(w, h, GdkPixbuf.InterpType.BILINEAR)
+                data, stride = pic.read_pixel_bytes(), pic.get_rowstride()
+            done(w, h, stride, data.get_data(), None)
+        self.view.get_snapshot(WebKit.SnapshotRegion.VISIBLE, WebKit.SnapshotOptions.NONE, None, got)
+
     def _screen(self, x, y):
         """(x, y) on the page as a point of the X screen, or None where there's no X (input's then the page's own
         events, made by script)."""
@@ -1374,7 +1465,7 @@ class GtkWeb:
         if at is not None:
             XTest.get().move(*at)
 
-    def click(self, x, y, button="left", count=1, mods=()):
+    def click(self, x, y, button="left", count=1, mods=(), press=None):
         at = self._screen(x, y)
         if at is None:
             raise OSError("real clicks need Emission's own display: a Bot's Emission has one, a window on "
@@ -1382,11 +1473,26 @@ class GtkWeb:
         xt = XTest.get()
         xt.move(*at)
         with xt.held(mods):
-            for _ in range(count):
-                xt.button(3 if button == "right" else 1)
+            for _ in range(1 if press else count):  # (X counts a double click's presses itself)
+                xt.button({"right": 3, "middle": 2}.get(button, 1))
 
     def keyed(self):
         return True
+
+    def drag(self, points):
+        xt = XTest.get()
+        at = [self._screen(x, y) for x, y in points]
+        if xt is None or None in at:
+            raise OSError("a real drag needs Emission's own display")
+        xt.move(*at[0])
+        xt.t.XTestFakeButtonEvent(xt.d, 1, 1, 0)
+        for p in at[1:]:
+            xt.move(*p)
+        xt.t.XTestFakeButtonEvent(xt.d, 1, 0, 0)
+        xt.x.XFlush(xt.d)
+
+    def view_size(self):
+        return [self.view.get_width(), self.view.get_height()]
 
     def key(self, name, mods=()):
         xt = XTest.get()
@@ -1473,6 +1579,8 @@ class Tab:
 
 
 class Window(Adw.ApplicationWindow):
+    FAST_MS, SLOW_MS = 100, 500  # (a watched page's frames: this often while things happen, this often after)
+
     def __init__(self, app, url, profile, agent=False):
         """agent: the window of an Emission started for a Bot's tools (its own profile; never shown: on macOS
         it's kept off the screen, on Linux it's on a display of its own; a page's prompts wait for the tools)."""
@@ -1483,6 +1591,8 @@ class Window(Adw.ApplicationWindow):
         self.used = GLib.get_monotonic_time()
         self.switching, self.asking, self.later, self.dialogs = False, {}, [], 0  # (later: (when, what), by tick)
         self.status, self.done = None, False
+        self.watchers, self.watch_source, self.watch_capturing = [], None, False
+        self.watch_fast, self.watch_fast_until = True, 0.0
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd_btn = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
         self.reload_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
@@ -1584,7 +1694,7 @@ class Window(Adw.ApplicationWindow):
         Door.listen(pid, self.handle)
         return True
 
-    def handle(self, pid, msg, answer):
+    def handle(self, pid, msg, answer, conn=None):
         """A request at pid's door: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
         (Control's), for pid's profile (this window moved to it if it's elsewhere)."""
         op = msg.get("op")
@@ -1596,7 +1706,7 @@ class Window(Adw.ApplicationWindow):
             return answer({"agent": self.agent, "profile": self.profile, "tabs": len(self.tabs)})
         if op == "quit":
             answer({"ok": True})
-            GLib.timeout_add(100, lambda: self.get_application().quit() or False)
+            GLib.timeout_add(100, lambda: (self.closing_window(), self.get_application().quit()) and False)
             return None
         if self.Engine is None:
             return answer({"error": "Emission has no page engine on this host"})
@@ -1609,7 +1719,72 @@ class Window(Adw.ApplicationWindow):
                                         "another profile now: it's the Bot's again once that window's closed"})
             if not self.switch_profile(listed["name"]):
                 return answer({"error": "that profile isn't open here"})
+        if op == "watch":
+            self.watchers.append(Watcher(self, conn, msg))
+            return self.watch_kick()
+        self.watch_kick()  # (something's being done: frames often for a while)
         return self.control.run(op, msg, answer)
+
+    # (watchers: Baude's Browser panes)
+
+    def watch_kick(self):
+        """Frames often (FAST_MS) for a while: the page may be changing."""
+        self.watch_fast_until = time.monotonic() + 3
+        if self.watch_source is None and self.watchers:
+            self.watch_source = GLib.timeout_add(self.FAST_MS, self.watch_tick)
+
+    def unwatch(self, watcher):
+        if watcher in self.watchers:
+            self.watchers.remove(watcher)
+            watcher.close()
+
+    def watch_state(self):
+        tab = self.current()
+        return {"profile": self.profile, "agent": self.agent, "view": tab.web.view_size() if tab else None,
+                "selected": tab.id if tab else None, "tabs": [self.control.describe(t) for t in self.tabs.values()],
+                "prompts": self.prompts(None), "downloads": self.downloads[-5:]}
+
+    def watch_tick(self):
+        """A frame of the page in front taken, and given to each watcher it's new to; its state too, if it's changed.
+        Often while things happen, less after (SLOW_MS)."""
+        if not self.watchers or self.done:
+            self.watch_source = None
+            return False
+        state = self.watch_state()
+        for w in list(self.watchers):
+            if state != w.sent_state and w.say({"state": state}):
+                w.sent_state = state
+        if not self.watchers:
+            self.watch_source = None
+            return False
+        if self.watch_capturing and time.monotonic() - self.watch_capturing > 5:
+            self.watch_capturing = False  # (a frame that never came: the next tried)
+        tab = self.current()
+        if tab is not None and tab.web.view is not None and min(tab.web.view_size() or [0]) < 50:
+            tab = None  # (not laid out yet: no frame of nothing)
+        if tab is not None and tab.web.view is not None and not self.watch_capturing:
+            self.watch_capturing = time.monotonic()
+            want_w = max(w.max_w for w in self.watchers)
+            want_h = max(w.max_h for w in self.watchers)
+
+            def got(fw, fh, stride, data, why):
+                self.watch_capturing = False
+                if data is None:
+                    return
+                total = zlib.crc32(data)
+                for w in list(self.watchers):
+                    w.offer(fw, fh, stride, data, total)
+            try:
+                tab.web.frame(want_w, want_h, got)
+            except Exception:  # (no frame this time: the next one tried)
+                self.watch_capturing = False
+                sys.excepthook(*sys.exc_info())
+        fast = time.monotonic() < self.watch_fast_until
+        if fast != self.watch_fast:  # (its pace changed: timed again)
+            self.watch_fast = fast
+            self.watch_source = GLib.timeout_add(self.FAST_MS if fast else self.SLOW_MS, self.watch_tick)
+            return False
+        return True
 
     def take(self, pid, urls):
         """Pages handed over by another Emission, for pid's profile (this window moved to it if it's elsewhere)."""
@@ -2038,6 +2213,8 @@ class Window(Adw.ApplicationWindow):
         return True
 
     def closing_window(self, *_):
+        for w in list(self.watchers):
+            self.unwatch(w)
         for tab in self.tabs.values():
             tab.web.close()
         self.tabs.clear()
@@ -2057,7 +2234,10 @@ class Window(Adw.ApplicationWindow):
     def tick(self):
         if self.done:
             return False
+        if self.watchers:
+            self.used = GLib.get_monotonic_time()  # (watched: in use)
         if self.agent and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and not self.waiting:
+            self.closing_window()
             self.get_application().quit()
             return False
         if self.later:
@@ -2274,6 +2454,7 @@ class Control:
     def __init__(self, win):
         self.win = win
         self.scales = {}  # (each tab's last screenshot's pixels to the page's: by tab id)
+        self.queue = []  # (input waiting its turn: (op, msg, answer), the first being done)
 
     # (tabs)
 
@@ -2329,15 +2510,42 @@ class Control:
             (then or (lambda v: answer({"result": v})))(value)
         t.web.run_js(body if page else PAGE_JS + body, guarded(done, answer), page=page)
 
+    INPUT = {"click", "drag", "hover", "type", "key", "scroll", "form_input", "navigate", "new_tab", "close_tab",
+             "select_tab", "answer_prompt", "resize"}  # (what changes the page: done in the order it came)
+
     def run(self, op, msg, answer):
         fn = getattr(self, "op_" + str(op), None)
         if fn is None:
             raise ValueError(f"no such request: {op}")
-        fn(msg, answer)
+        if op not in self.INPUT:
+            return fn(msg, answer)
+        self.queue.append((fn, msg, answer))
+        if len(self.queue) == 1:
+            self.next_input()
+
+    def next_input(self):
+        """The first of what's waiting done (the next once it's answered, whatever the answer)."""
+        while self.queue:
+            fn, msg, answer = self.queue[0]
+
+            def done(reply, answer=answer):
+                answer(reply)
+                if self.queue and self.queue[0][2] is answer:
+                    self.queue.pop(0)
+                    GLib.idle_add(lambda: self.next_input() and False)
+            try:
+                fn(msg, once(done))
+                return
+            except Exception as e:  # (said, and the next done)
+                answer({"error": str(e) if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: {e}"})
+                self.queue.pop(0)
 
     def op_tabs(self, msg, answer):
         answer({"profile": self.win.profile, "tabs": [self.describe(t) for t in self.win.tabs.values()],
                 "downloads": self.win.downloads[-10:]})
+
+    def op_select_tab(self, msg, answer):
+        answer(self.describe(self.tab(msg)))
 
     def op_new_tab(self, msg, answer):
         t = self.win.open(address(msg.get("url") or "about:blank"))
@@ -2422,7 +2630,7 @@ class Control:
             self.js(t, f"return await em.centre(em.get({json.dumps(msg['ref'])}))", answer,
                     lambda c: then(c["x"], c["y"], c.get("covered")))
         elif msg.get("x") is not None and msg.get("y") is not None:
-            scale = self.scales.get(t.id, 1.0)
+            scale = 1.0 if msg.get("css") else self.scales.get(t.id, 1.0)  # (css: the page's own pixels)
             then(float(msg["x"]) / scale, float(msg["y"]) / scale, None)
         else:
             raise ValueError("a ref, or x and y, says where")
@@ -2433,8 +2641,8 @@ class Control:
 
         def at(x, y, covered):
             started = GLib.get_monotonic_time()
-            t.web.click(x, y, "right" if msg.get("button") == "right" else "left", max(1, int(msg.get("count") or 1)),
-                        mods)
+            t.web.click(x, y, msg.get("button") if msg.get("button") in ("right", "middle") else "left",
+                        max(1, int(msg.get("count") or 1)), mods, press=int(msg["press"]) if msg.get("press") else None)
             if not t.web.keyed():  # (a window that isn't key: what's clicked given focus, as a click would give it)
                 t.web.run_js(PAGE_JS + f"const el = document.elementFromPoint({x}, {y});"
                              "const f = el && el.closest('input, textarea, select, [contenteditable], button, a[href],"
@@ -2442,6 +2650,17 @@ class Control:
             self.settle(t, answer, {"clicked": [round(x), round(y)], **({"covered_by": covered} if covered else {})},
                         started)
         self.point(t, msg, answer, at)
+
+    def op_drag(self, msg, answer):
+        """A drag along path ([[x, y], ...], the page's CSS pixels if css, else the last screenshot's)."""
+        t = self.tab(msg)
+        scale = 1.0 if msg.get("css") else self.scales.get(t.id, 1.0)
+        path = [(float(p[0]) / scale, float(p[1]) / scale) for p in msg.get("path") or [] if len(p) == 2]
+        if len(path) < 2:
+            raise ValueError("a drag needs a path of two points at least")
+        started = GLib.get_monotonic_time()
+        t.web.drag(path)
+        self.settle(t, answer, {"dragged": len(path)}, started)
 
     def op_hover(self, msg, answer):
         t = self.tab(msg)
@@ -2481,9 +2700,10 @@ class Control:
         def ready(_v):
             if next_char():
                 GLib.timeout_add(self.TYPE_GAP_MS, next_char)
+        anywhere = json.dumps(bool(msg.get("anywhere")))
         self.js(t, focus + "const el = document.activeElement;"
-                "if (!em.editable(el)) throw new Error('nothing to type into is focused: click the field, or give "
-                "its ref'); em.typed = el; return true", answer, ready)
+                f"if (!em.editable(el) && !{anywhere}) throw new Error('nothing to type into is focused: click the "
+                "field, or give its ref'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
 
     def op_key(self, msg, answer):
         t = self.tab(msg)
@@ -2635,6 +2855,155 @@ def sites_of(cookies):
             parts = d.split(".")
             out.add(".".join(parts[-3:]) if len(parts) > 2 and len(parts[-2]) <= 3 else ".".join(parts[-2:]))
     return sorted(out)
+
+
+class Watcher:
+    """Someone watching a profile's browser (Baude's Browser pane): its frames when the page changes, and its state
+    (tabs, prompts) when that does, each frame sent only once the last's been taken (acked): a slow one gets fewer,
+    never a backlog. shm (one on this machine): the frame's pixels in shared memory, only a line saying so sent;
+    else (one elsewhere, through its host) the frame as a JPEG in the line itself."""
+    ACK_S = 5  # (a frame not acked in this long: taken as lost)
+
+    def __init__(self, win, conn, msg):
+        self.win, self.conn = win, conn
+        self.shm_wanted = bool(msg.get("shm"))
+        self.max_w = max(100, min(3840, int(msg.get("max_w") or 1280)))
+        self.max_h = max(100, min(2400, int(msg.get("max_h") or 900)))
+        self.seq, self.waiting_since, self.sent_sum, self.sent_state = 0, None, None, None
+        self.memory, self.buffer, self.out, self.writing = None, b"", b"", None
+        conn.setblocking(False)
+        self.source = GLib.io_add_watch(conn.fileno(), GLib.PRIORITY_DEFAULT,
+                                        GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR, self.heard)
+
+    def heard(self, _fd, cond):
+        """What the watcher says: {ack: seq} for a frame taken, {max_w, max_h} for its new size; or it's gone."""
+        try:
+            part = self.conn.recv(1 << 16)
+        except BlockingIOError:
+            return True
+        except OSError:
+            part = b""
+        if not part:
+            self.win.unwatch(self)
+            return False
+        self.buffer += part
+        while b"\n" in self.buffer:
+            line, self.buffer = self.buffer.split(b"\n", 1)
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("ack") == self.seq:
+                self.waiting_since = None
+            if msg.get("max_w"):
+                self.max_w = max(100, min(3840, int(msg["max_w"])))
+                self.max_h = max(100, min(2400, int(msg.get("max_h") or self.max_h)))
+                self.sent_sum = None  # (sent again at its new size)
+            self.win.watch_kick()
+        return True
+
+    def say(self, msg):
+        """msg sent without waiting on the watcher: what the socket won't take now is kept, and written as it will
+        (a frame isn't made till it's all gone). False if it's gone."""
+        self.out += (json.dumps(msg) + "\n").encode()
+        return self.flush()
+
+    def flush(self, *_):
+        try:
+            while self.out:
+                n = self.conn.send(self.out)
+                self.out = self.out[n:]
+        except BlockingIOError:
+            if self.writing is None:
+                self.writing = GLib.io_add_watch(self.conn.fileno(), GLib.PRIORITY_DEFAULT, GLib.IOCondition.OUT,
+                                                 self.flushed)
+            return True
+        except (OSError, ValueError):
+            self.win.unwatch(self)
+            return False
+        return True
+
+    def flushed(self, *_):
+        self.writing = None
+        self.flush()
+        return False
+
+    def ready(self):
+        if self.out:
+            return False
+        if self.waiting_since is not None and time.monotonic() - self.waiting_since > self.ACK_S:
+            self.waiting_since = None
+        return self.waiting_since is None
+
+    def offer(self, w, h, stride, data, total):
+        """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last."""
+        if total == self.sent_sum or not self.ready():
+            return
+        if w > self.max_w or h > self.max_h:
+            w, h, stride, data = scaled(w, h, stride, data, self.max_w, self.max_h)
+        self.seq += 1
+        if self.shm_wanted and self.to_memory(stride * h):
+            self.memory.buf[:stride * h] = data
+            line = {"frame": self.seq, "w": w, "h": h, "stride": stride, "shm": self.memory.name}
+        else:
+            line = {"frame": self.seq, "w": w, "h": h, "jpeg": base64.b64encode(jpeg(w, h, stride, data)).decode()}
+        if self.say(line):
+            self.sent_sum, self.waiting_since = total, time.monotonic()
+
+    def to_memory(self, size):
+        """Shared memory at least size big (made anew if it's smaller): False if there's none to be had."""
+        if self.memory is not None and self.memory.size >= size:
+            return True
+        from multiprocessing import shared_memory
+        self.drop_memory()
+        try:
+            self.memory = shared_memory.SharedMemory(create=True, size=size + (size >> 2), track=False)
+        except TypeError:  # (a Python before 3.13: no track)
+            self.memory = shared_memory.SharedMemory(create=True, size=size + (size >> 2))
+        except OSError:
+            self.memory, self.shm_wanted = None, False
+            return False
+        return True
+
+    def drop_memory(self):
+        if self.memory is not None:
+            try:
+                self.memory.close()
+                self.memory.unlink()
+            except (OSError, BufferError):
+                pass
+            self.memory = None
+
+    def close(self):
+        GLib.source_remove(self.source)
+        if self.writing is not None:
+            GLib.source_remove(self.writing)
+            self.writing = None
+        self.drop_memory()
+        try:
+            self.conn.close()
+        except OSError:
+            pass
+
+
+def scaled(w, h, stride, data, max_w, max_h):
+    """Pixels made to fit max_w by max_h, their shape kept: (w, h, stride, data)."""
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    pic = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, True, 8, w, h, stride)
+    scale = min(max_w / w, max_h / h)
+    pic = pic.scale_simple(max(1, int(w * scale)), max(1, int(h * scale)), GdkPixbuf.InterpType.BILINEAR)
+    return pic.get_width(), pic.get_height(), pic.get_rowstride(), pic.read_pixel_bytes().get_data()
+
+
+def jpeg(w, h, stride, data, quality=72):
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    pic = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, True, 8, w, h, stride)
+    flat = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, w, h)
+    flat.fill(0xffffffff)
+    pic.composite(flat, 0, 0, w, h, 0, 0, 1, 1, GdkPixbuf.InterpType.NEAREST, 255)
+    return flat.save_to_bufferv("jpeg", ["quality"], [str(quality)])[1]
 
 
 class App(Adw.Application):

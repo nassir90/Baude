@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -184,6 +184,7 @@ class Session:
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
+        self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
         self.codex_queue = []     # Codex runs each follow-up as a separate turn.
@@ -1096,6 +1097,35 @@ class Server:
                 return reply("mesh_tools_set", session=s.listing())
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
+            if op == "routines":  # (a Bot's routines: read; or one set (made, or changed by its id), or deleted (by its
+                have = list(s.meta.get("routines") or [])  # id); each set checked, its next run worked out)
+                if "set" in msg or "delete" in msg:
+                    if not s.meta.get("bot"):
+                        return reply("error", error="routines are a Bot's")
+                    if "delete" in msg:
+                        have = [r for r in have if r["id"] != msg["delete"]]
+                    else:
+                        given = msg["set"] if isinstance(msg["set"], dict) else None
+                        old = next((r for r in have if given and r["id"] == given.get("id")), None)
+                        if given is None or (old is None and len(have) >= 50):
+                            return reply("error", error="set is a routine (a Bot has 50 at most)")
+                        try:
+                            made = routines.clean(given, old)
+                        except (ValueError, TypeError) as e:
+                            return reply("error", error=str(e))
+                        have = [made if r["id"] == made["id"] else r for r in have] if old else have + [made]
+                    s.meta["routines"] = have
+                    self.save(s)
+                    self.changed()
+                    self.woken.set()  # (the next due may be sooner: the watch told)
+                return reply("routines", session=s.id, routines=have, clock=routines.clock())
+            if op == "run_routine":  # (one of a Bot's routines run now, its schedule as it was)
+                r = next((r for r in s.meta.get("routines") or [] if r["id"] == msg.get("id")), None)
+                if r is None or not s.meta.get("bot") or s.meta.get("archived"):
+                    return reply("error", error="no such routine (or its Bot's archived)")
+                self.run_routine(s, r, schedule=False)
+                return reply("routines", session=s.id, routines=s.meta.get("routines") or [],
+                             clock=routines.clock())
             if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
                 # base_mtime, with what it wrote)
                 mem = self.bot_memory(s, msg.get("text"), msg.get("seen"),
@@ -1104,6 +1134,61 @@ class Server:
                     return reply("error", error=mem.pop("refused"), session=s.id, **mem)
                 return reply("memory", session=s.id, **mem)
         return reply("error", error=f"unknown op {op!r}")
+
+    def run_routine(self, s, r, schedule=True):
+        """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for
+        mid-turn taken after it); its next run worked out from now (schedule), or left as it was (run now). One
+        sent and not yet taken (its Bot still on a turn from before) isn't sent again: the run's skipped."""
+        now = time.time()
+        if r["id"] in s.routines_out and s.busy:
+            error = "skipped: the run before was still waiting for its Bot"
+        else:
+            error = None
+            self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                      "message": {"role": "user", "content": routines.said(r, now)}})
+            s.routines_out.add(r["id"])
+        s.meta["routines"] = [(routines.ran(x, now, error) if schedule else {**x, "last": now})
+                              if x["id"] == r["id"] else x for x in s.meta.get("routines") or []]
+        self.save(s)
+        self.log(f"routine {r['name']!r} of {s.id}: " + (error or "run"))
+
+    def routines_due(self):
+        """Routines due now run (each Bot's that are, not archived, not being deleted, the host not stopping): each
+        one's folder made again first if it's gone, as for a message; when the next one's due (seconds from now), or
+        None if there's none to run."""
+        now, soonest, due = time.time(), None, []
+        with self.lock:
+            if self.stopped.is_set():
+                return None
+            for s in list(self.sessions.values()):
+                if not s.meta.get("bot") or s.meta.get("archived") or s.deleting:
+                    continue
+                for r in s.meta.get("routines") or []:
+                    if routines.due(r, now):
+                        due.append((s.id, r["id"]))
+                    elif not r.get("paused") and r.get("next") is not None:
+                        soonest = r["next"] - now if soonest is None else min(soonest, r["next"] - now)
+        for sid, _rid in due:  # (not under the lock: git)
+            self.restore_folder(None, sid)
+        with self.lock:
+            for sid, rid in due:
+                s = self.sessions.get(sid)
+                if s is None or s.deleting or self.stopped.is_set():
+                    continue
+                r = next((x for x in s.meta.get("routines") or [] if x["id"] == rid), None)
+                if r is None or not routines.due(r, time.time()):
+                    continue
+                try:
+                    self.run_routine(s, r)
+                except Exception as e:  # noqa: BLE001 (said, on the page too, and tried again at its next time)
+                    self.log(f"routine {r.get('name')!r} of {s.id} didn't run: {type(e).__name__}: {e}")
+                    s.meta["routines"] = [routines.ran(x, time.time(), f"didn't run: {e}") if x["id"] == rid else x
+                                          for x in s.meta.get("routines") or []]
+                    self.save(s)
+                nxt = next((x["next"] for x in s.meta.get("routines") or [] if x["id"] == rid), None)
+                if nxt is not None:
+                    soonest = nxt - time.time() if soonest is None else min(soonest, nxt - time.time())
+        return soonest
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
@@ -1228,7 +1313,7 @@ class Server:
         name = (worktree.split(os.path.realpath(cwd)) or ("", os.path.basename(cwd)))[1]
         note = {"type": "_note", "text": f"worktree {name} was removed: made again from its branch {branch}"}
         with self.lock:
-            for c in s.live | {conn}:
+            for c in s.live | ({conn} if conn is not None else set()):
                 c.send({"op": "claude", "session": sid, "msg": note})
 
     # ---- sessions
@@ -1691,6 +1776,7 @@ class Server:
                     self.keep(s, "user", message, said)
                 s.queued = []
                 s.busy, s.used = False, time.time()
+                s.routines_out.clear()
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
@@ -1902,6 +1988,9 @@ class Server:
             else:
                 waits = [s.used + self.idle_s - time.time() for s in running if self.stoppable(s)]
                 waits.append(checked + CHECK_SOCKET_S - time.monotonic())
+                if (soon := self.routines_due()) is not None:
+                    waits.append(min(soon, 60))  # (looked at again each minute: a machine asleep meanwhile isn't
+                    # counted by the clock it waits on)
                 if not running and self.exit_s:
                     waits.append(quiet + self.exit_s - time.monotonic())
                 elif running:
@@ -1912,13 +2001,15 @@ class Server:
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
-                        and not self.mesh.links and not self.mesh.outs:  # (linked, or making links: the mesh's
-                    # members may want it)
+                        and not self.mesh.links and not self.mesh.outs and self.routines_due() is None:  # (linked,
+                    # or making links: the mesh's members may want it; a routine to run: it's to be here for it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
                     return
             if self.stopped.is_set():
                 return
+            if attached:
+                self.routines_due()
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()

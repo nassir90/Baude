@@ -5,7 +5,10 @@ frames come as the page changes: from an Emission of this machine's own host pro
 pixels in shared memory; from one elsewhere through its host process (wire's emission_watch), each frame a JPEG the
 size the page is shown at, the page laid out at the side panel's size. What you do with a streamed one (click, drag,
 type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order it's done, as the Bot's
-tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
+tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting). Out in a window of its
+own (BrowserWindow: an Emission window's bars, the Bot's browser still), the page says so instead, and the Bot's browser
+is that window's till it's closed. Over the page, never in it: the Bot's pointer as its tools move it, and its edges
+glowing in the accent while the Bot's turn is at its tools (BotPointer, drawn by Presence, or MacOverlay hosted)."""
 import json
 import os
 import queue
@@ -19,7 +22,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 from baudelib import emissionlink, wire  # noqa: E402
@@ -396,17 +399,222 @@ class Here:
             answered({"error": f"{type(e).__name__}: {e}"})
 
 
+def guard_keys(root):
+    """A window of Baude's kept from keys that aren't its own (a page's that has them; a Bot's, handed back by its
+    page, or the text they made): MacWeb.page_has_keys. GTK's own widgets clicked: the keys theirs again. Once."""
+    if getattr(root, "keys_back", False):
+        return
+    root.keys_back = True
+    import emission
+    clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    clicks.connect("pressed", lambda *_: emission.MacWeb.keys_to_gtk(root))
+    root.add_controller(clicks)
+    keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    for signal in ("key-pressed", "key-released"):
+        keys.connect(signal, lambda c, kv, *_: emission.MacWeb.page_has_keys(root, c.get_current_event_time(), kv))
+    root.add_controller(keys)
+
+
+PANES = set()  # (the side panels' Browser pages)
+DISEMBODIED = {}  # (a Bot's chat id: its BrowserWindow, its browser out of the side panel)
+RESTORE = {"left": None}  # (the chats whose browsers were out as Baude last ran: out again once they're listed)
+RESTORE_S = 60
+
+
+def remember():
+    """The chats whose browsers are out, kept (browser_out): out again as Baude next starts."""
+    widgets.save_settings(browser_out=sorted(set(DISEMBODIED) | set(RESTORE["left"] or ())))
+
+
+def restore_windows(win):
+    """The browsers out as Baude last ran, out again (in windows of their own), each once its chat's listed as a Bot's
+    on a host that's up; those never listed in RESTORE_S, forgotten. Once for the process."""
+    if RESTORE["left"] is not None:
+        return
+    RESTORE["left"] = {sid for sid in widgets.load_settings().get("browser_out") or [] if isinstance(sid, str)}
+    tries = [0]
+
+    def look():
+        tries[0] += 1
+        sidebar = getattr(win, "sidebar", None)
+        for sid in list(RESTORE["left"]):
+            info = sidebar.find_info(sid) if sidebar is not None else None
+            r = (info or {}).get("remote")
+            if sid in DISEMBODIED or info and info.get("bot") and r is not None and r.state == "alive":
+                RESTORE["left"].discard(sid)
+                if sid not in DISEMBODIED:
+                    BrowserWindow(win, info)
+        if RESTORE["left"] and tries[0] < RESTORE_S:
+            return True
+        if RESTORE["left"]:
+            RESTORE["left"] = set()
+            remember()
+        return False
+    if RESTORE["left"]:
+        GLib.timeout_add_seconds(1, look)
+
+
+class BrowserWindow(Adw.ApplicationWindow):
+    """A Bot's browser out of the side panel (Disembody), in a window of its own that's an Emission window to look at
+    (its bars: emission.Chrome), the Bot's browser still: the same pages and tabs, its profile, hosted or streamed as
+    it was, nothing reloaded. Its Bot's, whatever chat's open (several out at once, each its own). Its chat's side
+    panel page says it's out; closed, it's back there. Out as Baude last ran: out again (restore_windows). main: the
+    Baude window it came from (gone, this goes too, to come back next time)."""
+
+    def __init__(self, main, info):
+        super().__init__(application=main.get_application(), title="Emission", default_width=1180,
+                         default_height=820)
+        self.main, self.sid, self.done = main, info["id"], False
+        DISEMBODIED[self.sid] = self
+        remember()
+        for pane in list(PANES):  # (its chat's side panel page: out, now)
+            if pane.sid == self.sid:
+                pane.show_out()
+        self.pane = BrowserPane(main, bound=self)
+        self.set_content(self.pane)
+        keys = Gtk.ShortcutController()  # (Emission's own)
+        for accel, fn in (("<Meta>t|<Control>t", lambda: self.pane.ask({"op": "new_tab", "url": "about:blank"})),
+                          ("<Meta>w|<Control>w", lambda: self.pane.tab() and self.pane.ask(
+                              {"op": "close_tab", "tab": self.pane.tab()})),
+                          ("<Meta>l|<Control>l", lambda: (self.pane.address.grab_focus(), self.keys_to_gtk())),
+                          ("<Meta>r|<Control>r", lambda: self.pane.ask({"op": "navigate", "url": "reload",
+                                                                         "tab": self.pane.tab()}))):
+            keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(accel),
+                                               Gtk.CallbackAction.new(lambda *_a, fn=fn: (fn(), True)[1])))
+        self.add_controller(keys)
+        self.connect("close-request", lambda *_: self.put_back(closing=True) or False)
+        self.connect("notify::is-active", lambda *_: self.is_active() and self.pane.stream is None and
+                     self.pane.here is None and self.pane.watch_if_shown())  # (stopped: started again, come back to)
+        self.gone_id = main.connect("destroy", lambda *_: self.drop())
+        self.present()
+        self.pane.show(info)
+
+    def keys_to_gtk(self):
+        if sys.platform == "darwin":
+            import emission
+            emission.MacWeb.keys_to_gtk(self)
+
+    def put_back(self, closing=False):
+        """Back in the side panel (its window closed, or asked from there)."""
+        if self.done:
+            return
+        self.drop(closing)
+        remember()
+        for pane in list(PANES):
+            if pane.sid == self.sid:
+                pane.came_back()
+
+    def drop(self, closing=False):
+        """Gone: its page let go of (for the side panel's to have), the window too unless it's closing itself."""
+        if self.done:
+            return
+        self.done = True
+        if DISEMBODIED.get(self.sid) is self:
+            DISEMBODIED.pop(self.sid)
+        if self.main is not None:
+            self.main.disconnect(self.gone_id)
+            self.main = None
+        self.pane.stop()
+        if not closing:
+            self.destroy()
+
+
+class Presence(Gtk.Widget):
+    """Over a streamed page (its frames, in the Browser page or a BrowserWindow): the Bot's pointer (emission's
+    BotPointer, played from what the Bot's Emission tells its watchers) and the glow, drawn as emission's are, drawn
+    over the frame and never taking a click. Hosted, the page's own view is over everything GTK draws: MacOverlay
+    draws them there instead."""
+
+    def __init__(self, pane):
+        import emission
+        super().__init__(can_target=False, hexpand=True, vexpand=True)
+        self.pane, self.pointer, self.ticking, self.draw = pane, emission.BotPointer(), None, emission.draw_pointer
+        self.connect("unmap", lambda *_: self.ticking is not None and (self.remove_tick_callback(self.ticking),
+                                                                       setattr(self, "ticking", None)))
+
+    glow = None  # (the glow's picture, and the accent it's in)
+
+    def draw_glow(self, snapshot, x, y, w, h, rgb):
+        """The glow over the frame at x, y, w by h: macOS's overlay's picture of it (emission.glow_surface), its
+        corners as they are, its sides stretched along the frame's edges, nothing in the middle."""
+        import emission
+        size = emission.GLOW_REACH * 2 + 4
+        if self.glow is None or self.glow[1] != rgb:
+            _surface, pixels = emission.glow_surface(size, rgb)
+            self.glow = (Gdk.MemoryTexture.new(size * 2, size * 2, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
+                                               GLib.Bytes.new(bytes(pixels)), size * 8), rgb)
+        texture, r = self.glow[0], min(emission.GLOW_REACH, w / 2, h / 2)
+        cuts = ((0, emission.GLOW_REACH), (emission.GLOW_REACH, size - emission.GLOW_REACH),
+                (size - emission.GLOW_REACH, size))
+        xs = ((x, x + r), (x + r, x + w - r), (x + w - r, x + w))
+        ys = ((y, y + r), (y + r, y + h - r), (y + h - r, y + h))
+        for i in range(3):
+            for j in range(3):
+                if i == j == 1 or xs[i][1] <= xs[i][0] or ys[j][1] <= ys[j][0]:
+                    continue
+                kx = (xs[i][1] - xs[i][0]) / (cuts[i][1] - cuts[i][0])
+                ky = (ys[j][1] - ys[j][0]) / (cuts[j][1] - cuts[j][0])
+                snapshot.push_clip(Graphene.Rect().init(xs[i][0], ys[j][0], xs[i][1] - xs[i][0], ys[j][1] - ys[j][0]))
+                snapshot.append_texture(texture, Graphene.Rect().init(xs[i][0] - cuts[i][0] * kx,
+                                                                      ys[j][0] - cuts[j][0] * ky, size * kx, size * ky))
+                snapshot.pop()
+
+    def kick(self):
+        """Drawn each frame while anything moves."""
+        if self.ticking is None and self.get_mapped() and self.pointer.busy():
+            self.ticking = self.add_tick_callback(self.tick)
+
+    def tick(self, *_):
+        self.queue_draw()
+        if not self.pointer.busy():
+            self.ticking = None
+            return False
+        return True
+
+    def do_snapshot(self, snapshot):
+        pane = self.pane
+        if pane.stream is None or pane.body.get_visible_child_name() != "page":
+            return
+        box = pane.frame_rect(self)
+        if box is None:
+            return
+        x, y, w, h, sx, sy = box
+        look = self.pointer.look()
+        c = widgets.accent_rgba()
+        rgb = (c.red, c.green, c.blue)
+        snapshot.push_clip(Graphene.Rect().init(x, y, w, h))
+        if look["glow"] > 0:
+            snapshot.push_opacity(look["glow"])
+            self.draw_glow(snapshot, x, y, w, h, rgb)
+            snapshot.pop()
+        spots = []
+        if look["x"] is not None and look["alpha"] > 0:
+            spots.append((x + look["x"] * sx - 4, y + look["y"] * sy - 4, 30, 36))
+        for rx, ry, r, _a in look["rings"]:
+            spots.append((x + rx * sx - r - 3, y + ry * sy - r - 3, 2 * r + 6, 2 * r + 6))
+        for hx, hy, *_ in look["hints"]:
+            spots.append((x + hx * sx - 60, y + hy * sy - 60, 130, 130))
+        if spots:
+            left, top = min(p[0] for p in spots), min(p[1] for p in spots)
+            right, bottom = max(p[0] + p[2] for p in spots), max(p[1] + p[3] for p in spots)
+            cr = snapshot.append_cairo(Graphene.Rect().init(left, top, right - left, bottom - top))
+            self.draw(cr, look, rgb, sx, sy, x, y)
+        snapshot.pop()
+
+
 DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
          "navigate": "open the page", "new_tab": "open a tab", "scroll": "scroll", "select_tab": "switch tabs",
          "type": "type", "answer_prompt": "answer"}  # (what a call's error says it couldn't do)
 
 
 class BrowserPane(Gtk.Box):
-    """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown."""
+    """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown. bound:
+    the BrowserWindow it's in instead (one Bot's, whatever chat's open: an Emission window's bars, not the panel's)."""
 
-    def __init__(self, win):
+    def __init__(self, win, bound=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.sid, self.remote, self.home, self.name, self.stream = win, None, None, None, None, None
+        self.bound, self.info, self.setting = bound, None, False  # (info: show's; setting: a toggle set, not clicked)
         self.frame_size, self.view_size, self.state, self.prompt_ids = (0, 0), None, {}, None
         self.typed, self.type_source, self.scroll_due, self.scroll_source = "", None, [0.0, 0.0], None
         self.hover_source, self.size_source, self.pointer, self.drag = None, None, None, None
@@ -415,8 +623,53 @@ class BrowserPane(Gtk.Box):
         self.here, self.here_poll, self.here_off, self.here_busy = None, None, {}, None  # (here: the Here shown;
         # here_off: Bots whose browser couldn't be had here, streamed instead; here_busy: one busy in its own
         # Emission, streamed till the page is shown again)
+        self.pointer_seen = None  # (the last of the Bot's pointer's moves played, as its watch numbers them)
         open_home(win.get_application(), lambda bot: (
             (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
+        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
+        self.read_only.add_css_class("flat")
+        self.read_only.connect("toggled", lambda b: self.read_only_set(b.get_active()))
+        self.native = Gtk.Button(icon_name="video-display-symbolic", tooltip_text="Restart as Native (its pages reload)",
+                                 visible=False)  # (a browser of this Mac's streamed: drawn in place instead, at once)
+        self.native.add_css_class("flat")
+        self.native.connect("clicked", lambda *_: self.restart_native())
+        self.host_pick = Gtk.DropDown(tooltip_text="Host")
+        self.host_pick.connect("notify::selected", lambda *_: self.host_picked())
+        self.prompts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6)
+        self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
+                                   focusable=True)
+        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="No pages open", vexpand=True)
+        self.body = Gtk.Stack(vexpand=True)
+        self.body.add_named(self.status, "status")
+        self.body.add_named(self.picture, "page")
+        out = Gtk.Label(label="Currently disembodied", valign=Gtk.Align.CENTER)  # (its browser's in a window of its
+        out.add_css_class("dim-label")                                            # own: BrowserWindow)
+        out.add_css_class("title-3")
+        self.body.add_named(out, "out")
+        self.presence = Presence(self)
+        over = Gtk.Overlay(child=self.body, vexpand=True)
+        over.add_overlay(self.presence)
+        self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
+        self.said.add_css_class("dim-label")
+        if bound is None:
+            self.panel_bars(over)
+        else:
+            self.window_bars(over)
+        self.drives = [self.back, self.fwd, self.reload, self.address, self.new, self.native, self.tabs, self.prompts]
+        self.input()
+        self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
+        self.connect("unmap", lambda *_: self.stop(keep=True))
+        self.size_timer = GLib.timeout_add(500, self.size_check)
+        self.presence_timer = GLib.timeout_add(250, self.presence_check)
+        self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), GLib.source_remove(
+            self.presence_timer), PANES.discard(self), self.stop()))
+        if bound is None:
+            PANES.add(self)
+            restore_windows(win)
+
+    def panel_bars(self, over):
+        """The side panel's: one bar (back, forward, reload, the address, the host, a new tab, Restart as Native, out
+        in a window, read-only), the tabs under it while there's more than one."""
         bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
         self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -429,21 +682,19 @@ class BrowserPane(Gtk.Box):
         self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
             {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
         bar.append(self.address)
-        self.host_pick = Gtk.DropDown(tooltip_text="Host")
-        self.host_pick.connect("notify::selected", lambda *_: self.host_picked())
+        self.gap = Gtk.Box(hexpand=True, visible=False)  # (the address's room, while it's out)
+        bar.append(self.gap)
         bar.append(self.host_pick)
-        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
-        self.read_only.add_css_class("flat")
-        self.read_only.connect("toggled", lambda b: self.read_only_set(b.get_active()))
-        new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New tab")
-        new.add_css_class("flat")
-        new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
-        bar.append(new)
-        self.native = Gtk.Button(icon_name="video-display-symbolic", tooltip_text="Restart as Native (its pages reload)",
-                                 visible=False)  # (a browser of this Mac's streamed: drawn in place instead, at once)
-        self.native.add_css_class("flat")
-        self.native.connect("clicked", lambda *_: self.restart_native())
+        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New tab")
+        self.new.add_css_class("flat")
+        self.new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
+        bar.append(self.new)
         bar.append(self.native)
+        self.out = Gtk.ToggleButton(icon_name="window-new-symbolic", tooltip_text="Move to Its Own Window",
+                                    visible=False)
+        self.out.add_css_class("flat")
+        self.out.connect("toggled", lambda b: not self.setting and self.disembody(b.get_active()))
+        bar.append(self.out)
         bar.append(self.read_only)
         self.append(bar)
         self.strip = Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, margin_start=6,
@@ -451,24 +702,42 @@ class BrowserPane(Gtk.Box):
         self.tabs, self.tabs_key = Gtk.Box(spacing=4), None                                 # than one)
         self.strip.set_child(self.tabs)
         self.append(self.strip)
-        self.prompts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6)
         self.append(self.prompts)
-        self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
-                                   focusable=True)
-        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="No pages open", vexpand=True)
-        self.body = Gtk.Stack(vexpand=True)
-        self.body.add_named(self.status, "status")
-        self.body.add_named(self.picture, "page")
-        self.append(widgets.inside(self.body, start=False))  # (set into the frame, as the panel's other panes are)
-        self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
-        self.said.add_css_class("dim-label")
+        self.append(widgets.inside(over, start=False))  # (set into the frame, as the panel's other panes are)
         self.append(self.said)
-        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.native, self.tabs, self.prompts]
-        self.input()
-        self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
-        self.connect("unmap", lambda *_: self.stop(keep=True))
-        self.size_timer = GLib.timeout_add(500, self.size_check)
-        self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), self.stop()))
+
+    def window_bars(self, over):
+        """A BrowserWindow's: Emission's own (emission.Chrome: back, forward, reload, the address, a new tab, the
+        profile; the tabs' strip), Restart as Native and read-only beside them. Its tabs those of the Bot's page hosted
+        here (their own view), or (streamed) a view of stand-ins for them (mirror), kept as its state says."""
+        import emission
+        self.chrome = chrome = emission.Chrome("")
+        self.back, self.fwd, self.reload, self.address, self.new = chrome.back, chrome.fwd, chrome.reload, \
+            chrome.entry, chrome.new
+        for b, url in ((self.back, "back"), (self.fwd, "forward")):
+            b.connect("clicked", lambda _b, u=url: self.ask({"op": "navigate", "url": u, "tab": self.tab()}))
+        self.reload.connect("clicked", lambda *_: self.ask({"op": "navigate", "url": "reload", "tab": self.tab()}))
+        self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
+            {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
+        self.new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
+        chrome.who.set_sensitive(False)  # (the Bot's own profile: shown, not changed here)
+        chrome.bar.pack_end(self.read_only)
+        chrome.bar.pack_end(self.native)
+        self.mirror, self.mirrored, self.syncing = Adw.TabView(visible=False), {}, False  # (mirrored: tab id: page)
+        self.mirror.set_shortcuts(Adw.TabViewShortcuts.NONE)
+        self.mirror.connect("notify::selected-page", lambda *_: self.mirror_picked())
+        self.mirror.connect("close-page", self.mirror_closing)
+        chrome.tab_bar.set_view(self.mirror)
+        self.tabs, self.tabs_key, self.strip = chrome.tab_bar, None, chrome.strip
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.append(self.mirror)
+        content.append(self.prompts)
+        content.append(over)
+        content.append(self.said)
+        frame = Adw.ToolbarView(content=content, vexpand=True)
+        frame.add_top_bar(chrome.bar)
+        frame.add_top_bar(chrome.strip)
+        self.append(frame)
 
     # (whose browser, where)
 
@@ -481,7 +750,7 @@ class BrowserPane(Gtk.Box):
         if sid == self.sid and (not bot or info.get("remote") is self.home):
             return
         self.stop()
-        self.sid, self.home = sid, info.get("remote") if bot else None
+        self.sid, self.home, self.info = sid, info.get("remote") if bot else None, info if bot else None
         self.remote = self.home
         self.name = (info.get("bot") or {}).get("name") if bot else None
         held = (widgets.load_settings().get("browser_read_only") or {}).get(sid or "", False)
@@ -489,6 +758,7 @@ class BrowserPane(Gtk.Box):
         self.read_only_set(bool(held))
         self.list_hosts()
         self.set_state({})
+        self.show_out()
         self.watch_if_shown()
 
     def list_hosts(self):
@@ -500,6 +770,56 @@ class BrowserPane(Gtk.Box):
         self.host_pick.set_model(Gtk.StringList.new([r.info.get("name") or r.host for r in hosts]))
         self.host_pick.set_selected(0)
         self.host_pick.set_visible(len(hosts) > 1)
+
+    def is_out(self):
+        """Whether its Bot's browser is out in a window of its own (the side panel's page: not here, then)."""
+        return self.bound is None and self.sid is not None and self.sid in DISEMBODIED
+
+    def show_out(self):
+        """The side panel's page as its Bot's browser is: out in its own window (the page says so, and only that),
+        or here."""
+        if self.bound is not None:
+            return
+        out = self.is_out()
+        self.setting = True
+        try:
+            self.out.set_visible(self.sid is not None)
+            self.out.set_active(out)
+            self.out.set_tooltip_text("Put Back in the Side Panel" if out else "Move to Its Own Window")
+        finally:
+            self.setting = False
+        for w in (self.back, self.fwd, self.reload, self.address, self.new):
+            w.set_visible(not out)
+        self.gap.set_visible(out)
+        self.host_pick.set_visible(not out and len(self.hosts) > 1)
+        if out:
+            self.stop()
+            self.tabs_key = None  # (its tabs listed again once it's back)
+            for w in (self.strip, self.prompts, self.said):
+                w.set_visible(False)
+            self.body.set_visible_child_name("out")
+        else:
+            self.prompts.set_visible(True)
+            if self.body.get_visible_child_name() == "out":
+                self.say_status("No pages open", "")
+                self.body.set_visible_child_name("status")
+
+    def disembody(self, on):
+        """Its Bot's browser out in a window of its own (on), the same pages, nothing reloaded; or back here."""
+        if not on:
+            if (out := DISEMBODIED.get(self.sid)) is not None:
+                out.put_back()
+            return
+        if self.sid is None or self.info is None or self.is_out():
+            return self.show_out()
+        info = self.info
+        self.stop()  # (its page let go of here first: the window takes it)
+        BrowserWindow(self.win, info)
+
+    def came_back(self):
+        """Its window closed: its Bot's browser here again."""
+        self.show_out()
+        self.watch_if_shown()
 
     def host_picked(self):
         i = self.host_pick.get_selected()
@@ -514,7 +834,7 @@ class BrowserPane(Gtk.Box):
         if not self.get_mapped():
             self.stop(keep=True)
             return
-        if self.sid is None or self.stream is not None:
+        if self.sid is None or self.stream is not None or self.is_out():
             return
         if self.here is not None and self.here.win is None and self.here.why is not None:  # (let go of meanwhile)
             self.here = None
@@ -527,6 +847,7 @@ class BrowserPane(Gtk.Box):
             return self.show_here()
         self.native.set_visible(can_host(self.remote))
         self.say_status("Connecting…", "")
+        self.pointer_seen = None  # (its moves before this watch: not played)
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
@@ -542,22 +863,28 @@ class BrowserPane(Gtk.Box):
             self.here_poll = None
         if not keep:
             self.native.set_visible(False)  # (another Bot's, or none: offered again if it's hostable)
+        if self.here is not None and self.here.win is not None:
+            self.here.win.pointer.set_acting(False)  # (out of sight: its glow's gone, in again once it's shown)
         if not keep and self.here is not None:
             if self.here.win is not None and self.here.win.body.get_parent() is self.body:
                 self.body.remove(self.here.win.body)
             self.here = None
+            if self.bound is not None:  # (its tabs' strip on the stand-ins again)
+                self.tabs.set_view(self.mirror)
         if not keep:
             self.picture.set_paintable(None)
             self.body.set_visible_child_name("status")
 
     def ended(self, why):
         self.stream = None
+        again = "It restarts when you come back to this window." if self.bound is not None else \
+            "It restarts when you open this page again."
         if why and self.picture.get_paintable() is None:  # (it never showed: why, in its place)
             self.say_status("Couldn't open the browser", why)
         else:
-            self.say_status("The browser stopped", "It restarts when you open this page again.")
+            self.say_status("The browser stopped", again)
         self.said.set_tooltip_text(why or None)
-        self.said.set_label("The browser stopped. It restarts when you open this page again.")
+        self.said.set_label("The browser stopped. " + again)
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
         # as the status isn't)
 
@@ -617,18 +944,12 @@ class BrowserPane(Gtk.Box):
         self.native.set_visible(False)
         self.body.set_visible_child_name("here")
         here.win.blocked = self.read_only.get_active()
-        root = self.get_root()
-        if root is not None and not getattr(root, "keys_back", False):  # (GTK's own widgets clicked: keys theirs
-            root.keys_back = True                                       # again, not the page's)
-            import emission
-            clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-            clicks.connect("pressed", lambda *_: emission.MacWeb.keys_to_gtk(root))
-            root.add_controller(clicks)
-            keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (keys a page has, or a
-            for signal in ("key-pressed", "key-released"):  # Bot's typing in one handed back: not GTK's)
-                keys.connect(signal, lambda c, kv, *_: emission.MacWeb.page_has_keys(root, c.get_current_event_time(),
-                                                                                       kv))
-            root.add_controller(keys)
+        if self.bound is not None:  # (its own tabs, in Emission's strip)
+            self.tabs.set_view(here.win.view)
+        for root in {self.get_root(), self.win, *Gtk.Window.list_toplevels()}:  # (each of Baude's windows: a
+            if isinstance(root, Gtk.Window) and not getattr(root, "hosted", False):  # Bot's key's text goes to
+                guard_keys(root)                                         # whichever has the keys, its own or not)
+        self.presence_check()
         self.here_state()
         if self.here_poll is None:
             self.here_poll = GLib.timeout_add(250, self.here_state)
@@ -645,6 +966,8 @@ class BrowserPane(Gtk.Box):
     def here_state(self):
         if self.here is not None and self.here.win is None:  # (let go of: streamed from wherever it is now)
             self.here, self.here_poll = None, None
+            if self.bound is not None:
+                self.tabs.set_view(self.mirror)
             self.here_off[self.sid] = time.monotonic()
             self.body.set_visible_child_name("status")
             self.watch_if_shown()
@@ -656,6 +979,53 @@ class BrowserPane(Gtk.Box):
         if state != self.state:
             self.set_state(state)
         return True
+
+    def presence_check(self):
+        """The glow as the Bot's turn is (its host's listing: acting, at its tools; not writing to you, not done),
+        in the accent: given the pointer drawn over its page (hosted: its window's, drawn by MacOverlay; streamed:
+        Presence's)."""
+        listed = (getattr(self.home, "sessions", None) or {}).get(self.sid) or {}
+        acting = bool(listed.get("acting")) and listed.get("state") == "working" and not self.is_out() and \
+            getattr(self.home, "state", "alive") == "alive"
+        c = widgets.accent_rgba()
+        rgb = (c.red, c.green, c.blue)
+        if self.here is not None and self.here.win is not None and self.get_mapped():
+            self.here.win.pointer.set_acting(acting)
+            self.here.win.accent = rgb
+            self.presence.pointer.set_acting(False)
+        else:
+            self.presence.pointer.set_acting(acting and self.stream is not None)
+        self.presence.kick()
+        return True
+
+    def play_pointer(self, log):
+        """The Bot's pointer's moves its Emission's told its watchers (a streamed one's), those not played yet,
+        played over its page."""
+        if self.stream is None:
+            return
+        top = max((e.get("seq") or 0 for e in log), default=0)
+        if self.pointer_seen is None or top < self.pointer_seen:  # (a watch begun, or an Emission started again:
+            self.pointer_seen = top                                # what it did before isn't played)
+            return
+        for ev in sorted(log, key=lambda e: e.get("seq") or 0):
+            if (ev.get("seq") or 0) > self.pointer_seen:
+                self.presence.pointer.play(ev)
+        self.pointer_seen = top
+        self.presence.kick()
+
+    def frame_rect(self, widget):
+        """Where a streamed page's frame is drawn, in widget's terms, and its CSS pixels' size there: (x, y, width,
+        height, x scale, y scale), or None (none yet)."""
+        fw, fh = self.frame_size
+        pw, ph = self.picture.get_width(), self.picture.get_height()
+        if not fw or not fh or not pw or not ph:
+            return None
+        s = min(pw / fw, ph / fh)
+        ok, at = self.picture.compute_point(widget, Graphene.Point().init(0, 0))
+        if not ok:
+            return None
+        vw, vh = self.view_size or (fw, fh)
+        return (at.x + (pw - fw * s) / 2, at.y + (ph - fh * s) / 2, fw * s, fh * s, fw * s / vw, fh * s / vh)
 
     def say_status(self, title, text):
         self.status.set_title(title)
@@ -683,6 +1053,9 @@ class BrowserPane(Gtk.Box):
             if self.stream is not None and self.state.get("agent"):
                 self.fit_page()
         tabs = self.state.get("tabs") or []
+        self.play_pointer(self.state.get("pointer") or [])
+        if self.bound is not None:
+            return self.window_state(tabs)
         key = [(t.get("tab"), t.get("title"), t.get("url"), bool(t.get("selected"))) for t in tabs]
         if key != self.tabs_key:  # (made again only when they change: a click on one isn't lost to its remaking)
             self.tabs_key = key
@@ -707,10 +1080,69 @@ class BrowserPane(Gtk.Box):
         if now is not None and not self.address.get_delegate().has_focus():
             self.address.set_text(now.get("url") or "")
         self.reload.set_icon_name("process-stop-symbolic" if now and now.get("loading") else "view-refresh-symbolic")
+        self.state_prompts()
+
+    def state_prompts(self):
         prompts = self.state.get("prompts") or []
         if [p.get("id") for p in prompts] != self.prompt_ids:  # (made again only when they change: what's typed kept)
             self.prompt_ids = [p.get("id") for p in prompts]
             self.show_prompts(prompts)
+
+    def window_state(self, tabs):
+        """A BrowserWindow's bars as its state says: the page in front's address, back, forward, its progress
+        (Emission's own, Chrome.show), the window's title; streamed, the stand-ins for its tabs."""
+        now = next((t for t in tabs if t.get("selected")), None)
+        shown = dict(self.state.get("now") or {"back": True, "forward": True})  # (an Emission before now said: both
+        if now is not None:                                                      # offered)
+            shown.update(url=now.get("url") or "", loading=bool(now.get("loading")))
+        if now is not None or not tabs:
+            self.chrome.show(shown, not self.address.get_delegate().has_focus())
+        self.chrome.who.set_label(self.state.get("profile") or self.name or "")
+        title = (now or {}).get("title") or (now or {}).get("url") or "Emission"
+        self.bound.set_title(f"{title} — {self.name or 'Bot'}")
+        if self.here is None:
+            self.sync_mirror(tabs)
+        self.state_prompts()
+
+    def sync_mirror(self, tabs):
+        """The stand-ins for a streamed Bot's tabs (in the strip): one for each, named, loading, the one in front
+        picked, as they are there."""
+        self.syncing = True
+        try:
+            ids = [t.get("tab") for t in tabs]
+            for tid in [k for k in self.mirrored if k not in ids]:
+                self.mirror.close_page(self.mirrored.pop(tid))
+            for t in tabs:
+                page = self.mirrored.get(t.get("tab"))
+                if page is None:
+                    page = self.mirrored[t.get("tab")] = self.mirror.append(Gtk.Box())
+                page.set_title(t.get("title") or t.get("url") or "New Tab")
+                page.set_tooltip(t.get("url") or "")
+                page.set_loading(bool(t.get("loading")))
+                if t.get("selected") and self.mirror.get_selected_page() is not page:
+                    self.mirror.set_selected_page(page)
+        finally:
+            self.syncing = False
+
+    def mirror_picked(self):
+        page = self.mirror.get_selected_page()
+        if self.syncing or page is None:
+            return
+        tid = next((k for k, p in self.mirrored.items() if p is page), None)
+        if tid is not None and tid != self.tab():
+            self.ask({"op": "select_tab", "tab": tid})
+
+    def mirror_closing(self, view, page):
+        """A stand-in closed: here, as its strip's close was asked (its tab closed there, gone from here once it
+        is); by sync_mirror, as it's gone there."""
+        if self.syncing:
+            view.close_page_finish(page, True)
+            return True
+        tid = next((k for k, p in self.mirrored.items() if p is page), None)
+        view.close_page_finish(page, False)
+        if tid is not None:
+            self.ask({"op": "close_tab", "tab": tid})
+        return True
 
     def show_prompts(self, prompts):
         """What the Bot's pages wait on, each a card: answered here, or by the Bot."""
@@ -780,6 +1212,8 @@ class BrowserPane(Gtk.Box):
     def read_only_set(self, on):
         for w in self.drives:
             w.set_sensitive(not on)
+        if self.bound is not None:
+            self.chrome.who.set_sensitive(False)
         if self.here is not None and self.here.win is not None:
             self.here.win.blocked = on
         if self.sid is None:

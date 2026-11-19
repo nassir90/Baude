@@ -184,6 +184,8 @@ class Session:
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
+        self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
+        self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
@@ -320,11 +322,30 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
+                "acting": self.acting and self.busy and not self.asks,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
                 "mesh_tools": self.mesh_tools(),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
+
+
+def turn_acting(msg, was):
+    """Whether a turn's at its tools once msg (its agent's own, not a subagent's) has come, was being whether it
+    was before: a tool call's begun (its block started, as it's streamed; or come whole), and it is; text begun, and
+    it isn't (it's writing to you). Thinking, and the rest, leave it as it was: between two calls it's still at them.
+    Its result, or its agent gone, ends it (from_claude, claude_exited)."""
+    if msg.get("type") == "stream_event":
+        event = msg.get("event") or {}
+        if event.get("type") != "content_block_start":
+            return was
+        kinds = [(event.get("content_block") or {}).get("type")]
+    else:
+        content = (msg.get("message") or {}).get("content")
+        kinds = [c.get("type") for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+    if any(k in ("tool_use", "server_tool_use") for k in kinds):
+        return True
+    return False if "text" in kinds else was
 
 
 BOT_PICTURE_MAX = 2 << 20  # (bytes: a Bot's picture, as sent)
@@ -1820,6 +1841,12 @@ class Server:
                 self.changed()
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
+            if kind == "stream_event" and not msg.get("parent_tool_use_id"):
+                s.streamed = True  # (its blocks said as they start: what's come whole after is late, not looked at)
+            if (kind == "stream_event" or kind == "assistant" and not s.streamed) and \
+                    not msg.get("parent_tool_use_id") and (acting := turn_acting(msg, s.acting)) != s.acting:
+                s.acting = acting
+                self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
                 self.changed()
             if kind == "result" and s.id in self.cutting and self.stopped.is_set() and msg.get("subtype") == "success":
@@ -1834,7 +1861,7 @@ class Server:
                 for message, said in s.queued:
                     self.keep(s, "user", message, said)
                 s.queued = []
-                s.busy, s.used = False, time.time()
+                s.busy, s.used, s.acting = False, time.time(), False
                 s.routines_out.clear()
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
@@ -1957,7 +1984,7 @@ class Server:
         with self.lock:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
-            s.proc, s.busy = None, False
+            s.proc, s.busy, s.acting = None, False, False
             s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)

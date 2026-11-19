@@ -13,6 +13,7 @@ import ctypes
 import html
 import ipaddress
 import json
+import math
 import os
 import platform
 import shutil
@@ -562,6 +563,7 @@ class MacWeb:
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
         self.attached = self.attached_root = self.blocker = None
+        self.overlay, self.tab_id = None, None  # (overlay: what's drawn over it, hosted: MacOverlay)
 
     @staticmethod
     def jar(profile):
@@ -850,6 +852,23 @@ class MacWeb:
         self.block(bool(getattr(self.window, "blocked", False)) and not hidden)
         if self.blocker is not None:
             send(self.blocker, b"setFrame:", frame, types=(R,))
+        if hosted and not hidden:
+            self.draw_over()
+
+    def draw_over(self):
+        """The Bot's pointer and the glow drawn over the page (its window's BotPointer), as they are now."""
+        pointer = getattr(self.window, "pointer", None)
+        if pointer is None:
+            return
+        if self.overlay is None:
+            if not (pointer.shown() or pointer.acting or pointer.glow):  # (made once there's something to draw)
+                return
+            self.overlay = MacOverlay(self.view)
+        elif not pointer.busy() and self.overlay.drawn is not None:
+            return
+        look = pointer.look()
+        self.overlay.draw(look, getattr(self.window, "accent", None) or (0.21, 0.52, 0.89),
+                          mine=look["tab"] in (None, self.tab_id))
 
     def show(self, on):
         self.shown = on
@@ -1240,12 +1259,410 @@ class MacWeb:
     def close(self):
         if self.view:
             self.block(False)
+            if self.overlay is not None:
+                self.overlay.close()
+                self.overlay = None
             send = macos.objc_send
             self.views.pop(self.view, None)
             send(self.view, b"setNavigationDelegate:", None, types=(ctypes.c_void_p,))
             send(self.view, b"setUIDelegate:", None, types=(ctypes.c_void_p,))
             send(self.view, b"removeFromSuperview")
             send(self.view, b"release")
+            self.view = None
+
+
+# ------------------------------------------------------------- the Bot's pointer --
+
+class BotPointer:
+    """The Bot's pointer as it's drawn over its page, never in it (not in the page, nor in what the Bot's shown of
+    it): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played in turn.
+    It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
+    takes it pressed along its path, a scroll shows the wheel's way (a chevron going that way). It fades once the Bot's
+    let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or
+    its pointer's moving (gliding, pressing, dragging, scrolling), and out once neither is, GLOW_HOLD_S after.
+    look(now) says what's to be drawn then (now: time.monotonic())."""
+    GLIDE_S = (0.16, 0.65)  # (a glide's time: the shortest, the longest; about a second for 1500 px between)
+    PRESS_S, RING_S, HINT_S = 0.14, 0.5, 0.6
+    IDLE_S, FADE_S, APPEAR_S = 6.0, 0.35, 0.15  # (nothing done this long: the pointer faded out, in this long; in, this)
+    GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = 0.35, 0.8, 0.5
+    BEHIND = 6  # (more than this many steps waiting: glides quicker, so it isn't left behind)
+
+    def __init__(self):
+        self.at, self.steps, self.step, self.step_t = None, [], None, 0.0
+        self.pressed, self.marks, self.seen = False, [], -1e9  # (marks: rings and chevrons, as they fade)
+        self.alpha, self.glow, self.acting, self.looked = 0.0, 0.0, False, None
+        self.moved = -1e9  # (when its pointer last moved: the glow's held on till GLOW_HOLD_S after)
+        self.tab = None  # (the tab it was last in: hosted, drawn over that tab's page only)
+        self.log, self.seq = [], 0  # (what was done, numbered: watchers' to play, in the watch's state)
+
+    def add(self, kind, x, y, tab=None, path=None, count=1, dx=0, dy=0, played=True):
+        """What the Bot did: kind hover, click, drag or scroll, at x, y (a drag's path from there); played False:
+        only kept for watchers (one elsewhere plays it, not this one)."""
+        self.seq += 1
+        ev = {"seq": self.seq, "kind": kind, "x": round(x, 1), "y": round(y, 1)}
+        if path:
+            ev["path"] = [[round(p[0], 1), round(p[1], 1)] for p in path[:40]]
+        if count > 1:
+            ev["count"] = count
+        if dx or dy:
+            ev["dx"], ev["dy"] = dx, dy
+        self.log = (self.log + [ev])[-8:]
+        if played:
+            self.play(ev, tab)
+
+    def play(self, ev, tab=None):
+        """ev (add's) played here, after what's waiting."""
+        self.tab = tab if tab is not None else self.tab
+        x, y = float(ev["x"]), float(ev["y"])
+        kind = ev.get("kind")
+        if kind == "drag" and len(ev.get("path") or []) >= 2:
+            path = [(float(p[0]), float(p[1])) for p in ev["path"]]
+            self.steps += [("glide", path[0], 1.0), ("press", True, 0)]
+            whole = sum(math.dist(a, b) for a, b in zip(path, path[1:])) or 1
+            total = min(1.2, max(0.35, whole / 900))  # (the whole path in about its length's time)
+            self.steps += [("glide", p, total * math.dist(a, p) / whole) for a, p in zip(path, path[1:])]
+            self.steps.append(("press", False, 0))
+        else:
+            self.steps.append(("glide", (x, y), 1.0))
+            if kind == "click":
+                self.steps += [("tap", None, 1.0)] * max(1, min(3, int(ev.get("count") or 1)))
+            elif kind == "scroll":
+                self.steps.append(("hint", (ev.get("dx") or 0, ev.get("dy") or 0), 1.0))
+        self.seen = self.moved = time.monotonic()
+
+    def set_acting(self, on):
+        self.acting = bool(on)
+
+    def busy(self):
+        """Whether anything's moving (else what's drawn stays as it is)."""
+        return bool(self.steps or self.step or self.marks) or self.alpha not in (0.0, 1.0) or \
+            self.glow not in (0.0, 1.0) or (self.glow > 0) != self.glowing() or (self.alpha > 0) != self.shown()
+
+    def moving(self):
+        return bool(self.steps or self.step or self.marks)
+
+    def glowing(self, now=None):
+        """Whether the glow's wanted: the Bot's at its tools, or its pointer's moving or just has."""
+        return self.acting or self.moving() or (now or time.monotonic()) - self.moved < self.GLOW_HOLD_S
+
+    def shown(self, now=None):
+        """Whether the pointer's to be seen (it's somewhere, or about to be, and the Bot's been at it lately)."""
+        return (self.at is not None or bool(self.steps)) and (
+            self.acting or bool(self.steps or self.step) or (now or time.monotonic()) - self.seen < self.IDLE_S)
+
+    def look(self, now=None):
+        """What's drawn at now: {x, y (None: nowhere yet), alpha, scale (pressed: smaller), rings [(x, y, radius,
+        alpha)], hints [(x, y, dx, dy, how far on, alpha)], glow}."""
+        now = time.monotonic() if now is None else now
+        dt = 0.0 if self.looked is None else max(0.0, min(0.1, now - self.looked))
+        self.looked = now
+        self.advance(now)
+        want = 1.0 if self.shown(now) else 0.0
+        self.alpha = min(want, self.alpha + dt / self.APPEAR_S) if want > self.alpha else \
+            max(want, self.alpha - dt / self.FADE_S)
+        if self.moving():
+            self.moved = now
+        g = 1.0 if self.glowing(now) else 0.0
+        self.glow = min(g, self.glow + dt / self.GLOW_IN_S) if g > self.glow else \
+            max(g, self.glow - dt / self.GLOW_OUT_S)
+        x, y = self.at if self.at is not None else (None, None)
+        scale = 0.82 if self.pressed else 1.0
+        if self.step is not None and self.step[0] == "glide" and self.at is not None:
+            (sx, sy), (tx, ty), dur = self.step[1], self.step[2], self.step[3]
+            k = min(1.0, (now - self.step_t) / dur) if dur > 0 else 1.0
+            e = 4 * k ** 3 if k < 0.5 else 1 - (-2 * k + 2) ** 3 / 2  # (eased in and out, as a hand moves one)
+            x, y = sx + (tx - sx) * e, sy + (ty - sy) * e
+        elif self.step is not None and self.step[0] == "tap":
+            k = (now - self.step_t) / self.PRESS_S
+            scale = 1.0 - 0.18 * math.sin(math.pi * min(1.0, k))
+        rings, hints = [], []
+        for kind, mx, my, t0, extra in self.marks:
+            k = (now - t0) / (self.RING_S if kind == "ring" else self.HINT_S)
+            if kind == "ring":
+                rings.append((mx, my, 5 + 22 * (1 - (1 - k) ** 2), 0.9 * (1 - k)))
+            else:
+                hints.append((mx, my, extra[0], extra[1], k, 1 - k ** 2))
+        self.marks = [m for m in self.marks if now - m[3] < (self.RING_S if m[0] == "ring" else self.HINT_S)]
+        return {"x": x, "y": y, "alpha": self.alpha, "scale": scale, "rings": rings, "hints": hints,
+                "glow": self.glow, "tab": self.tab}
+
+    def advance(self, now):
+        while True:
+            if self.step is not None:
+                kind = self.step[0]
+                dur = self.step[3] if kind == "glide" else self.PRESS_S if kind == "tap" else 0
+                if now - self.step_t < dur:
+                    return
+                if kind == "glide":
+                    self.at = self.step[2]
+                self.step = None
+            if not self.steps:
+                return
+            kind, arg, share = self.steps.pop(0)
+            quick = 0.35 if len(self.steps) > self.BEHIND else 1.0
+            if kind == "glide":
+                if self.at is None:  # (its first: shown there, not glided from nowhere)
+                    self.at = arg
+                    continue
+                d = math.dist(self.at, arg)
+                lo, hi = self.GLIDE_S
+                dur = (min(hi, lo + d / 1500) if share == 1.0 else max(0.03, share)) * quick
+                self.step = ("glide", self.at, arg, dur)
+            elif kind == "press":
+                self.pressed = arg
+                continue
+            elif kind == "tap":
+                self.step = ("tap",)
+                self.marks.append(("ring", *self.at, now, None))
+            elif kind == "hint":
+                if arg[0] or arg[1]:
+                    self.marks.append(("hint", *self.at, now, arg))
+                continue
+            self.step_t = now
+
+
+def draw_pointer(cr, look, rgb, sx=1.0, sy=1.0, ox=0.0, oy=0.0):
+    """look (BotPointer.look's) drawn with cairo: the page's point (x, y) at (ox + x * sx, oy + y * sy); rgb the
+    accent's (0-1 each). Its rings, its chevrons, then the pointer itself (an arrow in the accent, edged in white)."""
+    a = look["alpha"]
+    for x, y, r, ra in look["rings"]:
+        cr.arc(ox + x * sx, oy + y * sy, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*rgb, 0.22 * ra * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*rgb, ra * a)
+        cr.set_line_width(2.5)
+        cr.stroke()
+    for x, y, dx, dy, k, ha in look["hints"]:
+        (ux, uy), (cx, cy) = hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
+        draw_chevron(cr, cx, cy, ux, uy, rgb, ha * a)
+    if look["x"] is not None and a > 0:
+        draw_arrow(cr, ox + look["x"] * sx, oy + look["y"] * sy, look["scale"], a, rgb)
+
+
+ARROW = [(0, 0), (0, 21), (5.5, 16.1), (9.1, 24), (12.5, 22.6), (9, 14.9), (16.1, 14.9)]
+
+
+def draw_arrow(cr, x, y, scale, alpha, rgb):
+    """The pointer, its tip at (x, y)."""
+    for dx, dy, fill in ((0.6, 1.6, None), (0, 0, rgb)):  # (its shadow first, a little down)
+        cr.save()
+        cr.translate(x + dx, y + dy)
+        cr.scale(scale, scale)
+        cr.move_to(*ARROW[0])
+        for p in ARROW[1:]:
+            cr.line_to(*p)
+        cr.close_path()
+        if fill is None:
+            cr.set_source_rgba(0, 0, 0, 0.28 * alpha)
+            cr.fill()
+        else:
+            cr.set_source_rgba(*fill, alpha)
+            cr.fill_preserve()
+            cr.set_line_join(1)  # (round)
+            cr.set_line_width(1.6)
+            cr.set_source_rgba(1, 1, 1, alpha)
+            cr.stroke()
+        cr.restore()
+
+
+def hint_at(x, y, dx, dy, k):
+    """A scroll's chevrons for the pointer's tip at (x, y), the wheel turned (dx, dy), k of the way through: their
+    way (a unit vector), and their middle: beside the pointer, off it, going that way."""
+    n = math.hypot(dx, dy) or 1
+    ux, uy = dx / n, dy / n
+    d = 30 + 12 * k
+    return (ux, uy), (x + 9 + ux * d, y + 13 + uy * d)
+
+
+def draw_chevron(cr, cx, cy, ux, uy, rgb, alpha):
+    """Two chevrons, one after the other, at (cx, cy) pointing along (ux, uy)."""
+    px, py = -uy, ux
+    cr.set_line_cap(1)
+    cr.set_line_join(1)
+    for width, colour in ((5, (1, 1, 1)), (2.8, rgb)):
+        for back in (-4.5, 3.5):
+            bx, by = cx + ux * back, cy + uy * back
+            cr.move_to(bx - ux * 4 + px * 7, by - uy * 4 + py * 7)
+            cr.line_to(bx + ux * 3, by + uy * 3)
+            cr.line_to(bx - ux * 4 - px * 7, by - uy * 4 - py * 7)
+        cr.set_source_rgba(*colour, alpha)
+        cr.set_line_width(width)
+        cr.stroke()
+
+
+GLOW_STRENGTH = 0.72  # (the glow: how strong it is at the page's edge itself, 0 to 1,
+GLOW_REACH = 80       # and how far in it reaches, in points)
+
+
+def glow_at(d, depth=GLOW_REACH):
+    """The glow's strength d in from an edge: strong at it, nothing by depth in."""
+    return GLOW_STRENGTH * (1 - d / depth) ** 2.4 if d < depth else 0.0
+
+
+def glow_surface(size, rgb, scale=2):
+    """The glow for a page size by size points (cairo's, scale pixels a point), each pixel as strong as its edges
+    make it together, so its corners are as soft as its sides (macOS's overlay stretches its middle to the page's
+    size: GTK draws the same with an inset shadow)."""
+    import cairo
+    n = size * scale
+    edge = [glow_at(min(i, n - 1 - i) / scale) for i in range(n)]
+    r, g, b = (round(c * 255) for c in rgb)
+    data = bytearray(n * n * 4)
+    for y in range(n):
+        ey = edge[y]
+        row = bytearray()
+        for x in range(n):
+            a = 1 - (1 - edge[x]) * (1 - ey)
+            row += bytes((round(b * a), round(g * a), round(r * a), round(255 * a)))  # (premultiplied BGRA)
+        data[y * n * 4:(y + 1) * n * 4] = row
+    return cairo.ImageSurface.create_for_data(data, cairo.FORMAT_ARGB32, n, n, n * 4), data
+
+
+class MacOverlay:
+    """What's drawn over a hosted page on macOS (its MacWeb's view): a view of its own laid over the page, layers in
+    it, that's never hit (clicks, wheels and keys go through to the page) and isn't the page's (the Bot's screenshots
+    are WebKit's picture of the page alone). BotPointer's look drawn in it: the glow, its rings and chevrons, the
+    pointer."""
+    klass = None
+    kept = []
+    RINGS, HINTS = 4, 3
+
+    @classmethod
+    def make_class(cls):
+        if cls.klass is None:
+            rt = macos.objc_send.rt
+            rt.objc_allocateClassPair.restype = ctypes.c_void_p
+            rt.objc_allocateClassPair.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
+            rt.class_addMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p]
+            rt.objc_registerClassPair.argtypes = [ctypes.c_void_p]
+            klass = rt.objc_getClass(b"EmissionOverlay")
+            if not klass:
+                klass = rt.objc_allocateClassPair(rt.objc_getClass(b"NSView"), b"EmissionOverlay", 0)
+                miss = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, MacPoint)(lambda *_: None)
+                flipped = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(lambda *_: True)
+                cls.kept += [miss, flipped]
+                rt.class_addMethod(klass, rt.sel_registerName(b"hitTest:"), ctypes.cast(miss, ctypes.c_void_p).value,
+                                   b"@@:{CGPoint=dd}")
+                rt.class_addMethod(klass, rt.sel_registerName(b"isFlipped"),
+                                   ctypes.cast(flipped, ctypes.c_void_p).value, b"c@:")
+                rt.objc_registerClassPair(klass)
+            cls.klass = klass
+        return cls.klass
+
+    @staticmethod
+    def image(w, h, draw, surface=None):
+        """An NSImage of w by h points (drawn at twice that) by draw(cr), or of surface (twice that, made)."""
+        import cairo
+        if surface is None:
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w * 2, h * 2)
+            cr = cairo.Context(surface)
+            cr.scale(2, 2)
+            draw(cr)
+        import io
+        out = io.BytesIO()
+        surface.write_to_png(out)
+        data = out.getvalue()
+        send = macos.objc_send
+        ns = send(b"NSData", b"dataWithBytes:length:", data, len(data), types=(ctypes.c_char_p, ctypes.c_ulong))
+        img = send(send(b"NSImage", b"alloc"), b"initWithData:", ns, types=(ctypes.c_void_p,))
+        send(img, b"setSize:", MacPoint(w, h), types=(MacPoint,))
+        return img
+
+    @staticmethod
+    def colour(rgb, a=1.0):
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGColorCreateSRGB.restype = ctypes.c_void_p
+        cg.CGColorCreateSRGB.argtypes = [ctypes.c_double] * 4
+        return cg.CGColorCreateSRGB(*rgb, a)
+
+    def __init__(self, view):
+        send, R = macos.objc_send, macos._rect()
+        self.view = send(send(self.make_class(), b"alloc"), b"initWithFrame:", send(view, b"bounds", ret=R), types=(R,))
+        send(self.view, b"setWantsLayer:", True, types=(ctypes.c_bool,))
+        send(self.view, b"setAutoresizingMask:", 2 | 16, types=(ctypes.c_ulong,))
+        send(view, b"addSubview:", self.view, types=(ctypes.c_void_p,))
+        root = send(self.view, b"layer")
+
+        def layer():
+            made = send(send(b"CALayer", b"alloc"), b"init")
+            send(root, b"addSublayer:", made, types=(ctypes.c_void_p,))
+            send(made, b"setOpacity:", ctypes.c_float(0.0), types=(ctypes.c_float,))
+            return made
+        self.glow = layer()
+        self.rings = [layer() for _ in range(self.RINGS)]
+        self.hints = [layer() for _ in range(self.HINTS)]
+        self.arrow = layer()
+        self.rgb, self.drawn = None, None
+
+    def colours(self, rgb):
+        """The accent's (rgb, 0-1 each) given to what's drawn in it."""
+        if rgb == self.rgb:
+            return
+        self.rgb = rgb
+        send, R = macos.objc_send, macos._rect()
+        n = GLOW_REACH * 2 + 4
+        surface, _pixels = glow_surface(n, rgb)  # (its pixels kept while it's drawn from them)
+        send(self.glow, b"setContents:", self.image(n, n, None, surface), types=(ctypes.c_void_p,))
+        send(self.glow, b"setContentsCenter:", R(0.48, 0.48, 0.04, 0.04), types=(R,))
+        self.arrow_size = (21, 29)
+        send(self.arrow, b"setContents:", self.image(*self.arrow_size, lambda cr: draw_arrow(cr, 1.5, 1.2, 1, 1, rgb)),
+             types=(ctypes.c_void_p,))
+        send(self.arrow, b"setAnchorPoint:", MacPoint(1.5 / 21, 1.2 / 29), types=(MacPoint,))
+        for ring in self.rings:
+            send(ring, b"setBorderWidth:", 2.5, types=(ctypes.c_double,))
+            send(ring, b"setBorderColor:", self.colour(rgb), types=(ctypes.c_void_p,))
+            send(ring, b"setBackgroundColor:", self.colour(rgb, 0.22), types=(ctypes.c_void_p,))
+        self.chevrons = {}
+        for name, (ux, uy) in (("down", (0, 1)), ("up", (0, -1)), ("right", (1, 0)), ("left", (-1, 0))):
+            self.chevrons[name] = self.image(30, 30, lambda cr, ux=ux, uy=uy: draw_chevron(cr, 15, 15, ux, uy, rgb, 1))
+        self.drawn = None
+
+    def draw(self, look, rgb, mine=True):
+        """look (BotPointer's) drawn now; mine False: the pointer's in another tab (only the glow drawn here)."""
+        send, R = macos.objc_send, macos._rect()
+        self.colours(rgb)
+        box = send(self.view, b"bounds", ret=R)
+        key = (repr(look), mine, box.w, box.h)
+        if key == self.drawn:
+            return
+        self.drawn = key
+        f = ctypes.c_float
+        send(b"CATransaction", b"begin")
+        send(b"CATransaction", b"setDisableActions:", True, types=(ctypes.c_bool,))
+        try:
+            send(self.glow, b"setFrame:", R(0, 0, box.w, box.h), types=(R,))
+            send(self.glow, b"setOpacity:", f(look["glow"]), types=(f,))
+            a = look["alpha"] if mine else 0.0
+            if look["x"] is not None:
+                w, h = self.arrow_size
+                send(self.arrow, b"setBounds:", R(0, 0, w * look["scale"], h * look["scale"]), types=(R,))
+                send(self.arrow, b"setPosition:", MacPoint(look["x"], look["y"]), types=(MacPoint,))
+            send(self.arrow, b"setOpacity:", f(a), types=(f,))
+            rings = look["rings"] if mine else []
+            for i, ring in enumerate(self.rings):
+                if i < len(rings):
+                    x, y, r, ra = rings[i]
+                    send(ring, b"setBounds:", R(0, 0, 2 * r, 2 * r), types=(R,))
+                    send(ring, b"setCornerRadius:", r, types=(ctypes.c_double,))
+                    send(ring, b"setPosition:", MacPoint(x, y), types=(MacPoint,))
+                send(ring, b"setOpacity:", f(rings[i][3] * a if i < len(rings) else 0.0), types=(f,))
+            hints = look["hints"] if mine else []
+            for i, hint in enumerate(self.hints):
+                if i < len(hints):
+                    x, y, dx, dy, k, ha = hints[i]
+                    (ux, uy), at = hint_at(x, y, dx, dy, k)
+                    name = ("down" if uy > 0 else "up") if abs(uy) >= abs(ux) else ("right" if ux > 0 else "left")
+                    send(hint, b"setContents:", self.chevrons[name], types=(ctypes.c_void_p,))
+                    send(hint, b"setBounds:", R(0, 0, 30, 30), types=(R,))
+                    send(hint, b"setPosition:", MacPoint(*at), types=(MacPoint,))
+                send(hint, b"setOpacity:", f(hints[i][5] * a if i < len(hints) else 0.0), types=(f,))
+        finally:
+            send(b"CATransaction", b"commit")
+
+    def close(self):
+        if self.view:
+            macos.objc_send(self.view, b"removeFromSuperview")
+            macos.objc_send(self.view, b"release")
             self.view = None
 
 
@@ -1840,7 +2257,7 @@ class Tab:
                     lambda *_: self.web.follow() or True)))
                 self.place.connect("unmap", lambda p: self.ticking is not None and (
                     p.remove_tick_callback(self.ticking), setattr(self, "ticking", None)))
-        self.web.window = win
+        self.web.window, self.web.tab_id = win, self.id
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
         if win.hosted:
@@ -1848,6 +2265,42 @@ class Tab:
         self.last = {}
         if url is not None:
             self.web.load(address(url))
+
+
+class Chrome:
+    """An Emission window's bars: back, forward, reload, the address, a new tab, its profile (who), and its tabs' strip
+    (tab_bar: given its view), a page's progress along the strip's foot. Emission's window's, and a Bot's browser's
+    window of Baude's (browserpane), driven its own way."""
+
+    def __init__(self, profile):
+        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
+        self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
+        self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
+        self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address")
+        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
+        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile")
+        self.bar = Adw.HeaderBar()
+        for w in (self.back, self.fwd, self.reload):
+            self.bar.pack_start(w)
+        self.bar.set_title_widget(self.entry)
+        self.bar.pack_end(self.who)
+        self.bar.pack_end(self.new)
+        self.tab_bar = Adw.TabBar(autohide=False)
+        self.strip = Gtk.Overlay(child=self.tab_bar)
+        self.progress = Gtk.ProgressBar(visible=False, valign=Gtk.Align.END, can_target=False)
+        self.progress.add_css_class("osd")
+        self.strip.add_overlay(self.progress)  # (over the strip's foot: the page doesn't move as it shows and hides)
+
+    def show(self, now, address=True):
+        """now: the page in front's state (MacWeb.state's); address: its address put in the entry too (not while
+        something's typed there)."""
+        if address:
+            self.entry.set_text(now.get("url") or "")
+        self.back.set_sensitive(now.get("back", False))
+        self.fwd.set_sensitive(now.get("forward", False))
+        self.reload.set_icon_name("process-stop-symbolic" if now.get("loading") else "view-refresh-symbolic")
+        self.progress.set_visible(now.get("loading", False))
+        self.progress.set_fraction(now.get("progress") or 0)
 
 
 class Window(Adw.ApplicationWindow):
@@ -1869,6 +2322,8 @@ class Window(Adw.ApplicationWindow):
         self.asked_at = GLib.get_monotonic_time()  # (the Bot's last request: how long it's left its browser alone)
         self.released = None  # (hosted: what lets its profile go when someone's Emission asks for it)
         self.note = None  # (what the Bot's next request is told: this browser's a new one, and what it had's gone)
+        self.pointer = BotPointer()  # (what its tools do with the mouse: drawn over its pages while hosted, and told
+        self.accent = None           # watchers; accent: the glow's colour there, Baude's, as rgb)
         if agent:
             pid = profile_id(profile) or ""
             had, why = open_pages(pid)
@@ -1888,36 +2343,24 @@ class Window(Adw.ApplicationWindow):
         self.watchers, self.watch_source, self.watch_capturing = [], None, False
         self.watch_fast, self.watch_fast_until, self.watch_same, self.watch_size = True, 0.0, 0, None  # (watch_size:
         # the window's size before a watcher laid its page out at its own: put back once no one watches)
-        self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
-        self.fwd_btn = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
-        self.reload_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
+        self.chrome = chrome = Chrome(profile)
+        self.back_btn, self.fwd_btn, self.reload_btn, self.entry = chrome.back, chrome.fwd, chrome.reload, chrome.entry
+        self.who, self.progress, bar, strip, new_tab = chrome.who, chrome.progress, chrome.bar, chrome.strip, chrome.new
         self.back_btn.connect("clicked", lambda *_: self.current() and self.current().web.back())
         self.fwd_btn.connect("clicked", lambda *_: self.current() and self.current().web.forward())
         self.reload_btn.connect("clicked", lambda *_: self.current() and (
             self.current().web.stop() if self.current().last.get("loading") else self.current().web.reload()))
-        self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address")
         self.entry.connect("activate", lambda e: self.current() and (self.current().web.load(address(e.get_text())),
                                                                       self.current().web.focus()))
-        new_tab = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
         new_tab.connect("clicked", lambda *_: self.open(HOME_PAGE))
-        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile")
-        bar = Adw.HeaderBar()
-        for w in (self.back_btn, self.fwd_btn, self.reload_btn):
-            bar.pack_start(w)
-        bar.set_title_widget(self.entry)
-        bar.pack_end(self.who)
-        bar.pack_end(new_tab)
         self.view = Adw.TabView(vexpand=True)
+        chrome.tab_bar.set_view(self.view)
         if hosted:  # (in Baude's window: its tabs' keys are Baude's own tabs')
             self.view.set_shortcuts(Adw.TabViewShortcuts.NONE)
         if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages')
             macos.route_events(MacWeb.take_event)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
-        strip = Gtk.Overlay(child=Adw.TabBar(view=self.view, autohide=False))
-        self.progress = Gtk.ProgressBar(visible=False, valign=Gtk.Align.END, can_target=False)
-        self.progress.add_css_class("osd")
-        strip.add_overlay(self.progress)  # (over the strip's foot: the page doesn't move as it shows and hides)
         self.banner = Adw.Banner(button_label="Show")
         self.banner.connect("button-clicked", lambda *_: self.show_download())
         self.shown_path, self.banner_gen = None, 0
@@ -2076,7 +2519,9 @@ class Window(Adw.ApplicationWindow):
         tab = self.current()
         return {"profile": self.profile, "agent": self.agent, "view": tab.web.view_size() if tab else None,
                 "selected": tab.id if tab else None, "tabs": [self.control.describe(t) for t in self.tabs.values()],
-                "prompts": self.prompts(None), "downloads": self.downloads[-5:]}
+                "prompts": self.prompts(None), "downloads": self.downloads[-5:],
+                "now": tab.web.state() if tab is not None and tab.web.view is not None else None,
+                "pointer": self.pointer.log}  # (now: the tab in front's back, forward and progress too)
 
     def watch_tick(self):
         """A frame of the page in front taken, and given to each watcher it's new to; its state too, if it's changed.
@@ -2554,7 +2999,10 @@ class Window(Adw.ApplicationWindow):
             tab.web.close()
         view.close_page_finish(page, True)
         if not self.tabs and not self.switching:
-            self.close()
+            if self.hosted:  # (in Baude, its last tab closed: a blank one in its place, as close_tab leaves)
+                self.open("about:blank")
+            else:
+                self.close()
         return True
 
     def closing_window(self, *_):
@@ -2617,13 +3065,7 @@ class Window(Adw.ApplicationWindow):
     def show_state(self, tab, now, force=False):
         if not now:
             return
-        if force or not self.typing():  # (what's being typed there left alone)
-            self.entry.set_text(now.get("url") or "")
-        self.back_btn.set_sensitive(now.get("back", False))
-        self.fwd_btn.set_sensitive(now.get("forward", False))
-        self.reload_btn.set_icon_name("process-stop-symbolic" if now.get("loading") else "view-refresh-symbolic")
-        self.progress.set_visible(now.get("loading", False))
-        self.progress.set_fraction(now.get("progress") or 0)
+        self.chrome.show(now, force or not self.typing())
         self.set_title(f"{now.get('title') or 'Emission'} — {self.profile}")
 
 
@@ -2987,12 +3429,19 @@ class Control:
         else:
             raise ValueError("a ref, or x and y, says where")
 
+    def pointed(self, msg, t, kind, x, y, **more):
+        """What the Bot did with the mouse (not the Browser page's own), for its pointer: drawn here if it's hosted,
+        else told its watchers (BotPointer)."""
+        if not msg.get("from_pane"):
+            self.win.pointer.add(kind, x, y, tab=t.id, played=self.win.hosted, **more)
+
     def op_click(self, msg, answer):
         t = self.tab(msg)
         mods = [m for m in (msg.get("modifiers") or []) if m in ("shift", "ctrl", "alt", "cmd")]
 
         def at(x, y, covered):
             started = GLib.get_monotonic_time()
+            self.pointed(msg, t, "click", x, y, count=1 if msg.get("press") else max(1, int(msg.get("count") or 1)))
             t.web.click(x, y, msg.get("button") if msg.get("button") in ("right", "middle") else "left",
                         max(1, int(msg.get("count") or 1)), mods, press=int(msg["press"]) if msg.get("press") else None)
             if not t.web.keyed():  # (a window that isn't key: what's clicked given focus, as a click would give it)
@@ -3013,6 +3462,7 @@ class Control:
         if len(path) < 2:
             raise ValueError("a drag needs a path of two points at least")
         started = GLib.get_monotonic_time()
+        self.pointed(msg, t, "drag", *path[0], path=path)
         t.web.drag(path)
         if msg.get("quick"):
             return answer({"dragged": len(path)})
@@ -3022,8 +3472,8 @@ class Control:
         t = self.tab(msg)
         if msg.get("quick"):
             return self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), answer({"hovered": True})))
-        self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), GLib.timeout_add(
-            80, lambda: answer(self.describe(t)) and False)))
+        self.point(t, msg, answer, lambda x, y, _c: (self.pointed(msg, t, "hover", x, y), t.web.move(x, y),
+                                                     GLib.timeout_add(80, lambda: answer(self.describe(t)) and False)))
 
     def op_type(self, msg, answer):
         """text typed into the focused field (or ref's, focused first), a key press a character at a time, as a
@@ -3122,6 +3572,8 @@ class Control:
             return self.point(t, msg, answer, turned)
 
         def at(x, y, _c):
+            self.pointed(msg, t, "scroll", x, y, dx=dx, dy=dy)
+
             def chosen(inner):
                 how = "wheel"
                 try:

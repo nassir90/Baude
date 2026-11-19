@@ -861,8 +861,16 @@ class MacWeb:
             cg.CGContextRelease(ctx)
             cg.CGColorSpaceRelease(space)
             GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False)
-        send(self.view, b"takeSnapshotWithConfiguration:completionHandler:", None,
+        conf = send(send(b"WKSnapshotConfiguration", b"alloc"), b"init")
+        ns = send(self.view, b"window")
+        scale = send(ns, b"backingScaleFactor", ret=ctypes.c_double) if ns else 1.0
+        view_w = (self.view_size() or [max_w])[0]
+        width = max(100, min(view_w, max_w / max(1.0, scale)))  # (points: its pixels about max_w)
+        send(conf, b"setSnapshotWidth:", send(b"NSNumber", b"numberWithDouble:", float(width),
+                                              types=(ctypes.c_double,)), types=(ctypes.c_void_p,))
+        send(self.view, b"takeSnapshotWithConfiguration:completionHandler:", conf,
              Blocks.once(got, types=(ctypes.c_void_p, ctypes.c_void_p)), types=(ctypes.c_void_p, ctypes.c_void_p))
+        send(conf, b"release")
 
     def _event(self, kind, x, y, count=1, flags=0):
         """A mouse event at (x, y) on the page (CSS pixels from its top left), in its window's terms."""
@@ -2665,7 +2673,7 @@ class Control:
     def op_hover(self, msg, answer):
         t = self.tab(msg)
         self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), GLib.timeout_add(
-            300, lambda: answer(self.describe(t)) and False)))
+            80, lambda: answer(self.describe(t)) and False)))
 
     def op_type(self, msg, answer):
         """text typed into the focused field (or ref's, focused first), a key press a character at a time, as a

@@ -8534,8 +8534,8 @@ class SessionSidebar(Gtk.Box):
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
             last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
-        bots = []  # (Bots first, each with what's under it: its forks, its threads)
-        for k, label, folder, rows in out:
+        bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads; by date, they're
+        for k, label, folder, rows in ([] if by_date else out):  # among the chats by their time)
             keep, under = [], False
             for row in rows:
                 if not row[1]:
@@ -8612,8 +8612,9 @@ class SessionSidebar(Gtk.Box):
             self.track_days()
         for key, label, folder, rows in self.groups():
             shut = key in collapsed and not searching
-            self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
-            if shut:
+            if key != "bots":  # (Bots, first: no heading, their rows say what they are)
+                self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
+            if shut and key != "bots":
                 continue
             limit = None if searching or key in self.expanded or key == "bots" else self.limit(key)
             # (the limit counts top-level sessions: their forks come with them)
@@ -8827,13 +8828,24 @@ class SessionSidebar(Gtk.Box):
     def ask_rename(self, info):
         if info is None:
             return
-        entry = Gtk.Entry(text=info.get("title") or "", activates_default=True)
-        dlg = Adw.AlertDialog(heading="Rename session", extra_child=entry, default_response="rename",
-                              close_response="cancel")
+        bot = info.get("bot") if info.get("remote") is not None else None  # (a Bot: its name, as it's known by)
+        entry = Gtk.Entry(text=(bot or {}).get("name") or info.get("title") or "", activates_default=True)
+        dlg = Adw.AlertDialog(heading="Rename Bot" if bot else "Rename session", extra_child=entry,
+                              default_response="rename", close_response="cancel")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("rename", "Rename")
         dlg.set_response_appearance("rename", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda d, r: r == "rename" and self.rename(info, entry.get_text()))
+
+        def answered(_d, r):
+            name = " ".join(entry.get_text().split())[:80]
+            if r != "rename" or not name:
+                return
+            if bot:
+                info["remote"].request({"op": "bot", "session": info["id"], "bot": {"name": name, "picture": None}},
+                                       self.bot_set)
+            else:
+                self.rename(info, entry.get_text())
+        dlg.connect("response", answered)
         self.dialog = dlg
         dlg.present(self.win)
         entry.grab_focus()

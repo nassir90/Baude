@@ -186,6 +186,13 @@ class BotMemory(Gtk.Box):
         self.again = False  # (a read wanted, once what's written is in)
         self.after = {}  # (what's written in a Bot's memory left while a save of it was answered: {asked: (text, seen)},
         # sent once it is)
+        self.offline = Gtk.Label(wrap=True, xalign=0, visible=False)  # (its host not reached: said above the memory,
+        self.offline.add_css_class("memory-offline")                # greyed below it, as it was last read)
+        grey = Gtk.CssProvider()
+        grey.load_from_string(".memory-offline { background: alpha(currentColor, 0.08); color: alpha(currentColor, "
+                              "0.75); padding: 8px 12px; }")
+        self.offline.get_style_context().add_provider(grey, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.append(self.offline)
         self.empty = Adw.StatusPage(icon_name="document-edit-symbolic", vexpand=True)
         self.append(self.empty)
         self._status()
@@ -210,6 +217,24 @@ class BotMemory(Gtk.Box):
         self.editor.title.get_parent().set_visible(False)  # (its name the panel's, on its tab)
         self.editor.set_vexpand(True)
         self.append(self.editor)
+        self.fit_width()
+
+    def fit_width(self):
+        """The text as wide as Baude's Full-width text has it (Record's page's column otherwise)."""
+        if self.editor is not None:
+            import widgets as w
+            full = w.load_settings().get("full_width", True)
+            self.editor.clamp.set_maximum_size(100_000 if full else self.editor.WIDTH)
+            self.editor.clamp.set_tightening_threshold(100_000 if full else 400)
+
+    def reached(self, ok, why=None):
+        """Its host reached (the page as it is), or not: the memory as it was last read, greyed, not to be written
+        in, and why above it."""
+        self.offline.set_label("Can't connect to this Bot's host. This is its memory as it was last read."
+                               if not ok else "")
+        self.offline.set_visible(not ok)
+        if self.editor is not None:
+            self.editor.set_sensitive(ok)
 
     def _status(self, title="No memory yet", text="What this Bot learns and keeps shows here. You can write in it too."):
         """The status page in the editor's place: before a Bot's memory is first read, or what went wrong reading it."""
@@ -222,6 +247,7 @@ class BotMemory(Gtk.Box):
     def show(self, info):
         """The open chat (info, the sidebar's: its id, its host, whether it's a Bot; or None) shown: a Bot's memory read
         from its host, the page empty and not to be written in till that's in."""
+        self.fit_width()
         info = info or {}
         sid, remote = info.get("id"), info.get("remote")
         bot = bool(info.get("bot")) and sid is not None and remote is not None
@@ -266,13 +292,14 @@ class BotMemory(Gtk.Box):
         if asked != self.asked:
             return
         if reply.get("op") == "error":
-            return self._status("The memory wasn't read", f"{reply.get('error') or 'Its host said nothing more'}.")
+            return self.reached(False, reply.get("error") or "it said nothing more")
         if self.dirty or self.saving is not None or self.sending:
             self.again = True  # (written in since it was asked for: that's saved, then it's read again)
             return
         self._take(reply)
 
     def _take(self, reply):
+        self.reached(True)
         """The memory as its host has it (a read's, or a save's reply), the page showing it, unless it does already:
         what's accepted, and the Bot's changes since, as Record's proposals; the caret where it was."""
         text = reply.get("text") or ""

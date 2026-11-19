@@ -115,7 +115,13 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        wait would have given, as its user's message
     emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
                                                        {state}, many, till emission_watch_end: (version 11) a Bot's
-                                                       browser here watched (Baude's Browser pane)
+                                                       browser here watched (Baude's Browser pane). Its state also
+                                                       says (version 14) now, the tab in front's {title, url,
+                                                       progress, loading, back, forward}, and pointer, what the Bot's
+                                                       tools last did with the mouse, numbered, oldest first: [{seq,
+                                                       kind (hover, click, drag, scroll), x, y (CSS pixels), path?,
+                                                       count?, dx?, dy?}] (its last 8; seq starts again from 1 with
+                                                       each Emission)
     emission_watch_say {line: {ack?, max_w?, max_h?}} -> nothing: a frame taken (ack: its frame), or the pane's size
     emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
                                                        request, baudelib.emissiontools) to the Emission that has the
@@ -159,8 +165,8 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot, start_key}: its id a UUID the server made as it started it (claude's
---session-id; what it's resumed by), state "working"
+subagents, asks, cli_id, commands, cut, bot, start_key, acting}: its id a UUID the server made as it started it
+(claude's --session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
 is checked against), asks what
@@ -174,7 +180,9 @@ background: background true) from their start to their notification; none once i
 seconds) the host process stopped its claude at a turn or asking (shutting down, a quit, a restart; not a turn that
 ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input). bot:
 a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8). start_key:
-its start's, if it was given one (version 13).
+its start's, if it was given one (version 13). acting: whether its turn is at its tools (version 14): from a tool
+call's start in what its agent says till text starts after it, the turn ends or its agent goes; only while it's
+"working" (not while it asks permission).
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
@@ -210,12 +218,12 @@ import subprocess
 import threading
 import time
 
-VERSION = 13  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 14  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
 # 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
-# gone)
+# gone; 14: a session's acting, emission_watch's state's now and pointer)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

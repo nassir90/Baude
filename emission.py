@@ -10,13 +10,16 @@ widget of its own. On a Linux host with no display it starts one of its own (xvf
 import argparse
 import ctypes
 import fcntl
+import hashlib
 import html
 import ipaddress
 import json
 import os
 import platform
 import shutil
+import socket
 import sys
+import tempfile
 import urllib.parse
 import uuid
 
@@ -51,9 +54,13 @@ def _read_profiles():
     for p in raw:
         if isinstance(p, str):
             p = {"name": p, "id": str(uuid.uuid5(PROFILE_SPACE, p))}
-        if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].strip() and p["name"] != DEFAULT \
-                and isinstance(p.get("id"), str):
-            out.append({"name": p["name"].strip(), "id": p["id"]})
+        if not (isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].strip() and p["name"] != DEFAULT):
+            continue
+        try:
+            pid = str(uuid.UUID(str(p.get("id"))))
+        except ValueError:
+            continue  # (not an id: a store's named by one, and on Linux it's a folder's name)
+        out.append({"name": p["name"].strip(), "id": pid})
     return out
 
 
@@ -89,9 +96,46 @@ def forget_profile(name):
     _write_profiles([p for p in _read_profiles() if p["name"] != name])
 
 
+def leftovers():
+    path = os.path.join(data_home(), "removed.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return [str(uuid.UUID(str(i))) for i in json.load(f)]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def note_leftover(pid, add=True):
+    left = [i for i in leftovers() if i != pid] + ([pid] if add else [])
+    os.makedirs(data_home(), exist_ok=True)
+    with open(os.path.join(data_home(), "removed.json"), "w", encoding="utf-8") as f:
+        json.dump(left, f)
+
+
+def clear_leftovers():
+    """Removed profiles' folders deleted again (none of their pages open now: each one's lock had first)."""
+    for pid in leftovers():
+        if pid in HELD or not lock_profile(pid):
+            continue
+        shutil.rmtree(os.path.join(data_home(), "profiles", pid), ignore_errors=True)
+        if not os.path.exists(os.path.join(data_home(), "profiles", pid)):
+            note_leftover(pid, add=False)
+        try:
+            os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
+        except OSError:
+            pass
+        unlock_profile(pid)
+
+
+HELD = {}  # (this process's profile locks, by id)
+
+
 def lock_profile(pid):
-    """The profile's lock (a file descriptor, held while a window uses it), or None if another Emission has it: two
-    processes on one store would share its cookie database and caches."""
+    """True if this process has the profile's lock (now, or already), False if another Emission has it: two processes
+    on one store would share its cookie database and caches. Kept until the process ends (its store may still be
+    open after its pages close: WebKit lets go of it later), or the profile's removed."""
+    if pid in HELD:
+        return True
     folder = os.path.join(data_home(), "profiles")
     os.makedirs(folder, exist_ok=True)
     fd = os.open(os.path.join(folder, pid + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
@@ -99,13 +143,88 @@ def lock_profile(pid):
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
-        return None
-    return fd
+        return False
+    HELD[pid] = fd
+    return True
 
 
-def unlock_profile(fd):
+def unlock_profile(pid):
+    fd = HELD.pop(pid, None)
     if fd is not None:
         os.close(fd)
+
+
+def door_path(pid):
+    """Where the Emission that has pid's profile takes pages from others (a socket in a folder only this user can
+    open; short, for macOS's limit on socket paths)."""
+    base = os.path.join(tempfile.gettempdir(), f"emission-{os.getuid()}")
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    return os.path.join(base, hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock")
+
+
+def hand_over(pid, urls):
+    """urls opened in the Emission that has pid's profile: True if it took them."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            s.connect(door_path(pid))
+            s.sendall((json.dumps({"open": list(urls)}) + "\n").encode())
+            return s.recv(16).startswith(b"ok")
+    except (OSError, ValueError):
+        return False
+
+
+class Door:
+    """This process taking pages for the profiles it has (each one's lock held: no one else listens there)."""
+    open = {}
+
+    @classmethod
+    def listen(cls, pid, take):
+        """take(pid, urls) run for each hand-over to pid's profile."""
+        if pid in cls.open:
+            return
+        path = door_path(pid)
+        try:
+            os.unlink(path)  # (a door left by an Emission that's gone: its lock's ours now)
+        except OSError:
+            pass
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(path)
+        srv.listen(4)
+        srv.setblocking(False)
+
+        def came(*_):
+            try:
+                conn, _addr = srv.accept()
+            except OSError:
+                return True
+            with conn:
+                conn.settimeout(5)
+                try:
+                    raw = b""
+                    while not raw.endswith(b"\n") and len(raw) < 1 << 16:
+                        part = conn.recv(4096)
+                        if not part:
+                            break
+                        raw += part
+                    urls = [u for u in json.loads(raw or b"{}").get("open") or [] if isinstance(u, str)]
+                    take(pid, urls)
+                    conn.sendall(b"ok\n")
+                except (OSError, ValueError, AttributeError):
+                    pass
+            return True
+        cls.open[pid] = (srv, GLib.io_add_watch(srv.fileno(), GLib.PRIORITY_DEFAULT, GLib.IOCondition.IN, came))
+
+    @classmethod
+    def close(cls, pid):
+        srv, source = cls.open.pop(pid, (None, None))
+        if srv is not None:
+            GLib.source_remove(source)
+            srv.close()
+            try:
+                os.unlink(door_path(pid))
+            except OSError:
+                pass
 
 
 # ------------------------------------------------------------------ addresses --
@@ -313,22 +432,32 @@ class MacWeb:
                              types=(ctypes.c_void_p,))) or web.asked
         web.show_failure(url, cls._text(send(error, b"localizedDescription")))
 
+    # (each of these answers WebKit on every path: a completion handler never called aborts the app)
+
     @classmethod
     def decide_action(cls, _view, action, decide):
-        download = macos.objc_send(action, b"shouldPerformDownload", ret=ctypes.c_bool)
-        Blocks.call(decide, 2 if download else 1, types=(ctypes.c_long,))  # (WKNavigationActionPolicy)
+        policy = 1  # (WKNavigationActionPolicy: allow)
+        try:
+            if macos.objc_send(action, b"shouldPerformDownload", ret=ctypes.c_bool):
+                policy = 2  # (download)
+        finally:
+            Blocks.call(decide, policy, types=(ctypes.c_long,))
 
     @classmethod
     def decide_response(cls, _view, response, decide):
-        send = macos.objc_send
-        show = send(response, b"canShowMIMEType", ret=ctypes.c_bool)
-        r = send(response, b"response")
-        if show and send(r, b"respondsToSelector:", objc_sel(b"valueForHTTPHeaderField:"),
-                         types=(ctypes.c_void_p,), ret=ctypes.c_bool):
-            how = cls._text(send(r, b"valueForHTTPHeaderField:", macos.ns_string("Content-Disposition"),
-                                 types=(ctypes.c_void_p,)))
-            show = not how.strip().lower().startswith("attachment")
-        Blocks.call(decide, 1 if show else 2, types=(ctypes.c_long,))  # (WKNavigationResponsePolicy)
+        policy = 1  # (WKNavigationResponsePolicy: allow)
+        try:
+            send = macos.objc_send
+            show = send(response, b"canShowMIMEType", ret=ctypes.c_bool)
+            r = send(response, b"response")
+            if show and send(r, b"respondsToSelector:", objc_sel(b"valueForHTTPHeaderField:"),
+                             types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+                how = cls._text(send(r, b"valueForHTTPHeaderField:", macos.ns_string("Content-Disposition"),
+                                     types=(ctypes.c_void_p,)))
+                show = not how.strip().lower().startswith("attachment")
+            policy = 1 if show else 2  # (download)
+        finally:
+            Blocks.call(decide, policy, types=(ctypes.c_long,))
 
     @classmethod
     def downloading(cls, download):
@@ -336,10 +465,17 @@ class MacWeb:
 
     @classmethod
     def destination(cls, download, _response, name, done):
-        path = download_path(cls._text(name))
-        cls.downloads[download] = path
-        url = macos.objc_send(b"NSURL", b"fileURLWithPath:", macos.ns_string(path), types=(ctypes.c_void_p,))
-        Blocks.call(done, url, types=(ctypes.c_void_p,))
+        url = None  # (none: the download's cancelled)
+        try:
+            path = download_path(cls._text(name))
+            cls.downloads[download] = path
+            url = macos.objc_send(b"NSURL", b"fileURLWithPath:", macos.ns_string(path), types=(ctypes.c_void_p,))
+        except OSError as e:
+            web = cls.views.get(macos.objc_send(download, b"webView"))
+            if web is not None and web.window is not None:
+                web.window.saved(cls._text(name) or "download", e.strerror or str(e))
+        finally:
+            Blocks.call(done, url, types=(ctypes.c_void_p,))
 
     @classmethod
     def download_done(cls, download, error):
@@ -352,25 +488,34 @@ class MacWeb:
     @classmethod
     def challenged(cls, view, challenge, done):
         send = macos.objc_send
-        space = send(challenge, b"protectionSpace")
-        method = cls._text(send(space, b"authenticationMethod"))
-        web = cls.views.get(view)
-        if web is None or web.window is None or method not in (
-                "NSURLAuthenticationMethodHTTPBasic", "NSURLAuthenticationMethodHTTPDigest",
-                "NSURLAuthenticationMethodDefault"):
-            Blocks.call(done, 1, None, types=(ctypes.c_long, ctypes.c_void_p))  # (default handling: TLS and the like)
-            return
-        done = Blocks.copy(done)
+        held = None
+        try:
+            space = send(challenge, b"protectionSpace")
+            method = cls._text(send(space, b"authenticationMethod"))
+            web = cls.views.get(view)
+            if web is None or web.window is None or method not in (
+                    "NSURLAuthenticationMethodHTTPBasic", "NSURLAuthenticationMethodHTTPDigest",
+                    "NSURLAuthenticationMethodDefault"):
+                return  # (default handling, below: TLS and the like)
+            held = Blocks.copy(done)
 
-        def answer(user, password):
-            if user is None:
-                Blocks.call(done, 2, None, types=(ctypes.c_long, ctypes.c_void_p), release=True)  # (cancelled)
-                return
-            cred = send(b"NSURLCredential", b"credentialWithUser:password:persistence:", macos.ns_string(user),
-                        macos.ns_string(password), 1, types=(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong))
-            Blocks.call(done, 0, cred, types=(ctypes.c_long, ctypes.c_void_p), release=True)  # (use it)
-        web.window.sign_in(web, cls._text(send(space, b"host")), cls._text(send(space, b"realm")),
-                           send(challenge, b"previousFailureCount", ret=ctypes.c_long) > 0, once(answer))
+            def answer(user, password):
+                if user is None:
+                    Blocks.call(held, 2, None, types=(ctypes.c_long, ctypes.c_void_p), release=True)  # (cancelled)
+                    return
+                cred = send(b"NSURLCredential", b"credentialWithUser:password:persistence:", macos.ns_string(user),
+                            macos.ns_string(password), 1, types=(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong))
+                Blocks.call(held, 0, cred, types=(ctypes.c_long, ctypes.c_void_p), release=True)  # (use it)
+            answer = once(answer)
+            try:
+                web.window.sign_in(web, cls._text(send(space, b"host")), cls._text(send(space, b"realm")),
+                                   send(challenge, b"previousFailureCount", ret=ctypes.c_long) > 0, answer)
+            except Exception:
+                answer(None, None)
+                raise
+        finally:
+            if held is None:
+                Blocks.call(done, 1, None, types=(ctypes.c_long, ctypes.c_void_p))  # (default handling)
 
     @classmethod
     def opened(cls, view, config):
@@ -383,16 +528,24 @@ class MacWeb:
         web = cls.views.get(view)
         done = Blocks.copy(done)
         if kind == "alert":
-            finish = lambda _answer: Blocks.call(done, release=True)  # noqa: E731
+            def finish(_answer):
+                Blocks.call(done, release=True)
         elif kind == "confirm":
-            finish = lambda answer: Blocks.call(done, bool(answer), types=(ctypes.c_bool,), release=True)  # noqa
+            def finish(answer):
+                Blocks.call(done, bool(answer), types=(ctypes.c_bool,), release=True)
         else:
-            finish = lambda answer: Blocks.call(done, macos.ns_string(answer) if answer is not None else None,  # noqa
-                                                types=(ctypes.c_void_p,), release=True)
-        if web is None or web.window is None:
+            def finish(answer):
+                Blocks.call(done, macos.ns_string(answer) if answer is not None else None, types=(ctypes.c_void_p,),
+                            release=True)
+        finish = once(finish)
+        try:
+            if web is None or web.window is None:
+                finish(None)
+                return
+            web.window.page_dialog(web, kind, cls._text(message), cls._text(text), finish)
+        except Exception:
             finish(None)
-            return
-        web.window.page_dialog(web, kind, cls._text(message), cls._text(text), once(finish))
+            raise
 
     @classmethod
     def choose_files(cls, view, params, _frame, done):
@@ -408,11 +561,16 @@ class MacWeb:
                     send(arr, b"addObject:", send(b"NSURL", b"fileURLWithPath:", macos.ns_string(p),
                                                   types=(ctypes.c_void_p,)), types=(ctypes.c_void_p,))
             Blocks.call(done, arr, types=(ctypes.c_void_p,), release=True)
-        if web is None or web.window is None:
+        finish = once(finish)
+        try:
+            if web is None or web.window is None:
+                finish(None)
+                return
+            web.window.choose_files(send(params, b"allowsMultipleSelection", ret=ctypes.c_bool),
+                                    send(params, b"allowsDirectories", ret=ctypes.c_bool), finish)
+        except Exception:
             finish(None)
-            return
-        web.window.choose_files(send(params, b"allowsMultipleSelection", ret=ctypes.c_bool),
-                                send(params, b"allowsDirectories", ret=ctypes.c_bool), once(finish))
+            raise
 
     # (one page)
 
@@ -467,6 +625,18 @@ class MacWeb:
         ns = macos.native_window(window)
         if ns:
             macos.objc_send(ns, b"makeFirstResponder:", macos.objc_send(ns, b"contentView"), types=(ctypes.c_void_p,))
+
+    @staticmethod
+    def gtk_has_keys(window):
+        """Whether GTK's widgets have the keys, not a page (a page clicked into takes them from AppKit without GTK
+        knowing: its entry keeps GTK's focus)."""
+        ns = macos.native_window(window)
+        return not ns or macos.objc_send(ns, b"firstResponder") == macos.objc_send(ns, b"contentView")
+
+    def focus(self):
+        if self.attached is not None:
+            macos.objc_send(macos.objc_send(self.view, b"window"), b"makeFirstResponder:", self.view,
+                            types=(ctypes.c_void_p,))
 
     def attach(self):
         """Put in its window's content view, once the window's shown."""
@@ -615,8 +785,33 @@ class GtkWeb:
         place.append(self.view)
 
     @classmethod
-    def forget_session(cls, profile):
-        cls.sessions.pop(profile, None)
+    def remove_store(cls, profile, done):
+        """profile's data deleted (cleared through its session if this process has one, then its folder), then
+        done(why it couldn't be, or None)."""
+        net = cls.sessions.pop(profile, None)
+
+        def wipe():
+            try:
+                if os.path.exists(cls.folder(profile)):
+                    shutil.rmtree(cls.folder(profile))
+            except OSError as e:
+                done(f"{e.filename}: {e.strerror}")
+                return
+            note_leftover(profile)  # (deleted again next time: its closed pages may still write here)
+            done(None)
+        if net is None:
+            wipe()
+            return
+        from gi.repository import WebKit
+
+        def cleared(mgr, result):
+            try:
+                mgr.clear_finish(result)
+            except GLib.Error as e:
+                done(e.message)
+                return
+            wipe()
+        net.get_website_data_manager().clear(WebKit.WebsiteDataTypes.ALL, 0, None, cleared)
 
     @classmethod
     def download_started(cls, _session, download):
@@ -645,6 +840,9 @@ class GtkWeb:
             return False  # (a load stopped, or handed to a download: no failure)
         view.load_alternate_html(failure_page(url, error.message), url, None)
         return True
+
+    def focus(self):
+        self.view.grab_focus()
 
     def follow(self):
         pass  # (a widget in its place: GTK lays it out)
@@ -719,7 +917,8 @@ class Window(Adw.ApplicationWindow):
         super().__init__(application=app, title="Emission", default_width=1200, default_height=820)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
-        self.lock, self.switching, self.asking, self.later = None, False, {}, []  # (later: (when, what), run by tick)
+        self.switching, self.asking, self.later, self.dialogs = False, {}, [], 0  # (later: (when, what), by tick)
+        self.status, self.done = None, False
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd_btn = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
         self.reload_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
@@ -728,11 +927,11 @@ class Window(Adw.ApplicationWindow):
         self.reload_btn.connect("clicked", lambda *_: self.current() and (
             self.current().web.stop() if self.current().last.get("loading") else self.current().web.reload()))
         self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address")
-        self.entry.connect("activate", lambda e: self.current() and self.current().web.load(address(e.get_text())))
+        self.entry.connect("activate", lambda e: self.current() and (self.current().web.load(address(e.get_text())),
+                                                                      self.current().web.focus()))
         new_tab = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
         new_tab.connect("clicked", lambda *_: self.open(HOME_PAGE))
         self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile: its cookies and logins its own")
-        self.who.set_menu_model(self.profile_menu())
         bar = Adw.HeaderBar()
         for w in (self.back_btn, self.fwd_btn, self.reload_btn):
             bar.pack_start(w)
@@ -749,22 +948,21 @@ class Window(Adw.ApplicationWindow):
         self.banner = Adw.Banner(button_label="Show")
         self.banner.connect("button-clicked", lambda *_: self.show_download())
         self.shown_path, self.banner_gen = None, 0
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.body = body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         body.append(self.banner)
         frame = Adw.ToolbarView(content=body)  # (its bar: back, forward, reload, the address, its profile)
         frame.add_top_bar(bar)
         frame.add_top_bar(strip)
         self.set_content(frame)
-        if self.Engine is not None:
-            self.lock = lock_profile(self.profile_id)
-            if self.lock is None:
-                why = f"The profile “{profile}” is open in another Emission window. Close that one, or open " \
-                      "another profile here."
-        if why:
-            body.append(Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages here",
-                                       description=why, vexpand=True))
-        else:
-            body.append(self.view)
+        if self.Engine is None:
+            self.who.set_sensitive(False)
+            new_tab.set_sensitive(False)
+        else:  # (the menu made as it opens: another Emission may have changed the profiles)
+            self.who.set_create_popup_func(lambda b: b.set_menu_model(self.profile_menu()))
+        if self.Engine is not None and not self.have(self.profile_id):
+            why = f"The profile “{profile}” is open in another Emission that isn't answering. Close it, or choose " \
+                  "another profile here."
+        self.show_body(why)
         for name, keys, fn in (("new-tab", ["<Meta>t", "<Control>t"], lambda: self.open(HOME_PAGE)),
                                ("close-tab", ["<Meta>w", "<Control>w"], self.close_current),
                                ("address", ["<Meta>l", "<Control>l"], self.focus_address),
@@ -779,15 +977,52 @@ class Window(Adw.ApplicationWindow):
             clicks.connect("pressed", lambda *_: MacWeb.keys_to_gtk(self))
             self.add_controller(clicks)
         self.connect("close-request", self.closing_window)
-        if not why:
-            self.open(url or HOME_PAGE)
+        if self.Engine is not None:
+            if not why:
+                self.open(url or HOME_PAGE)
             GLib.timeout_add(POLL_MS, self.tick)
+
+    def have(self, pid):
+        """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
+        has it."""
+        if not lock_profile(pid):
+            return False
+        Door.listen(pid, self.take)
+        return True
+
+    def take(self, pid, urls):
+        """Pages handed over by another Emission, for pid's profile (this window moved to it if it's elsewhere)."""
+        name = next((p["name"] for p in profiles() if p["id"] == pid), None)
+        if name is None or (pid != self.profile_id and not self.switch_profile(name)):
+            return
+        for url in urls or [HOME_PAGE]:
+            self.open(url)
+        self.present()
+
+    def show_body(self, why):
+        """The pages, or (why: there can't be any) a status page saying why."""
+        if why:
+            if self.status is None:
+                if self.view.get_parent() is not None:
+                    self.body.remove(self.view)
+                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages here",
+                                             vexpand=True)
+                self.body.append(self.status)
+            self.status.set_description(why)
+        elif self.status is not None or self.view.get_parent() is None:
+            if self.status is not None:
+                self.body.remove(self.status)
+                self.status = None
+            self.body.append(self.view)
 
     # (profiles)
 
     def profile_menu(self):
         menu, group = Gio.Menu(), Gio.SimpleActionGroup()
-        for i, p in enumerate(profiles()):
+        listed = profiles()
+        self.profile = next((p["name"] for p in listed if p["id"] == self.profile_id), self.profile)  # (renamed)
+        self.who.set_label(self.profile)
+        for i, p in enumerate(listed):
             act = Gio.SimpleAction.new(f"p{i}", None)
             act.connect("activate", lambda *_a, n=p["name"]: self.switch_profile(n))
             group.add_action(act)
@@ -806,7 +1041,6 @@ class Window(Adw.ApplicationWindow):
         return menu
 
     def refresh_profiles(self):
-        self.who.set_label(self.profile)
         self.who.set_menu_model(self.profile_menu())
 
     def ask_name(self, heading, body, verb, start, then):
@@ -857,8 +1091,7 @@ class Window(Adw.ApplicationWindow):
             return
         if self.profile == name and not self.switch_profile(DEFAULT):
             return
-        lock = lock_profile(pid)
-        if lock is None:
+        if not self.have(pid):
             self.say("Still open", f"“{name}” is open in another Emission window, so it's kept. Close that window "
                      "and try again.")
             return
@@ -870,7 +1103,6 @@ class Window(Adw.ApplicationWindow):
                 tries[0] -= 1
                 self.later.append((GLib.get_monotonic_time() + 1_000_000, lambda: MacWeb.remove_store(pid, removed)))
                 return
-            unlock_profile(lock)
             if why:
                 self.say(f"“{name}” wasn't removed", why)
                 return
@@ -879,13 +1111,10 @@ class Window(Adw.ApplicationWindow):
                 os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
             except OSError:
                 pass
+            Door.close(pid)
+            unlock_profile(pid)
             self.refresh_profiles()
-        if self.Engine is MacWeb:
-            MacWeb.remove_store(pid, removed)
-        else:
-            GtkWeb.forget_session(pid)
-            shutil.rmtree(GtkWeb.folder(pid), ignore_errors=True)
-            removed(None)
+        self.Engine.remove_store(pid, removed)
 
     def switch_profile(self, name):
         """Its tabs again, in another profile (its own cookies: a page signed in there is again there). False if
@@ -893,9 +1122,16 @@ class Window(Adw.ApplicationWindow):
         if name == self.profile:
             return True
         pid = profile_id(name)
-        lock = lock_profile(pid) if pid else None
-        if lock is None:
-            self.say("Open elsewhere", f"The profile “{name}” is open in another Emission window.")
+        if pid is None:
+            self.say("No such profile", f"There's no profile called “{name}” now.")
+            return False
+        if not self.have(pid):
+            urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
+            if hand_over(pid, urls):
+                self.say(f"Opened in “{name}”'s window", f"“{name}” is open in another Emission, so this window's "
+                         "pages opened there.")
+            else:
+                self.say("Not answering", f"“{name}” is open in another Emission that isn't answering.")
             return False
         urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
         self.switching = True
@@ -904,9 +1140,9 @@ class Window(Adw.ApplicationWindow):
                 self.view.close_page(page)
         finally:
             self.switching = False
-        unlock_profile(self.lock)
-        self.lock, self.profile, self.profile_id = lock, name, pid
+        self.profile, self.profile_id = name, pid
         self.refresh_profiles()
+        self.show_body(None)
         for url in urls or [HOME_PAGE]:
             self.open(url)
         return True
@@ -915,12 +1151,17 @@ class Window(Adw.ApplicationWindow):
 
     def present_dialog(self, dlg, web=None):
         """dlg shown; web: the page it's for (its tab closed, the dialog's closed too: answered as cancelled)."""
-        if (tab := self.current()) is not None:
-            tab.web.show(False)
+        self.dialogs += 1
+        self.show_pages()
         if web is not None:
             self.asking.setdefault(web, []).append(dlg)
-        dlg.connect("closed", lambda *_: (web is not None and dlg in self.asking.get(web, ()) and
-                                          self.asking[web].remove(dlg), self.selected()))
+
+        def closed(*_):
+            self.dialogs -= 1
+            if web is not None and dlg in self.asking.get(web, ()):
+                self.asking[web].remove(dlg)
+            self.show_pages()
+        dlg.connect("closed", closed)
         dlg.present(self)
 
     def say(self, heading, body):
@@ -1026,9 +1267,14 @@ class Window(Adw.ApplicationWindow):
         page = self.view.get_selected_page()
         return self.tabs.get(page) if page is not None else None
 
-    def selected(self):
+    def show_pages(self):
+        """The selected tab's page shown, the others hidden (all of them while a dialog's up: on macOS a page is
+        drawn over the window, dialogs included)."""
         for page, tab in self.tabs.items():
-            tab.web.show(page is self.view.get_selected_page())
+            tab.web.show(page is self.view.get_selected_page() and not self.dialogs)
+
+    def selected(self):
+        self.show_pages()
         if (tab := self.current()) is not None:
             self.show_state(tab, tab.last, force=True)
 
@@ -1047,8 +1293,7 @@ class Window(Adw.ApplicationWindow):
         for tab in self.tabs.values():
             tab.web.close()
         self.tabs.clear()
-        unlock_profile(self.lock)
-        self.lock = None
+        self.done = True
         return False
 
     def close_tab(self, tab):
@@ -1062,7 +1307,7 @@ class Window(Adw.ApplicationWindow):
             self.view.close_page(page)
 
     def tick(self):
-        if not self.tabs and self.lock is None:
+        if self.done:
             return False
         if self.later:
             now = GLib.get_monotonic_time()
@@ -1081,10 +1326,15 @@ class Window(Adw.ApplicationWindow):
                 tab.last = now
         return True
 
+    def typing(self):
+        if not self.entry.get_delegate().has_focus():
+            return False
+        return self.Engine is not MacWeb or MacWeb.gtk_has_keys(self)
+
     def show_state(self, tab, now, force=False):
         if not now:
             return
-        if force or not self.entry.get_delegate().has_focus():  # (what's being typed there left alone)
+        if force or not self.typing():  # (what's being typed there left alone)
             self.entry.set_text(now.get("url") or "")
         self.back_btn.set_sensitive(now.get("back", False))
         self.fwd_btn.set_sensitive(now.get("forward", False))
@@ -1125,7 +1375,11 @@ def main():
         return 1
     if not a.profile.strip():
         p.error("a profile needs a name")
-    add_profile(a.profile.strip())
+    pid = add_profile(a.profile.strip())
+    clear_leftovers()
+    if pid not in HELD and not lock_profile(pid) and hand_over(pid, [a.url or HOME_PAGE]):
+        print(f"Opened in the Emission that has the profile “{a.profile.strip()}”.")
+        return 0
     return App(a.url, a.profile.strip()).run([sys.argv[0]])
 
 

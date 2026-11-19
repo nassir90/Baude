@@ -30,16 +30,23 @@ SCHEMAS = {
                  {"url": {"type": "string", "description": "An address, words to search for, or back, forward, "
                                                            "reload"}, "tab": TAB, "host": HOST}, ["url"]),
     "close_tab": ("Close a tab.", {"tab": TAB, "host": HOST}, ["tab"]),
-    "screenshot": ("A picture of a tab's page as it's shown. Its pixels are what click and scroll's x and y are in.",
+    "screenshot": ("A picture of a tab's page as it's shown, for what text can't show: layout, images, a canvas, "
+                   "how something looks. To read a page, read_page, find and get_text are cheaper. Its pixels are "
+                   "what click, scroll and zoom's x and y are in.",
                    {"tab": TAB, "host": HOST}, []),
-    "read_page": ("The page's elements as a tree: each one's role, name and ref (links, buttons, fields, headings; "
-                  "filter all adds the rest, text too). Refs are what click, type, form_input and scroll take.",
+    "zoom": ("A region of the last screenshot at full detail, for small text or fine detail: region [x0, y0, x1, "
+             "y1] in that screenshot's pixels (click and scroll keep to the screenshot's).",
+             {"region": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+              "tab": TAB, "host": HOST}, ["region"]),
+    "read_page": ("How to read a page: its elements on screen and a screen above and below, each one's role, name "
+                  "and ref (links, buttons, fields, headings; filter all adds the rest, text too). Refs are what "
+                  "click, type, form_input and scroll take, the same for an element each read.",
                   {"tab": TAB, "host": HOST, "filter": {"type": "string", "enum": ["interactive", "all"]},
                    "ref": {"type": "string", "description": "Only this element's part of the page"},
                    "max_chars": {"type": "integer"}}, []),
-    "find": ("Elements whose role, name, placeholder, id or link match words: their refs.",
+    "find": ("Elements anywhere on the page whose role, name, placeholder, id or link match words: their refs.",
              {"query": {"type": "string"}, "tab": TAB, "host": HOST}, ["query"]),
-    "get_text": ("The page's text (its main part's, if it has one).",
+    "get_text": ("The page's text (its main part's, if it has one): to read what it says.",
                  {"tab": TAB, "host": HOST, "max_chars": {"type": "integer"}}, []),
     "click": ("Click an element (by its ref: scrolled to and clicked in its middle) or a point of the last "
               "screenshot, with the mouse, as a person would; then wait for any page it opens.",
@@ -61,7 +68,7 @@ SCHEMAS = {
             "Left, Right, Home, End, PageUp, PageDown, a character, or a combination like cmd+a or shift+Tab.",
             {"keys": {"type": "string"}, "tab": TAB, "host": HOST}, ["keys"]),
     "scroll": ("Turn the mouse wheel over an element, a point, or the page's middle: dy (and dx) pixels (dy 600 if "
-               "none's given; up is negative).",
+               "none's given; up is negative). Says what came into view, with refs.",
                {"dy": {"type": "integer"}, "dx": {"type": "integer"}, "ref": REF, "x": {"type": "number"},
                 "y": {"type": "number"}, "tab": TAB, "host": HOST}, []),
     "form_input": ("Set a form field by its ref: a select's option (value or text), a checkbox or radio (true or "
@@ -88,12 +95,18 @@ SCHEMAS = {
                       {"id": {"type": "string"}, "accept": {"type": "boolean"}, "text": {"type": "string"},
                        "user": {"type": "string"}, "password": {"type": "string"},
                        "files": {"type": "array", "items": {"type": "string"}}, "host": HOST}, []),
+    "browser_batch": ("Several of these tools in one call, done in order, stopping at the first error: actions, "
+                      "each {name, input} as that tool takes it (not javascript, nor browser_batch), each checked "
+                      "as it is on its own. Each one's answer comes back, pictures too.",
+                      {"actions": {"type": "array", "items": {
+                          "type": "object", "properties": {"name": {"type": "string"}, "input": {"type": "object"}},
+                          "required": ["name", "input"]}}}, ["actions"]),
 }
 OPS = {"tabs": "tabs", "new_tab": "new_tab", "navigate": "navigate", "close_tab": "close_tab",
-       "screenshot": "screenshot", "read_page": "read_page", "find": "find", "get_text": "get_text", "click": "click",
-       "hover": "hover", "drag": "drag", "type": "type", "key": "key", "scroll": "scroll", "form_input": "form_input",
-       "javascript": "javascript", "console": "console", "network": "network", "resize": "resize",
-       "prompts": "prompts", "answer_prompt": "answer_prompt"}
+       "screenshot": "screenshot", "zoom": "zoom", "read_page": "read_page", "find": "find", "get_text": "get_text",
+       "click": "click", "hover": "hover", "drag": "drag", "type": "type", "key": "key", "scroll": "scroll",
+       "form_input": "form_input", "javascript": "javascript", "console": "console", "network": "network",
+       "resize": "resize", "prompts": "prompts", "answer_prompt": "answer_prompt"}
 HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
 
 
@@ -130,15 +143,63 @@ class Browser:
 
 
 def content(tool, result):
-    """An MCP tool result's content: a screenshot's picture as an image, the rest as text."""
-    if tool == "screenshot" and result.get("image"):
+    """An MCP tool result's content: a screenshot's or zoom's picture as an image, the rest as text (a page's, and
+    what a scroll brought into view, as text of their own)."""
+    if tool in ("screenshot", "zoom") and result.get("image"):
         image = result.pop("image")
         return [{"type": "image", "data": image, "mimeType": result.pop("mime", "image/jpeg")},
                 {"type": "text", "text": json.dumps(result, indent=1, ensure_ascii=False)}]
     text = result.pop("page", None) or result.pop("text", None) if tool in ("read_page", "get_text") else None
+    if tool == "scroll":
+        text = result.pop("in_view", None)
     out = [{"type": "text", "text": json.dumps(result, indent=1, ensure_ascii=False)}]
     if text is not None:
         out.append({"type": "text", "text": meshtools.cut([text]) if len(text) > 60000 else text})
+    return out
+
+
+BATCH_MAX = 25  # (a batch's actions at most)
+NOT_BATCHED = {"browser_batch", "javascript"}  # (a batch is the tools only: no script in it, nor a batch)
+SAID = ("tab", "title", "url", "loading", "selected")  # (a tab's description: in a batch, said only as it changes)
+
+
+def batch(browser, actions):
+    """browser_batch: each action ({name, input}) called as that tool would be, in order, until one fails; their
+    answers in one content (each one's tab, title and address only where they've changed)."""
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("browser_batch needs actions: a list of {name, input}")
+    if len(actions) > BATCH_MAX:
+        raise ValueError(f"a batch takes {BATCH_MAX} actions at most")
+    steps = []
+    for i, a in enumerate(actions, 1):
+        name = a.get("name") if isinstance(a, dict) else None
+        name = name.removeprefix(f"mcp__{NAME}__") if isinstance(name, str) else name
+        if name in NOT_BATCHED:
+            raise ValueError(f"action {i}: {name} isn't done in a batch: call it on its own")
+        if name not in SCHEMAS:
+            raise ValueError(f"action {i}: no tool {name!r}")
+        args = a.get("input", {})
+        if not isinstance(args, dict):
+            raise ValueError(f"action {i}: its input is an object of {name}'s arguments")
+        steps.append((name, args))
+    out, last = [], {}
+    for i, (name, args) in enumerate(steps, 1):
+        try:
+            result = browser.call(name, args)
+        except Exception as e:
+            left = len(steps) - i
+            out.append({"type": "text", "text": f"{i}. {name} failed: {type(e).__name__}: {e}" + (
+                f" (the {left} after it not done)" if left > 1 else " (the one after it not done)" if left else "")})
+            break
+        now = {k: result[k] for k in SAID if k in result}
+        for k in SAID:
+            if k in result and last.get(k) == result[k]:
+                del result[k]
+        last.update(now)
+        got = content(name, result)
+        first = next(c for c in got if c["type"] == "text")
+        first["text"] = f"{i}. {name}" + (": " + first["text"] if result else "")
+        out += got
     return out
 
 
@@ -156,7 +217,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
         try:
             if name not in SCHEMAS:
                 raise ValueError(f"no tool {name}")
-            result = {"content": content(name, browser.call(name, args))}
+            result = {"content": batch(browser, args.get("actions")) if name == "browser_batch" else
+                      content(name, browser.call(name, args))}
         except Exception as e:  # (said to the model, which may try again)
             result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True}
         send({"jsonrpc": "2.0", "id": mid, "result": result})

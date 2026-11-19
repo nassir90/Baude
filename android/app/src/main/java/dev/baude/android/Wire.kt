@@ -19,41 +19,67 @@ const val PING_MS = 5_000L    // (wire.PING_S: each end says something at least 
 const val SILENT_MS = 16_000L // (wire.SILENT_S: silent this long, the other end's taken for gone)
 const val MIN_VERSION = 8     // (wire's version 8: Bots)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
+const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long to open)
+const val RELAY_RETRY_MS = 10_000L // (a member that's dropped, tried again this often while it's listed: Baude's 10 s)
 
 /** What ssh offers and takes here: what Android's own crypto has, P-256's ECDH and ECDSA, RSA and AES. */
 private val KEX = "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group16-sha512," +
     "diffie-hellman-group14-sha256"
 private val HOST_KEYS = "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256"
 
+/** Where a connection goes: a host you added, over ssh; or a member of the mesh one of them is in, through it (relay,
+ * as Baude reaches a member through its own machine's host process). */
+sealed class Place {
+    abstract val id: String
+
+    data class Direct(val host: Host) : Place() {
+        override val id: String get() = host.id
+    }
+
+    data class Member(val member: String) : Place() {
+        override val id: String get() = "mesh:$member"
+    }
+}
+
 /** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, "<command> connect" run
- * there, and the host process's JSON lines over its stdin and stdout. Made again whenever it drops, a little later each
- * time; not while the host's key isn't one you've trusted (shown, for you to say). */
+ * there, and the host process's JSON lines over its stdin and stdout. A member of the mesh is reached the same way
+ * through a host that's up and lists it (route): another "<command> connect" on that host's ssh, told to relay to the
+ * member, and from then on a tunnel to it, hello first as ever (wire.through). Made again whenever it drops, a little
+ * later each time (a member: every RELAY_RETRY_MS while a host lists it, else once one does); not while the host's key
+ * isn't one you've trusted (shown, for you to say). */
 class Connection(
     private val ctx: Context,
-    val host: Host,
-    private val key: Key,
+    val place: Place,
+    private val identify: (JSch) -> Unit,
+    private val route: (String) -> Connection?,
     private val heard: (Connection, JSONObject) -> Unit,
     private val changed: (Connection) -> Unit,
 ) {
+    val id: String get() = place.id
+    val host: Host? get() = (place as? Place.Direct)?.host
     @Volatile var state = "connecting" // (connecting, up, down, key: the host's key waits to be trusted)
     @Volatile var why: String? = null
     @Volatile var info: JSONObject? = null
     @Volatile var shown: ShownKey? = null
+    @Volatile var via: Connection? = null // (a member's: the host it's reached through, this time)
+    @Volatile var listed = true // (a member's: whether a host that's up lists it)
     @Volatile private var stopped = false
     @Volatile private var out: OutputStream? = null
     @Volatile private var session: Session? = null
+    @Volatile private var end: () -> Unit = {} // (this connection let go of: its ssh, or a member's channel on another's)
     private val calls = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
     private val nextReq = AtomicInteger(100)
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
 
     fun start() {
-        thread(name = "ssh-${host.address}", isDaemon = true) { loop() }
+        thread(name = "conn-$id", isDaemon = true) { loop() }
     }
 
     fun stop() {
         stopped = true
-        session?.disconnect()
+        wake.offer(Unit)
+        end()
     }
 
     private fun set(state: String, why: String? = null) {
@@ -78,12 +104,17 @@ class Connection(
                     set("key", if (repo.shown!!.changed) "the host's key changed" else "the host's key isn't trusted yet")
                     return // (made again once you've said: Mesh.trust)
                 }
-                set("down", plain(e))
+                set("down", if (e is NoRoute) e.message else plain(e))
             } finally {
                 out = null
-                session?.disconnect()
+                end()
+                end = {}
                 session = null
                 failAll()
+            }
+            if (place is Place.Member) { // (as Baude's: tried again soon while a host lists it, else once one does)
+                if (listed) wake.poll(RELAY_RETRY_MS, TimeUnit.MILLISECONDS) else wake.take()
+                continue
             }
             if (reached) wait = 1_000L // (it was up: tried again at once, then more slowly each time it fails)
             wait = if (wake.poll(wait, TimeUnit.MILLISECONDS) != null) 1_000L // (the network's back: now)
@@ -96,32 +127,61 @@ class Connection(
     private val wake = LinkedBlockingQueue<Unit>() // (kick: the wait between tries cut short)
     @Volatile private var said = "" // (what ssh, or the host's command, last said on stderr: why it went)
 
-    /** Tried again now, not after the wait (the network's back). */
+    /** Tried again now, not after the wait (the network's back, or a member's listed again). */
     fun kick() {
         if (state == "down") wake.offer(Unit)
+    }
+
+    private class NoRoute(why: String) : Exception(why)
+
+    /** Another "<command> connect" on this host's ssh, for a member reached through it (null if it isn't up). */
+    fun exec(): ChannelExec? {
+        val s = session ?: return null
+        val h = host ?: return null
+        if (state != "up" || !s.isConnected) return null
+        return (s.openChannel("exec") as ChannelExec).apply { setCommand("${h.command} connect") }
+    }
+
+    /** The channel to the host process: ssh to a host you added, or one on the ssh of the host a member's reached
+     * through. */
+    private fun open(): ChannelExec = when (val p = place) {
+        is Place.Direct -> {
+            val jsch = JSch()
+            identify(jsch)
+            val repo = TrustedKeys(ctx, p.host)
+            lastRepo = repo
+            jsch.hostKeyRepository = repo
+            val s = jsch.getSession(p.host.user, p.host.address, p.host.port)
+            s.setConfig("StrictHostKeyChecking", "yes")
+            s.setConfig("PreferredAuthentications", "publickey")
+            s.setConfig("kex", KEX)
+            s.setConfig("server_host_key", HOST_KEYS)
+            s.setConfig("PubkeyAcceptedAlgorithms", "ecdsa-sha2-nistp256")
+            s.setServerAliveInterval(15_000)
+            s.setServerAliveCountMax(3)
+            session = s
+            end = { s.disconnect() }
+            s.connect(15_000)
+            (s.openChannel("exec") as ChannelExec).apply { setCommand("${p.host.command} connect") }
+        }
+        is Place.Member -> {
+            val v = route(p.member) ?: throw NoRoute("none of your hosts reaches it now")
+            via = v
+            val ch = try {
+                v.exec()
+            } catch (_: Exception) {
+                null
+            } ?: throw NoRoute("${v.host?.label ?: "its host"} went")
+            end = { ch.disconnect() }
+            ch
+        }
     }
 
     /** One connection, till it ends: whether it got as far as the host process's hello. */
     private fun run(): Boolean {
         set("connecting")
         said = ""
-        val jsch = JSch()
-        jsch.addIdentity("baude", key.private, key.public, null)
-        val repo = TrustedKeys(ctx, host)
-        lastRepo = repo
-        jsch.hostKeyRepository = repo
-        val s = jsch.getSession(host.user, host.address, host.port)
-        s.setConfig("StrictHostKeyChecking", "yes")
-        s.setConfig("PreferredAuthentications", "publickey")
-        s.setConfig("kex", KEX)
-        s.setConfig("server_host_key", HOST_KEYS)
-        s.setConfig("PubkeyAcceptedAlgorithms", "ecdsa-sha2-nistp256")
-        s.setServerAliveInterval(15_000)
-        s.setServerAliveCountMax(3)
-        session = s
-        s.connect(15_000)
-        val ch = s.openChannel("exec") as ChannelExec
-        ch.setCommand("${host.command} connect")
+        val ch = open()
         val input = object : java.io.FilterInputStream(ch.inputStream) { // (every byte heard: a long line coming
             override fun read(): Int = super.read().also { heardAt = SystemClock.elapsedRealtime() } // slowly isn't
             override fun read(b: ByteArray, off: Int, len: Int): Int =                                // silence)
@@ -130,7 +190,7 @@ class Connection(
         val stream = ch.outputStream
         val errors = ch.errStream
         ch.connect(15_000)
-        val stderr = thread(name = "stderr-${host.address}", isDaemon = true) {
+        val stderr = thread(name = "stderr-$id", isDaemon = true) {
             try {
                 BufferedReader(InputStreamReader(errors, Charsets.UTF_8)).forEachLine { line ->
                     if (line.isNotBlank()) said = line.trim().take(200)
@@ -139,7 +199,7 @@ class Connection(
             }
         }
         val queue = LinkedBlockingQueue<ByteArray>()
-        val writer = thread(name = "write-${host.address}", isDaemon = true) {
+        val writer = thread(name = "write-$id", isDaemon = true) {
             try {
                 while (true) {
                     val line = queue.take()
@@ -148,41 +208,53 @@ class Connection(
                     if (queue.isEmpty()) stream.flush()
                 }
             } catch (_: Exception) {
-                s.disconnect() // (can't write: the reader ends, and it's made again)
+                end() // (can't write: the reader ends, and it's made again)
             }
         }
         writes = queue
         out = stream
         var reached = false
-        request(JSONObject().put("op", "hello").put("client", "baude-android")) { reply ->
-            val server = reply.optJSONObject("server")
-            when {
-                reply.optString("op") != "hello" -> {
-                    said = reply.optString("error", "the host said no")
-                    s.disconnect()
-                }
-                (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
-                    said = "this host's Baude is too old for Bots: update it"
-                    s.disconnect()
-                }
-                else -> {
-                    info = server
-                    said = "" // (what it said starting: not why it goes later)
-                    reached = true
-                    set("up")
-                    send(JSONObject().put("op", "subscribe"))
+        val hello = {
+            request(JSONObject().put("op", "hello").put("client", "baude-android")) { reply ->
+                val server = reply.optJSONObject("server")
+                when {
+                    reply.optString("op") != "hello" -> {
+                        said = reply.optString("error", "the host said no")
+                        end()
+                    }
+                    (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
+                        said = "this host's Baude is too old for Bots: update it"
+                        end()
+                    }
+                    else -> {
+                        info = server
+                        said = "" // (what it said starting: not why it goes later)
+                        reached = true
+                        set("up")
+                        send(JSONObject().put("op", "subscribe"))
+                    }
                 }
             }
         }
-        heardAt = SystemClock.elapsedRealtime() + START_MS // (a host process connect starts: its hello waited for)
-        val pinger = thread(name = "ping-${host.address}", isDaemon = true) {
+        val member = (place as? Place.Member)?.member
+        if (member == null) hello()
+        else request(JSONObject().put("op", "relay").put("to", member)) { reply -> // (wire.through)
+            if (reply.optString("op") == "relayed") hello()
+            else {
+                said = reply.optString("error", "${via?.host?.label ?: "its host"} couldn't reach it")
+                end()
+            }
+        }
+        heardAt = SystemClock.elapsedRealtime() + START_MS + // (a host process connect starts: its hello waited for;
+            if (member != null) OPEN_MS else 0L              // a member's tunnel, the time it has to open)
+        val pinger = thread(name = "ping-$id", isDaemon = true) {
             try {
                 while (!stopped && out != null) {
                     Thread.sleep(PING_MS)
                     send(JSONObject().put("op", "ping"))
                     if (SystemClock.elapsedRealtime() - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
                         said = "the host stopped answering"                   // the socket says)
-                        s.disconnect()
+                        end()
                         break
                     }
                 }
@@ -203,6 +275,8 @@ class Connection(
                     if (call != null) call(msg) else heard(this, msg)
                 }
             }
+        } catch (e: java.io.IOException) { // (a member's channel let go of: closed under the reader)
+            if (place is Place.Direct) throw e
         } finally {
             pinger.interrupt()
             writes = null

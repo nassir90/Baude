@@ -70,9 +70,14 @@ object HostStore {
     }
 }
 
-/** The key a host showed, when it isn't the one trusted for it (none yet, or another: changed). */
-data class ShownKey(val type: String, val blob: ByteArray, val changed: Boolean) {
+/** The key a host showed, when it isn't the one trusted for it: none trusted yet, or another (was: the one trusted,
+ * "type base64"), which it changed from. */
+data class ShownKey(val type: String, val blob: ByteArray, val was: String? = null) {
+    val changed: Boolean get() = was != null
     val fingerprint: String get() = fingerprintOf(blob)
+    val wasType: String? get() = was?.substringBefore(" ")
+    val wasFingerprint: String?
+        get() = was?.substringAfter(" ", "")?.let { try { fingerprintOf(Base64.getDecoder().decode(it)) } catch (_: Exception) { null } }
 }
 
 /** JSch's host key check, by HostStore: the trusted key, or the connection's refused and what was shown kept. */
@@ -84,7 +89,7 @@ class TrustedKeys(private val ctx: Context, private val host: Host) : HostKeyRep
         val trusted = HostStore.trusted(ctx, host)
         val now = "${keyType(key)} ${Base64.getEncoder().encodeToString(key)}"
         if (trusted == now) return HostKeyRepository.OK
-        shown = ShownKey(keyType(key), key, changed = trusted != null)
+        shown = ShownKey(keyType(key), key, was = trusted)
         return if (trusted == null) HostKeyRepository.NOT_INCLUDED else HostKeyRepository.CHANGED
     }
 

@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
                     "hosts" -> HostsScreen(::back)
                     else -> Contacts(open = { go(listOf("chat", it.hostId, it.id)) }, hosts = { go(listOf("hosts")) })
                 }
+                HostKeyAsk()
             }
         }
     }

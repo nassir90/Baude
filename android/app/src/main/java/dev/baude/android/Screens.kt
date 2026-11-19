@@ -14,6 +14,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,9 +40,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -72,10 +76,10 @@ fun Contacts(open: (Contact) -> Unit, hosts: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Baude", end = { IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts) })
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
-        if (Mesh.key.value == null || Mesh.hosts.isEmpty()) {
+        if ((Mesh.key.value == null && Mesh.old.value == null) || Mesh.hosts.isEmpty()) {
             GreyBanner("Add a host to see its Bots.", onClick = hosts)
         }
-        for (conn in down) GreyBanner("Can't connect to ${conn.host.label}: ${conn.why ?: "no answer"}", onClick = hosts)
+        for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)}: ${conn.why ?: "no answer"}", onClick = hosts)
         if (contacts.isEmpty()) {
             Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally) {
@@ -120,7 +124,6 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     val contact = Mesh.contact(hostId, sid)
     val name = contact?.name ?: "Bot"
-    val host = Mesh.hosts.firstOrNull { it.id == hostId }
     var text by androidx.compose.runtime.saveable.rememberSaveable(hostId, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -142,18 +145,24 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
         }
     }
     val list = rememberLazyListState()
-    LaunchedEffect(chat.lines.size) { if (chat.lines.isNotEmpty()) list.animateScrollToItem(chat.lines.size - 1) }
+    LaunchedEffect(chat.lines.size, chat.asks.size) { // (to the end: what it said last, or what it asks)
+        val n = chat.lines.size + chat.asks.size
+        if (n > 0) list.animateScrollToItem(n - 1)
+    }
     Mesh.tick.value
     val conn = Mesh.conn(hostId)
     Column(Modifier.fillMaxSize().background(c.inside).imePadding()) {
-        Bar(name, subtitle = host?.label, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
+        Bar(name, subtitle = Mesh.label(hostId), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             lead = { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) })
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line) }
-            if (contact?.state == "working") item { Text("Working…", style = Type.caption, color = c.dim) }
+            items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, contact?.alwaysOffered ?: true) }
+            if (contact?.state == "working" && chat.asks.isEmpty()) item {
+                Text("Working…", style = Type.caption, color = c.dim)
+            }
         }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send beside it
@@ -187,6 +196,111 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
                     files.clear()
                 }
             }
+        }
+    }
+}
+
+/** What a Bot asks to do, as Baude's permission card has it: Allow, Always allow (for Claude Code's models), Deny;
+ * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean) {
+    val c = LocalBaude.current
+    val questions = ask.input.optJSONArray("questions")
+    Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (ask.tool == "AskUserQuestion" && questions != null) {
+            Text("Claude has a question", style = Type.bold, color = c.fg)
+            Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
+                skip = { Mesh.answer(chat, ask, allow = false) })
+            return@Column
+        }
+        Text("Allow ${toolTitle(ask.tool)}?", style = Type.bold, color = c.fg)
+        val shown = shownInput(ask.input)
+        if (shown.isNotBlank()) Text(shown, style = Type.mono, color = c.fg, maxLines = 14, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
+                .padding(horizontal = 8.dp, vertical = 6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Button("Allow", suggested = true) { Mesh.answer(chat, ask, allow = true) }
+            if (alwaysOffered) Button("Always allow ${toolDisplay(ask.tool).first}") {
+                Mesh.answer(chat, ask, allow = true, always = true)
+            }
+            Button("Deny", destructive = true) { Mesh.answer(chat, ask, allow = false) }
+        }
+    }
+}
+
+/** A call's input as the card shows it: its command, or its fields one a line. */
+private fun shownInput(input: org.json.JSONObject): String {
+    input.optString("command").ifBlank { null }?.let { return it }
+    return input.keys().asSequence().joinToString("\n") { k ->
+        val v = input.opt(k)
+        "$k: " + (if (v is String) v else v.toString()).lines().take(6).joinToString("\n  ").take(400)
+    }
+}
+
+/** claude's questions (AskUserQuestion), as Baude's QuestionForm: each its options (one picked, or several if it
+ * says so) and Other, to write your own. Answer sends {question: what's picked, comma-joined}; Skip, none. */
+@Composable
+private fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
+    val c = LocalBaude.current
+    val qs = (0 until questions.length()).mapNotNull { questions.optJSONObject(it) }.filter { it.optString("question").isNotBlank() }
+    val picked = remember { mutableStateListOf<Set<String>>().apply { repeat(qs.size) { add(emptySet()) } } }
+    val other = remember { mutableStateListOf<String?>().apply { repeat(qs.size) { add(null) } } }
+    fun answers() = org.json.JSONObject().apply {
+        qs.forEachIndexed { i, q ->
+            val all = picked[i].toList() + listOfNotNull(other[i]?.trim()?.ifBlank { null })
+            put(q.optString("question"), all.joinToString(", "))
+        }
+    }
+    qs.forEachIndexed { i, q ->
+        val multi = q.optBoolean("multiSelect")
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val head = q.optString("header")
+            if (head.isNotBlank()) Text(head, style = Type.caption, color = c.dim)
+            Text(q.optString("question"), style = Type.bold, color = c.fg)
+            val options = q.optJSONArray("options")
+            for (j in 0 until (options?.length() ?: 0)) {
+                val o = options!!.opt(j)
+                val label = (o as? org.json.JSONObject)?.optString("label") ?: o.toString()
+                val about = (o as? org.json.JSONObject)?.optString("description").orEmpty()
+                val on = label in picked[i]
+                Choice(on, multi, label, about) {
+                    picked[i] = if (multi) (if (on) picked[i] - label else picked[i] + label) else setOf(label)
+                    if (!multi) other[i] = null
+                }
+            }
+            Choice(other[i] != null, multi, "Other", "") {
+                other[i] = if (other[i] != null) null else ""
+                if (!multi && other[i] != null) picked[i] = emptySet()
+            }
+            other[i]?.let { Field(it, { v -> other[i] = v }, "Your own answer") }
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        val ready = qs.indices.all { picked[it].isNotEmpty() || !other[it].isNullOrBlank() }
+        Button("Answer", suggested = ready) { if (ready) answer(answers()) }
+        Button("Skip", onClick = skip)
+    }
+}
+
+@Composable
+private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, toggle: () -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable(onClick = toggle).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(18.dp).clip(if (multi) RoundedCornerShape(4.dp) else androidx.compose.foundation.shape.CircleShape)
+            .background(if (on) c.accentBg else c.inside)
+            .border(1.5.dp, if (on) c.accentBg else c.dim, if (multi) RoundedCornerShape(4.dp)
+                else androidx.compose.foundation.shape.CircleShape),
+            contentAlignment = Alignment.Center) {
+            if (on && multi) androidx.compose.material3.Icon(Icons.Filled.Check, null, tint = c.accentFg,
+                modifier = Modifier.size(14.dp))
+            else if (on) Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.accentFg))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(label, style = Type.body, color = c.fg)
+            if (about.isNotBlank()) Text(about, style = Type.caption, color = c.dim)
         }
     }
 }
@@ -350,29 +464,30 @@ private const val MAX_FILE = 20L * 1024 * 1024
 
 // ----------------------------------------------------------------------------------------------------- hosts --
 
-/** This phone's key, and your hosts: added as user@host (a host's Tailscale name works, as ssh's), each one's key
- * trusted once you've compared it. */
+/** This phone's key, your hosts (added as user@host: a host's Tailscale name works, as ssh's), each one's key trusted
+ * once you've compared it, and the members of their mesh, reached through them. */
 @Composable
 fun HostsScreen(back: () -> Unit) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
     var adding by remember { mutableStateOf(false) }
-    var asking by remember { mutableStateOf<Connection?>(null) }
     var removing by remember { mutableStateOf<Host?>(null) }
     var renewing by remember { mutableStateOf(false) }
+    var forgetting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             end = { IconButton(Icons.Filled.Add, "Add Host") { adding = true } })
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val key = Mesh.key.value
+            val old = Mesh.old.value
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("This phone's key", style = Type.title, color = c.fg)
                 if (key == null) {
-                    Text("Make a key for this phone, then put its public half in each host's ~/.ssh/authorized_keys.",
-                        style = Type.body, color = c.dim)
+                    Text("Make a key for this phone, then put its public half in each host's ~/.ssh/authorized_keys. " +
+                        "It's made in this phone's secure hardware and never leaves it.", style = Type.body, color = c.dim)
                     Button("Make Key", suggested = true) { Mesh.makeKey() }
                 } else {
                     Text("Put this line in each host's ~/.ssh/authorized_keys.", style = Type.body, color = c.dim)
@@ -380,7 +495,15 @@ fun HostsScreen(back: () -> Unit) {
                         Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
                     }
-                    Text(key.fingerprint, style = Type.caption, color = c.dim)
+                    Text("ECDSA P-256 · ${key.fingerprint}", style = Type.caption, color = c.dim)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Icon(Icons.Filled.Lock, null, tint = c.dim,
+                            modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("${key.where}. " + if (key.hardware) "It signs for this phone there and can't be " +
+                            "copied off it." else "It signs for this phone there: this app can't read it out.",
+                            style = Type.caption, color = c.dim)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button("Copy", suggested = true) {
                             ctx.getSystemService(ClipboardManager::class.java)
@@ -394,6 +517,15 @@ fun HostsScreen(back: () -> Unit) {
                         Button("New Key") { renewing = true }
                     }
                 }
+                if (old != null) Column(Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(8.dp))
+                    .background(c.warning.copy(alpha = 0.12f)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Moving to the new key", style = Type.bold, color = c.fg)
+                    Text("This phone's old key, kept in a file, is still offered to your hosts so they let it in " +
+                        "meanwhile. On each host, put the line above in ~/.ssh/authorized_keys in place of the old " +
+                        "key's, then forget the old key.", style = Type.caption, color = c.fg)
+                    Text("Old key: ${old.fingerprint}", style = Type.caption, color = c.dim)
+                    Button("Forget Old Key", destructive = true) { forgetting = true }
+                }
             }
             if (Mesh.hosts.isEmpty()) Text("No hosts yet. Add one as user@host: over Tailscale, its Tailscale name.",
                 style = Type.body, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
@@ -402,14 +534,18 @@ fun HostsScreen(back: () -> Unit) {
                 val (state, colour) = when (conn?.state) {
                     "up" -> "Connected" to c.success
                     "connecting" -> "Connecting…" to c.dim
-                    "key" -> (if (conn.shown?.changed == true) "Its key changed: tap to see it"
-                              else "Its key isn't trusted yet: tap to check it") to c.warning
+                    "key" -> (if (conn.shown?.changed == true) "Its key changed, so it isn't connected: tap to see it"
+                              else "Its key isn't trusted yet: tap to check it") to
+                        (if (conn.shown?.changed == true) c.destructive else c.warning)
                     "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
-                    else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
+                    else -> (if (key == null && old == null) "Make this phone's key first" else "Not connected") to c.dim
                 }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)
-                        .clickable { if (conn?.state == "key") asking = conn else Mesh.connect(h) }.padding(12.dp),
+                        .clickable {
+                            if (conn?.state == "key") Mesh.declined.removeAll { it.startsWith(h.id + " ") } // (asked again)
+                            else Mesh.connect(h)
+                        }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
@@ -420,31 +556,10 @@ fun HostsScreen(back: () -> Unit) {
                     IconButton(Icons.Filled.Delete, "Remove") { removing = h }
                 }
             }
+            Members()
         }
     }
     if (adding) AddHost { adding = false }
-    asking?.let { conn ->
-        val shown = conn.shown
-        if (shown == null) asking = null else AlertDialog(
-            onDismissRequest = { asking = null },
-            title = { Text(if (shown.changed) "${conn.host.label}'s key changed" else "Trust ${conn.host.label}?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (shown.changed) "It isn't the key it showed before, so it isn't connected to. If you know " +
-                        "why it changed, remove the host and add it again."
-                        else "Compare its fingerprint with the host's own, from ssh-keygen -lf on its host key.")
-                    Text(shown.type, style = Type.caption, color = c.dim)
-                    SelectionContainer { Text(shown.fingerprint, style = Type.mono) }
-                }
-            },
-            confirmButton = {
-                if (shown.changed) Button("OK") { asking = null }
-                else Button("Trust", suggested = true) { Mesh.trust(conn.host, shown); asking = null }
-            },
-            dismissButton = { if (!shown.changed) Button("Cancel") { asking = null } },
-            containerColor = c.dialog,
-        )
-    }
     removing?.let { h ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
             text = { Text("Its Bots aren't listed here any more. Nothing on the host changes.") },
@@ -455,6 +570,101 @@ fun HostsScreen(back: () -> Unit) {
         text = { Text("Hosts that have the current key need the new one in their authorized_keys.") },
         confirmButton = { Button("Make Key", destructive = true) { Mesh.makeKey(); renewing = false } },
         dismissButton = { Button("Cancel") { renewing = false } }, containerColor = c.dialog)
+    if (forgetting) AlertDialog(onDismissRequest = { forgetting = false }, title = { Text("Forget the old key?") },
+        text = { Text("Hosts that have only the old key in their authorized_keys won't let this phone in.") },
+        confirmButton = { Button("Forget Old Key", destructive = true) { Mesh.forgetOld(); forgetting = false } },
+        dismissButton = { Button("Cancel") { forgetting = false } }, containerColor = c.dialog)
+}
+
+/** The members of your hosts' mesh: each reached through a host of yours that's up (the one that reaches it in fewest
+ * hops), without this phone's key on it. */
+@Composable
+private fun Members() {
+    val c = LocalBaude.current
+    Mesh.tick.value // (a connection's state changed: drawn again)
+    val members = Mesh.members.values.sortedWith(compareBy({ it.optInt("hops", 99) }, { it.optString("name").lowercase() }))
+    if (members.isEmpty()) return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("The mesh", style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+        Text("Reached through your hosts: they need no key of this phone's.", style = Type.caption, color = c.dim,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)) {
+            members.forEachIndexed { i, m ->
+                val id = m.optString("id")
+                val conn = Mesh.conn("mesh:$id")
+                val route = m.optString("route").ifBlank { null }
+                val through = if (m.isNull("through")) null else m.optString("through").ifBlank { null }
+                val path = listOfNotNull(route, through).joinToString(" and ")
+                val (state, colour) = when {
+                    conn?.state == "up" -> "Connected" to c.success
+                    conn?.listed == false -> "Not in reach now" to c.dim
+                    conn?.state == "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
+                    else -> "Connecting…" to c.dim
+                }
+                if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 12.dp).heightIn(min = 1.dp).background(c.rule))
+                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(m.optString("name").ifBlank { m.optString("host") }, style = Type.bold, color = c.fg)
+                        val where = m.optString("host").ifBlank { null }
+                        Text(listOfNotNull(where, if (path.isNotEmpty()) "through $path" else null).joinToString(" · "),
+                            style = Type.caption, color = c.dim)
+                        Text(state, style = Type.caption, color = colour)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A host's key, when it isn't one you've trusted, asked about wherever you are, as ssh asks: the first time, its
+ * fingerprint, to trust or not; changed, the key trusted before and the one shown now, refused unless you trust the
+ * new one on purpose. Not trusting leaves the host unconnected (tap it in Hosts to be asked again). */
+@Composable
+fun HostKeyAsk() {
+    val c = LocalBaude.current
+    Mesh.tick.value
+    val conn = Mesh.hosts.firstNotNullOfOrNull { h ->
+        Mesh.conn(h.id)?.takeIf { it.state == "key" && it.shown != null && "${h.id} ${it.shown!!.fingerprint}" !in Mesh.declined }
+    } ?: return
+    val host = conn.host ?: return
+    val shown = conn.shown ?: return
+    val decline = { Mesh.declined.add("${host.id} ${shown.fingerprint}"); Unit }
+    AlertDialog(
+        onDismissRequest = decline,
+        title = { Text(if (shown.changed) "${host.label}'s key changed" else "Trust ${host.label}?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (shown.changed) {
+                    Text("${host.dest} showed a key that isn't the one you trusted. Someone may be pretending to be it, " +
+                        "or its host key was replaced. This phone won't connect to it unless you trust the new key.")
+                    KeyLines("Trusted before", shown.wasType ?: "?", shown.wasFingerprint ?: "?")
+                    KeyLines("Shown now", shown.type, shown.fingerprint)
+                } else {
+                    Text("This phone hasn't connected to ${host.dest} before. Compare its key's fingerprint with the " +
+                        "host's own (ssh-keygen -lf on its host key) before you trust it.")
+                    KeyLines(null, shown.type, shown.fingerprint)
+                }
+            }
+        },
+        confirmButton = {
+            if (shown.changed) Button("Don't Connect", suggested = true, onClick = decline)
+            else Button("Trust", suggested = true) { Mesh.trust(host, shown) }
+        },
+        dismissButton = {
+            if (shown.changed) Button("Trust the New Key", destructive = true) { Mesh.trust(host, shown) }
+            else Button("Don't Trust", onClick = decline)
+        },
+        containerColor = c.dialog,
+    )
+}
+
+@Composable
+private fun KeyLines(label: String?, type: String, fingerprint: String) {
+    val c = LocalBaude.current
+    Column {
+        Text(listOfNotNull(label, type).joinToString(" · "), style = Type.caption, color = c.dim)
+        SelectionContainer { Text(fingerprint, style = Type.mono, color = c.fg) }
+    }
 }
 
 @Composable

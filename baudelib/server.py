@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -353,6 +353,7 @@ class Session:
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "acting": self.acting and self.busy and not self.asks,
+                "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
                 "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
@@ -500,6 +501,7 @@ class Server:
         self.socket_path = socket_path or wire.socket_path()
         self.catalogue_lock, self.catalogue_asked = threading.Lock(), {}  # (catalogue's: when each folder was first asked for)
         self.agent_runs = {}  # (id: an agent run here for a caller elsewhere: agentproxy.Run)
+        self.phones = phonebrowser.Phones(self)  # (Bots whose browser is on a phone, connected here as a head)
         if len(self.socket_path.encode()) > 100:
             raise OSError(f"{self.socket_path}: too long a path for a socket")
         self.listener, self.accepted, self.binding = None, 0.0, threading.Lock()
@@ -939,6 +941,7 @@ class Server:
             if getattr(conn, "agent_relay", None) is not None:
                 conn.agent_relay[0].relay_gone(conn.agent_relay[1])
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
+            self.phones.gone(conn)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
                     conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
@@ -1072,6 +1075,8 @@ class Server:
 
             def browse():
                 try:
+                    if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there)
+                        return reply("emission", result=self.phones.call(bot, msg["call"]))
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
                                                                    timeout=emissiontools.HOST_WAIT_S))
                 except (OSError, ValueError) as e:
@@ -1082,9 +1087,15 @@ class Server:
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection)
             if not isinstance(bot.get("id"), str) or not bot["id"] or getattr(conn, "emission_watch", None):
                 return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
+            if self.phones.phone(bot["id"]) is not None:
+                return reply("error", error="this Bot's browser is on a phone now: it's shown there")
             threading.Thread(target=self.emission_watch, args=(conn, req, bot, msg), daemon=True,
                              name="emission-watch").start()
             return None
+        if op == "emission_serve":  # (a phone showing a Bot's browser, or not now: phonebrowser)
+            return self.phones.serve(conn, msg, reply)
+        if op == "emission_answer":  # (a phone's answer to an emission_call)
+            return self.phones.answer(conn, msg)
         if op == "emission_watch_say":  # (what the pane says back: a frame taken, its new size)
             line = msg.get("line") if isinstance(msg.get("line"), dict) else {}
             line = {k: line[k] for k in ("ack", "max_w", "max_h") if isinstance(line.get(k), int)}

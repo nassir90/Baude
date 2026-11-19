@@ -291,6 +291,7 @@ object Mesh {
     private fun changed(c: Connection) {
         if (conns[c.id] !== c) return
         tick.value++
+        PhoneBrowser.changed(c)
         if (c.state == "up") {
             c.host?.let { h -> c.info?.optString("id")?.takeIf(::isId)?.let { HostStore.setMachine(app, h, it) } }
             if (sessions[c.id] != null) catchUp.add(c.id)
@@ -320,6 +321,8 @@ object Mesh {
                     open?.let { if (it.hostId == c.id) read(it) } // (its first read, or what it missed)
                 }
                 "turn_ended" -> ended(c, msg)
+                "emission_call" -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
+                "emission_unserved" -> PhoneBrowser.unserved(c, msg)
                 "claude" -> open?.let {
                     if (it.hostId != c.id || it.sid != msg.optString("session")) return@let
                     val ask = msg.optJSONObject("msg")?.let(Ask::of)

@@ -12,6 +12,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="Baude"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Baude">
 
         <activity
@@ -24,6 +25,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false"
+            android:process=":emission"
+            android:launchMode="singleTask"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|density|screenSize|smallestScreenSize|layoutDirection|colorMode|fontWeightAdjustment|grammaticalGender"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".BrowserService"
+            android:exported="false"
+            android:process=":emission"
+            android:foregroundServiceType="remoteMessaging" />
 
         <service
             android:name=".MeshService"

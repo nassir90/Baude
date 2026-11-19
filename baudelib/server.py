@@ -326,7 +326,8 @@ BOT_MEMORY_TOLD = 32 << 10  # (bytes of a Bot's memory put in what its agent's t
 
 
 def bot_dir(state_dir, sid):
-    """A Bot's own folder on its host: its memory (memory.md) and its picture."""
+    """A Bot's own folder on its host: its memory (memory.md), what the user's accepted of it (memory.seen.md: what the
+    Bot's changes are shown against, on the Memory page) and its picture."""
     return os.path.join(state_dir, "bots", wire.safe_name(sid))
 
 
@@ -343,9 +344,26 @@ def bot_system(name, memory_path, memory):
             f"Your memory is the Markdown file {memory_path}. It is yours to keep: read it, and edit it with your "
             "file tools when you learn something worth keeping (who the user is, what they want, how they like to "
             "work, what's in progress), and take out what's no longer true. Keep it short and current; the user can "
-            "read and edit it too.\n\n"
+            "read and edit it too.\n"
+            "Changes of yours the user rejects disappear from the file: don't put them back unless they ask you to "
+            "(memory.seen.md beside it is their copy of what they've accepted: leave it as it is).\n\n"
             + ("Your memory as this run starts:\n<memory>\n" + told + "\n</memory>" + rest if told
                else "Your memory is empty so far."))
+
+
+def _mtime(path):
+    """A file's mtime in ns, or None if there's none."""
+    try:
+        return os.stat(path).st_mtime_ns
+    except FileNotFoundError:
+        return None
+
+
+def _write_text(path, text):
+    """A file's text replaced whole (written beside it, then moved over it: never half there)."""
+    with open(path + ".new", "w") as f:
+        f.write(text)
+    os.replace(path + ".new", path)
 
 
 class AlreadyRunning(OSError):
@@ -991,8 +1009,13 @@ class Server:
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
-            if op == "memory":  # (a Bot's memory: read, or, text given, written)
-                return reply("memory", session=s.id, **self.bot_memory(s, msg.get("text")))
+            if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
+                # base_mtime, with what it wrote)
+                mem = self.bot_memory(s, msg.get("text"), msg.get("seen"),
+                                      **({"base_mtime": msg["base_mtime"]} if "base_mtime" in msg else {}))
+                if "refused" in mem:
+                    return reply("error", error=mem.pop("refused"), session=s.id, **mem)
+                return reply("memory", session=s.id, **mem)
         return reply("error", error=f"unknown op {op!r}")
 
     def set_bot(self, s, bot):
@@ -1007,9 +1030,10 @@ class Server:
             os.makedirs(folder, mode=0o700, exist_ok=True)
             s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
                              "since": (s.meta.get("bot") or {}).get("since") or time.time()}
-            if not os.path.exists(os.path.join(folder, "memory.md")):
-                with open(os.path.join(folder, "memory.md"), "w") as f:
-                    f.write("")
+            if not os.path.exists(os.path.join(folder, "memory.md")):  # (and nothing in it accepted yet: all the Bot
+                for name in ("memory.md", "memory.seen.md"):              # writes is shown as its changes)
+                    with open(os.path.join(folder, name), "w") as f:
+                        f.write("")
             pic = os.path.join(folder, "picture")
             if bot.get("picture") == "":
                 if os.path.exists(pic):
@@ -1055,22 +1079,40 @@ class Server:
         with open(pic, "rb") as f:
             return base64.b64encode(f.read()).decode()
 
-    def bot_memory(self, s, text=None):
-        """A Bot's memory: {text, path, mtime}, after writing text if it's given."""
+    def bot_memory(self, s, text=None, seen=None, **base):
+        """A Bot's memory: {text, seen, mtime, path}: memory.md's text and its mtime (in ns), and seen, what the user's
+        accepted of it (memory.seen.md, made as the memory is the first time it's asked for, if there's none). text
+        given: written, and seen with it if that's given; base_mtime given, only if memory.md's mtime is still that,
+        else nothing's written and it's {refused: why, text, seen, mtime, path}, the memory as the Bot left it."""
         if not s.meta.get("bot"):
             raise ValueError("not a Bot")
-        path = os.path.join(bot_dir(self.state_dir, s.id), "memory.md")
+        folder = bot_dir(self.state_dir, s.id)
+        path, seen_path = os.path.join(folder, "memory.md"), os.path.join(folder, "memory.seen.md")
         if text is not None:
-            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-            with open(path + ".new", "w") as f:
-                f.write(str(text))
-            os.replace(path + ".new", path)
+            if "base_mtime" in base and _mtime(path) != base["base_mtime"]:
+                return {"refused": "the Bot changed its memory since it was read", **self.memory_now(path, seen_path)}
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            if seen is not None:
+                _write_text(seen_path, str(seen))
+            _write_text(path, str(text))
+        return self.memory_now(path, seen_path)
+
+    @staticmethod
+    def memory_now(path, seen_path):
+        """A Bot's memory as it is on the disk (bot_memory's)."""
         try:
             with open(path) as f:
                 text = f.read()
         except FileNotFoundError:
             text = ""
-        return {"text": text, "path": path, "mtime": os.path.getmtime(path) if os.path.exists(path) else None}
+        try:
+            with open(seen_path) as f:
+                seen = f.read()
+        except FileNotFoundError:
+            seen = text
+            if os.path.isdir(os.path.dirname(seen_path)):
+                _write_text(seen_path, seen)
+        return {"text": text, "seen": seen, "mtime": _mtime(path), "path": path}
 
     @staticmethod
     def makes_folder(msg):

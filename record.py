@@ -1498,16 +1498,26 @@ def pages_root():
 
 # ---------------------------------------------------------------- UI pieces
 
-CSS = """
-.reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
-.reader-assistant { padding: 4px 2px; }
-.reader-assistant label.prose { font-size: 1.02em; }
+# A page's editor's look (DiaryEditor, EditControls): Baude's Bot memory pane loads it too
+EDITOR_CSS = """
 button.edit-control { min-height: 0; min-width: 0; padding: 0; border-radius: 0; color: white; box-shadow: none; }
 button.edit-accept { background: #2ec27e; }
 button.edit-accept:hover { background: #26a269; }
 button.edit-reject { background: #e01b24; }
 button.edit-reject:hover { background: #c01c28; }  /* (an edit's Accept and Reject, on its page: EditControls) */
 button.edit-card-control { min-width: 22px; min-height: 18px; }  /* (and on its card: RecordChat.card_extra) */
+.diary-title { font-size: 1.75em; font-weight: 800; }
+.diary { font-size: 1.05em; background: transparent; }
+/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
+textview.own-selection > text > selection { background-color: transparent; }
+entry.diary-title { background: none; }
+entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
+"""
+
+CSS = EDITOR_CSS + """
+.reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
+.reader-assistant { padding: 4px 2px; }
+.reader-assistant label.prose { font-size: 1.02em; }
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
 .pending-bar button { min-height: 24px; min-width: 24px; padding: 0; }  /* (edits waiting: RecordChat._pending_bar) */
 .quote-in-bubble { border-left: 3px solid alpha(@view_fg_color, 0.25); padding-left: 8px; font-size: 0.92em;
@@ -1515,17 +1525,11 @@ button.edit-card-control { min-width: 22px; min-height: 18px; }  /* (and on its 
 .quote-in-bubble.quote-chip { border-left-color: @accent_bg_color; opacity: 1; color: alpha(@card_fg_color, 0.8); }
 /* (one to send, its bar as bright as the accent: RecordChat.quote_box) */
 button.quote-drop { min-width: 24px; min-height: 24px; padding: 0; border-radius: 0; }
-.diary-title { font-size: 1.75em; font-weight: 800; }
 dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
-.diary { font-size: 1.05em; background: transparent; }
-/* a page's selection is NotesView's own, drawn to its text (_snapshot_selection) */
-textview.own-selection > text > selection { background-color: transparent; }
 /* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
-entry.diary-title { background: none; }
-entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
 paned.notes-split > separator { background: none; background-image: none; box-shadow: none; }
 .ref-card contents { padding: 6px 8px; }  /* (a name's card, just under the pointer: Window.ref_card) */
 .page-placeholder { font-style: italic; }
@@ -2798,6 +2802,53 @@ class EditControls(Gtk.Box):
             self.layout.layout_changed()
 
 
+class EditorHost:
+    """What a DiaryEditor needs of the window it's in (its win). Record's Window is one, with its own of each; another
+    (Baude's Memory page, botmemory) subclasses this, which has each method doing nothing, or what a window with no
+    notebooks open says.
+    store: .save() (the page changed: kept soon), .markup ("line": a line's markup shown with the caret on it),
+           .spell_check, .meta ({"messages": [...]}: what's proposed, pending_edits), .page_file(notebook, page)
+    pages: the pages' list: .names() ([names], _), .prune(), .changed(), .typed(notebook, page, shown)
+    chat:  the Record: .decided(p), .set_selection(notebook, page, start, end, text), .follow_moves(notebook, moved),
+           .edit_cards_changed(), .tint(editor), .agent (its reply coming, or None)
+    tabs:  .get(key), .retitle(key, title, tooltip=None)
+    current: the notebook open (its page's selection quoted to the Record, its pages' names the + list's)"""
+    pages_made = True  # (a [[link]] followed and a +Name typed make a page; False: the notebook's one page is all)
+    store = pages = chat = tabs = current = None
+
+    def get_focus(self):
+        return None
+
+    def toast(self, text):
+        pass
+
+    def space(self):
+        """What @ searches (a chat's folder, its chats): None, nothing to search."""
+        return None
+
+    def read_folders(self):
+        return []
+
+    def open_note(self, name, select=True):
+        """A page opened (made if there's none yet): its editor, or None."""
+        return None
+
+    def open_ref(self, name):
+        pass
+
+    def open_citation(self, url):
+        pass
+
+    def hover_ref(self, name, at=None):
+        pass
+
+    def hover_left(self):
+        pass
+
+    def note_renamed(self, moved):
+        pass
+
+
 class DiaryEditor(Gtk.Box, FindInText):
     """A Record's glossary, its notes: pages of Markdown drawn as they read, as Self's editor draws them (headings,
     **bold**, *italic*, ==marked==, `code`, - lists, > quotes, [links](url)), the markup shown on the caret's line
@@ -2983,7 +3034,9 @@ class DiaryEditor(Gtk.Box, FindInText):
     def _up_to_title(self):
         """Up on the text's first line, as Down in the title comes down to it: up into the title, the caret about
         straight above where it was (title_offset_at), none of it selected, so what's typed next doesn't replace it.
-        False anywhere lower: Up's as it always was."""
+        False anywhere lower, or with the title hidden: Up's as it always was."""
+        if not self.title.is_visible():
+            return False
         caret = self.buf.get_iter_at_mark(self.buf.get_insert())
         at = self.view.get_iter_location(caret)
         if at.y != self.view.get_iter_location(self.buf.get_start_iter()).y:
@@ -3063,10 +3116,11 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.win.note_renamed(moved)
         self.win.chat.edit_cards_changed()  # (an edit's card: its page's there again)
 
-    def reload(self):
+    def reload(self, pending=False):
         """The page changed elsewhere (a word added to To learn, a link renamed): shown again, the caret kept, nothing
-        to undo (as GTK's own Undo had it)."""
-        if self.notebook and self.kept() != self.notebook["pages"].get(self.page, ""):
+        to undo (as GTK's own Undo had it). pending: what's proposed to it changed: shown again even if its text's the
+        same."""
+        if self.notebook and (pending or self.kept() != self.notebook["pages"].get(self.page, "")):
             at = self.kept_offset(self.buf.get_property("cursor-position"))
             self._drop_all()
             self.loading = True
@@ -3544,6 +3598,13 @@ class DiaryEditor(Gtk.Box, FindInText):
             self.buf.move_mark(e["a"], self.buf.get_iter_at_offset(at))
             self.buf.move_mark(e["b"], self.buf.get_iter_at_offset(at + len(old)))
 
+    @staticmethod
+    def adds(p):
+        """Is a change lines put in after its passage's (its new its old, whole lines, with more after)? Its green is
+        then only what it puts in, and its passage isn't struck through: it stays."""
+        old, new = p["old"], p["new"]
+        return bool(old) and old.endswith("\n") and len(new) > len(old) and new.startswith(old)
+
     def _put_greens(self):
         """Each change shown without its green: that put in, just after its passage (the last first, so two at one
         place are in their order). A whole line, or lines, replaced: the green on a line of its own, under it."""
@@ -3551,8 +3612,9 @@ class DiaryEditor(Gtk.Box, FindInText):
             if e["g0"] is not None:
                 continue
             p, a, b = e["p"], self.buf.get_iter_at_mark(e["a"]), self.buf.get_iter_at_mark(e["b"])
-            body = p["new"].rstrip("\n")
-            trail = p["new"][len(body):]
+            put = p["new"][len(p["old"]):] if self.adds(p) and not e["gone"] else p["new"]
+            body = put.rstrip("\n")
+            trail = put[len(body):]
             lead = "\n" if p["old"] and not e["gone"] and not p["old"].endswith("\n") and not body.startswith("\n") \
                 and a.starts_line() and b.ends_line() else ""
             at, words = b.get_offset(), lead + body
@@ -3616,7 +3678,8 @@ class DiaryEditor(Gtk.Box, FindInText):
             if e["g0"] is None:
                 continue
             for x, y in self._kept_pieces(*(buf.get_iter_at_mark(e[k]).get_offset() for k in ("a", "b"))):
-                tag("proposal-old", x, y)
+                if not self.adds(e["p"]):
+                    tag("proposal-old", x, y)
             g0, g1 = (buf.get_iter_at_mark(e[k]).get_offset() for k in ("g0", "g1"))
             tag("proposal-new", g0 + e["lead"], g0 + e["lead"] + e["body"])
             tag("proposal-lock", g0, g1)
@@ -4239,7 +4302,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         elif hit[0] == "url" and hit[1].startswith(CITE_SCHEME):
             self.win.open_citation(hit[1])
         elif hit[0] == "url":
-            Gtk.UriLauncher(uri=hit[1]).launch(self.win, None, None)
+            Gtk.UriLauncher(uri=hit[1]).launch(self.get_root(), None, None)
         else:
             self.win.open_ref(hit[1])
 
@@ -4283,7 +4346,7 @@ class DiaryEditor(Gtk.Box, FindInText):
             typed = self.buf.get_slice(self.buf.get_iter_at_offset(self.token[0]), ins, True)
             if typed.startswith("#") and "\n" not in typed:
                 return self._issue_search(before, self.token[0] - start, start)
-            if typed.startswith("+") and LINKING_RE.fullmatch(typed) and self.notebook is not None:
+            if typed.startswith("+") and LINKING_RE.fullmatch(typed) and self._pages_made():
                 self.token = (self.token[0], typed[1:])
                 self.token_far = max(self.token_far or 0, offset)
                 self._mark_token()
@@ -4294,7 +4357,7 @@ class DiaryEditor(Gtk.Box, FindInText):
                 self._mark_token()
                 return self._fill_pop()
         m = re.search(r"(?<![\w@])@(\{[^}\n]*|[\w./:\-]*)$", before) or re.search(r"#[\w./:\-]*$", before) or \
-            (plus if self.notebook is not None and (plus := LINKING_RE.search(before)) and
+            (plus if self._pages_made() and (plus := LINKING_RE.search(before)) and
              not (not plus.group(1) and not before[:plus.start()].strip()) and not self._in_code(offset) else None)
         if not m or offset - len(m.group(0)) != self.typed_at:  # (only an @ just typed: the caret come
             return self._hide_pop()  # back to an @name's end doesn't start its search again, to take in what's next)
@@ -4687,10 +4750,15 @@ class DiaryEditor(Gtk.Box, FindInText):
         self.buf.end_user_action()
         return True
 
+    def _pages_made(self):
+        """Does a link here make a page (+'s list of pages to link to, +Ideas a sub-page)? Not in a one-page notebook
+        (EditorHost.pages_made)."""
+        return self.notebook is not None and getattr(self.win, "pages_made", True)
+
     def _sub_page(self):
         """+Ideas just typed, then a space or Enter: it becomes [[+Ideas]], a link to this page's sub-page Ideas, which
         the page list has for the link, grey until something's written in it, as Zim does. True if it was."""
-        if self.notebook is None or self.buf.get_has_selection():
+        if not self._pages_made() or self.buf.get_has_selection():
             return False
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())
         line = ins.copy()

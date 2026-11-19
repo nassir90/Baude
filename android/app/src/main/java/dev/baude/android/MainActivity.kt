@@ -20,6 +20,19 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Mesh.start(this)
         HomePrefs.load(this)
+        Outbox.start() // (feedback not filed yet: tried again)
+        Meta.restore() // (its conversation and journal, as they were kept; its session attached again once its host's up)
+        Meta.go = { b ->
+            when (b) {
+                "send_feedback" -> go(listOf("feedback"))
+                "hosts" -> go(listOf("hosts"))
+                "new_session" -> { // (the New session form, empty, in Meta's pane)
+                    MetaTools.form.value = org.json.JSONObject().put("id", "f${MetaTools.next++}").put("form", "new_session")
+                        .put("values", org.json.JSONObject()).put("state", "open")
+                    MetaTools.formVersion.value++
+                }
+            }
+        }
         MeshService.keep(this)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)

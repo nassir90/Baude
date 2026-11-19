@@ -96,75 +96,137 @@ fun merge3(base: String, ours: String, theirs: String): String? {
 private val UNREACHED = setOf("the server isn't there", "the server didn't answer", "the server's gone", "not connected",
     "the connection went")
 
-/** A Bot's memory (botmemory.BotMemory): the notes it keeps, as you've seen them, its changes since shown where they
- * are to accept or reject, written back 600 ms after each edit or answer. Saved while the Bot's written it since, its
- * change and yours are made one (or, the same lines, its shown as changes). */
+/** Do two changes (of the same text) touch the same lines (or go in at the same place)? */
+private fun overlap(a: Hunk, b: Hunk) = a.from < b.to && b.from < a.to || a.from == b.from && (a.from == a.to || b.from == b.to)
+
+/** A Bot's memory as this phone has it, kept while the app runs (whichever page is shown: a view model's part):
+ * base, the Bot's text as its host last said it (what a save is merged against); seen, what you've accepted, with
+ * your edits; text, what's saved, seen with the Bot's changes not yet accepted or rejected in it (botmemory's
+ * written()). Saved 600 ms after a change, at once on leaving the page, and again a little later if it couldn't be. */
+class MemoryState(val hostId: String, val sid: String) {
+    var base by mutableStateOf<String?>(null)
+    var seen by mutableStateOf("")
+    var text by mutableStateOf("")
+    var mtime: Long? = null
+    var failed by mutableStateOf<String?>(null)  // (why it couldn't be read, or saved, last)
+    var edits by mutableIntStateOf(0)            // (changes made here not saved yet: 0 when it's as saved)
+    private var saving = false
+    private var wait = 5_000L
+
+    val pending: List<Hunk> get() = hunks(seen.split("\n"), text.split("\n"))
+
+    private fun took(r: JSONObject) {
+        base = r.optString("text")
+        text = base!!
+        seen = if (r.has("seen") && !r.isNull("seen")) r.optString("seen") else base!!
+        mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+        failed = null
+    }
+
+    /** Read from its host: as it is there, or (changed here meanwhile) the Bot's changes since merged into yours. */
+    fun load() = Mesh.ask(hostId, JSONObject().put("op", "memory").put("session", sid)) { r ->
+        if (r.optString("op") != "memory") { failed = r.optString("error"); return@ask }
+        if (edits == 0 || base == null) return@ask took(r)
+        val theirs = r.optString("text")
+        if (theirs != base) text = merge3(base!!, text, theirs) ?: text
+        base = theirs
+        mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+        failed = null
+    }
+
+    /** You've edited what you've seen: the Bot's changes that aren't where you edited kept in what's saved. */
+    fun edit(now: String) {
+        val a = seen.split("\n")
+        val mine = hunks(a, now.split("\n"))
+        val keep = pending.filter { b -> mine.none { overlap(it, b) } }
+        text = merge3(seen, now, applied(a, keep).joinToString("\n")) ?: now
+        seen = now
+        edits++
+    }
+
+    fun accept(h: Hunk) {
+        seen = applied(seen.split("\n"), listOf(h)).joinToString("\n")
+        edits++
+    }
+
+    fun reject(k: Int) {
+        val p = pending
+        text = applied(seen.split("\n"), p.filterIndexed { i, _ -> i != k }).joinToString("\n")
+        edits++
+    }
+
+    /** Saved now (if there's anything to save, and it isn't being saved): merged with what the Bot wrote since, if it
+     * did; tried again a little later if it couldn't be. */
+    fun save(tries: Int = 3, said: (String) -> Unit = {}) {
+        if (edits == 0 || saving || base == null) return
+        saving = true
+        val n = edits
+        val t = text
+        val s = seen
+        val msg = JSONObject().put("op", "memory").put("session", sid).put("text", t).put("seen", s)
+        mtime?.let { msg.put("base_mtime", it) }
+        Mesh.ask(hostId, msg) { r ->
+            saving = false
+            when {
+                r.optString("op") == "memory" -> {
+                    wait = 5_000L
+                    base = r.optString("text")
+                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+                    failed = null
+                    if (edits == n) { took(r); edits = 0 } else save(said = said) // (changed meanwhile: that saved next)
+                }
+                r.has("text") && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
+                    val theirs = r.optString("text")
+                    val merged = merge3(base ?: theirs, text, theirs)
+                    if (merged == null) said("The Bot changed the same lines. Its version is shown as changes to accept or reject.")
+                    text = merged ?: theirs
+                    base = theirs
+                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+                    save(tries - 1, said)
+                }
+                else -> {
+                    failed = r.optString("error").ifBlank { "it said no" }
+                    said(if (failed in UNREACHED) "Not saved yet: can't connect to the host" else "Couldn't save: $failed")
+                    val again = wait
+                    wait = (wait * 2).coerceAtMost(60_000L)
+                    Mesh.later(again) { save(said = said) } // (tried again, for as long as it isn't saved)
+                }
+            }
+        }
+    }
+
+    companion object {
+        private val held = HashMap<String, MemoryState>()
+        fun of(hostId: String, sid: String) = held.getOrPut("$hostId/$sid") { MemoryState(hostId, sid) }
+    }
+}
+
+/** A Bot's memory (botmemory.BotMemory): the notes it keeps, as you've seen them and edited them, with its changes
+ * since shown where they are to accept or reject; you edit around them, as Baude's editor lets you. Saved 600 ms after
+ * each change, and at once as you leave the page (another page, Back). */
 @Composable
 fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
-    var text by remember(hostId, sid) { mutableStateOf<String?>(null) } // (the Bot's, as last read)
-    var seen by remember(hostId, sid) { mutableStateOf("") }           // (what you've accepted)
-    var mtime by remember(hostId, sid) { mutableStateOf<Long?>(null) }
-    var failed by remember(hostId, sid) { mutableStateOf<String?>(null) }
-    var dirty by remember(hostId, sid) { mutableIntStateOf(0) }       // (edits not yet saved: a count, for the timer)
-    var saving by remember { mutableStateOf(false) }
-    var doc by remember(hostId, sid) { mutableStateOf("") }
-    fun took(r: JSONObject) {
-        text = r.optString("text")
-        seen = if (r.has("seen") && !r.isNull("seen")) r.optString("seen") else r.optString("text")
-        mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
-        if (hunks(seen.split("\n"), text!!.split("\n")).isEmpty()) doc = text!!
-        failed = null
-    }
-    fun load() = Mesh.ask(hostId, JSONObject().put("op", "memory").put("session", sid)) { r ->
-        if (r.optString("op") == "memory") { if (dirty == 0 && !saving) took(r) } else failed = r.optString("error")
-    }
-    fun write(t: String, s: String, base: String, tries: Int = 3) {
-        saving = true
-        val msg = JSONObject().put("op", "memory").put("session", sid).put("text", t).put("seen", s)
-        mtime?.let { msg.put("base_mtime", it) }
-        val edits = dirty // (edits made by now: those made while it's saved are saved after it)
-        Mesh.ask(hostId, msg) { r ->
-            saving = false
-            when {
-                r.optString("op") == "memory" && dirty == edits -> { took(r); dirty = 0 }
-                r.optString("op") == "memory" -> { // (written in it meanwhile: what's there kept, saved next)
-                    text = r.optString("text")
-                    seen = if (r.has("seen") && !r.isNull("seen")) r.optString("seen") else r.optString("text")
-                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
-                }
-                r.has("text") && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
-                    val theirs = r.optString("text")
-                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
-                    val merged = merge3(base, t, theirs)
-                    if (merged == null) Toast.makeText(ctx, "The Bot changed the same lines. Its version is shown as " +
-                        "changes to accept or reject.", Toast.LENGTH_LONG).show()
-                    write(merged ?: theirs, s, theirs, tries - 1)
-                }
-                r.optString("error") in UNREACHED -> Toast.makeText(ctx, "Not saved yet: can't connect to the host",
-                    Toast.LENGTH_SHORT).show()
-                else -> Toast.makeText(ctx, "Couldn't save: " + r.optString("error"), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-    LaunchedEffect(here) { if (here) load() }
+    val m = remember(hostId, sid) { MemoryState.of(hostId, sid) }
+    val say = { t: String -> Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show() }
+    LaunchedEffect(here) { if (here) m.load() else m.save(said = say) }
+    DisposableEffect(m) { onDispose { m.save(said = say) } }
     DisposableEffect(hostId, sid) {
         val l: (String, JSONObject) -> Unit = { at, msg ->
-            if (at == hostId && msg.optString("op") == "turn_ended" && msg.optString("session") == sid) load()
+            if (at == hostId && msg.optString("op") == "turn_ended" && msg.optString("session") == sid) m.load()
         }
         Mesh.listeners.add(l)
         onDispose { Mesh.listeners.remove(l) }
     }
-    LaunchedEffect(dirty) { // (saved 600 ms after the last edit)
-        if (dirty == 0) return@LaunchedEffect
+    LaunchedEffect(m.edits) { // (saved 600 ms after the last change)
+        if (m.edits == 0) return@LaunchedEffect
         delay(600)
-        while (saving) delay(200)
-        write(doc, doc, text ?: "")
+        m.save(said = say)
     }
-    val bot = text
+    val failed = m.failed
     val offline = failed?.let { if (it in UNREACHED) "Can't connect to the host." else "Couldn't load the memory." }
-    if (bot == null) {
+    if (m.base == null) {
         when {
             failed == null -> StatusPage(Icons.Filled.EditNote, "No memory yet", "Notes the Bot keeps. You can edit them.")
             failed in UNREACHED -> StatusPage(Icons.Filled.EditNote, "Can't connect to the host", "It's shown once the host is back.")
@@ -172,34 +234,36 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
         }
         return
     }
-    val a = seen.split("\n")
-    val pending = remember(seen, bot) { hunks(a, bot.split("\n")) }
+    val a = m.seen.split("\n")
+    val pending = remember(m.seen, m.text) { m.pending }
     Column(Modifier.fillMaxSize()) {
-        if (offline != null) GreyBanner("$offline Showing the last saved copy.")
-        Box(Modifier.fillMaxSize().inside(c).alpha(if (offline != null) 0.5f else 1f)) {
+        if (offline != null) GreyBanner("$offline " + if (m.edits > 0) "Your changes are saved once it's back." else "Showing the last saved copy.")
+        Box(Modifier.fillMaxSize().inside(c)) {
             if (pending.isEmpty()) {
-                BasicTextField(doc, { doc = it; dirty++ }, enabled = offline == null, textStyle = Type.body.copy(color = c.fg),
+                BasicTextField(m.seen, { m.edit(it) }, textStyle = Type.body.copy(color = c.fg),
                     cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                         .padding(horizontal = Gap.chatH, vertical = Gap.chatV))
-                if (doc.isEmpty()) Text("Notes the Bot keeps. You can edit them.", style = Type.body, color = c.dim,
+                if (m.seen.isEmpty()) Text("Notes the Bot keeps. You can edit them.", style = Type.body, color = c.dim,
                     modifier = Modifier.padding(horizontal = Gap.chatH, vertical = Gap.chatV))
                 return@Box
             }
-            // its changes where they are, each to accept or reject (the text around them as you've seen it)
+            // its changes where they are, each to accept or reject; what's around them yours to edit
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Gap.chatH, vertical = Gap.chatV),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                @Composable
+                fun segment(from: Int, to: Int) {
+                    if (from >= to) return
+                    BasicTextField(a.subList(from, to).joinToString("\n"), { now ->
+                        m.edit((a.subList(0, from) + now.split("\n") + a.subList(to, a.size)).joinToString("\n"))
+                    }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth())
+                }
                 var at = 0
                 for ((k, h) in pending.withIndex()) {
-                    if (h.from > at) Text(a.subList(at, h.from).joinToString("\n"), style = Type.body, color = c.fg)
-                    Proposal(a.subList(h.from, h.to), h.lines,
-                        accept = { val s = applied(a, listOf(h)).joinToString("\n"); seen = s; write(bot, s, bot) },
-                        reject = {
-                            val t = applied(a, pending.filterIndexed { i, _ -> i != k }).joinToString("\n")
-                            text = t; write(t, seen, bot)
-                        })
+                    segment(at, h.from)
+                    Proposal(a.subList(h.from, h.to), h.lines, accept = { m.accept(h) }, reject = { m.reject(k) })
                     at = h.to
                 }
-                if (at < a.size) Text(a.subList(at, a.size).joinToString("\n"), style = Type.body, color = c.fg)
+                segment(at, a.size)
             }
         }
     }

@@ -80,6 +80,7 @@ class Chat(hostId: String, sid: String) {
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     val artifacts = mutableStateListOf<Artifact>() // (what it published, newest first: the Artifacts page)
     val agents = mutableStateListOf<Subagent>()    // (the subagents it started, newest first: the Subagents page)
+    val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
     var reading = false
@@ -149,7 +150,7 @@ object Mesh {
             key.value = Keys.load()
             keyError.value = null
         } catch (e: Exception) {
-            keyError.value = "This phone's key couldn't be read from the Keystore: ${e.message ?: e.javaClass.simpleName}"
+            keyError.value = "This phone's key couldn't be read: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 
@@ -309,7 +310,8 @@ object Mesh {
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
         if (c.place is Place.Direct) meshed()
-    }
+        if (c.state == "up") for (l in listeners.toList()) l(c.id, JSONObject().put("op", "connected")) // (its pages:
+    }                                                                                                    // attached again)
 
     fun conn(hostId: String): Connection? = conns[hostId]
 
@@ -334,8 +336,10 @@ object Mesh {
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): JSONObject? = sessions[hostId]?.firstOrNull { it.optString("id") == sid }
 
-    /** Every connection that's up, as a host or a member of the mesh: (id, label), your hosts first. */
-    fun reached(): List<Pair<String, String>> = conns.values.filter { it.state == "up" }
+    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (offers): (id,
+     * label), your hosts first. */
+    fun reached(op: String? = null): List<Pair<String, String>> = conns.values
+        .filter { it.state == "up" && (op == null || offers(it.id, op)) }
         .sortedWith(compareBy({ it.place is Place.Member }, { label(it.id).lowercase() })).map { it.id to label(it.id) }
 
     /** Another connection to where hostId is, for a watch of its own (it doesn't subscribe): started; stop it when
@@ -502,6 +506,8 @@ object Mesh {
     fun close() {
         val chat = open ?: return
         conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", chat.sid))
+        for (q in chat.btw) if (q.sid.isNotEmpty()) // (its side questions let go of with it, as Baude's window's are)
+            conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", q.sid))
         open = null
     }
 

@@ -229,7 +229,7 @@ fun ProcessesPage(hostId: String, sid: String) {
                 if (since > 0) "since " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
                     .format(java.util.Date((since * 1000).toLong())) else null).joinToString(" · ")
             ActionRow(cmd.optString("what").lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
-                IconButton(Icons.Filled.Stop, "Stop this process") {
+                if (offers(hostId, "control")) IconButton(Icons.Filled.Stop, "Stop this process") {
                     control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.optString("id"))) { e ->
                         if (e != null) said = "Couldn't stop it: $e"
                     }

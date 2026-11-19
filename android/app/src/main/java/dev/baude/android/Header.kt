@@ -95,14 +95,102 @@ fun family(m: ModelChoice): String {
         "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: "Other"
 }
 
-/** Where a model runs, as its value says (an agent's member, Ollama, an endpoint), for the provider picker. */
-private fun provider(hostId: String, value: String): String = when {
-    value.startsWith("agent/") -> Mesh.members[value.split("/").getOrNull(1)]?.optString("name")?.ifBlank { null }
-        ?: value.split("/").getOrNull(1) ?: "a member"
-    value.startsWith("ollama/") -> Mesh.label(hostId) + " / Ollama"
-    value.startsWith("openai/") -> Mesh.label(hostId) + " / " + (value.split("/").getOrNull(1) ?: "endpoint")
-    value.startsWith("mlx-") -> Mesh.label(hostId) + " / MLX"
-    else -> Mesh.label(hostId)
+/** A copy of a model somewhere in the mesh, as Baude's provider picker lists it (provider_choices): its value as a
+ * chat on this host runs it, the host it's on, its provider there, and what it says of itself. */
+data class Copy(val value: String, val host: String, val provider: String, val m: JSONObject)
+
+/** The provider a value names (providers.provider_of): apple, mlx, ollama, openai/<endpoint>, agent/<member>/…;
+ * null for Claude's. */
+fun providerOf(v: String): String? = when {
+    v == "apple" -> "apple"
+    v.startsWith("mlx-") -> "mlx"
+    v.startsWith("ollama/") -> "ollama"
+    v.startsWith("openai/") -> "openai/" + v.removePrefix("openai/").substringBefore("/")
+    v.startsWith("agent/") -> v.split("/").let { p -> "agent/${p.getOrNull(1)}/" + if (p.lastOrNull() == "apple") "apple" else "mlx" }
+    else -> null
+}
+
+private fun hasRuntime(pid: String?) = pid != null && pid != "apple" && !(pid.startsWith("agent/") && pid.endsWith("/apple"))
+
+/** What it's served as, any case (providers.kind), or null. */
+private fun kindOf(c: Copy): String? {
+    if (!hasRuntime(c.m.optString("provider").ifBlank { null } ?: providerOf(c.value))) return null
+    return (c.m.str("resolvedModel") ?: c.m.str("id"))?.lowercase()
+}
+
+/** Whether two copies are the same model (providers.same): what they're served as (else their names), their version
+ * and digest where both say one, their window where both do and neither has a digest. */
+fun sameModel(a: Copy, b: Copy): Boolean {
+    val ka = kindOf(a)
+    val kb = kindOf(b)
+    if (ka != null && kb != null) { if (ka != kb) return false }
+    else if ((a.m.str("displayName") ?: a.value).lowercase() != (b.m.str("displayName") ?: b.value).lowercase()) return false
+    fun differ(k: String) = a.m.has(k) && b.m.has(k) && !a.m.isNull(k) && !b.m.isNull(k) && a.m.opt(k).toString() != b.m.opt(k).toString()
+    return !(differ("version") || differ("digest") || differ("window") && !(a.m.has("digest") || b.m.has("digest")))
+}
+
+private fun slug(p: String): String {
+    var s = p.lowercase().replace(Regex("[^a-z0-9_-]"), "-")
+    if (s.length > 17) s = s.take(10) + "-" + java.security.MessageDigest.getInstance("SHA-1").digest(p.toByteArray())
+        .joinToString("") { "%02x".format(it) }.take(6)
+    return s
+}
+
+/** Every copy of a model a chat on hostId can run (baude.provider_choices): its host's own providers', then each
+ * other member's of its mesh, as that host runs them (providers.elsewhere: an endpoint's through the mesh's proxy,
+ * openai/mesh-<id>-<provider>/…, else run there as an agent, agent/<member>/…). */
+fun copies(hostId: String): List<Copy> {
+    val info = Mesh.conn(hostId)?.info ?: return emptyList()
+    val out = ArrayList<Copy>()
+    val here = Mesh.label(hostId)
+    for (p in info.optJSONArray("providers").list()) for (m in p.optJSONArray("models").list()) {
+        val v = m.str("value") ?: continue
+        out.add(Copy(v, here, p.str("name") ?: p.optString("id"), JSONObject(m.toString()).put("provider", providerOf(v))))
+    }
+    val me = info.str("id")
+    for (member in info.optJSONObject("mesh")?.optJSONArray("members").list()) {
+        val id = member.str("id") ?: continue
+        if (id == me) continue
+        val name = member.str("name") ?: id.take(8)
+        for (p in member.optJSONArray("providers").list()) for (m in p.optJSONArray("models").list()) {
+            val inner = m.str("id") ?: m.str("value") ?: continue
+            val (pid, v) = if (p.optBoolean("http")) {
+                val ep = "openai/mesh-${id.lowercase().replace(Regex("[^a-z0-9]"), "").take(8)}-${slug(p.optString("id"))}"
+                ep to "$ep/$inner"
+            } else "agent/$id/${p.optString("id")}" to "agent/$id/${m.optString("value")}"
+            val d = JSONObject(m.toString()).put("provider", pid)
+            if (!d.has("id") && m.has("resolvedModel")) d.put("id", m.optString("resolvedModel"))
+            out.add(Copy(v, name, p.str("name") ?: p.optString("id"), d))
+        }
+    }
+    return out
+}
+
+/** The copies of the model a chat runs (none: it's Claude's, or nothing else has it). */
+fun copiesOf(hostId: String, model: String?): List<Copy> {
+    model ?: return emptyList()
+    if (providerOf(model) == null) return emptyList()
+    val all = copies(hostId)
+    val now = all.firstOrNull { it.value == model } ?: return emptyList()
+    return all.filter { sameModel(it, now) }
+}
+
+/** Model changes waiting for a turn's end (Baude's move_after_turn): (host, session) -> the value to move to. */
+object Moves {
+    val waiting = HashMap<String, String>()
+    private var listening = false
+    var apply: (String, String, String) -> Unit = { _, _, _ -> }
+
+    fun later(hostId: String, sid: String, value: String) {
+        waiting["$hostId/$sid"] = value
+        if (listening) return
+        listening = true
+        Mesh.listeners.add { at, msg ->
+            if (msg.optString("op") != "turn_ended") return@add
+            val v = waiting.remove("$at/${msg.optString("session")}") ?: return@add
+            apply(at, msg.optString("session"), v)
+        }
+    }
 }
 
 private val nextControl = AtomicInteger(1)
@@ -152,10 +240,19 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
     Row(Modifier.fillMaxWidth().background(c.frame).horizontalScroll(rememberScrollState())
         .padding(start = 6.dp, end = 6.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        if (prog != "claude" && prog != "codex" && now != null) {
-            val copies = choices.filter { it.name == now.name }
-            Picker(provider(hostId, now.value), "Where the chat's model runs", copies.map { provider(hostId, it.value) to it.value },
-                now.value, enabled = copies.size > 1) { v -> pickModel(hostId, sid, s, v, choices, asked, said, open) }
+        val copies = copiesOf(hostId, model)
+        if (copies.isNotEmpty()) { // (where the chat's model runs: each copy of it in the mesh, by host and provider)
+            val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" } ?: "Provider"
+            Picker(face, if (copies.size > 1) "Where the chat's model runs" else "Where the chat's model runs (the only one that has it)",
+                copies.map { "${it.host} / ${it.provider}" to it.value }, model, enabled = copies.size > 1) { v ->
+                Moves.waiting.remove("$hostId/$sid")
+                if (v == s.str("model")) { asked.remove("model"); return@Picker } // (the one it's on: no move)
+                if (s.optString("state") in setOf("working", "waiting")) { // (at a turn: moved once it's over)
+                    asked["model"] = v
+                    Moves.apply = { h, id, value -> Mesh.session(h, id)?.let { pickModel(h, id, it, value, models(h), HashMap(), said, open) } }
+                    Moves.later(hostId, sid, v)
+                } else pickModel(hostId, sid, s, v, choices, asked, said, open)
+            }
         }
         ModelPicker(now?.name ?: model ?: "Model", choices, now?.value) { v ->
             pickModel(hostId, sid, s, v, choices, asked, said, open)

@@ -42,6 +42,63 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/** Feedback written here and not filed yet, kept on this phone (filesDir/feedback/<id>.json) and tried again till
+ * it's filed, as Baude's keep_filing tries its notes: every minute, and as a host comes back. A note's tried through
+ * the host it was last sent to, and another only once that's been away a while (a host files a note once, claiming
+ * it while gh runs; two hosts can't see each other's claims). */
+object Outbox {
+    private val going = HashSet<String>() // (notes asked of a host now: not asked again till it answers)
+    private var started = false
+    private const val STICK_MS = 5 * 60_000L // (how long a note waits for the host it was sent through)
+
+    private fun dir() = java.io.File(Mesh.app.filesDir, "feedback").apply { mkdirs() }
+
+    fun keep(id: String, text: String, context: List<String>, host: String) {
+        val o = JSONObject().put("id", id).put("text", text).put("context", JSONArray(context)).put("host", host)
+            .put("tried", System.currentTimeMillis())
+        java.io.File(dir(), "$id.json").writeText(o.toString())
+    }
+
+    private fun notes(): List<JSONObject> = (dir().listFiles() ?: emptyArray()).filter { it.name.endsWith(".json") }
+        .mapNotNull { f -> try { JSONObject(f.readText()) } catch (_: Exception) { null } }
+
+    /** A note sent through host: what it said, to then (null: filed). */
+    fun send(id: String, host: String, then: (JSONObject) -> Unit) {
+        val f = java.io.File(dir(), "$id.json")
+        val o = try { JSONObject(f.readText()) } catch (_: Exception) { return }
+        o.optJSONObject("filed")?.let { return then(it) }
+        if (!going.add(id)) return then(JSONObject().put("op", "error").put("error", "it's being sent already"))
+        o.put("host", host).put("tried", System.currentTimeMillis())
+        f.writeText(o.toString())
+        Mesh.ask(host, JSONObject().put("op", "feedback").put("note", id).put("text", o.optString("text"))
+            .put("context", o.optJSONArray("context") ?: JSONArray())) { r ->
+            going.remove(id)
+            if (r.optString("op") == "feedback_filed") f.writeText(o.put("filed", r).toString())
+            then(r)
+        }
+    }
+
+    /** Every note not filed yet tried again (through its host, or, that one away long enough, another). */
+    fun again() {
+        val up = Mesh.reached("feedback").map { it.first }.filter { h -> Mesh.hosts.any { it.id == h } }
+        for (o in notes()) {
+            if (o.has("filed")) continue
+            val was = o.optString("host")
+            val h = if (was in up) was
+                else if (System.currentTimeMillis() - o.optLong("tried") > STICK_MS) up.firstOrNull() else null
+            h?.let { send(o.optString("id"), it) {} }
+        }
+    }
+
+    fun start() {
+        if (started) return
+        started = true
+        Mesh.listeners.add { _, msg -> if (msg.optString("op") == "connected") Mesh.later(2_000) { again() } }
+        fun tick() { again(); Mesh.later(60_000) { tick() } }
+        Mesh.later(10_000) { tick() }
+    }
+}
+
 /** Send Feedback: what should change, and the screen it's about (the context, shown if you ask), filed as an issue
  * by a host's gh (this phone has none), where Baude's Send Feedback files it (fixes.submit_issue_target: the private
  * repository the host's checkout has, if its gh sees it). Its id stays the same while it's tried again, so the host
@@ -56,7 +113,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     var failed by remember { mutableStateOf<String?>(null) }
     var showContext by rememberSaveable { mutableStateOf(false) }
     Mesh.tick.value
-    val up = Mesh.reached().filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours: its gh files it)
+    val up = Mesh.reached("feedback").filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours that files it)
     var picked by rememberSaveable { mutableStateOf<String?>(null) }
     val host = picked?.takeIf { p -> up.any { it.first == p } } ?: up.firstOrNull()?.first
     var target by remember { mutableStateOf<String?>(null) }
@@ -75,7 +132,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         val h = host ?: return
         sending = true
         failed = null
-        Mesh.ask(h, JSONObject().put("op", "feedback").put("note", id).put("text", text).put("context", JSONArray(full))) { r ->
+        Outbox.keep(id, text, full, h) // (kept first: tried again later, from here or not, till it's filed)
+        Outbox.send(id, h) { r ->
             sending = false
             if (r.optString("op") == "feedback_filed") {
                 Toast.makeText(ctx, "Filed as an issue on ${r.optString("repo")}", Toast.LENGTH_LONG).show()
@@ -107,13 +165,15 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
                 }, style = Type.caption, color = c.dim)
             }
             targetWhy?.let { Text(it, style = Type.caption, color = c.warning) }
+            if (host == null && Mesh.reached().any { (h, _) -> Mesh.hosts.any { it.id == h } })
+                Text("Your hosts' Baude can't file feedback for a phone: update it", style = Type.caption, color = c.warning)
             Text(if (showContext) "Hide context" else "Show context", style = Type.body,
                 color = c.accent, modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showContext = !showContext }
                     .padding(vertical = 4.dp))
             if (showContext) Text(full.joinToString("\n") { "- $it" }, style = Type.mono, color = c.fg, modifier = Modifier
                 .fillMaxWidth().heightIn(max = 160.dp).clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
                 .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(8.dp))
-            failed?.let { Text("Saved on this phone, but it couldn't be filed: $it", style = Type.caption, color = c.destructive) }
+            failed?.let { Text("Saved on this phone, and it's filed when it can be: $it", style = Type.caption, color = c.destructive) }
         }
         val ready = text.isNotBlank() && host != null && !sending
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).height(52.dp).clip(RoundedCornerShape(12.dp))

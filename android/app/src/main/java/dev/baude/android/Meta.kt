@@ -16,7 +16,9 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,20 +27,27 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Meta, Baude's helper, for this phone: this phone can't run claude, so its agent runs on a host you pick, as a
- * session of its own there that's kept nowhere (ephemeral: its conversation is the phone's, gone once it's cleared or
- * the host's let go of it). It operates the app as desktop Meta operates Baude: its tools (MetaTools) are the phone's
- * own, an MCP server its claude runs relayed back over the phone's connection (start's app_tools), so they act here;
- * it knows the app by the light index sent with your first message, and reads files on its host with Read, Grep and
- * Glob. */
+ * session of its own there that's kept nowhere (ephemeral), waiting for the phone a long while (start's grace) when
+ * it's away, and attached again, its tools with it, when it's back. It operates the app as desktop Meta operates
+ * Baude: its tools (MetaTools) are the phone's own, an MCP server its claude runs relayed back over the phone's
+ * connection (start's app_tools), so they act here; it knows the app by the light index sent with your first message.
+ * Its conversation and its journal are kept on this phone (meta.json, as desktop's meta.json keeps them): a session
+ * that's gone meanwhile (its host restarted) is started again with what was said before, as desktop Meta's is. */
 object Meta {
     val host = mutableStateOf<String?>(null)
     var chat = Chat("", "")
-    var opener: (String, String) -> Unit = { _, _ -> } // (a chat's row tapped under a reply: opened, as the app opens one)
+    var opener: (String, String) -> Unit = { _, _ -> } // (a chat's row tapped under a reply: opened)
+    var pageOpener: (String) -> Unit = {}               // (a page's row: shown, in the chat open)
+    var pages: () -> List<Page> = { emptyList() }      // (the chat open's pages)
+    var go: (String) -> Unit = {}                       // (a button: new_session, send_feedback, hosts)
     private var started = false
     private val waiting = ArrayList<String>() // (sent before its session's made: sent once it is)
     private val relays = HashSet<Int>()      // (its tools' relays open on its host: their numbers)
+    private var heard: ((String, JSONObject) -> Unit)? = null
     private val shown = ArrayList<Line>()    // (what its tools showed, and the actions they took, this turn: under its
                                               // reply once it's said)
+    private var loaded = false
+    const val GRACE_S = 6 * 3600 // (how long its session waits on its host for the phone to come back)
 
     /** Shown under this turn's reply, once it ends. */
     fun under(line: Line) {
@@ -48,8 +57,8 @@ object Meta {
     private fun shownNow() {
         chat.lines.addAll(shown)
         shown.clear()
+        save()
     }
-    private var heard: ((String, JSONObject) -> Unit)? = null
 
     val SYSTEM = listOf(
         "You are Meta, the helper inside Baude for Android, a phone app for Baude, which lists the user's chats and " +
@@ -66,8 +75,9 @@ object Meta {
             "archive them.",
         "Forms: asked to help the user start a session, bring up new_session with open_form, fill in what you know " +
             "(fill_form), and leave the rest and the submitting to them.",
-        "Settings: set_setting changes one at once, and its row shows under your reply. show also lists chats as rows " +
-            "the user can tap to open.",
+        "Settings: set_setting changes one at once, and its row shows under your reply. show also lists chats or the " +
+            "open chat's pages as rows the user can tap, the changelog, and buttons for what you don't do yourself " +
+            "(app_index buttons).",
         "Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it.",
     ).joinToString("\n\n")
 
@@ -93,29 +103,112 @@ object Meta {
         return lines.joinToString("\n")
     }
 
-    /** What you asked sent: a new session for Meta on its host the first time (the index with it), else the next
-     * message to it. */
+    // ---- kept on the phone
+
+    private fun file() = java.io.File(Mesh.app.filesDir, "meta.json")
+
+    /** Its conversation, its session's place, its journal and where its form is, written out (after each change). */
+    fun save() {
+        if (!loaded) return
+        val o = JSONObject().put("host", host.value).put("sid", chat.sid).put("started", started)
+            .put("lines", JSONArray(chat.lines.map { JSONArray(listOf(it.kind, it.text)) }))
+            .put("actions", JSONArray(MetaTools.actions.map { it.json() })).put("next", MetaTools.next).put("turn", MetaTools.turn)
+        try {
+            file().writeText(o.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    /** (the app started) What was kept read back, and its session attached again once its host is up. */
+    fun restore() {
+        if (loaded) return
+        loaded = true
+        val o = try {
+            JSONObject(file().readText())
+        } catch (_: Exception) {
+            return
+        }
+        host.value = o.str("host")
+        chat = Chat(host.value ?: "", o.optString("sid")).also { it.sender = { t, _ -> send(t) } }
+        for (l in o.optJSONArray("lines").let { a -> (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONArray(it) } })
+            chat.lines.add(Line(l.optString(0), l.optString(1)))
+        MetaTools.actions.addAll(o.optJSONArray("actions").list().map(Action::of))
+        MetaTools.next = o.optInt("next", 1)
+        MetaTools.turn = o.optInt("turn", 0)
+        started = o.optBoolean("started") && chat.sid.isNotEmpty()
+        host.value?.let { h ->
+            listen(h)
+            if (started && Mesh.conn(h)?.state == "up") reattach(h)
+        }
+    }
+
+    /** Its session attached again (its host back, or the app started again): its tools carried to this connection, how
+     * it stands now taken; gone meanwhile, the next message starts another with what was said before. */
+    private fun reattach(h: String) {
+        val c = chat
+        if (!started || c.sid.isEmpty()) return
+        val was = c.thinking.value
+        Mesh.ask(h, JSONObject().put("op", "attach").put("session", c.sid).put("live", true).put("answers", true)
+            .put("app_tools", true)) { r ->
+            if (chat !== c) return@ask
+            if (r.optString("op") != "attached") {
+                started = false
+                c.sid = ""
+                c.thinking.value = false
+                if (was) c.lines.add(Line("note", "Meta's session on ${Mesh.label(h)} ended: your next message starts it again"))
+                save()
+                return@ask
+            }
+            val busy = r.optJSONObject("session")?.optString("state") in setOf("working", "waiting")
+            c.thinking.value = busy
+            c.asks.clear()
+            c.asks.addAll(r.optJSONArray("asks").list().mapNotNull(Ask::of))
+            if (was && !busy) {
+                c.lines.add(Line("note", "Meta's reply came while the phone was away: it isn't shown here"))
+                shownNow()
+            }
+        }
+    }
+
+    /** What was said before, for a session started again (desktop's earlier_said): its last part. */
+    private fun earlier(): String {
+        val said = chat.lines.filter { it.kind == "you" || it.kind == "bot" }
+            .joinToString("\n") { (if (it.kind == "you") "[the user] " else "[you] ") + it.text }
+        return if (said.isEmpty()) "" else "Earlier in this conversation (your session for it ended, so it's said again):\n" +
+            said.takeLast(12_000) + "\n\n"
+    }
+
+    /** What you asked sent: a new session for Meta on its host the first time (the index with it, and what was said
+     * before), else the next message to it. */
     fun send(text: String) {
         val h = host.value ?: return
         val c = chat
+        if (!offers(h, "app_tools")) {
+            c.said.value = tooOld(h, "run Meta for a phone")
+            return
+        }
+        val before = earlier()
         c.lines.add(Line("you", text))
+        MetaTools.turn++
         MetaTools.highlight.clear() // (highlighted till the user's next message)
         c.thinking.value = true
         c.said.value = null
+        save()
         if (!started || c.hostId != h) {
             started = true
             c.hostId = h
             listen(h)
             val haiku = models(h).firstOrNull { it.value == "haiku" || it.name.lowercase().startsWith("haiku") }
-            val msg = JSONObject().put("op", "start").put("prompt", index() + "\n\n" + text).put("cwd", "~")
-                .put("mode", "default").put("ephemeral", true).put("title", "Meta").put("system", SYSTEM)
-                .put("allowed_tools", JSONArray(listOf("Read", "Grep", "Glob"))).put("attach", true)
+            val msg = JSONObject().put("op", "start").put("prompt", index() + "\n\n" + before + text).put("cwd", "~")
+                .put("mode", "default").put("ephemeral", true).put("grace", GRACE_S).put("title", "Meta")
+                .put("system", SYSTEM).put("allowed_tools", JSONArray(listOf("Read", "Grep", "Glob"))).put("attach", true)
                 .put("app_tools", JSONArray(listOf(MetaTools.NAME)))
             haiku?.let { msg.put("model", it.value) }
             Mesh.ask(h, msg) { r ->
                 val id = r.optJSONObject("session")?.optString("id")
                 if (r.optString("op") == "started" && id != null) {
                     c.sid = id
+                    save()
                     waiting.toList().also { waiting.clear() }.forEach { input(c, h, it) }
                 } else {
                     waiting.clear()
@@ -135,17 +228,20 @@ object Meta {
             if (r.optString("op") == "error") {
                 c.thinking.value = false
                 c.said.value = "Couldn't send: " + r.optString("error")
+                if (r.optString("error").startsWith("no session")) { started = false; c.sid = ""; save() }
             }
         }
     }
 
-    /** What Meta's claude says, live: its text and tool calls as the chat's lines, what it asks, its turn's end. */
+    /** What Meta's host says: its tools' lines (served here), and its claude's text, tool calls, asks and turn's end;
+     * the host back, its session attached again. */
     private fun listen(h: String) {
         heard?.let { Mesh.listeners.remove(it) }
         val l: (String, JSONObject) -> Unit = l@{ at, msg ->
             val c = chat
             if (at != h) return@l
-            when (msg.optString("op")) { // (its tools: their lines served here, answered back to the host)
+            when (msg.optString("op")) {
+                "connected" -> return@l reattach(h)
                 "mcp_open" -> if (msg.optString("name") == MetaTools.NAME && (msg.optString("session") == c.sid || c.sid.isEmpty()))
                     relays.add(msg.optInt("conn"))
                 "mcp" -> if (msg.optInt("conn") in relays) {
@@ -170,8 +266,8 @@ object Meta {
                         }
                         "result" -> {
                             c.thinking.value = false
-                            shownNow()
                             if (m.optBoolean("is_error")) c.lines.add(Line("error", m.optString("result").ifBlank { "Meta couldn't finish" }))
+                            shownNow()
                         }
                     }
                 }
@@ -181,7 +277,7 @@ object Meta {
         Mesh.listeners.add(l)
     }
 
-    /** A new conversation: the one there let go of (its host drops it, as nobody's attached). */
+    /** A new conversation: the one there let go of, the journal with it, nothing kept. */
     fun clear() {
         val c = chat
         if (started && c.sid.isNotEmpty()) {
@@ -192,8 +288,13 @@ object Meta {
         waiting.clear()
         relays.clear()
         shown.clear()
+        MetaTools.actions.clear()
+        MetaTools.highlight.clear()
+        MetaTools.form.value = null
+        MetaTools.turn = 0
         chat = Chat(host.value ?: "", "").also { it.sender = { t, _ -> send(t) } }
         version.value++
+        save()
     }
 
     val version = mutableStateOf(0) // (a new conversation: drawn anew)
@@ -209,9 +310,9 @@ fun MetaPage(chatHost: String, here: Boolean) {
     val c = LocalBaude.current
     Mesh.tick.value
     Meta.version.value
-    val up = Mesh.reached()
-    androidx.compose.runtime.LaunchedEffect(up, chatHost) {
-        if (Meta.host.value == null || up.none { it.first == Meta.host.value })
+    val up = Mesh.reached("app_tools")
+    androidx.compose.runtime.LaunchedEffect(up, chatHost) { // (a host it's on kept, even while it's away: its session
+        if (Meta.host.value == null)                          // waits for the phone there)
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
     }
     Column(Modifier.fillMaxSize()) {
@@ -219,8 +320,9 @@ fun MetaPage(chatHost: String, here: Boolean) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Runs on", style = Type.caption, color = c.dim)
             val h = Meta.host.value
-            Picker(h?.let { Mesh.label(it) } ?: "No host connected", "Where Meta runs", up.map { it.second to it.first }, h,
-                enabled = up.isNotEmpty()) {
+            val face = h?.let { Mesh.label(it) + if (up.none { u -> u.first == it }) " (not connected)" else "" }
+            Picker(face ?: if (Mesh.reached().isEmpty()) "No host connected" else "No host can run it yet",
+                "Where Meta runs", up.map { it.second to it.first }, h, enabled = up.isNotEmpty()) {
                 if (it != Meta.host.value) {
                     Meta.host.value = it
                     Meta.clear()
@@ -233,36 +335,70 @@ fun MetaPage(chatHost: String, here: Boolean) {
             ChatPage(Meta.chat, "Meta", hint = "Ask Meta", attach = false)
         }
     }
-    MetaTools.form.value?.let { f -> // (a form Meta brought up, as it's filled: the user submits it)
-        androidx.compose.runtime.key(MetaTools.formVersion.value) {
-            NewSession(null, null, done = { MetaTools.form.value = null }, opened = { h, s -> Meta.opener(h, s) },
-                given = f.optJSONObject("values"))
+    MetaTools.form.value?.takeIf { it.optString("state", "open") == "open" }?.let { f -> // (a form Meta brought up, as
+        androidx.compose.runtime.key(MetaTools.formVersion.value) {                       // it's filled: the user submits)
+            NewSession(null, null, done = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString())
+                    .put("state", if (it.optString("state") == "submitted") "submitted" else "closed") } },
+                opened = { h, s ->
+                    MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString()).put("state", "submitted") }
+                    Meta.opener(h, s)
+                }, given = f.optJSONObject("values"), edited = MetaTools::edited)
         }
     }
 }
 
-/** What Meta showed under a reply: chats (a row each, tapped to open), or a setting's row (its choices). */
+/** What Meta showed under a reply: chats (a row each, tapped to open), the open chat's pages, a setting's row (its
+ * choices), the changelog (its host's own code's last commits), or a button for the user to press. */
 @Composable
 fun MetaRows(text: String) {
     val c = LocalBaude.current
     val o = try { JSONObject(text) } catch (_: Exception) { return }
     Mesh.tick.value
+    @Composable
+    fun boxed(rows: List<@Composable () -> Unit>) = Column(Modifier.fillMaxWidth()
+        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(c.card)
+        .border(1.dp, c.rule, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))) {
+        rows.forEachIndexed { i, r ->
+            if (i > 0) androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+            r()
+        }
+    }
+    val chevron: @Composable () -> Unit = { androidx.compose.material3.Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim) }
     o.optJSONArray("chats")?.let { rows ->
-        Column(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(c.card)
-            .border(1.dp, c.rule, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))) {
-            for (i in 0 until rows.length()) {
-                val r = rows.optJSONArray(i) ?: continue
+        boxed((0 until rows.length()).mapNotNull { rows.optJSONArray(it) }.map { r ->
+            {
                 val (h, sid) = r.optString(0) to r.optString(1)
                 val s = Mesh.session(h, sid)
-                if (i > 0) androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
                 ActionRow(s?.optJSONObject("bot")?.str("name") ?: s?.str("title") ?: "(untitled)",
                     listOfNotNull(Mesh.label(h), s?.optString("cwd")?.let { shortPath(h, it) }).joinToString(" · "),
-                    onClick = { Meta.opener(h, sid) },
-                    suffix = { androidx.compose.material3.Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        null, tint = c.dim) })
+                    onClick = { Meta.opener(h, sid) }, suffix = chevron)
+            }
+        })
+    }
+    o.optJSONArray("pages")?.let { rows ->
+        boxed(rows.strings().map { p -> { ActionRow(p, null, onClick = { Meta.pageOpener(p) }, suffix = chevron) } })
+    }
+    o.str("changelog")?.let { h ->
+        var log by androidx.compose.runtime.remember(text) { mutableStateOf<List<JSONObject>?>(null) }
+        var why by androidx.compose.runtime.remember(text) { mutableStateOf<String?>(null) }
+        androidx.compose.runtime.LaunchedEffect(text) {
+            val checkout = Mesh.conn(h)?.info?.str("checkout") ?: return@LaunchedEffect run { why = "Its host didn't say where its code is." }
+            Mesh.ask(h, JSONObject().put("op", "git").put("what", "log").put("cwd", checkout).put("limit", 15)) { r ->
+                if (r.optString("op") == "git" && r.str("error") == null) log = r.optJSONArray("commits").list()
+                else why = r.optString("error").ifBlank { "Couldn't read it." }
+            }
+        }
+        Column {
+            Text("What's new on ${Mesh.label(h)}", style = Type.folder, color = c.dim, modifier = Modifier.padding(bottom = 4.dp))
+            when {
+                why != null -> Text(why!!, style = Type.caption, color = c.dim)
+                log == null -> Text("Reading it…", style = Type.caption, color = c.dim)
+                else -> boxed(log!!.map { m -> { ActionRow(m.optString("subject"), java.text.SimpleDateFormat("d MMM",
+                    java.util.Locale.ENGLISH).format(java.util.Date(m.optLong("at") * 1000)) + " · " + m.optString("sha").take(7)) } })
             }
         }
     }
+    o.str("button")?.let { b -> Button(MetaTools.BUTTONS[b] ?: b, suggested = true) { Meta.go(b) } }
     when (o.optString("setting")) {
         "sidebar_group" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Group the home screen by", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
@@ -271,7 +407,7 @@ fun MetaRows(text: String) {
         }
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-            val up = Mesh.reached()
+            val up = Mesh.reached("subscribe")
             Picker(HomePrefs.host.value.let { if (it == "all") "All hosts" else Mesh.label(it) }, "Hosts shown",
                 listOf("All hosts" to "all") + up.map { it.second to it.first }, HomePrefs.host.value) {
                 HomePrefs.host.value = it; HomePrefs.save()
@@ -287,7 +423,7 @@ fun MetaAction(id: String) {
     val a = MetaTools.actions.firstOrNull { it.id == id } ?: return
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
-        if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, "Redo") { a.redo(); a.undone.value = false }
-        else IconButton(Icons.AutoMirrored.Filled.Undo, "Undo") { a.undo(); a.undone.value = true }
+        if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, "Redo") { MetaTools.button(a, undo = false) }
+        else IconButton(Icons.AutoMirrored.Filled.Undo, "Undo") { MetaTools.button(a, undo = true) }
     }
 }

@@ -34,11 +34,11 @@ import org.json.JSONObject
  * it's on (fixed), or null to pick. */
 @Composable
 fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String, String) -> Unit,
-               given: JSONObject? = null) {
+               given: JSONObject? = null, edited: ((JSONObject) -> Unit)? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
-    val up = Mesh.reached()
+    val up = Mesh.reached("start")
     var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
         ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
     fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.optString("home")?.ifBlank { null } } ?: "~"
@@ -49,6 +49,10 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     var effort by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf("auto") }
     var busy by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(at, cwd, group, prompt) { // (the user's own edits, kept where it's Meta's form)
+        edited?.invoke(JSONObject().put("host", at?.let { Mesh.label(it) } ?: "").put("folder", cwd).put("group", group)
+            .put("prompt", prompt))
+    }
     var error by remember { mutableStateOf<String?>(null) }
     fun start() {
         val h = at ?: return
@@ -64,8 +68,8 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
             val id = r.optJSONObject("session")?.optString("id")
             if (r.optString("op") == "started" && id != null) {
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
-                done()
                 opened(h, id)
+                done()
             } else error = r.optString("error").ifBlank { "the host said no" }
         }
     }

@@ -133,43 +133,45 @@ fun sections(query: String): List<Section> {
     val q = query.trim().lowercase()
     val pick = HomePrefs.host.value
     val shown = Mesh.sessions.keys.filter { pick == "all" || it == pick }.sorted()
-    val several = shown.count { !Mesh.sessions[it].isNullOrEmpty() } > 1
     val live = ArrayList<Item>()
     val archived = ArrayList<Item>()
-    for (hostId in shown) {
-        val list = Mesh.sessions[hostId].orEmpty().filter { !it.optBoolean("draft") }
-        val groups = HomePrefs.groups.toSet()
-        val keep = list.filter { s ->
-            (groups.isEmpty() || groupOf(hostId, s) in groups) && (q.isEmpty() || listOf(s.str("title").orEmpty(),
-                s.optString("cwd"), Mesh.label(hostId), s.optJSONObject("bot")?.optString("name").orEmpty())
-                .any { it.lowercase().contains(q) })
-        }
-        val byKey = HashMap<String, JSONObject>()
-        for (s in list) {
-            byKey[s.optString("id")] = s
-            s.optString("cli_id").ifBlank { null }?.let { byKey[it] = s }
-        }
-        fun parent(s: JSONObject): JSONObject? = listOf("spawned_by", "fork_from").firstNotNullOfOrNull { k ->
-            if (s.isNull(k)) null else byKey[s.optString(k)]?.takeIf { it !== s }
-        }
-        val kept = keep.toSet()
-        val children = HashMap<String, MutableList<JSONObject>>()
-        val top = ArrayList<JSONObject>()
-        for (s in keep) {
-            val p = parent(s)
-            val nested = !s.isNull("spawned_by") || !s.isNull("fork_from")
-            when {
-                p != null && p in kept -> children.getOrPut(p.optString("id")) { ArrayList() }.add(s)
-                nested && q.isEmpty() && p != null -> {}  // (its parent filtered out: not without it)
-                else -> top.add(s)
-            }
-        }
-        fun flat(s: JSONObject, depth: Int, into: MutableList<Item>) {
-            into.add(Item(hostId, s, depth))
-            for (c in children[s.optString("id")].orEmpty().sortedByDescending(::said)) flat(c, depth + 1, into)
-        }
-        for (s in top.sortedByDescending(::said)) flat(s, 0, if (s.optBoolean("archived")) archived else live)
+    val groups = HomePrefs.groups.toSet()
+    val listed = shown.flatMap { h -> Mesh.sessions[h].orEmpty().filter { !it.optBoolean("draft") }.map { h to it } }
+    fun matches(h: String, s: JSONObject) = (groups.isEmpty() || groupOf(h, s) in groups) && (q.isEmpty() || listOf(
+        s.str("title").orEmpty(), s.optString("cwd"), Mesh.label(h), s.optJSONObject("bot")?.optString("name").orEmpty())
+        .any { it.lowercase().contains(q) })
+    // (a chat's parent: the one it forked from, on its host; or the agent that started it, on its host or any other,
+    // as Baude pulls such chats under their parent across hosts)
+    val byKey = HashMap<String, Pair<String, JSONObject>>() // ("host/id" and "host/cli_id": the session)
+    val byId = HashMap<String, Pair<String, JSONObject>>()  // (id or cli_id alone: for a parent on another host)
+    for ((h, s) in listed) for (id in listOfNotNull(s.optString("id"), s.str("cli_id"))) {
+        byKey["$h/$id"] = h to s
+        byId.putIfAbsent(id, h to s)
     }
+    fun parent(h: String, s: JSONObject): Pair<String, JSONObject>? {
+        s.str("fork_from")?.let { f -> byKey["$h/$f"]?.takeIf { it.second !== s }?.let { return it } }
+        return s.str("spawned_by")?.let { p -> (byKey["$h/$p"] ?: byId[p])?.takeIf { it.second !== s } }
+    }
+    val kept = listed.filter { (h, s) -> matches(h, s) }
+    val keptKeys = kept.map { (h, s) -> "$h/${s.optString("id")}" }.toSet()
+    val children = HashMap<String, MutableList<Pair<String, JSONObject>>>()
+    val top = ArrayList<Pair<String, JSONObject>>()
+    for ((h, s) in kept) {
+        val nested = s.str("spawned_by") != null || s.str("fork_from") != null
+        val p = parent(h, s)
+        when {
+            p != null && "${p.first}/${p.second.optString("id")}" in keptKeys ->
+                children.getOrPut("${p.first}/${p.second.optString("id")}") { ArrayList() }.add(h to s)
+            nested && p == null -> {}  // (its parent not listed at all: left out, as Baude leaves it)
+            else -> top.add(h to s)   // (its parent filtered out: listed in its own place)
+        }
+    }
+    fun flat(h: String, s: JSONObject, depth: Int, into: MutableList<Item>) {
+        into.add(Item(h, s, depth))
+        for ((ch, c) in children["$h/${s.optString("id")}"].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into)
+    }
+    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.optBoolean("archived")) archived else live)
+    val several = shown.count { !Mesh.sessions[it].isNullOrEmpty() } > 1
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
         val r = ArrayList<MutableList<Item>>()
@@ -276,8 +278,8 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
                     if (item.bot != null && item.depth == 0) BotRow(item) { open(item.hostId, item.id) }
                     else SessionRow(item) { open(item.hostId, item.id) }
                 }
-                if (tops > cap) item(key = "m:" + sec.key) {
-                    Text("Show ${tops - cap} more", style = Type.body, color = c.dim,
+                if (tops > cap) item(key = "m:" + sec.key) { // (every row it hides counted, nested ones too)
+                    Text("Show ${sec.rows.size - rows.size} more", style = Type.body, color = c.dim,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { more.add(sec.key) }
                             .padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
                 }
@@ -381,6 +383,7 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     val pick = HomePrefs.host.value
     val ids = (Mesh.hosts.map { it.id } + Mesh.sessions.keys).distinct()
+        .filter { Mesh.conn(it)?.info == null || offers(it, "subscribe") } // (one that lists no sessions: not offered)
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically) {

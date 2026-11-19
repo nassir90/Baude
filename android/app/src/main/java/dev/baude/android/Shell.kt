@@ -25,7 +25,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Groups
@@ -53,17 +57,25 @@ import kotlinx.coroutines.launch
 /** One of the bottom bar's pages (Baude's side panel's, the chat's own first). */
 data class Page(val key: String, val title: String, val icon: ImageVector)
 
-/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and routines only while it's a Bot. */
-fun pages(bot: Boolean): List<Page> = listOfNotNull(
-    Page("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
-    Page("meta", "Meta", Icons.Filled.Build),
-    if (bot) Page("memory", "Memory", Icons.Filled.EditNote) else null,
-    if (bot) Page("browser", "Browser", Icons.Filled.Web) else null,
-    if (bot) Page("routines", "Routines", Icons.Filled.Alarm) else null,
-    Page("agents", "Subagents", Icons.Filled.Groups),
-    Page("processes", "Processes", Icons.Filled.Terminal),
-    Page("artifacts", "Artifacts", Icons.Filled.Language),
-)
+/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and routines only while it's a Bot;
+ * each only where its host takes what it asks of it (offers). */
+fun pages(bot: Boolean, hostId: String): List<Page> {
+    fun has(op: String) = offers(hostId, op)
+    return listOfNotNull(
+        Page("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
+        Page("meta", "Meta", Icons.Filled.Build),
+        if (bot && has("memory")) Page("memory", "Memory", Icons.Filled.EditNote) else null,
+        if (bot && has("emission_watch")) Page("browser", "Browser", Icons.Filled.Web) else null,
+        if (bot && has("routines")) Page("routines", "Routines", Icons.Filled.Alarm) else null,
+        Page("agents", "Subagents", Icons.Filled.Groups),
+        Page("processes", "Processes", Icons.Filled.Terminal),
+        if (has("ephemeral")) Page("btw", "Side questions", Icons.Filled.QuestionAnswer) else null,
+        Page("artifacts", "Artifacts", Icons.Filled.Language),
+        if (has("list_dir")) Page("files", "Files", Icons.Filled.Folder) else null,
+        if (has("git")) Page("git", "Git", Icons.Filled.AccountTree) else null,
+        if (has("signal_names")) Page("signal", "Signal", Icons.Filled.Link) else null,
+    )
+}
 
 /** A chat open: its bar (its Bot's picture and name, or its title; where it is), Baude's header controls under it,
  * its pages to swipe between, and the bottom bar that's Baude's side panel's switcher (a row that scrolls). */
@@ -79,10 +91,17 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val bot = s?.optJSONObject("bot")
     val contact = s?.let { Contact(at, it) }
     val name = if (bot != null) contact!!.name else s?.str("title") ?: "(untitled)"
-    val all = pages(bot != null)
+    val all = pages(bot != null, at)
     var shown by rememberSaveable(hostId, sid) { mutableStateOf("chat") }
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
     val scope = rememberCoroutineScope()
+    Meta.pages = { all }
+    Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
+    androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
+        val l = sideQuestions(chat)
+        Mesh.listeners.add(l)
+        onDispose { Mesh.listeners.remove(l) }
+    }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         val i = all.indexOfFirst { it.key == shown }
@@ -95,7 +114,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 Menu(listOf("Send Feedback…" to feedback))
             })
-        ChatControls(at, sid, said = { chat.said.value = it }, open = open)
+        if (offers(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
@@ -110,6 +129,10 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "agents" -> SubagentsPage(chat)
                 "processes" -> ProcessesPage(at, sid)
                 "artifacts" -> ArtifactsPage(chat)
+                "btw" -> SideQuestionsPage(chat)
+                "files" -> FilesPage(at, sid)
+                "git" -> GitPage(at, sid)
+                "signal" -> SignalPage(at, sid)
             }
         }
         if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }

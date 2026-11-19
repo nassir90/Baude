@@ -6,22 +6,33 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Base64
 
-/** One of Meta's changes (an action, as desktop Meta's journal has them): what it did, undone and done again. */
-class Action(val id: String, val said: String, val undo: () -> Unit, val redo: () -> Unit) {
+/** One of Meta's changes, as desktop Meta's journal keeps them: its id, what it did, the turn it was made in, and its
+ * kind and data, from which it's undone and done again (kept with Meta's conversation, so it outlives a restart). */
+class Action(val id: String, val said: String, val kind: String, val data: JSONObject, val turn: Int) {
     val undone = mutableStateOf(false)
+
+    fun json(): JSONObject = JSONObject().put("id", id).put("said", said).put("kind", kind).put("data", data)
+        .put("turn", turn).put("undone", undone.value)
+
+    companion object {
+        fun of(o: JSONObject) = Action(o.optString("id"), o.optString("said"), o.optString("kind"),
+            o.optJSONObject("data") ?: JSONObject(), o.optInt("turn")).also { it.undone.value = o.optBoolean("undone") }
+    }
 }
 
-/** Meta's tools on the phone: desktop Meta's (meta.SHARED_TOOLS and baude.BAUDE_TOOLS, by their names) as they make
- * sense here, acting on the app: its index, its settings, rows under a reply, reading and renaming chats, groups,
- * archiving, the New session form, undo and redo. Served as the MCP server "meta" that Meta's claude runs on its
- * host, relayed back over the phone's connection (start's app_tools): JSON-RPC lines in, answers out. */
+/** Meta's tools on the phone: desktop Meta's (meta.SHARED_TOOLS and baude.BAUDE_TOOLS, by their names and what they
+ * take) as they act on this app: its index, its settings, what's shown under a reply, reading and renaming chats,
+ * the New session form, groups, archiving, undo and redo. Served as the MCP server "meta" that Meta's claude runs on
+ * its host, relayed back over the phone's connection (start's app_tools): JSON-RPC lines in, answers out. */
 object MetaTools {
     const val NAME = "meta"
     val actions = mutableStateListOf<Action>()
     val highlight = mutableStateListOf<String>() // ("host/session": chats highlighted on the home screen)
-    val form = mutableStateOf<JSONObject?>(null)  // (the form brought up: {id, form, values})
-    val formVersion = mutableStateOf(0)
-    private var next = 1
+    val form = mutableStateOf<JSONObject?>(null)  // (the form brought up: {id, form, values, state})
+    val formVersion = mutableStateOf(0)           // (filled by Meta: the dialog drawn anew with its values)
+    var next = 1
+    var turn = 0                                   // (the user's messages so far: an action's turn)
+    val BUTTONS = mapOf("new_session" to "New session", "send_feedback" to "Send Feedback…", "hosts" to "Hosts")
 
     private fun tool(name: String, description: String, required: List<String>, props: JSONObject) =
         JSONObject().put("name", name).put("description", description)
@@ -29,6 +40,7 @@ object MetaTools {
 
     private fun str() = JSONObject().put("type", "string")
     private fun strs() = JSONObject().put("type", "array").put("items", str())
+    private fun obj() = JSONObject().put("type", "object")
 
     val TOOLS: JSONArray = JSONArray(listOf(
         tool("app_index", "A part of the app's index in full, a row a line (its parts: the index's last line). filter: " +
@@ -36,17 +48,21 @@ object MetaTools {
         tool("set_setting", "Change a setting at once (app_index settings: their names and values). Its row shows under " +
             "your reply for the user to adjust.", listOf("name", "value"), JSONObject().put("name", str())
             .put("value", JSONObject().put("type", JSONArray(listOf("string", "number", "boolean"))))),
-        tool("show", "Show UI under your reply: setting:<name> (its row), or chats (rows to tap, each opening its chat: " +
-            "their ids or names in items).", listOf("what"), JSONObject().put("what", str()).put("items", strs())),
+        tool("show", "Show UI under your reply: setting:<name> (its row), chats or pages (rows to click: their ids or " +
+            "names in items), changelog, or button:<action> (a control for the user to press, for what you don't do " +
+            "yourself; its actions: app_index buttons).", listOf("what"), JSONObject().put("what", str()).put("items", strs())),
         tool("read_chat", "A chat's conversation as text (its end, if it's long).", listOf("chat"), JSONObject().put("chat", str())),
         tool("rename_chat", "Rename a chat.", listOf("chat", "title"), JSONObject().put("chat", str()).put("title", str())),
-        tool("undo", "Undo one of your actions: its id, or last.", listOf("action"), JSONObject().put("action", str())),
+        tool("undo", "Undo one of your actions: its id, or last. turn: true undoes all of the turn it was made in.",
+            listOf("action"), JSONObject().put("action", str()).put("turn", JSONObject().put("type", "boolean"))),
         tool("redo", "Do again an action of yours that was undone: its id.", listOf("action"), JSONObject().put("action", str())),
-        tool("open_form", "Bring up one of the app's forms in your pane (app_index forms: their names), for the user to " +
-            "finish and submit: its id.", listOf("form"), JSONObject().put("form", str())),
-        tool("fill_form", "Fill fields of a form you brought up (its id): values {field: value}. The user submits it.",
-            listOf("form", "values"), JSONObject().put("form", str()).put("values", JSONObject().put("type", "object"))),
-        tool("highlight_chats", "Highlight chats on the home screen, changing nothing, to show the user which you mean " +
+        tool("open_form", "Bring up one of the app's forms in your pane (app_index forms: their names), filled with " +
+            "values if you know them ({field: value}), for the user to finish and submit; you never submit one. Returns " +
+            "its id, its fields (with their choices) and what's still wrong.", listOf("form"),
+            JSONObject().put("form", str()).put("values", obj())),
+        tool("fill_form", "Fill fields of a form you brought up (its id): values {field: value}. Returns what's still " +
+            "wrong, if anything.", listOf("id", "values"), JSONObject().put("id", str()).put("values", obj())),
+        tool("highlight_chats", "Highlight chats in the left bar, changing nothing, to show the user which you mean " +
             "(till their next message).", listOf("chats"), JSONObject().put("chats", strs())),
         tool("move_chats", "Put chats in a group (a new name makes it; \"\" for no group).", listOf("chats", "group"),
             JSONObject().put("chats", strs()).put("group", str())),
@@ -54,12 +70,12 @@ object MetaTools {
         tool("rename_group", "Rename a group; to a group there already, its chats join that one.", listOf("group", "name"),
             JSONObject().put("group", str()).put("name", str())),
         tool("delete_group", "Delete a group; its chats are in no group then.", listOf("group"), JSONObject().put("group", str())),
-        tool("show_groups", "Which groups the home screen lists (\"No group\" for chats in none; none given: all).",
+        tool("show_groups", "Which groups the left bar lists (\"No group\" for chats in none; none given: all).",
             listOf("groups"), JSONObject().put("groups", strs())),
         tool("archive_chats", "Archive chats: listed under Archived, out of the way.", listOf("chats"), JSONObject().put("chats", strs())),
         tool("unarchive_chats", "Bring archived chats back to the list.", listOf("chats"), JSONObject().put("chats", strs())),
-        tool("delete_chats", "Delete chats of this machine's own. The phone has none: its chats are all hosts'.",
-            listOf("chats"), JSONObject().put("chats", strs())),
+        tool("delete_chats", "Delete chats of this machine's own: their transcripts go to Baude's trash, and undo brings " +
+            "them back. Not a host's session, nor the chat open.", listOf("chats"), JSONObject().put("chats", strs())),
     ))
 
     /** A JSON-RPC line from Meta's claude: its answer, to then (null for a notification). */
@@ -83,6 +99,7 @@ object MetaTools {
                 call(p.optString("name"), p.optJSONObject("arguments") ?: JSONObject()) { text, error ->
                     answer(JSONObject().put("content", JSONArray(listOf(JSONObject().put("type", "text").put("text", text))))
                         .put("isError", error))
+                    Meta.save()
                 }
             }
             "ping" -> answer(JSONObject())
@@ -91,11 +108,16 @@ object MetaTools {
         }
     }
 
+    // ---- chats, hosts, groups
+
+    private fun all(): List<Pair<String, JSONObject>> =
+        Mesh.sessions.flatMap { (h, list) -> list.filter { !it.optBoolean("draft") }.map { h to it } }
+
     /** A chat named as Meta names one: its short id (or more of it), its title, or its Bot's name. */
     private fun find(ref: String): Pair<String, JSONObject>? {
         val r = ref.trim().lowercase()
         if (r.isEmpty()) return null
-        val all = Mesh.sessions.flatMap { (h, list) -> list.filter { !it.optBoolean("draft") }.map { h to it } }
+        val all = all()
         return all.firstOrNull { (_, s) -> r.length >= 4 && s.optString("id").lowercase().startsWith(r) }
             ?: all.firstOrNull { (_, s) -> s.str("title")?.lowercase() == r }
             ?: all.firstOrNull { (_, s) -> s.optJSONObject("bot")?.str("name")?.lowercase() == r }
@@ -103,192 +125,107 @@ object MetaTools {
 
     private fun title(s: JSONObject) = s.optJSONObject("bot")?.str("name")?.let { "Bot $it" } ?: s.str("title") ?: "(untitled)"
 
-    private fun chats(args: JSONObject): Pair<List<Pair<String, JSONObject>>, List<String>> {
-        val refs = args.optJSONArray("chats").strings()
-        val found = refs.mapNotNull(::find)
-        return found to refs.filter { find(it) == null }
-    }
+    private fun chats(refs: List<String>): Pair<List<Pair<String, JSONObject>>, List<String>> =
+        refs.mapNotNull(::find).distinctBy { it.first + it.second.optString("id") } to refs.filter { find(it) == null }
 
-    private fun act(said: String, undo: () -> Unit, redo: () -> Unit): String {
-        val a = Action("a${next++}", said, undo, redo)
+    private fun notFound(missing: List<String>) =
+        "No chat ${missing.joinToString(", ") { "'$it'" }}: app_index chats lists them, each with its id."
+
+    fun hostByName(name: String): String? =
+        Mesh.reached("start").firstOrNull { it.second.equals(name, true) || it.first == name }?.first
+
+    fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
+        Mesh.conn(id)?.info?.optJSONArray("groups").strings() - (Mesh.conn(id)?.info?.optString("group") ?: "")
+    } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sorted()
+
+    private fun key(h: String, s: JSONObject) = "$h/${s.optString("id")}"
+
+    // ---- the journal
+
+    private fun act(said: String, kind: String, data: JSONObject): Action {
+        val a = Action("a${next++}", said, kind, data, turn)
         actions.add(a)
         Meta.under(Line("action", a.id))
-        return a.id
+        return a
     }
 
-    /** A tool called: what it says back (and whether it went wrong), to done, on the main thread. */
-    fun call(name: String, args: JSONObject, done: (String, Boolean) -> Unit) {
-        val ok = { t: String -> done(t, false) }
-        val no = { t: String -> done(t, true) }
-        when (name) {
-            "app_index" -> {
-                val f = args.optString("filter").lowercase()
-                val rows = section(args.optString("section")) ?: return no("no part ${args.optString("section")}: " + PARTS)
-                ok(rows.filter { f.isEmpty() || it.lowercase().contains(f) }.joinToString("\n").ifEmpty { "(none)" })
-            }
-            "set_setting" -> {
-                val v = args.opt("value")?.toString().orEmpty()
-                when (args.optString("name")) {
-                    "sidebar_group" -> {
-                        if (v !in setOf("folder", "date")) return no("sidebar_group is folder or date")
-                        val was = HomePrefs.by.value
-                        HomePrefs.by.value = v; HomePrefs.save()
-                        val id = act("Grouped by $v", { HomePrefs.by.value = was; HomePrefs.save() },
-                            { HomePrefs.by.value = v; HomePrefs.save() })
-                        Meta.under(Line("rows", JSONObject().put("setting", "sidebar_group").toString()))
-                        ok("sidebar_group=$v ($id)")
-                    }
-                    "sidebar_host" -> {
-                        val to = if (v == "all") "all" else hostByName(v) ?: return no("no host $v: all, or " +
-                            Mesh.reached().joinToString(", ") { it.second })
-                        val was = HomePrefs.host.value
-                        HomePrefs.host.value = to; HomePrefs.save()
-                        val id = act("Showing ${if (to == "all") "all hosts" else Mesh.label(to)}",
-                            { HomePrefs.host.value = was; HomePrefs.save() }, { HomePrefs.host.value = to; HomePrefs.save() })
-                        Meta.under(Line("rows", JSONObject().put("setting", "sidebar_host").toString()))
-                        ok("sidebar_host=$v ($id)")
-                    }
-                    else -> no("no setting ${args.optString("name")}: sidebar_group, sidebar_host")
-                }
-            }
-            "show" -> {
-                val what = args.optString("what")
-                when {
-                    what == "chats" -> {
-                        val (found, missing) = chats(JSONObject().put("chats", args.optJSONArray("items") ?: JSONArray()))
-                        Meta.under(Line("rows", JSONObject().put("chats", JSONArray(found.map { (h, s) ->
-                            JSONArray(listOf(h, s.optString("id"))) })).toString()))
-                        if (missing.isNotEmpty()) no("shown; not found: " + missing.joinToString(", ")) else ok("shown")
-                    }
-                    what.startsWith("setting:") && what.removePrefix("setting:") in setOf("sidebar_group", "sidebar_host") -> {
-                        Meta.under(Line("rows", JSONObject().put("setting", what.removePrefix("setting:")).toString()))
-                        ok("shown")
-                    }
-                    else -> no("the phone shows chats, or setting:sidebar_group or setting:sidebar_host")
-                }
-            }
-            "read_chat" -> {
-                val (h, s) = find(args.optString("chat")) ?: return no("no chat ${args.optString("chat")}")
-                val size = s.optLong("size", 0)
-                Mesh.ask(h, JSONObject().put("op", "transcript").put("session", s.optString("id"))
-                    .put("offset", (size - 60_000).coerceAtLeast(0))) { r ->
-                    if (r.optString("op") != "transcript") return@ask no(r.optString("error"))
-                    val data = r.optString("data", "")
-                    val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
-                    ok(parse(text, cutFirst = size > 60_000).filter { it.kind in setOf("you", "bot", "tool", "note", "error") }
-                        .joinToString("\n") { "[${it.kind}] ${it.text}" }.takeLast(20_000).ifEmpty { "(nothing said yet)" })
-                }
-            }
-            "rename_chat" -> {
-                val (h, s) = find(args.optString("chat")) ?: return no("no chat ${args.optString("chat")}")
-                val sid = s.optString("id")
-                val was = s.str("title") ?: ""
-                val to = args.optString("title").trim().ifEmpty { return no("a title, please") }
-                rename(h, sid, to) { e ->
-                    if (e != null) no(e)
-                    else ok("renamed (" + act("Renamed “$was” to “$to”", { rename(h, sid, was) {} }, { rename(h, sid, to) {} }) + ")")
-                }
-            }
-            "undo", "redo" -> {
-                val ref = args.optString("action")
-                val undo = name == "undo"
-                val a = (if (ref == "last") actions.lastOrNull { it.undone.value != undo } else actions.firstOrNull { it.id == ref })
-                    ?: return no("no action $ref")
-                if (a.undone.value == undo) return no("${a.id} is ${if (undo) "undone" else "done"} already")
-                if (undo) a.undo() else a.redo()
-                a.undone.value = undo
-                ok("${if (undo) "undid" else "redid"} ${a.id}")
-            }
-            "open_form" -> {
-                if (args.optString("form") != "new_session") return no("its forms: new_session")
-                val id = "f${next++}"
-                form.value = JSONObject().put("id", id).put("form", "new_session").put("values", JSONObject())
-                formVersion.value++
-                ok("$id: new_session, fields host, folder, group, prompt")
-            }
-            "fill_form" -> {
-                val f = form.value?.takeIf { it.optString("id") == args.optString("form") } ?: return no("no form ${args.optString("form")} open")
-                val values = f.optJSONObject("values") ?: JSONObject()
-                val given = args.optJSONObject("values") ?: JSONObject()
-                for (k in given.keys()) {
-                    if (k !in setOf("host", "folder", "group", "prompt")) return no("new_session's fields: host, folder, group, prompt")
-                    if (k == "host" && hostByName(given.optString(k)) == null) return no("no host ${given.optString(k)} connected")
-                    values.put(k, given.optString(k))
-                }
-                form.value = JSONObject(f.toString()).put("values", values)
-                formVersion.value++
-                ok("filled")
-            }
-            "highlight_chats" -> {
-                val (found, missing) = chats(args)
-                highlight.clear()
-                highlight.addAll(found.map { (h, s) -> h + "/" + s.optString("id") })
-                if (missing.isNotEmpty()) no("highlighted; not found: " + missing.joinToString(", ")) else ok("highlighted")
-            }
-            "move_chats" -> {
-                val (found, missing) = chats(args)
-                if (found.isEmpty()) return no("no such chats: " + missing.joinToString(", "))
-                val to = args.optString("group").trim()
-                val was = found.associate { (h, s) -> "$h/${s.optString("id")}" to groupOf(h, s) }
-                fun put(g: (String) -> String) {
-                    for (k in was.keys) HomePrefs.chatGroups[k] = g(k)
-                    if (to.isNotEmpty() && to !in HomePrefs.made) HomePrefs.made.add(to)
-                    HomePrefs.save()
-                }
-                put { to }
-                ok("moved (" + act("Moved ${found.size} chat(s) to ${to.ifEmpty { "no group" }}", { put { was[it]!! } }, { put { to } }) + ")" +
-                    if (missing.isNotEmpty()) "; not found: " + missing.joinToString(", ") else "")
-            }
-            "make_group" -> {
-                val g = args.optString("name").trim().ifEmpty { return no("a name, please") }
-                if (g in groupNames()) return no("there's a group $g already")
-                HomePrefs.made.add(g); HomePrefs.save()
-                ok("made (" + act("Made group $g", { HomePrefs.made.remove(g); HomePrefs.save() },
-                    { HomePrefs.made.add(g); HomePrefs.save() }) + ")")
-            }
-            "rename_group", "delete_group" -> {
-                val g = args.optString("group")
-                if (g !in groupNames()) return no("no group $g")
-                val to = if (name == "rename_group") args.optString("name").trim().ifEmpty { return no("a name, please") } else ""
-                val members = Mesh.sessions.flatMap { (h, list) -> list.filter { groupOf(h, it) == g }.map { "$h/${it.optString("id")}" } }
-                val wasMade = g in HomePrefs.made
-                fun apply(from: String, into: String) {
-                    for (k in members) HomePrefs.chatGroups[k] = into
-                    HomePrefs.made.remove(from)
-                    if (into.isNotEmpty() && into !in HomePrefs.made) HomePrefs.made.add(into)
-                    HomePrefs.save()
-                }
-                apply(g, to)
-                val said = if (to.isEmpty()) "Deleted group $g" else "Renamed group $g to $to"
-                ok("done (" + act(said, {
-                    apply(to, g)
-                    if (!wasMade) { HomePrefs.made.remove(g); HomePrefs.save() }
-                }, { apply(g, to) }) + ")")
-            }
-            "show_groups" -> {
-                val given = args.optJSONArray("groups").strings().map { if (it == "No group") "" else it }
-                val was = HomePrefs.groups.toList()
-                fun put(l: List<String>) { HomePrefs.groups.clear(); HomePrefs.groups.addAll(l); HomePrefs.save() }
-                put(given)
-                ok("showing " + (if (given.isEmpty()) "all" else given.joinToString(", ") { it.ifEmpty { "No group" } }) +
-                    " (" + act("Showing " + (if (given.isEmpty()) "all groups" else given.joinToString(", ") { it.ifEmpty { "No group" } }),
-                    { put(was) }, { put(given) }) + ")")
-            }
-            "archive_chats", "unarchive_chats" -> {
-                val (found, missing) = chats(args)
-                if (found.isEmpty()) return no("no such chats: " + missing.joinToString(", "))
-                val op = if (name == "archive_chats") "archive" else "unarchive"
-                val back = if (op == "archive") "unarchive" else "archive"
-                fun send(o: String) = found.forEach { (h, s) -> Mesh.ask(h, JSONObject().put("op", o).put("session", s.optString("id"))) {} }
-                send(op)
-                ok("${op}d ${found.size} (" + act((if (op == "archive") "Archived " else "Unarchived ") +
-                    found.joinToString(", ") { title(it.second) }, { send(back) }, { send(op) }) + ")" +
-                    if (missing.isNotEmpty()) "; not found: " + missing.joinToString(", ") else "")
-            }
-            "delete_chats" -> no("the phone's chats are all hosts' sessions, which aren't deleted from here: archive them")
-            else -> no("no tool $name")
+    private fun overrides(keys: JSONObject, to: (String) -> String?) {
+        for (k in keys.keys()) {
+            val v = to(k)
+            if (v == null) HomePrefs.chatGroups.remove(k) else HomePrefs.chatGroups[k] = v
         }
     }
+
+    private fun was(o: JSONObject, k: String): String? = if (o.isNull(k)) null else o.optString(k)
+
+    /** An action undone (or done again): what went wrong, if anything, to done. */
+    fun apply(a: Action, undo: Boolean, done: (String?) -> Unit) {
+        val d = a.data
+        val finish = { e: String? -> if (e == null) a.undone.value = undo; HomePrefs.save(); Meta.save(); done(e) }
+        when (a.kind) {
+            "rename" -> rename(d.optString("host"), d.optString("sid"), d.optString(if (undo) "from" else "to"), finish)
+            "setting" -> finish(setting(d.optString("name"), d.optString(if (undo) "from" else "to")))
+            "move" -> {
+                val keys = d.optJSONObject("keys") ?: JSONObject()
+                val to = d.optString("to")
+                if (undo) {
+                    overrides(keys) { was(keys, it) }
+                    if (d.optBoolean("made")) HomePrefs.made.remove(to)
+                } else {
+                    overrides(keys) { to }
+                    if (d.optBoolean("made") && to !in HomePrefs.made) HomePrefs.made.add(to)
+                }
+                finish(null)
+            }
+            "make_group" -> {
+                val g = d.optString("name")
+                if (undo) HomePrefs.made.remove(g) else if (g !in HomePrefs.made) HomePrefs.made.add(g)
+                finish(null)
+            }
+            "group" -> {
+                val keys = d.optJSONObject("keys") ?: JSONObject()
+                val from = d.optString("from")
+                val to = d.optString("to")
+                if (undo) {
+                    overrides(keys) { was(keys, it) }
+                    if (d.optBoolean("from_made") && from !in HomePrefs.made) HomePrefs.made.add(from)
+                    if (to.isNotEmpty() && !d.optBoolean("to_made")) HomePrefs.made.remove(to)
+                } else {
+                    overrides(keys) { to }
+                    if (d.optBoolean("from_made")) HomePrefs.made.remove(from)
+                    if (to.isNotEmpty() && to !in HomePrefs.made) HomePrefs.made.add(to)
+                }
+                finish(null)
+            }
+            "show_groups" -> {
+                val l = d.optJSONArray(if (undo) "from" else "to").strings()
+                HomePrefs.groups.clear(); HomePrefs.groups.addAll(l)
+                finish(null)
+            }
+            "archive" -> {
+                val op = d.optString("op").let { if (undo) (if (it == "archive") "unarchive" else "archive") else it }
+                archive(d.optJSONArray("chats").list2(), op) { failed -> finish(failed.ifEmpty { null }?.joinToString("; ")) }
+            }
+            else -> done("not an action of the phone's")
+        }
+    }
+
+    private fun JSONArray?.list2(): List<Pair<String, String>> = if (this == null) emptyList()
+    else (0 until length()).mapNotNull { optJSONArray(it)?.let { p -> p.optString(0) to p.optString(1) } }
+
+    private fun undoMany(acts: List<Action>, undo: Boolean, done: (List<String>) -> Unit) {
+        val failed = ArrayList<String>()
+        fun step(i: Int) {
+            if (i < 0 || i >= acts.size) return done(failed)
+            apply(acts[i], undo) { e -> if (e != null) failed.add("${acts[i].said}: $e"); step(if (undo) i - 1 else i + 1) }
+        }
+        step(if (undo) acts.size - 1 else 0) // (undone newest first)
+    }
+
+    /** An action of Meta's undone or done again from its row (Undo, Redo). */
+    fun button(a: Action, undo: Boolean) = apply(a, undo) { e -> if (e != null) Meta.chat.said.value = "Couldn't: $e" }
+
+    // ---- the app's own changes, each checked with its host where it's the host's
 
     private fun rename(h: String, sid: String, title: String, then: (String?) -> Unit) {
         var answered = false
@@ -300,32 +237,284 @@ object MetaTools {
         Mesh.later(30_000) { if (!answered) { answered = true; then("its host didn't answer") } }
     }
 
-    fun hostByName(name: String): String? = Mesh.reached().firstOrNull { it.second.equals(name, true) || it.first == name }?.first
+    /** Each chat archived or unarchived (op), its host's answer checked: what didn't go, to then. */
+    private fun archive(chats: List<Pair<String, String>>, op: String, then: (List<String>) -> Unit) {
+        val failed = ArrayList<String>()
+        var left = chats.size
+        if (left == 0) return then(failed)
+        for ((h, sid) in chats) Mesh.ask(h, JSONObject().put("op", op).put("session", sid)) { r ->
+            if (r.optString("op") != op + "d") failed.add("${Mesh.session(h, sid)?.let(::title) ?: sid.take(8)}: " +
+                r.optString("error").ifBlank { "it said no" })
+            if (--left == 0) then(failed)
+        }
+    }
 
-    fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
-        Mesh.conn(id)?.info?.optJSONArray("groups").strings() - (Mesh.conn(id)?.info?.optString("group") ?: "")
-    } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sorted()
+    private fun setting(name: String, v: String): String? = when (name) {
+        "sidebar_group" -> if (v !in setOf("folder", "date")) "sidebar_group is folder or date"
+            else { HomePrefs.by.value = v; HomePrefs.save(); null }
+        "sidebar_host" -> {
+            val to = if (v == "all") "all" else hostByName(v) ?: Mesh.conn(v)?.id
+            if (to == null) "no host $v: all, or ${Mesh.reached("subscribe").joinToString(", ") { it.second }}"
+            else { HomePrefs.host.value = to; HomePrefs.save(); null }
+        }
+        else -> "No setting '$name': they're sidebar_group, sidebar_host."
+    }
 
-    const val PARTS = "hosts, sessions, groups, settings, forms"
+    private fun settingValue(name: String) = when (name) {
+        "sidebar_group" -> HomePrefs.by.value
+        "sidebar_host" -> HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }
+        else -> ""
+    }
+
+    // ---- the New session form
+
+    /** The New session form's fields as Meta's told them (Form.described): name, what it takes, its value, its
+     * choices. */
+    private fun described(values: JSONObject): JSONArray = JSONArray(listOf(
+        JSONObject().put("field", "host").put("takes", "one of its choices").put("value", values.optString("host"))
+            .put("choices", JSONArray(Mesh.reached("start").map { it.second })),
+        JSONObject().put("field", "folder").put("takes", "a folder on the host").put("value", values.optString("folder")),
+        JSONObject().put("field", "group").put("takes", "a group (\"\" for none)").put("value", values.optString("group")),
+        JSONObject().put("field", "prompt").put("takes", "what to ask first (none: a draft, written in later)")
+            .put("value", values.optString("prompt")),
+    ))
+
+    /** What's still wrong with it (Form.check), or null: it's ready for the user to submit. */
+    private fun wrong(values: JSONObject): String? = when {
+        values.optString("host").isBlank() -> "host: pick one of its choices"
+        hostByName(values.optString("host")) == null -> "host: ${values.optString("host")} isn't connected now; pick one of its choices"
+        values.optString("folder").isBlank() -> "folder: a folder on the host, please"
+        else -> null
+    }
+
+    private fun fill(values: JSONObject, given: JSONObject): String? {
+        for (k in given.keys()) {
+            if (k !in setOf("host", "folder", "group", "prompt")) return "new_session's fields are host, folder, group and prompt"
+            values.put(k, given.optString(k))
+        }
+        return null
+    }
+
+    /** The dialog's own edits, kept in the form (so Meta's next fill keeps what the user wrote). */
+    fun edited(values: JSONObject) {
+        val f = form.value ?: return
+        form.value = JSONObject(f.toString()).put("values", values)
+    }
+
+    // ---- the tools
+
+    /** A tool called: what it says back (and whether it went wrong), to done, on the main thread. */
+    fun call(name: String, args: JSONObject, done: (String, Boolean) -> Unit) {
+        val ok = { t: String -> done(t, false) }
+        val no = { t: String -> done(t, true) }
+        when (name) {
+            "app_index" -> {
+                val f = args.optString("filter").lowercase()
+                val rows = section(args.optString("section")) ?: return no("No part '${args.optString("section")}': " +
+                    "they're $PARTS.")
+                ok(rows.filter { f.isEmpty() || it.lowercase().contains(f) }.joinToString("\n").ifEmpty { "(none)" })
+            }
+            "set_setting" -> {
+                val n = args.optString("name")
+                val v = args.opt("value")?.toString().orEmpty()
+                val from = settingValue(n)
+                setting(n, v)?.let { return no(it) }
+                Meta.under(Line("rows", JSONObject().put("setting", n).toString()))
+                if (from == settingValue(n)) return ok("It's $v already.")
+                val a = act("$n: $from → $v", "setting", JSONObject().put("name", n).put("from", from).put("to", v))
+                ok("$n is $v now (action ${a.id}).")
+            }
+            "show" -> show(args, ok, no)
+            "read_chat" -> {
+                val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
+                val size = s.optLong("size", 0)
+                Mesh.ask(h, JSONObject().put("op", "transcript").put("session", s.optString("id"))
+                    .put("offset", (size - 60_000).coerceAtLeast(0))) { r ->
+                    if (r.optString("op") != "transcript") return@ask no(r.optString("error"))
+                    val data = r.optString("data", "")
+                    val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
+                    val said = parse(text, cutFirst = size > 60_000).filter { it.kind in setOf("you", "bot", "tool", "note", "error") }
+                        .joinToString("\n") { "[${it.kind}] ${it.text}" }.takeLast(20_000).ifEmpty { "(nothing said yet)" }
+                    ok("<chat title=\"${title(s).replace("\"", "&quot;")}\">\n$said\n</chat>")
+                }
+            }
+            "rename_chat" -> {
+                val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
+                val to = args.optString("title").split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+                if (to.isEmpty()) return no("A title is needed.")
+                val before = s.str("title") ?: ""
+                if (to == before) return ok("It's called that already.")
+                rename(h, s.optString("id"), to) { e ->
+                    if (e != null) return@rename no("Couldn't rename it: $e")
+                    val a = act("Renamed “$before” to “$to”", "rename", JSONObject().put("host", h).put("sid", s.optString("id"))
+                        .put("from", before).put("to", to))
+                    ok("Renamed (action ${a.id}).")
+                }
+            }
+            "undo" -> {
+                val ref = args.optString("action").trim()
+                val a = if (ref.isEmpty() || ref == "last") actions.lastOrNull { !it.undone.value } else actions.firstOrNull { it.id == ref }
+                a ?: return no("No such action of yours: its id is in your replies.")
+                val acts = if (args.optBoolean("turn")) actions.filter { it.turn == a.turn } else listOf(a)
+                if (acts.all { it.undone.value }) return ok("That's undone already.")
+                undoMany(acts.filter { !it.undone.value }, true) { failed ->
+                    ok("Undone: ${acts.filter { it.undone.value }.joinToString(", ") { it.said }}." +
+                        if (failed.isNotEmpty()) " Not undone: ${failed.joinToString("; ")}." else "")
+                }
+            }
+            "redo" -> {
+                val a = actions.firstOrNull { it.id == args.optString("action") && it.undone.value }
+                    ?: return no("No action of yours with that id is undone.")
+                apply(a, false) { e -> if (e != null) no(e) else ok("Done again: ${a.said}.") }
+            }
+            "open_form" -> {
+                val f = args.optString("form").trim()
+                if (f != "new_session") return no("No form '$f': they're new_session (app_index forms).")
+                val values = JSONObject().put("host", "").put("folder", "").put("group", "").put("prompt", "")
+                fill(values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
+                val id = "f${next++}"
+                form.value = JSONObject().put("id", id).put("form", f).put("values", values).put("state", "open")
+                formVersion.value++
+                val w = wrong(values)
+                ok("Form $id (New session) is up for the user to finish and submit; you don't submit it. Its fields: " +
+                    "${described(values)}. " + (w?.let { "Still wrong: $it" } ?: "It's ready to submit."))
+            }
+            "fill_form" -> {
+                val id = args.optString("id").trim()
+                val f = form.value?.takeIf { it.optString("id") == id } ?: return no("No form '$id' of yours: open_form " +
+                    "gives a form's id.")
+                if (f.optString("state", "open") != "open") return no("That form is ${f.optString("state")} already.")
+                val values = JSONObject(f.optJSONObject("values")?.toString() ?: "{}")
+                fill(values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
+                form.value = JSONObject(f.toString()).put("values", values)
+                formVersion.value++
+                val w = wrong(values)
+                ok(if (w != null) "Filled. Still wrong: $w" else "Filled: it's ready for the user to submit.")
+            }
+            "highlight_chats" -> {
+                val (found, missing) = chats(args.optJSONArray("chats").strings())
+                if (missing.isNotEmpty()) return no(notFound(missing))
+                highlight.clear()
+                highlight.addAll(found.map { (h, s) -> key(h, s) })
+                ok("Highlighted till the user's next message.")
+            }
+            "move_chats" -> {
+                val (found, missing) = chats(args.optJSONArray("chats").strings())
+                if (missing.isNotEmpty()) return no(notFound(missing))
+                val to = args.optString("group").trim()
+                val keys = JSONObject()
+                for ((h, s) in found) if (groupOf(h, s) != to) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
+                if (keys.length() == 0) return ok("They're in ${to.ifEmpty { "no group" }} already.")
+                val made = to.isNotEmpty() && to !in groupNames()
+                val a = act("Moved ${keys.length()} chat${if (keys.length() != 1) "s" else ""} to ${to.ifEmpty { "no group" }}",
+                    "move", JSONObject().put("keys", keys).put("to", to).put("made", made))
+                apply(a, false) { ok("Moved (action ${a.id}).") }
+            }
+            "make_group" -> {
+                val g = args.optString("name").trim().ifEmpty { return no("A name is needed.") }
+                if (g in groupNames()) return no("There's a group '$g' already.")
+                val a = act("Made group $g", "make_group", JSONObject().put("name", g))
+                apply(a, false) { ok("Made (action ${a.id}).") }
+            }
+            "rename_group", "delete_group" -> {
+                val g = args.optString("group")
+                if (g !in groupNames()) return no("No group '$g': app_index groups lists them.")
+                val to = if (name == "rename_group") args.optString("name").trim().ifEmpty { return no("A name is needed.") } else ""
+                if (to == g) return ok("It's called that already.")
+                val keys = JSONObject()
+                for ((h, s) in all()) if (groupOf(h, s) == g) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
+                val a = act(if (to.isEmpty()) "Deleted group $g" else "Renamed group $g to $to", "group", JSONObject()
+                    .put("keys", keys).put("from", g).put("to", to).put("from_made", g in HomePrefs.made)
+                    .put("to_made", to.isNotEmpty() && to in HomePrefs.made))
+                apply(a, false) { ok("${if (to.isEmpty()) "Deleted" else "Renamed"} (action ${a.id}).") }
+            }
+            "show_groups" -> {
+                val given = args.optJSONArray("groups").strings().map { if (it == "No group") "" else it }
+                val unknown = given.filter { it.isNotEmpty() && it !in groupNames() }
+                if (unknown.isNotEmpty()) return no("No group ${unknown.joinToString(", ") { "'$it'" }}: app_index groups lists them.")
+                val a = act("Showing " + (if (given.isEmpty()) "all groups" else given.joinToString(", ") { it.ifEmpty { "No group" } }),
+                    "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)))
+                apply(a, false) { ok("Shown (action ${a.id}).") }
+            }
+            "archive_chats", "unarchive_chats" -> {
+                val (found, missing) = chats(args.optJSONArray("chats").strings())
+                if (missing.isNotEmpty()) return no(notFound(missing))
+                val op = if (name == "archive_chats") "archive" else "unarchive"
+                val change = found.filter { (_, s) -> s.optBoolean("archived") != (op == "archive") } // (only those it
+                if (change.isEmpty()) return ok("They're ${op}d already.")                             // changes: undone)
+                val pairs = change.map { (h, s) -> h to s.optString("id") }
+                archive(pairs, op) { failed ->
+                    val went = pairs.filter { (h, sid) -> failed.none { it.startsWith((Mesh.session(h, sid)?.let(::title) ?: sid.take(8)) + ":") } }
+                    if (went.isEmpty()) return@archive no("Couldn't: ${failed.joinToString("; ")}")
+                    val a = act((if (op == "archive") "Archived " else "Unarchived ") +
+                        went.joinToString(", ") { (h, sid) -> Mesh.session(h, sid)?.let(::title) ?: sid.take(8) }, "archive",
+                        JSONObject().put("op", op).put("chats", JSONArray(went.map { JSONArray(listOf(it.first, it.second)) })))
+                    ok("${op.replaceFirstChar(Char::uppercase)}d (action ${a.id})." +
+                        if (failed.isNotEmpty()) " Not ${op}d: ${failed.joinToString("; ")}." else "")
+                }
+            }
+            "delete_chats" -> no("These are hosts' sessions, and Meta deletes only this machine's own chats: the phone " +
+                "has none. archive_chats puts them out of the way.")
+            else -> no("No tool '$name'.")
+        }
+    }
+
+    private fun show(args: JSONObject, ok: (String) -> Unit, no: (String) -> Unit) {
+        val what = args.optString("what").trim()
+        val items = args.optJSONArray("items").strings()
+        val kind = what.substringBefore(":")
+        val rest = what.substringAfter(":", "")
+        when (kind) {
+            "setting" -> {
+                if (rest !in setOf("sidebar_group", "sidebar_host")) return no("No setting '$rest': they're sidebar_group, sidebar_host.")
+                Meta.under(Line("rows", JSONObject().put("setting", rest).toString()))
+            }
+            "chats" -> {
+                val (found, missing) = chats(items)
+                if (missing.isNotEmpty()) return no(notFound(missing))
+                Meta.under(Line("rows", JSONObject().put("chats", JSONArray(found.map { (h, s) ->
+                    JSONArray(listOf(h, s.optString("id"))) })).toString()))
+            }
+            "pages" -> {
+                val have = Meta.pages().map { it.title }
+                val missing = items.filter { i -> have.none { it.equals(i, true) } }
+                if (missing.isNotEmpty()) return no("No page ${missing.joinToString(", ") { "'$it'" }}: the chat open has " +
+                    have.joinToString(", ") + " (app_index pages).")
+                Meta.under(Line("rows", JSONObject().put("pages", JSONArray(items.map { i -> have.first { it.equals(i, true) } })).toString()))
+            }
+            "changelog" -> {
+                val h = Meta.host.value ?: return no("Meta's host isn't connected.")
+                if (!offers(h, "git")) return no(tooOld(h, "show its changelog"))
+                Meta.under(Line("rows", JSONObject().put("changelog", h).toString()))
+            }
+            "button" -> {
+                if (rest !in BUTTONS) return no("No button '$rest': they're ${BUTTONS.keys.joinToString(", ")} (app_index buttons).")
+                Meta.under(Line("rows", JSONObject().put("button", rest).toString()))
+            }
+            else -> return no("show takes setting:<name>, chats, pages, changelog or button:<action>.")
+        }
+        ok("Shown under your reply.")
+    }
+
+    const val PARTS = "chats, hosts, groups, settings, forms, buttons, pages"
 
     /** A part of the index, a row a line. */
     fun section(name: String): List<String>? = when (name) {
         "hosts" -> (Mesh.hosts.map { it.id } + Mesh.members.keys.map { "mesh:$it" }).map { id ->
             "${Mesh.label(id)}: ${Mesh.conn(id)?.state ?: "not connected"}" + if (id.startsWith("mesh:")) " (through the mesh)" else ""
         }
-        "sessions" -> Mesh.sessions.flatMap { (h, list) ->
-            list.filter { !it.optBoolean("draft") }.map { s ->
-                "${s.optString("id").take(8)} " + listOfNotNull("\"${s.str("title") ?: "(untitled)"}\"", Mesh.label(h),
-                    shortPath(h, s.optString("cwd")), s.optString("state"), s.optJSONObject("bot")?.str("name")?.let { "Bot $it" },
-                    groupOf(h, s).ifEmpty { null }?.let { "group $it" }, if (s.optBoolean("archived")) "archived" else null,
-                    s.str("model")).joinToString(" · ")
-            }
+        "chats", "sessions" -> all().map { (h, s) ->
+            "${s.optString("id").take(8)} " + listOfNotNull("\"${s.str("title") ?: "(untitled)"}\"", Mesh.label(h),
+                shortPath(h, s.optString("cwd")), s.optString("state"), s.optJSONObject("bot")?.str("name")?.let { "Bot $it" },
+                groupOf(h, s).ifEmpty { null }?.let { "group $it" }, if (s.optBoolean("archived")) "archived" else null,
+                s.str("model")).joinToString(" · ")
         }
         "groups" -> listOf("No group") + groupNames()
-        "settings" -> listOf("sidebar_group=${HomePrefs.by.value} (folder, date: how the home screen groups chats)",
-            "sidebar_host=${HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }} (all, or a host: whose " +
-                "chats the home screen lists)")
+        "settings" -> listOf("sidebar_group=${settingValue("sidebar_group")} (folder or date: how the left bar, the home " +
+            "screen, groups chats)", "sidebar_host=${settingValue("sidebar_host")} (all, or a host's name: whose chats it lists)")
         "forms" -> listOf("new_session: host, folder, group, prompt (the New session dialog)")
+        "buttons" -> BUTTONS.map { (k, v) -> "$k: $v" }
+        "pages" -> Meta.pages().map { it.title }.ifEmpty { listOf("(no chat open)") }
         else -> null
     }
 }

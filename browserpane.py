@@ -269,7 +269,8 @@ class BrowserPane(Gtk.Box):
         self.append(self.said)
         self.drives = [self.back, self.fwd, self.reload, self.address, new, self.tabs, self.prompts]
         self.input()
-        self.connect("notify::mapped", lambda *_: self.watch_if_shown())
+        self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
+        self.connect("unmap", lambda *_: self.stop(keep=True))
         self.size_timer = GLib.timeout_add(500, self.size_check)
         self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), self.stop()))
 

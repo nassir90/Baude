@@ -13,6 +13,7 @@ import time
 from baudelib import wire
 
 NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
+SUBAGENT_MODES = ("auto", "acceptEdits", "default", "plan")  # (a subagent's: Auto at most; its host holds it to these)
 READ_ONLY = ("hosts", "chats", "read_chat")  # (looking, never asked about; starting or saying: as the chat's mode is)
 WAIT_S, WAIT_MAX_S = 600, 3600  # (a subagent's or a chat's reply waited for this long, by default and at most)
 ASK_S = 60  # (a subagent asking a permission no one's there to give: refused after this long)
@@ -23,15 +24,16 @@ SCHEMAS = {
               "can run (their values are what start_subagent's model takes).", {}, []),
     "start_subagent": ("Start a new chat (a subagent) on a host of the mesh, with one of its models, give it a task "
                        "and, unless wait is false, wait for its answer. It runs as a chat there (listed in Baude), in "
-                       "cwd on that host (its home if none's given); it can't ask you for permissions, so what it "
-                       "asks is refused after a minute. Its id comes back, to message it again (message_chat).",
+                       "cwd on that host (its home if none's given), in Auto mode unless another's asked for (Auto at "
+                       "most); it can't ask you for permissions, so what it does ask is refused after a minute. Its id comes back, to message it again (message_chat).",
                        {"prompt": {"type": "string", "description": "The task, said in full: it doesn't see this chat"},
                         "host": {"type": "string", "description": "A host's id or name (hosts); this one if none"},
                         "model": {"type": "string", "description": "A model's value on that host (hosts)"},
                         "cwd": {"type": "string", "description": "The folder on that host it works in"},
                         "title": {"type": "string", "description": "Its title in the list"},
-                        "mode": {"type": "string", "enum": ["default", "acceptEdits", "plan", "bypassPermissions"],
-                                 "description": "Its permission mode (default: acceptEdits)"},
+                        "mode": {"type": "string", "enum": list(SUBAGENT_MODES),
+                                 "description": "Its permission mode (default: auto; a model with no modes runs in "
+                                                "default)"},
                         "wait": {"type": "boolean", "description": "Wait for its answer (default true)"},
                         "timeout_s": {"type": "integer", "description": f"How long to wait (default {WAIT_S})"}},
                        ["prompt"]),
@@ -192,7 +194,7 @@ class Mesh:
         """A chat started on a host with the task, attached to as it starts (nothing it says missed), its answer
         waited for."""
         params = {"op": "start", "prompt": a["prompt"], "title": a.get("title") or " ".join(a["prompt"].split())[:60],
-                  "mode": a.get("mode") or "acceptEdits", "ask_timeout": ASK_S, "ask_default": "deny",
+                  "mode": a.get("mode") or "auto", "ask_timeout": ASK_S, "ask_default": "deny",
                   "attach": True, "answers": False, "req": 1}
         for k in ("model", "cwd"):
             if a.get(k):

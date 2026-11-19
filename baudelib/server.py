@@ -1180,6 +1180,8 @@ class Server:
             raise ValueError(f"a fork runs in its session's folder: {src.meta['cwd']}")
         model = model or (src.meta.get("model") if src else None)
         mode = params.get("mode") or "default"
+        if params.get("spawned_by") and mode not in meshtools.SUBAGENT_MODES:  # (a Bot's subagent: Auto at most;
+            mode = "auto"  # a program without Auto's modes, launch's next best: manual)
         if params.get("ephemeral") and models.model_program(model) == "codex":
             mode = "default"
         run = models.launch(model, mode, params.get("effort") or None)
@@ -1349,8 +1351,9 @@ class Server:
                                                                             os.path.abspath(self.socket_path)],
                                         "env": {"BAUDE_SESSION": s.id}}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
-            if run["program"] == "claude":  # (what it reads asked for no more than a file read is: what it starts or
-                rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.READ_ONLY]  # says, as the chat's mode has it)
+            if run["program"] == "claude":  # (a Bot's, never asked about; another chat's, its looking only: what it
+                rules = [f"mcp__{meshtools.NAME}__{t}"  # starts or says, as the chat's mode has it)
+                         for t in (meshtools.SCHEMAS if s.meta.get("bot") else meshtools.READ_ONLY)]
                 if "--allowedTools" in extra:
                     at = extra.index("--allowedTools") + 1
                     extra[at:at] = rules

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -96,8 +97,9 @@ fun merge3(base: String, ours: String, theirs: String): String? {
 private val UNREACHED = setOf("the server isn't there", "the server didn't answer", "the server's gone", "not connected",
     "the connection went")
 
-/** Do two changes (of the same text) touch the same lines (or go in at the same place)? */
-private fun overlap(a: Hunk, b: Hunk) = a.from < b.to && b.from < a.to || a.from == b.from && (a.from == a.to || b.from == b.to)
+/** Do two changes (of the same text) touch the same lines? One going in at another's edge (a line added just above
+ * or below it) doesn't. */
+private fun overlap(a: Hunk, b: Hunk) = a.from < b.to && b.from < a.to
 
 /** A Bot's memory as this phone has it, kept while the app runs (whichever page is shown: a view model's part):
  * base, the Bot's text as its host last said it (what a save is merged against); seen, what you've accepted, with
@@ -111,6 +113,7 @@ class MemoryState(val hostId: String, val sid: String) {
     var failed by mutableStateOf<String?>(null)  // (why it couldn't be read, or saved, last)
     var edits by mutableIntStateOf(0)            // (changes made here not saved yet: 0 when it's as saved)
     private var saving = false
+    private var retrying = false // (a try again waiting: one at a time)
     private var wait = 5_000L
 
     val pending: List<Hunk> get() = hunks(seen.split("\n"), text.split("\n"))
@@ -134,12 +137,16 @@ class MemoryState(val hostId: String, val sid: String) {
         failed = null
     }
 
-    /** You've edited what you've seen: the Bot's changes that aren't where you edited kept in what's saved. */
+    /** You've edited what you've seen: what's saved is your text with each of the Bot's changes still in it (one
+     * is only ever gone once you reject it; you edit around them, never in them: the page has them apart). */
     fun edit(now: String) {
         val a = seen.split("\n")
         val mine = hunks(a, now.split("\n"))
-        val keep = pending.filter { b -> mine.none { overlap(it, b) } }
-        text = merge3(seen, now, applied(a, keep).joinToString("\n")) ?: now
+        val theirs = pending
+        text = if (mine.none { u -> theirs.any { overlap(u, it) } }) // (yours and its, each where it is: yours first
+            applied(a, (mine + theirs).sortedWith(compareBy<Hunk>({ it.from },   // where both go in at one place)
+                { if (it in mine && it.from == it.to) 0 else if (it.from == it.to) 1 else 2 }))).joinToString("\n")
+        else merge3(seen, now, text) ?: text // (in one of its changes, which the page doesn't let you edit: kept as it is)
         seen = now
         edits++
     }
@@ -187,9 +194,12 @@ class MemoryState(val hostId: String, val sid: String) {
                 else -> {
                     failed = r.optString("error").ifBlank { "it said no" }
                     said(if (failed in UNREACHED) "Not saved yet: can't connect to the host" else "Couldn't save: $failed")
-                    val again = wait
-                    wait = (wait * 2).coerceAtMost(60_000L)
-                    Mesh.later(again) { save(said = said) } // (tried again, for as long as it isn't saved)
+                    if (!retrying) { // (tried again, for as long as it isn't saved: one try waiting at a time)
+                        retrying = true
+                        val again = wait
+                        wait = (wait * 2).coerceAtMost(60_000L)
+                        Mesh.later(again) { retrying = false; save(said = said) }
+                    }
                 }
             }
         }
@@ -251,8 +261,14 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Gap.chatH, vertical = Gap.chatV),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 @Composable
-                fun segment(from: Int, to: Int) {
-                    if (from >= to) return
+                fun segment(from: Int, to: Int) { // (what's around its changes: yours to edit; between two of them, or
+                    if (from >= to) {               // before one at the top, a line to write in)
+                        BasicTextField("", { now -> if (now.isNotEmpty())
+                            m.edit((a.subList(0, from) + now.split("\n") + a.subList(from, a.size)).joinToString("\n")) },
+                            textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 22.dp))
+                        return
+                    }
                     BasicTextField(a.subList(from, to).joinToString("\n"), { now ->
                         m.edit((a.subList(0, from) + now.split("\n") + a.subList(to, a.size)).joinToString("\n"))
                     }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth())

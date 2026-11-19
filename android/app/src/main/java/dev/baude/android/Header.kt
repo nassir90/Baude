@@ -175,20 +175,26 @@ fun copiesOf(hostId: String, model: String?): List<Copy> {
     return all.filter { sameModel(it, now) }
 }
 
-/** Model changes waiting for a turn's end (Baude's move_after_turn): (host, session) -> the value to move to. */
+/** Model changes waiting for a turn's end (Baude's move_after_turn): (host, session) -> the value to move to, and
+ * how that chat moves (its own). Made once its turn ends, or, its host back after a drop, at once if it's not at one. */
 object Moves {
-    val waiting = HashMap<String, String>()
+    private val waiting = HashMap<String, Pair<String, (String) -> Unit>>()
     private var listening = false
-    var apply: (String, String, String) -> Unit = { _, _, _ -> }
 
-    fun later(hostId: String, sid: String, value: String) {
-        waiting["$hostId/$sid"] = value
+    fun cancel(hostId: String, sid: String) = waiting.remove("$hostId/$sid")
+
+    fun later(hostId: String, sid: String, value: String, apply: (String) -> Unit) {
+        waiting["$hostId/$sid"] = value to apply
         if (listening) return
         listening = true
         Mesh.listeners.add { at, msg ->
-            if (msg.optString("op") != "turn_ended") return@add
-            val v = waiting.remove("$at/${msg.optString("session")}") ?: return@add
-            apply(at, msg.optString("session"), v)
+            when (msg.optString("op")) {
+                "turn_ended" -> waiting.remove("$at/${msg.optString("session")}")?.let { (v, go) -> go(v) }
+                "connected" -> for (k in waiting.keys.filter { it.startsWith("$at/") }) { // (its turn may have ended
+                    val s = Mesh.session(at, k.substringAfter("/"))                    // while it was away)
+                    if (s == null || s.optString("state") !in setOf("working", "waiting")) waiting.remove(k)?.let { (v, go) -> go(v) }
+                }
+            }
         }
     }
 }
@@ -245,12 +251,13 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
             val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" } ?: "Provider"
             Picker(face, if (copies.size > 1) "Where the chat's model runs" else "Where the chat's model runs (the only one that has it)",
                 copies.map { "${it.host} / ${it.provider}" to it.value }, model, enabled = copies.size > 1) { v ->
-                Moves.waiting.remove("$hostId/$sid")
+                Moves.cancel(hostId, sid)
                 if (v == s.str("model")) { asked.remove("model"); return@Picker } // (the one it's on: no move)
                 if (s.optString("state") in setOf("working", "waiting")) { // (at a turn: moved once it's over)
                     asked["model"] = v
-                    Moves.apply = { h, id, value -> Mesh.session(h, id)?.let { pickModel(h, id, it, value, models(h), HashMap(), said, open) } }
-                    Moves.later(hostId, sid, v)
+                    Moves.later(hostId, sid, v) { value ->
+                        Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, models(hostId), HashMap(), said, open) }
+                    }
                 } else pickModel(hostId, sid, s, v, choices, asked, said, open)
             }
         }

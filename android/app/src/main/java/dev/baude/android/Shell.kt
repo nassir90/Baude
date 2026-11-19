@@ -100,7 +100,11 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
         Mesh.listeners.add(l)
-        onDispose { Mesh.listeners.remove(l) }
+        onDispose {
+            Mesh.listeners.remove(l)
+            Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
+            Meta.pageOpener = {}
+        }
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)

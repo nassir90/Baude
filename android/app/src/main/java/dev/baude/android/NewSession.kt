@@ -34,7 +34,7 @@ import org.json.JSONObject
  * it's on (fixed), or null to pick. */
 @Composable
 fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String, String) -> Unit,
-               given: JSONObject? = null, edited: ((JSONObject) -> Unit)? = null) {
+               given: JSONObject? = null, edited: ((JSONObject) -> Unit)? = null, heading: String? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
@@ -45,13 +45,14 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     var cwd by remember { mutableStateOf(given?.str("folder") ?: home(at)) }
     var group by remember { mutableStateOf(given?.str("group") ?: at?.let { Mesh.conn(it)?.info?.optString("group") }.orEmpty()) }
     var prompt by remember { mutableStateOf(given?.str("prompt").orEmpty()) }
-    var model by remember { mutableStateOf<String?>(null) }
+    var model by remember { mutableStateOf<String?>(given?.str("agent")?.let { a -> // (Meta's spawn_agent: its agent)
+        at?.let { h -> models(h).firstOrNull { it.name.equals(a, true) || it.value == a }?.value } }) }
     var effort by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf("auto") }
     var busy by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(at, cwd, group, prompt) { // (the user's own edits, kept where it's Meta's form)
+    androidx.compose.runtime.LaunchedEffect(at, cwd, group, prompt, model) { // (the user's own edits, kept where it's Meta's form)
         edited?.invoke(JSONObject().put("host", at?.let { Mesh.label(it) } ?: "").put("folder", cwd).put("group", group)
-            .put("prompt", prompt))
+            .put("prompt", prompt).put("agent", at?.let { h -> chosen(models(h), model ?: defaultModel(h))?.name }.orEmpty()))
     }
     var error by remember { mutableStateOf<String?>(null) }
     fun start() {
@@ -75,7 +76,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     }
     AlertDialog(
         onDismissRequest = done,
-        title = { Text(if (host != null) "New session on ${Mesh.label(host)}" else "New session on the network") },
+        title = { Text(heading ?: if (host != null) "New session on ${Mesh.label(host)}" else "New session on the network") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FormRow("Host") {

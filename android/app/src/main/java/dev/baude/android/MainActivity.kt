@@ -26,11 +26,7 @@ class MainActivity : ComponentActivity() {
             when (b) {
                 "send_feedback" -> go(listOf("feedback"))
                 "hosts" -> go(listOf("hosts"))
-                "new_session" -> { // (the New session form, empty, in Meta's pane)
-                    MetaTools.form.value = org.json.JSONObject().put("id", "f${MetaTools.next++}").put("form", "new_session")
-                        .put("values", org.json.JSONObject()).put("state", "open")
-                    MetaTools.formVersion.value++
-                }
+                "home" -> go(listOf("contacts"))
             }
         }
         MeshService.keep(this)

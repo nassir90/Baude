@@ -136,41 +136,57 @@ fun sections(query: String): List<Section> {
     val live = ArrayList<Item>()
     val archived = ArrayList<Item>()
     val groups = HomePrefs.groups.toSet()
-    val listed = shown.flatMap { h -> Mesh.sessions[h].orEmpty().filter { !it.optBoolean("draft") }.map { h to it } }
-    fun matches(h: String, s: JSONObject) = (groups.isEmpty() || groupOf(h, s) in groups) && (q.isEmpty() || listOf(
-        s.str("title").orEmpty(), s.optString("cwd"), Mesh.label(h), s.optJSONObject("bot")?.optString("name").orEmpty())
-        .any { it.lowercase().contains(q) })
-    // (a chat's parent: the one it forked from, on its host; or the agent that started it, on its host or any other,
-    // as Baude pulls such chats under their parent across hosts)
+    // (as Baude's sidebar lists them: each host's sessions that pass the host picked and the groups shown; a chat an
+    // agent started, on another host or in another group, pulled in to go under it if that's listed; then the search)
+    val everywhere = Mesh.sessions.flatMap { (h, list) -> list.filter { !it.optBoolean("draft") }.map { h to it } }
+    fun key(h: String, s: JSONObject) = "$h/${s.optString("id")}"
     val byKey = HashMap<String, Pair<String, JSONObject>>() // ("host/id" and "host/cli_id": the session)
-    val byId = HashMap<String, Pair<String, JSONObject>>()  // (id or cli_id alone: for a parent on another host)
-    for ((h, s) in listed) for (id in listOfNotNull(s.optString("id"), s.str("cli_id"))) {
+    val byId = HashMap<String, Pair<String, JSONObject>>()  // (id or cli_id alone: an agent on another host)
+    for ((h, s) in everywhere) for (id in listOfNotNull(s.optString("id"), s.str("cli_id"))) {
         byKey["$h/$id"] = h to s
         byId.putIfAbsent(id, h to s)
     }
-    fun parent(h: String, s: JSONObject): Pair<String, JSONObject>? {
-        s.str("fork_from")?.let { f -> byKey["$h/$f"]?.takeIf { it.second !== s }?.let { return it } }
-        return s.str("spawned_by")?.let { p -> (byKey["$h/$p"] ?: byId[p])?.takeIf { it.second !== s } }
+    fun agent(h: String, s: JSONObject) = s.str("spawned_by")?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
+    val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) }
+        .map { (h, s) -> key(h, s) }.toMutableSet()
+    val pulled = HashSet<String>()
+    while (true) {
+        val more = everywhere.filter { (h, s) -> key(h, s) !in listedKeys && agent(h, s)?.let { key(it.first, it.second) } in listedKeys }
+            .map { (h, s) -> key(h, s) }
+        if (more.isEmpty()) break
+        listedKeys.addAll(more)
+        pulled.addAll(more)
     }
-    val kept = listed.filter { (h, s) -> matches(h, s) }
-    val keptKeys = kept.map { (h, s) -> "$h/${s.optString("id")}" }.toSet()
+    val found = everywhere.filter { (h, s) -> key(h, s) in listedKeys && (q.isEmpty() || listOf(s.str("title").orEmpty(),
+        s.optString("cwd"), Mesh.label(h), s.optJSONObject("bot")?.optString("name").orEmpty()).any { it.lowercase().contains(q) }) }
+    val kept = found.map { (h, s) -> key(h, s) }.toMutableSet()
+    while (true) { // (one pulled in whose agent isn't listed after all (not found by the search, say): nor is it)
+        val lost = found.filter { (h, s) -> key(h, s) in kept && key(h, s) in pulled && agent(h, s)?.let { key(it.first, it.second) } !in kept }
+        if (lost.isEmpty()) break
+        lost.forEach { (h, s) -> kept.remove(key(h, s)) }
+    }
+    // (nested under the one it forked from, on its host, or the agent that started it, wherever that is, if that's
+    // listed; in its own place otherwise)
+    fun parent(h: String, s: JSONObject): Pair<String, JSONObject>? {
+        s.str("fork_from")?.let { f -> byKey["$h/$f"]?.takeIf { it.second !== s && key(it.first, it.second) in kept }?.let { return it } }
+        return agent(h, s)?.takeIf { key(it.first, it.second) in kept }
+    }
     val children = HashMap<String, MutableList<Pair<String, JSONObject>>>()
     val top = ArrayList<Pair<String, JSONObject>>()
-    for ((h, s) in kept) {
-        val nested = s.str("spawned_by") != null || s.str("fork_from") != null
+    for ((h, s) in found) {
+        if (key(h, s) !in kept) continue
         val p = parent(h, s)
-        when {
-            p != null && "${p.first}/${p.second.optString("id")}" in keptKeys ->
-                children.getOrPut("${p.first}/${p.second.optString("id")}") { ArrayList() }.add(h to s)
-            nested && p == null -> {}  // (its parent not listed at all: left out, as Baude leaves it)
-            else -> top.add(h to s)   // (its parent filtered out: listed in its own place)
-        }
+        if (p != null) children.getOrPut(key(p.first, p.second)) { ArrayList() }.add(h to s) else top.add(h to s)
     }
-    fun flat(h: String, s: JSONObject, depth: Int, into: MutableList<Item>) {
+    fun flat(h: String, s: JSONObject, depth: Int, into: MutableList<Item>, seen: MutableSet<String>) {
+        if (!seen.add(key(h, s))) return // (a loop of parents: each once)
         into.add(Item(h, s, depth))
-        for ((ch, c) in children["$h/${s.optString("id")}"].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into)
+        for ((ch, c) in children[key(h, s)].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into, seen)
     }
-    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.optBoolean("archived")) archived else live)
+    val seen = HashSet<String>()
+    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.optBoolean("archived")) archived else live, seen)
+    for ((h, s) in found) if (key(h, s) in kept && key(h, s) !in seen) // (in a loop of parents: in its own place)
+        flat(h, s, 0, if (s.optBoolean("archived")) archived else live, seen)
     val several = shown.count { !Mesh.sessions[it].isNullOrEmpty() } > 1
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
@@ -383,7 +399,7 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     val pick = HomePrefs.host.value
     val ids = (Mesh.hosts.map { it.id } + Mesh.sessions.keys).distinct()
-        .filter { Mesh.conn(it)?.info == null || offers(it, "subscribe") } // (one that lists no sessions: not offered)
+        .filter { Mesh.conn(it)?.info == null || offers(it, "subscribe") }
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically) {

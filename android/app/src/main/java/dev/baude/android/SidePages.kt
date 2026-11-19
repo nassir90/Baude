@@ -73,6 +73,10 @@ class SideQuestion(val question: String) {
 /** (the chat open) What its side questions' sessions say: their answers, their turns' ends; what they ask, denied. */
 fun sideQuestions(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
     if (at != chat.hostId) return@l
+    if (msg.optString("op") == "connected") { // (its host back after a drop: those it was answering were let go of)
+        chat.btw.filter { it.status.value == "running" }.forEach { it.status.value = "interrupted" }
+        return@l
+    }
     val q = chat.btw.firstOrNull { it.sid.isNotEmpty() && it.sid == msg.optString("session") } ?: return@l
     when (msg.optString("op")) {
         "exited", "deleted" -> if (q.status.value == "running") q.status.value = "interrupted"
@@ -378,15 +382,20 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
             Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
                 val t = diffText
                 if (t == null) Empty("Reading it…")
-                else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(8.dp)) {
+                else { // (a line at a time, as it's scrolled to: a long diff isn't all drawn)
                     val add = if (c == DarkBaude) Color(0xFF8FF0A4) else Color(0xFF26A269)
                     val del = if (c == DarkBaude) Color(0xFFFF7B63) else Color(0xFFC01C28)
-                    for (l in t.lines()) Text(l, style = Type.mono, color = when {
-                        l.startsWith("+") && !l.startsWith("+++") -> add
-                        l.startsWith("-") && !l.startsWith("---") -> del
-                        l.startsWith("@@") -> c.accent
-                        else -> c.fg
-                    })
+                    val lines = remember(t) { t.lines() }
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+                        items(lines) { l ->
+                            Text(l, style = Type.mono, color = when {
+                                l.startsWith("+") && !l.startsWith("+++") -> add
+                                l.startsWith("-") && !l.startsWith("---") -> del
+                                l.startsWith("@@") -> c.accent
+                                else -> c.fg
+                            })
+                        }
+                    }
                 }
             }
         }

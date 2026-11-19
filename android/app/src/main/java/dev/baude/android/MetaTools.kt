@@ -32,7 +32,10 @@ object MetaTools {
     val formVersion = mutableStateOf(0)           // (filled by Meta: the dialog drawn anew with its values)
     var next = 1
     var turn = 0                                   // (the user's messages so far: an action's turn)
-    val BUTTONS = mapOf("new_session" to "New session", "send_feedback" to "Send Feedback…", "hosts" to "Hosts")
+    val BUTTONS = mapOf( // (desktop Baude's, trash and host, and the phone's own)
+        "trash" to "Move to Trash… a chat (items: its id), to its host's trash; asks first, and can't be undone here",
+        "host" to "Open a host (items: its name): the home screen lists its chats, and New session's on it",
+        "send_feedback" to "Send Feedback…", "hosts" to "Hosts: the phone's key, its hosts, the mesh")
 
     private fun tool(name: String, description: String, required: List<String>, props: JSONObject) =
         JSONObject().put("name", name).put("description", description)
@@ -266,30 +269,59 @@ object MetaTools {
         else -> ""
     }
 
-    // ---- the New session form
+    // ---- the forms (desktop Meta's: Baude's forms(), as the phone has them)
 
-    /** The New session form's fields as Meta's told them (Form.described): name, what it takes, its value, its
-     * choices. */
-    private fun described(values: JSONObject): JSONArray = JSONArray(listOf(
-        JSONObject().put("field", "host").put("takes", "one of its choices").put("value", values.optString("host"))
-            .put("choices", JSONArray(Mesh.reached("start").map { it.second })),
-        JSONObject().put("field", "folder").put("takes", "a folder on the host").put("value", values.optString("folder")),
-        JSONObject().put("field", "group").put("takes", "a group (\"\" for none)").put("value", values.optString("group")),
-        JSONObject().put("field", "prompt").put("takes", "what to ask first (none: a draft, written in later)")
-            .put("value", values.optString("prompt")),
-    ))
+    /** A form: its heading, its verb, and its fields, each (name, what it takes, its choices or null). */
+    class FormDef(val heading: String, val verb: String, val about: String, val fields: List<Triple<String, String, (JSONObject) -> List<String>?>>)
+
+    /** What a host offers to run (spawn_agent's agent): its models, by name. */
+    private fun agents(values: JSONObject): List<String> =
+        hostByName(values.optString("host"))?.let { h -> models(h).map { it.name } }.orEmpty()
+
+    val FORMS = linkedMapOf(
+        "add_host" to FormDef("Add a host", "Add", "add a host Baude reaches over ssh", listOf(
+            Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null }),
+            Triple("command", "its host process's command there, run as `<command> connect`: empty if baude_headless.py " +
+                "is on its PATH, else its path (in a git checkout of Baude, <checkout>/baude_headless.py)", { _: JSONObject -> null }))),
+        "new_group" to FormDef("New group", "Create", "make a group of chats", listOf(
+            Triple("name", "the group's name", { _: JSONObject -> null }))),
+        "spawn_agent" to FormDef("Spawn an agent", "Start", "start an agent (a session) on a host: the host, then what it " +
+            "offers to run, the folder, group and prompt", listOf(
+            Triple("host", "the host it runs on", { _: JSONObject -> Mesh.reached("start").map { it.second } }),
+            Triple("agent", "what runs it: one of the host's", ::agents),
+            Triple("folder", "the folder it starts in, on that host", { _: JSONObject -> null }),
+            Triple("group", "its group (or empty)", { _: JSONObject -> null }),
+            Triple("prompt", "what it's asked first", { _: JSONObject -> null }))),
+    )
+
+    /** Its fields as Meta's told them (Form.described): each one's name, what it takes, what it has, its choices. */
+    private fun described(form: String, values: JSONObject): JSONArray = JSONArray(FORMS[form]!!.fields.map { (name, takes, choices) ->
+        JSONObject().put("field", name).put("takes", takes).put("value", values.optString(name)).apply {
+            choices(values)?.let { put("choices", JSONArray(it)) }
+        }
+    })
 
     /** What's still wrong with it (Form.check), or null: it's ready for the user to submit. */
-    private fun wrong(values: JSONObject): String? = when {
-        values.optString("host").isBlank() -> "host: pick one of its choices"
-        hostByName(values.optString("host")) == null -> "host: ${values.optString("host")} isn't connected now; pick one of its choices"
-        values.optString("folder").isBlank() -> "folder: a folder on the host, please"
+    fun wrong(form: String, values: JSONObject): String? = when (form) {
+        "add_host" -> if (Host.parse(values.optString("destination")) == null) "Where ssh goes: user@host (or user@host:port)" else null
+        "new_group" -> {
+            val n = values.optString("name").split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+            if (n.isEmpty()) "A group needs a name" else if (n in groupNames()) "There's a group $n already" else null
+        }
+        "spawn_agent" -> when {
+            hostByName(values.optString("host")) == null -> "host: pick one of its choices"
+            agents(values).isEmpty() -> "${values.optString("host")} offers no agent"
+            values.optString("agent").isNotEmpty() && agents(values).none { it.equals(values.optString("agent"), true) } ->
+                "agent: pick one of ${values.optString("host")}'s"
+            else -> null
+        }
         else -> null
     }
 
-    private fun fill(values: JSONObject, given: JSONObject): String? {
+    private fun fill(form: String, values: JSONObject, given: JSONObject): String? {
+        val names = FORMS[form]!!.fields.map { it.first }
         for (k in given.keys()) {
-            if (k !in setOf("host", "folder", "group", "prompt")) return "new_session's fields are host, folder, group and prompt"
+            if (k !in names) return "$form's fields are ${names.joinToString(", ")}"
             values.put(k, given.optString(k))
         }
         return null
@@ -369,15 +401,15 @@ object MetaTools {
             }
             "open_form" -> {
                 val f = args.optString("form").trim()
-                if (f != "new_session") return no("No form '$f': they're new_session (app_index forms).")
-                val values = JSONObject().put("host", "").put("folder", "").put("group", "").put("prompt", "")
-                fill(values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
+                val def = FORMS[f] ?: return no("No form '$f': they're ${FORMS.keys.joinToString(", ")} (app_index forms).")
+                val values = JSONObject().apply { def.fields.forEach { put(it.first, "") } }
+                fill(f, values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
                 val id = "f${next++}"
                 form.value = JSONObject().put("id", id).put("form", f).put("values", values).put("state", "open")
                 formVersion.value++
-                val w = wrong(values)
-                ok("Form $id (New session) is up for the user to finish and submit; you don't submit it. Its fields: " +
-                    "${described(values)}. " + (w?.let { "Still wrong: $it" } ?: "It's ready to submit."))
+                val w = wrong(f, values)
+                ok("Form $id (${def.heading}) is up for the user to finish and submit; you don't submit it. Its fields: " +
+                    "${described(f, values)}. " + (w?.let { "Still wrong: $it" } ?: "It's ready to submit."))
             }
             "fill_form" -> {
                 val id = args.optString("id").trim()
@@ -385,10 +417,10 @@ object MetaTools {
                     "gives a form's id.")
                 if (f.optString("state", "open") != "open") return no("That form is ${f.optString("state")} already.")
                 val values = JSONObject(f.optJSONObject("values")?.toString() ?: "{}")
-                fill(values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
+                fill(f.optString("form"), values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
                 form.value = JSONObject(f.toString()).put("values", values)
                 formVersion.value++
-                val w = wrong(values)
+                val w = wrong(f.optString("form"), values)
                 ok(if (w != null) "Filled. Still wrong: $w" else "Filled: it's ready for the user to submit.")
             }
             "highlight_chats" -> {
@@ -489,7 +521,21 @@ object MetaTools {
             }
             "button" -> {
                 if (rest !in BUTTONS) return no("No button '$rest': they're ${BUTTONS.keys.joinToString(", ")} (app_index buttons).")
-                Meta.under(Line("rows", JSONObject().put("button", rest).toString()))
+                val item = items.firstOrNull()
+                when (rest) {
+                    "trash" -> {
+                        val (h, s) = item?.let(::find) ?: return no("There's no button trash without items: app_index buttons.")
+                        Meta.under(Line("rows", JSONObject().put("button", "trash").put("host", h).put("sid", s.optString("id"))
+                            .put("label", "Move “${title(s)}” to Trash…").toString()))
+                    }
+                    "host" -> {
+                        val h = item?.let { hostByName(it) } ?: return no("No host '${item.orEmpty()}': they're " +
+                            Mesh.reached("start").joinToString(", ") { it.second } + ".")
+                        Meta.under(Line("rows", JSONObject().put("button", "host").put("host", h)
+                            .put("label", "Open ${Mesh.label(h)}").toString()))
+                    }
+                    else -> Meta.under(Line("rows", JSONObject().put("button", rest).put("label", BUTTONS[rest]!!.substringBefore(":")).toString()))
+                }
             }
             else -> return no("show takes setting:<name>, chats, pages, changelog or button:<action>.")
         }
@@ -512,7 +558,7 @@ object MetaTools {
         "groups" -> listOf("No group") + groupNames()
         "settings" -> listOf("sidebar_group=${settingValue("sidebar_group")} (folder or date: how the left bar, the home " +
             "screen, groups chats)", "sidebar_host=${settingValue("sidebar_host")} (all, or a host's name: whose chats it lists)")
-        "forms" -> listOf("new_session: host, folder, group, prompt (the New session dialog)")
+        "forms" -> FORMS.map { (k, f) -> "$k: ${f.about}" }
         "buttons" -> BUTTONS.map { (k, v) -> "$k: $v" }
         "pages" -> Meta.pages().map { it.title }.ifEmpty { listOf("(no chat open)") }
         else -> null

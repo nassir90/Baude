@@ -65,15 +65,15 @@ object Outbox {
     /** A note sent through host: what it said, to then (null: filed). */
     fun send(id: String, host: String, then: (JSONObject) -> Unit) {
         val f = java.io.File(dir(), "$id.json")
-        val o = try { JSONObject(f.readText()) } catch (_: Exception) { return }
-        o.optJSONObject("filed")?.let { return then(it) }
+        val o = try { JSONObject(f.readText()) } catch (_: Exception) {
+            return then(JSONObject().put("op", "error").put("error", "it isn't kept here any more")) }
         if (!going.add(id)) return then(JSONObject().put("op", "error").put("error", "it's being sent already"))
         o.put("host", host).put("tried", System.currentTimeMillis())
         f.writeText(o.toString())
         Mesh.ask(host, JSONObject().put("op", "feedback").put("note", id).put("text", o.optString("text"))
             .put("context", o.optJSONArray("context") ?: JSONArray())) { r ->
             going.remove(id)
-            if (r.optString("op") == "feedback_filed") f.writeText(o.put("filed", r).toString())
+            if (r.optString("op") == "feedback_filed") f.delete() // (filed: nothing more kept of it here)
             then(r)
         }
     }
@@ -82,7 +82,7 @@ object Outbox {
     fun again() {
         val up = Mesh.reached("feedback").map { it.first }.filter { h -> Mesh.hosts.any { it.id == h } }
         for (o in notes()) {
-            if (o.has("filed")) continue
+            if (o.has("filed")) { java.io.File(dir(), "${o.optString("id")}.json").delete(); continue } // (from before)
             val was = o.optString("host")
             val h = if (was in up) was
                 else if (System.currentTimeMillis() - o.optLong("tried") > STICK_MS) up.firstOrNull() else null

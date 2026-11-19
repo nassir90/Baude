@@ -39,7 +39,7 @@ object Meta {
     var opener: (String, String) -> Unit = { _, _ -> } // (a chat's row tapped under a reply: opened)
     var pageOpener: (String) -> Unit = {}               // (a page's row: shown, in the chat open)
     var pages: () -> List<Page> = { emptyList() }      // (the chat open's pages)
-    var go: (String) -> Unit = {}                       // (a button: new_session, send_feedback, hosts)
+    var go: (String) -> Unit = {}                       // (a button's screen: send_feedback, hosts, home)
     private var started = false
     private val waiting = ArrayList<String>() // (sent before its session's made: sent once it is)
     private val relays = HashSet<Int>()      // (its tools' relays open on its host: their numbers)
@@ -47,6 +47,9 @@ object Meta {
     private val shown = ArrayList<Line>()    // (what its tools showed, and the actions they took, this turn: under its
                                               // reply once it's said)
     private var loaded = false
+    private val running = HashMap<String, String>() // (its tools' calls the phone's running: "relay/id" -> what they are)
+    val late = ArrayList<String>() // (calls that ran here after its host had told it they failed: said with the next
+                                   // message, so it doesn't do them again)
     const val GRACE_S = 6 * 3600 // (how long its session waits on its host for the phone to come back)
 
     /** Shown under this turn's reply, once it ends. */
@@ -73,7 +76,8 @@ object Meta {
         "Everything you change is an action, with an id, and can be undone: the user sees each under your reply with " +
             "Undo. undo and redo take one back or put it again. A host's sessions aren't deleted from the phone: " +
             "archive them.",
-        "Forms: asked to help the user start a session, bring up new_session with open_form, fill in what you know " +
+        "Forms: asked to help the user add a host, make a group or start an agent, bring up its form with open_form " +
+            "(app_index forms), fill in what you know " +
             "(fill_form), and leave the rest and the submitting to them.",
         "Settings: set_setting changes one at once, and its row shows under your reply. show also lists chats or the " +
             "open chat's pages as rows the user can tap, the changelog, and buttons for what you don't do yourself " +
@@ -113,6 +117,7 @@ object Meta {
         val o = JSONObject().put("host", host.value).put("sid", chat.sid).put("started", started)
             .put("lines", JSONArray(chat.lines.map { JSONArray(listOf(it.kind, it.text)) }))
             .put("actions", JSONArray(MetaTools.actions.map { it.json() })).put("next", MetaTools.next).put("turn", MetaTools.turn)
+            .put("late", JSONArray(late))
         try {
             file().writeText(o.toString())
         } catch (_: Exception) {
@@ -135,6 +140,7 @@ object Meta {
         MetaTools.actions.addAll(o.optJSONArray("actions").list().map(Action::of))
         MetaTools.next = o.optInt("next", 1)
         MetaTools.turn = o.optInt("turn", 0)
+        late.addAll(o.optJSONArray("late").strings())
         started = o.optBoolean("started") && chat.sid.isNotEmpty()
         host.value?.let { h ->
             listen(h)
@@ -170,6 +176,16 @@ object Meta {
         }
     }
 
+    /** A call of Meta's that ran on the phone after its host had told Meta it failed: kept, to be said with the next
+     * message. */
+    private fun ranLate(what: String, answer: String) {
+        val said = try {
+            JSONObject(answer).optJSONObject("result")?.optJSONArray("content").list().joinToString(" ") { it.optString("text") }
+        } catch (_: Exception) { "" }
+        late.add("$what: ${said.take(300)}")
+        save()
+    }
+
     /** What was said before, for a session started again (desktop's earlier_said): its last part. */
     private fun earlier(): String {
         val said = chat.lines.filter { it.kind == "you" || it.kind == "bot" }
@@ -188,6 +204,9 @@ object Meta {
             return
         }
         val before = earlier()
+        val ran = if (late.isEmpty()) "" else "(While the phone was away, these calls of yours did run here after all, " +
+            "though you were told they failed; they're done, so don't do them again:\n" + late.joinToString("\n") { "- $it" } + ")\n\n"
+        late.clear()
         c.lines.add(Line("you", text))
         MetaTools.turn++
         MetaTools.highlight.clear() // (highlighted till the user's next message)
@@ -199,7 +218,7 @@ object Meta {
             c.hostId = h
             listen(h)
             val haiku = models(h).firstOrNull { it.value == "haiku" || it.name.lowercase().startsWith("haiku") }
-            val msg = JSONObject().put("op", "start").put("prompt", index() + "\n\n" + before + text).put("cwd", "~")
+            val msg = JSONObject().put("op", "start").put("prompt", index() + "\n\n" + before + ran + text).put("cwd", "~")
                 .put("mode", "default").put("ephemeral", true).put("grace", GRACE_S).put("title", "Meta")
                 .put("system", SYSTEM).put("allowed_tools", JSONArray(listOf("Read", "Grep", "Glob"))).put("attach", true)
                 .put("app_tools", JSONArray(listOf(MetaTools.NAME)))
@@ -219,7 +238,7 @@ object Meta {
             }
             return
         }
-        if (c.sid.isEmpty()) waiting.add(text) else input(c, h, text)
+        if (c.sid.isEmpty()) waiting.add(ran + text) else input(c, h, ran + text)
     }
 
     private fun input(c: Chat, h: String, text: String) {
@@ -246,9 +265,21 @@ object Meta {
                     relays.add(msg.optInt("conn"))
                 "mcp" -> if (msg.optInt("conn") in relays) {
                     val n = msg.optInt("conn")
+                    val call = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
+                    val what = call.optJSONObject("params")?.let { p -> "${p.optString("name")} ${p.optJSONObject("arguments") ?: "{}"}" }
+                    val key = "$n/${call.opt("id")}"
+                    if (call.optString("method") == "tools/call" && what != null) running[key] = what
                     MetaTools.line(msg.optString("line")) { answer ->
-                        if (answer != null) Mesh.conn(h)?.send(JSONObject().put("op", "mcp").put("conn", n).put("line", answer))
+                        if (answer == null) return@line
+                        val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(JSONObject().put("op", "mcp")
+                            .put("conn", n).put("line", answer)) == true
+                        val was = running.remove(key)
+                        if (!sent && was != null) ranLate(was, answer) // (its host gone meanwhile: it failed it there)
                     }
+                }
+                "mcp_late" -> { // (it ran here, but its host had failed it to Meta already: Meta's told it did run)
+                    val r = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
+                    running.remove("${msg.optInt("conn")}/${r.opt("id")}")?.let { ranLate(it, msg.optString("line")) }
                 }
                 "mcp_close" -> relays.remove(msg.optInt("conn"))
             }
@@ -292,6 +323,8 @@ object Meta {
         MetaTools.highlight.clear()
         MetaTools.form.value = null
         MetaTools.turn = 0
+        late.clear()
+        running.clear()
         chat = Chat(host.value ?: "", "").also { it.sender = { t, _ -> send(t) } }
         version.value++
         save()
@@ -336,13 +369,17 @@ fun MetaPage(chatHost: String, here: Boolean) {
         }
     }
     MetaTools.form.value?.takeIf { it.optString("state", "open") == "open" }?.let { f -> // (a form Meta brought up, as
-        androidx.compose.runtime.key(MetaTools.formVersion.value) {                       // it's filled: the user submits)
-            NewSession(null, null, done = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString())
-                    .put("state", if (it.optString("state") == "submitted") "submitted" else "closed") } },
-                opened = { h, s ->
-                    MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString()).put("state", "submitted") }
-                    Meta.opener(h, s)
-                }, given = f.optJSONObject("values"), edited = MetaTools::edited)
+        val done = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString())   // it's filled: the
+            .put("state", if (it.optString("state") == "submitted") "submitted" else "closed") } }   // user submits)
+        val submitted = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString()).put("state", "submitted") } }
+        androidx.compose.runtime.key(MetaTools.formVersion.value) {
+            val given = f.optJSONObject("values")
+            when (f.optString("form")) {
+                "spawn_agent" -> NewSession(null, null, done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
+                    given = given, edited = MetaTools::edited, heading = "Spawn an agent")
+                "add_host" -> AddHost(done = done, given = given, edited = MetaTools::edited, added = { submitted() })
+                "new_group" -> NewGroup(given, done = done, made = { submitted() })
+            }
         }
     }
 }
@@ -398,7 +435,31 @@ fun MetaRows(text: String) {
             }
         }
     }
-    o.str("button")?.let { b -> Button(MetaTools.BUTTONS[b] ?: b, suggested = true) { Meta.go(b) } }
+    o.str("button")?.let { b -> // (a control for the user to press: Meta doesn't do these itself)
+        var asking by androidx.compose.runtime.remember { mutableStateOf(false) }
+        Button(o.str("label") ?: b, suggested = b != "trash", destructive = b == "trash") {
+            when (b) {
+                "trash" -> asking = true
+                "host" -> { HomePrefs.host.value = o.optString("host"); HomePrefs.save(); Meta.go("home") }
+                else -> Meta.go(b)
+            }
+        }
+        if (asking) {
+            val h = o.optString("host")
+            val sid = o.optString("sid")
+            val title = Mesh.session(h, sid)?.let { it.optJSONObject("bot")?.str("name") ?: it.str("title") } ?: "(untitled)"
+            androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
+                title = { Text("Move “$title” to Trash?") },
+                text = { Text("Its transcript goes to ${Mesh.label(h)}'s trash. It can't be undone here.") },
+                confirmButton = { Button("Move to Trash", destructive = true) {
+                    asking = false
+                    Mesh.ask(h, JSONObject().put("op", "delete").put("session", sid)) { r ->
+                        if (r.optString("op") == "error") Meta.chat.said.value = "Couldn't: " + r.optString("error")
+                    }
+                } },
+                dismissButton = { Button("Cancel") { asking = false } }, containerColor = c.dialog)
+        }
+    }
     when (o.optString("setting")) {
         "sidebar_group" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Group the home screen by", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
@@ -426,4 +487,30 @@ fun MetaAction(id: String) {
         if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, "Redo") { MetaTools.button(a, undo = false) }
         else IconButton(Icons.AutoMirrored.Filled.Undo, "Undo") { MetaTools.button(a, undo = true) }
     }
+}
+
+/** Meta's new_group form: the group's name (Baude's New group), made once the user presses Create. */
+@Composable
+fun NewGroup(given: JSONObject?, done: () -> Unit, made: () -> Unit) {
+    val c = LocalBaude.current
+    var name by androidx.compose.runtime.remember { mutableStateOf(given?.str("name").orEmpty()) }
+    androidx.compose.runtime.LaunchedEffect(name) { MetaTools.edited(JSONObject().put("name", name)) }
+    val wrong = MetaTools.wrong("new_group", JSONObject().put("name", name))
+    androidx.compose.material3.AlertDialog(onDismissRequest = done, title = { Text("New group") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("A list of chats of its own, picked in ⋮ → Groups.", style = Type.body, color = c.dim)
+                Field(name, { name = it }, "Its name")
+                if (name.isNotBlank() && wrong != null) Text(wrong, style = Type.caption, color = c.destructive)
+            }
+        },
+        confirmButton = { Button("Create", suggested = wrong == null) {
+            if (wrong != null) return@Button
+            val g = name.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+            HomePrefs.made.add(g)
+            HomePrefs.save()
+            made()
+            done()
+        } },
+        dismissButton = { Button("Cancel", onClick = done) }, containerColor = c.dialog)
 }

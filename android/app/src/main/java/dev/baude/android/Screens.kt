@@ -493,7 +493,7 @@ fun HostsScreen(back: () -> Unit) {
             Members()
         }
     }
-    if (adding) AddHost { adding = false }
+    if (adding) AddHost(done = { adding = false })
     removing?.let { h ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
             text = { Text("Its sessions aren't listed here any more. Nothing on the host changes.") },
@@ -596,11 +596,13 @@ private fun KeyLines(label: String?, type: String, fingerprint: String) {
 }
 
 @Composable
-private fun AddHost(done: () -> Unit) {
+fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
+            added: () -> Unit = {}) { // (given, edited: Meta's add_host form's values, filled by it and by you)
     val c = LocalBaude.current
-    var dest by remember { mutableStateOf("") }
+    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
     var name by remember { mutableStateOf("") }
-    var command by remember { mutableStateOf("baude_headless.py") }
+    var command by remember { mutableStateOf(given?.str("command") ?: "baude_headless.py") }
+    LaunchedEffect(dest, command) { edited?.invoke(org.json.JSONObject().put("destination", dest).put("command", command)) }
     val host = Host.parse(dest, name, command)
     AlertDialog(
         onDismissRequest = done,
@@ -613,7 +615,7 @@ private fun AddHost(done: () -> Unit) {
                 Text("Over Tailscale, use the host's Tailscale name or address.", style = Type.caption, color = c.dim)
             }
         },
-        confirmButton = { Button("Add", suggested = true) { if (host != null) { Mesh.addHost(host); done() } } },
+        confirmButton = { Button("Add", suggested = true) { if (host != null) { Mesh.addHost(host); added(); done() } } },
         dismissButton = { Button("Cancel", onClick = done) },
         containerColor = c.dialog,
     )

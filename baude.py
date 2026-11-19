@@ -6306,7 +6306,7 @@ class MeshCard(ToolCard):
         if listed is not None and listed.get("state") in ("working", "waiting"):
             return "running"
         return "error" if self.reply.get("error") or self.reply.get("exited") is not None or \
-            self.reply.get("lost") else "done"
+            self.reply.get("lost") or self.reply.get("interrupted") or self.reply.get("expired") else "done"
 
     def show_status(self):
         self.refresh_header()
@@ -6331,8 +6331,10 @@ class MeshCard(ToolCard):
             title = bot or (listed or {}).get("title") or f"Chat {str(self.input.get('session') or '')[:8]}".strip()
             bits = [f"Messaged on {host}" if host else "Messaged"]
         reply = self.reply
-        if self.state == "interrupted":
+        if self.state == "interrupted" or reply.get("interrupted"):  # (its own turn, or the subagent's, cut short)
             bits.append("interrupted")
+        elif reply.get("expired"):
+            bits.append("the wait ran out")
         elif self.decision == "denied":
             bits.append("denied")
         elif listed is not None and listed.get("state") == "waiting":

@@ -107,10 +107,10 @@ def _bot_profile(pid, bot_id, name):
     if name is None and mine is not None:
         return pid
     label = ' '.join(str(name or 'Bot').split())[:60]
-    if mine is not None and (mine["name"] == label or mine["name"].startswith(label + " ") and
-                             mine["name"][len(label) + 1:].isdigit()):
-        return pid  # (its name, or its name and a number, as one taken made it: kept, not written again)
     taken = {p["name"] for p in items if p["id"] != pid} | {DEFAULT}
+    if mine is not None and (mine["name"] == label or label in taken and mine["name"].startswith(label + " ") and
+                             mine["name"][len(label) + 1:].isdigit() and mine["name"] not in taken):
+        return pid  # (its name, or, that taken, its name and a number: kept, not written again)
     final, n = label, 2
     while final in taken:
         final, n = f"{label} {n}", n + 1

@@ -467,7 +467,10 @@ class BrowserPane(Gtk.Box):
 
     def ended(self, why):
         self.stream = None
-        self.say_status("The browser stopped", "It restarts when you open this page again.")
+        if why and self.picture.get_paintable() is None:  # (it never showed: why, in its place)
+            self.say_status("Couldn't open the browser", why)
+        else:
+            self.say_status("The browser stopped", "It restarts when you open this page again.")
         self.said.set_tooltip_text(why or None)
         self.said.set_label("The browser stopped. It restarts when you open this page again.")
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,

@@ -3939,30 +3939,29 @@ def jpeg(w, h, stride, data, quality=72):
     return flat.save_to_bufferv("jpeg", ["quality"], [str(quality)])[1]
 
 
-# ---- its logo: Baude's and Record's tile and speech bubble, in a muted yellow (their terracotta's and teal's
-# lightness and saturation), the bubble a page with a globe on it: its outline, a meridian, two parallels, cut off at
-# the page's edges. At 16 px, the meridian and the parallels only, on whole pixels (ICON_SVG_16).
+# ---- its logo: Baude's and Record's tile, in a muted yellow (their terracotta's and teal's lightness and saturation),
+# with a cream page on it (their bubble's, without its tail) and a globe cut through it to the tile: its outline, a
+# meridian and two parallels, fading as Record's lines do. At 16 px, the meridian and the parallels only, on whole
+# pixels (ICON_SVG_16).
 
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <clipPath id="page"><rect x="22" y="38" width="84" height="52" rx="8"/></clipPath>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <path d="M30 38h68a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H58l-18 14v-14H30a8 8 0 0 1-8-8V46a8 8 0 0 1 8-8z"
-        fill="#fff8f0"/>
-  <g clip-path="url(#page)" fill="none" stroke="#b08a26" stroke-width="7">
-    <circle cx="64" cy="64" r="36"/>
-    <ellipse cx="64" cy="64" rx="20" ry="36"/>
-    <path d="M22 52h84M22 76h84"/>
+  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0"/>
+  <g clip-path="url(#page)" fill="none" stroke="#d9b44a" stroke-width="4">
+    <circle cx="64" cy="64" r="34"/>
+    <ellipse cx="64" cy="64" rx="18" ry="34" opacity="0.6"/>
+    <path d="M22 50h84M22 78h84" opacity="0.3"/>
   </g>
 </svg>
 """
 ICON_SVG_16 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <clipPath id="page"><rect x="22" y="38" width="84" height="52" rx="8"/></clipPath>
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <path d="M30 38h68a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H58l-18 14v-14H30a8 8 0 0 1-8-8V46a8 8 0 0 1 8-8z"
-        fill="#fff8f0"/>
-  <g clip-path="url(#page)" fill="none" stroke="#b08a26" stroke-width="8">
+  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0"/>
+  <g clip-path="url(#page)" fill="none" stroke="#d9b44a" stroke-width="8">
     <ellipse cx="64" cy="64" rx="20" ry="36"/>
-    <path d="M22 52h84M22 76h84"/>
+    <path d="M22 52h84M22 76h84" opacity="0.45"/>
   </g>
 </svg>
 """

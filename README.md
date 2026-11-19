@@ -132,6 +132,19 @@ virtual one of its own, with `xvfb-run` installed (package `xvfb`).
 python3 emission.py [URL] [--profile NAME]
 ```
 
+A Bot has a browser of its own: its tools (`mcp__emission__…`) drive its own Emission profile, on any host of the
+mesh. On each host its profile is its own there, made when it's first used and named after the Bot. The host process
+starts Emission for it out of sight (no window on screen, no Dock icon; on Linux, a virtual display of its own), and it
+goes after half an hour unused. Its tools are tabs, new_tab, navigate, close_tab, screenshot, read_page and find (the
+page's elements, with refs), get_text, click, hover, type, key, scroll, form_input, javascript, and prompts and
+answer_prompt for what a page asks (an alert, a confirm, a site's sign-in, files to upload). Clicks and keys are real
+input: the pointer is moved to a place and pressed, and keys go one at a time. A Bot only ever reaches its own
+profile, never yours or another Bot's.
+
+To sign a Bot in to a site, open its profile from Emission's profile menu (its Emission steps aside) and sign in
+there, or choose Copy Sign-ins to a Bot… in your own profile to copy your sign-ins for the sites you pick. Pages say
+the browser is Safari (as its engine is); `EMISSION_USER_AGENT` sets another.
+
 ## Sessions on the network
 
 `baude_headless.py` is a machine's host process for Claude Code sessions: one for each user, which owns that user's

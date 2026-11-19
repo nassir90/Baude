@@ -8,9 +8,8 @@ widget of its own. On a Linux host with no display it starts one of its own (xvf
     python3 emission.py [URL] [--profile NAME]
 """
 import argparse
+import base64
 import ctypes
-import fcntl
-import hashlib
 import html
 import ipaddress
 import json
@@ -19,7 +18,7 @@ import platform
 import shutil
 import socket
 import sys
-import tempfile
+import threading
 import urllib.parse
 import uuid
 
@@ -33,154 +32,23 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 APP_ID = "dev.baude.Emission"
 HOME_PAGE = "https://duckduckgo.com/"
 SEARCH = "https://duckduckgo.com/?q={}"
-PROFILE_SPACE = uuid.UUID("6b1f0d3e-3c4e-4f51-9b0e-7a1e5e6d2c11")  # (a profile named before ids: its name's uuid)
 POLL_MS = 200  # (each page's title, address, progress, back and forward read this often, the same on both engines)
-DEFAULT = "Default"
+AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long without a request)
 
-
-def data_home():
-    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "emission")
-
-
-# ------------------------------------------------------------------ profiles --
-
-def _read_profiles():
-    try:
-        with open(os.path.join(data_home(), "profiles.json"), encoding="utf-8") as f:
-            raw = json.load(f).get("profiles") or []
-    except (OSError, ValueError, AttributeError):
-        raw = []
-    out = []
-    for p in raw:
-        if isinstance(p, str):
-            p = {"name": p, "id": str(uuid.uuid5(PROFILE_SPACE, p))}
-        if not (isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].strip() and p["name"] != DEFAULT):
-            continue
-        try:
-            pid = str(uuid.UUID(str(p.get("id"))))
-        except ValueError:
-            continue  # (not an id: a store's named by one, and on Linux it's a folder's name)
-        out.append({"name": p["name"].strip(), "id": pid})
-    return out
-
-
-def _write_profiles(items):
-    os.makedirs(data_home(), exist_ok=True)
-    path = os.path.join(data_home(), "profiles.json")
-    with open(path + ".tmp", "w", encoding="utf-8") as f:
-        json.dump({"profiles": items}, f, indent=1)
-    os.replace(path + ".tmp", path)
-
-
-def profiles():
-    """The profiles there are, "Default" first: [{name, id}], each one's cookies and logins its own (kept by its id,
-    so a profile renamed keeps them)."""
-    return [{"name": DEFAULT, "id": str(uuid.uuid5(PROFILE_SPACE, DEFAULT))}, *_read_profiles()]
-
-
-def profile_id(name):
-    return next((p["id"] for p in profiles() if p["name"] == name), None)
-
-
-def add_profile(name):
-    if profile_id(name) is None:
-        _write_profiles([*_read_profiles(), {"name": name, "id": str(uuid.uuid4())}])
-    return profile_id(name)
-
-
-def rename_profile(old, new):
-    _write_profiles([{**p, "name": new} if p["name"] == old else p for p in _read_profiles()])
-
-
-def forget_profile(name):
-    _write_profiles([p for p in _read_profiles() if p["name"] != name])
-
-
-def leftovers():
-    path = os.path.join(data_home(), "removed.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            return [str(uuid.UUID(str(i))) for i in json.load(f)]
-    except (OSError, ValueError, TypeError):
-        return []
-
-
-def note_leftover(pid, add=True):
-    left = [i for i in leftovers() if i != pid] + ([pid] if add else [])
-    os.makedirs(data_home(), exist_ok=True)
-    with open(os.path.join(data_home(), "removed.json"), "w", encoding="utf-8") as f:
-        json.dump(left, f)
-
-
-def clear_leftovers():
-    """Removed profiles' folders deleted again (none of their pages open now: each one's lock had first)."""
-    for pid in leftovers():
-        if pid in HELD or not lock_profile(pid):
-            continue
-        shutil.rmtree(os.path.join(data_home(), "profiles", pid), ignore_errors=True)
-        if not os.path.exists(os.path.join(data_home(), "profiles", pid)):
-            note_leftover(pid, add=False)
-        try:
-            os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
-        except OSError:
-            pass
-        unlock_profile(pid)
-
-
-HELD = {}  # (this process's profile locks, by id)
-
-
-def lock_profile(pid):
-    """True if this process has the profile's lock (now, or already), False if another Emission has it: two processes
-    on one store would share its cookie database and caches. Kept until the process ends (its store may still be
-    open after its pages close: WebKit lets go of it later), or the profile's removed."""
-    if pid in HELD:
-        return True
-    folder = os.path.join(data_home(), "profiles")
-    os.makedirs(folder, exist_ok=True)
-    fd = os.open(os.path.join(folder, pid + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(fd)
-        return False
-    HELD[pid] = fd
-    return True
-
-
-def unlock_profile(pid):
-    fd = HELD.pop(pid, None)
-    if fd is not None:
-        os.close(fd)
-
-
-def door_path(pid):
-    """Where the Emission that has pid's profile takes pages from others (a socket in a folder only this user can
-    open; short, for macOS's limit on socket paths)."""
-    base = os.path.join(tempfile.gettempdir(), f"emission-{os.getuid()}")
-    os.makedirs(base, mode=0o700, exist_ok=True)
-    return os.path.join(base, hashlib.sha1(f"{data_home()}\0{pid}".encode()).hexdigest()[:20] + ".sock")
-
-
-def hand_over(pid, urls):
-    """urls opened in the Emission that has pid's profile: True if it took them."""
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(5)
-            s.connect(door_path(pid))
-            s.sendall((json.dumps({"open": list(urls)}) + "\n").encode())
-            return s.recv(16).startswith(b"ok")
-    except (OSError, ValueError):
-        return False
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
+                                   data_home, door_path, forget_profile, hand_over, leftovers, lock_profile,
+                                   note_leftover, profile_id, profiles, rename_profile, unlock_profile)
 
 
 class Door:
-    """This process taking pages for the profiles it has (each one's lock held: no one else listens there)."""
+    """This process taking requests for the profiles it has (each one's lock held: no one else listens there): a
+    line of JSON each, answered with one, maybe later (a screenshot, a script)."""
     open = {}
 
     @classmethod
-    def listen(cls, pid, take):
-        """take(pid, urls) run for each hand-over to pid's profile."""
+    def listen(cls, pid, handle):
+        """handle(pid, request, answer) run for each request to pid's profile; answer(dict) sends its answer."""
         if pid in cls.open:
             return
         path = door_path(pid)
@@ -190,7 +58,7 @@ class Door:
             pass
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         srv.bind(path)
-        srv.listen(4)
+        srv.listen(8)
         srv.setblocking(False)
 
         def came(*_):
@@ -198,20 +66,35 @@ class Door:
                 conn, _addr = srv.accept()
             except OSError:
                 return True
-            with conn:
-                conn.settimeout(5)
+            conn.settimeout(10)
+            try:
+                raw = b""
+                while not raw.endswith(b"\n") and len(raw) < 1 << 22:
+                    part = conn.recv(1 << 16)
+                    if not part:
+                        break
+                    raw += part
+                msg = json.loads(raw or b"{}")
+                if not isinstance(msg, dict):
+                    raise ValueError("not a request")
+            except (OSError, ValueError):
+                conn.close()
+                return True
+
+            def answer(reply):
                 try:
-                    raw = b""
-                    while not raw.endswith(b"\n") and len(raw) < 1 << 16:
-                        part = conn.recv(4096)
-                        if not part:
-                            break
-                        raw += part
-                    urls = [u for u in json.loads(raw or b"{}").get("open") or [] if isinstance(u, str)]
-                    take(pid, urls)
-                    conn.sendall(b"ok\n")
-                except (OSError, ValueError, AttributeError):
+                    conn.settimeout(30)
+                    conn.sendall((json.dumps(reply) + "\n").encode())
+                except (OSError, TypeError, ValueError):
                     pass
+                finally:
+                    conn.close()
+            answer = once(answer)
+            try:
+                handle(pid, msg, answer)
+            except Exception as e:  # (said to whoever asked, and in the log)
+                sys.excepthook(*sys.exc_info())
+                answer({"error": f"{type(e).__name__}: {e}"})
             return True
         cls.open[pid] = (srv, GLib.io_add_watch(srv.fileno(), GLib.PRIORITY_DEFAULT, GLib.IOCondition.IN, came))
 
@@ -330,7 +213,20 @@ class Blocks:
             cls.system()._Block_release(block)
 
     @classmethod
-    def make(cls, fn, types=()):
+    def once(cls, fn, types=()):
+        """A block for one call (a completion handler's): let go of after it's run."""
+        held = {}
+
+        def run(*args):
+            try:
+                fn(*args)
+            finally:
+                GLib.idle_add(lambda: held.clear() or False)  # (not while it's running)
+        held["block"] = cls.make(run, types, keep=held)
+        return held["block"]
+
+    @classmethod
+    def make(cls, fn, types=(), keep=None):
         """A global block running fn(*args) (kept for good: they're few)."""
         class Desc(ctypes.Structure):
             _fields_ = [("reserved", ctypes.c_ulong), ("size", ctypes.c_ulong)]
@@ -342,8 +238,34 @@ class Blocks:
         desc = Desc(0, ctypes.sizeof(Literal))
         isa = ctypes.addressof(ctypes.c_void_p.in_dll(cls.system(), "_NSConcreteGlobalBlock"))
         lit = Literal(isa, 1 << 28, 0, ctypes.cast(imp, ctypes.c_void_p).value, ctypes.pointer(desc))
-        cls.kept.extend((imp, desc, lit))
+        if keep is None:
+            cls.kept.extend((imp, desc, lit))
+        else:
+            keep["parts"] = (imp, desc, lit)
         return ctypes.addressof(lit)
+
+
+class MacPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+
+MAC_MODS = {"shift": 1 << 17, "ctrl": 1 << 18, "alt": 1 << 19, "cmd": 1 << 20}
+MAC_KEYS = {"Enter": (36, "\r"), "Tab": (48, "\t"), "Space": (49, " "), "Backspace": (51, "\x7f"),
+            "Escape": (53, "\x1b"), "Delete": (117, "\uf728"), "Left": (123, "\uf702"), "Right": (124, "\uf703"),
+            "Down": (125, "\uf701"), "Up": (126, "\uf700"), "Home": (115, "\uf729"), "End": (119, "\uf72b"),
+            "PageUp": (116, "\uf72c"), "PageDown": (121, "\uf72d")}
+MAC_CHAR_CODES = dict(zip("asdfhgzxcv bqweryt123465=97-80]ou[ip lj'k;\\,/nm.", range(0, 48)))
+MAC_CHAR_CODES.pop(" ", None)
+MAC_COMMANDS = {("Enter", ()): b"insertNewline:", ("Tab", ()): b"insertTab:", ("Tab", ("shift",)): b"insertBacktab:",
+                ("Backspace", ()): b"deleteBackward:", ("Delete", ()): b"deleteForward:",
+                ("Escape", ()): b"cancelOperation:", ("Left", ()): b"moveLeft:", ("Right", ()): b"moveRight:",
+                ("Up", ()): b"moveUp:", ("Down", ()): b"moveDown:",
+                ("Left", ("shift",)): b"moveLeftAndModifySelection:",
+                ("Right", ("shift",)): b"moveRightAndModifySelection:",
+                ("Home", ()): b"scrollToBeginningOfDocument:", ("End", ()): b"scrollToEndOfDocument:",
+                ("PageUp", ()): b"scrollPageUp:", ("PageDown", ()): b"scrollPageDown:",
+                ("a", ("cmd",)): b"selectAll:", ("c", ("cmd",)): b"copy:", ("x", ("cmd",)): b"cut:",
+                ("v", ("cmd",)): b"paste:", ("z", ("cmd",)): b"undo:", ("z", ("cmd", "shift")): b"redo:"}
 
 
 class MacWeb:
@@ -567,7 +489,7 @@ class MacWeb:
                 finish(None)
                 return
             web.window.choose_files(send(params, b"allowsMultipleSelection", ret=ctypes.c_bool),
-                                    send(params, b"allowsDirectories", ret=ctypes.c_bool), finish)
+                                    send(params, b"allowsDirectories", ret=ctypes.c_bool), finish, web)
         except Exception:
             finish(None)
             raise
@@ -592,8 +514,12 @@ class MacWeb:
             if not store:
                 raise RuntimeError("WebKit gave no store for this profile")
             send(config, b"setWebsiteDataStore:", store, types=(ctypes.c_void_p,))
+            send(config, b"setApplicationNameForUserAgent:", macos.ns_string(self.user_agent()),
+                 types=(ctypes.c_void_p,))
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
+        if (agent := os.environ.get("EMISSION_USER_AGENT")):
+            send(self.view, b"setCustomUserAgent:", macos.ns_string(agent), types=(ctypes.c_void_p,))
         if not opener:
             send(config, b"release")  # (the view keeps its own copy)
         send(self.view, b"setAllowsBackForwardNavigationGestures:", True, types=(ctypes.c_bool,))
@@ -603,6 +529,70 @@ class MacWeb:
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
         self.attached = None
+
+    @staticmethod
+    def jar(profile):
+        """profile's cookie store (its WKHTTPCookieStore)."""
+        MacWeb.load_kit()
+        send = macos.objc_send
+        nsuuid = send(send(b"NSUUID", b"alloc"), b"initWithUUIDString:", macos.ns_string(profile),
+                      types=(ctypes.c_void_p,))
+        store = send(b"WKWebsiteDataStore", b"dataStoreForIdentifier:", nsuuid, types=(ctypes.c_void_p,))
+        send(nsuuid, b"release")
+        return send(store, b"httpCookieStore")
+
+    @classmethod
+    def cookies(cls, profile, done):
+        """As GtkWeb's: profile's cookies, done(list, None) or (None, why)."""
+        send = macos.objc_send
+
+        def got(array):
+            out = []
+            for i in range(send(array, b"count", ret=ctypes.c_ulong) if array else 0):
+                c = send(array, b"objectAtIndex:", i, types=(ctypes.c_ulong,))
+                exp = send(c, b"expiresDate")
+                out.append({"name": cls._text(send(c, b"name")), "value": cls._text(send(c, b"value")),
+                            "domain": cls._text(send(c, b"domain")), "path": cls._text(send(c, b"path")),
+                            "expires": send(exp, b"timeIntervalSince1970", ret=ctypes.c_double) if exp else None,
+                            "secure": send(c, b"isSecure", ret=ctypes.c_bool),
+                            "http_only": send(c, b"isHTTPOnly", ret=ctypes.c_bool),
+                            "same_site": cls._text(send(c, b"sameSitePolicy")).lower() or None})
+            GLib.idle_add(lambda: done(out, None) and False)
+        send(cls.jar(profile), b"getAllCookies:", Blocks.once(got, types=(ctypes.c_void_p,)), types=(ctypes.c_void_p,))
+
+    @classmethod
+    def add_cookies(cls, profile, cookies, done):
+        """As GtkWeb's: cookies put in profile's store, done(how many, None) or (None, why)."""
+        send, jar, left = macos.objc_send, cls.jar(profile), list(cookies)
+
+        def next_one(*_):
+            if not left:
+                GLib.idle_add(lambda: done(len(cookies), None) and False)
+                return
+            c = left.pop(0)
+            props = send(b"NSMutableDictionary", b"dictionary")
+            for key, value in (("Name", c["name"]), ("Value", c.get("value") or ""), ("Domain", c["domain"]),
+                               ("Path", c.get("path") or "/")):
+                send(props, b"setObject:forKey:", macos.ns_string(str(value)), macos.ns_string(key),
+                     types=(ctypes.c_void_p, ctypes.c_void_p))
+            if c.get("expires"):
+                send(props, b"setObject:forKey:", send(b"NSDate", b"dateWithTimeIntervalSince1970:",
+                                                       float(c["expires"]), types=(ctypes.c_double,)),
+                     macos.ns_string("Expires"), types=(ctypes.c_void_p, ctypes.c_void_p))
+            for key, on in (("Secure", c.get("secure")), ("HttpOnly", c.get("http_only"))):
+                if on:
+                    send(props, b"setObject:forKey:", macos.ns_string("TRUE"), macos.ns_string(key),
+                         types=(ctypes.c_void_p, ctypes.c_void_p))
+            if c.get("same_site") in ("lax", "strict"):
+                send(props, b"setObject:forKey:", macos.ns_string(c["same_site"]), macos.ns_string("SameSite"),
+                     types=(ctypes.c_void_p, ctypes.c_void_p))
+            made = send(b"NSHTTPCookie", b"cookieWithProperties:", props, types=(ctypes.c_void_p,))
+            if not made:
+                next_one()
+                return
+            send(jar, b"setCookie:completionHandler:", made, Blocks.once(next_one),
+                 types=(ctypes.c_void_p, ctypes.c_void_p))
+        next_one()
 
     @staticmethod
     def remove_store(profile, done):
@@ -737,6 +727,137 @@ class MacWeb:
                 "back": send(self.view, b"canGoBack", ret=ctypes.c_bool),
                 "forward": send(self.view, b"canGoForward", ret=ctypes.c_bool)}
 
+    # (what an agent's tools do with it: emission's Control)
+
+    worlds = {}
+
+    def run_js(self, body, done, page=False):
+        """body (an async function's) run in the page (page: in its own world, where its scripts are; else in
+        Emission's, apart from them, the same DOM): done(its result as JSON text, None) or (None, what went wrong)."""
+        send = macos.objc_send
+        if page:
+            world = send(b"WKContentWorld", b"pageWorld")
+        else:
+            world = self.worlds.get("emission") or self.worlds.setdefault(
+                "emission", send(send(b"WKContentWorld", b"worldWithName:", macos.ns_string("emission"),
+                                      types=(ctypes.c_void_p,)), b"retain"))  # (kept: it's made once)
+        code = f"return JSON.stringify(await (async () => {{ {body}\n}})() ?? null);"
+
+        def finished(result, error):
+            if error:
+                info = send(error, b"userInfo")
+                why = self._text(send(info, b"objectForKey:", macos.ns_string("WKJavaScriptExceptionMessage"),
+                                      types=(ctypes.c_void_p,))) or self._text(send(error, b"localizedDescription"))
+                GLib.idle_add(lambda: done(None, why) and False)
+            else:
+                text = self._text(result) if result else "null"
+                GLib.idle_add(lambda: done(text, None) and False)
+        send(self.view, b"callAsyncJavaScript:arguments:inFrame:inContentWorld:completionHandler:",
+             macos.ns_string(code), None, None, world, Blocks.once(finished, types=(ctypes.c_void_p, ctypes.c_void_p)),
+             types=(ctypes.c_void_p,) * 5)
+
+    def snapshot(self, done):
+        """The page as it's shown: done(PNG bytes, None) or (None, why not)."""
+        send = macos.objc_send
+
+        def got(image, error):
+            if not image:
+                why = self._text(send(error, b"localizedDescription")) if error else "no picture"
+                GLib.idle_add(lambda: done(None, why) and False)
+                return
+            rep = send(b"NSBitmapImageRep", b"imageRepWithData:", send(image, b"TIFFRepresentation"),
+                       types=(ctypes.c_void_p,))
+            png = send(rep, b"representationUsingType:properties:", 4, send(b"NSDictionary", b"dictionary"),
+                       types=(ctypes.c_ulong, ctypes.c_void_p))  # (4: PNG)
+            data = ctypes.string_at(send(png, b"bytes"), send(png, b"length", ret=ctypes.c_ulong))
+            GLib.idle_add(lambda: done(data, None) and False)
+        send(self.view, b"takeSnapshotWithConfiguration:completionHandler:", None,
+             Blocks.once(got, types=(ctypes.c_void_p, ctypes.c_void_p)), types=(ctypes.c_void_p, ctypes.c_void_p))
+
+    def _event(self, kind, x, y, count=1, flags=0):
+        """A mouse event at (x, y) on the page (CSS pixels from its top left), in its window's terms."""
+        send, R = macos.objc_send, macos._rect()
+        ns = send(self.view, b"window")
+        fr = send(self.view, b"frame", ret=R)
+        sup = send(self.view, b"superview")
+        h = send(sup, b"bounds", ret=R).h
+        top = fr.y if send(sup, b"isFlipped", ret=ctypes.c_bool) else h - fr.y - fr.h
+        point = MacPoint(fr.x + x, h - (top + y))
+        f = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, MacPoint, ctypes.c_ulong,
+                             ctypes.c_double, ctypes.c_long, ctypes.c_void_p, ctypes.c_long, ctypes.c_long,
+                             ctypes.c_float)(ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+        return f(send.rt.objc_getClass(b"NSEvent"), objc_sel(
+            b"mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+            kind, point, flags, GLib.get_monotonic_time() / 1e6, send(ns, b"windowNumber", ret=ctypes.c_long), None, 0,
+            count, 1.0 if kind not in (5, 6) else 0.0)
+
+    def move(self, x, y):
+        """The pointer to (x, y) on the page: what's under it hovered, as a person's mouse would."""
+        macos.objc_send(self.view, b"mouseMoved:", self._event(5, x, y), types=(ctypes.c_void_p,))
+
+    def click(self, x, y, button="left", count=1, mods=()):
+        """A real click at (x, y): pointer moved there, pressed, released (count times, as a double click is)."""
+        flags = sum(MAC_MODS[m] for m in mods)
+        down, up, dsel, usel = ((3, 4, b"rightMouseDown:", b"rightMouseUp:") if button == "right"
+                                else (1, 2, b"mouseDown:", b"mouseUp:"))
+        self.move(x, y)
+        for n in range(1, count + 1):
+            macos.objc_send(self.view, dsel, self._event(down, x, y, n, flags), types=(ctypes.c_void_p,))
+            macos.objc_send(self.view, usel, self._event(up, x, y, n, flags), types=(ctypes.c_void_p,))
+
+    def keyed(self):
+        """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
+        that isn't key types characters, but doesn't run Return, Delete and the like)."""
+        ns = macos.objc_send(self.view, b"window")
+        return bool(ns) and macos.objc_send(ns, b"isKeyWindow", ret=ctypes.c_bool)
+
+    def key(self, name, mods=()):
+        """A key pressed and let go (name: a character, or Enter, Tab, Backspace, Delete, Escape, the arrows, Home,
+        End, PageUp, PageDown, Space), as real key events."""
+        send = macos.objc_send
+        code, chars = MAC_KEYS.get(name, (None, name))
+        if code is None and len(name) == 1:
+            code = MAC_CHAR_CODES.get(name.lower(), 0)
+        if code is None:
+            raise ValueError(f"no key {name!r}")
+        flags = sum(MAC_MODS[m] for m in mods)
+        shown = chars.upper() if "shift" in mods and len(chars) == 1 and chars.isalpha() else chars
+        ns = send(self.view, b"window")
+        f = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, MacPoint, ctypes.c_ulong,
+                             ctypes.c_double, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_bool, ctypes.c_ushort)(ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+
+        def ev(kind):
+            return f(send.rt.objc_getClass(b"NSEvent"), objc_sel(
+                b"keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:"
+                b"charactersIgnoringModifiers:isARepeat:keyCode:"), kind, MacPoint(0, 0), flags,
+                GLib.get_monotonic_time() / 1e6, send(ns, b"windowNumber", ret=ctypes.c_long), None,
+                macos.ns_string(shown), macos.ns_string(chars), False, code)
+        command = MAC_COMMANDS.get((name, tuple(sorted(mods))))
+        keyed = self.keyed()
+        if "cmd" in mods:
+            if keyed and send(self.view, b"performKeyEquivalent:", ev(10), types=(ctypes.c_void_p,),
+                              ret=ctypes.c_bool):
+                return
+            if command:
+                send(self.view, b"doCommandBySelector:", objc_sel(command), types=(ctypes.c_void_p,))
+            return
+        send(self.view, b"keyDown:", ev(10), types=(ctypes.c_void_p,))
+        send(self.view, b"keyUp:", ev(11), types=(ctypes.c_void_p,))
+        if command and not keyed:
+            send(self.view, b"doCommandBySelector:", objc_sel(command), types=(ctypes.c_void_p,))
+
+    @staticmethod
+    def user_agent():
+        """Safari's own (this WebKit is Safari's): WKWebView's names no browser, which some sites take badly."""
+        try:
+            import plistlib
+            with open("/Applications/Safari.app/Contents/Info.plist", "rb") as f:
+                version = plistlib.load(f).get("CFBundleShortVersionString") or ""
+        except (OSError, ValueError):
+            version = ""
+        return f"Version/{version.split('.')[0] + '.0' if version else '18.0'} Safari/605.1.15"
+
     def close(self):
         if self.view:
             send = macos.objc_send
@@ -749,6 +870,97 @@ class MacWeb:
 
 
 # ------------------------------------------------------------------- Linux --
+
+X_KEYS = {"Enter": "Return", "Backspace": "BackSpace", "PageUp": "Prior", "PageDown": "Next", "Space": "space"}
+X_MODS = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L", "cmd": "Control_L"}  # (cmd: Control, on Linux)
+
+
+class XTest:
+    """Real input on an X display (Emission's own, under xvfb-run, or the desktop's), through libXtst: the pointer
+    moved, buttons and keys pressed, as the X server would have them from a mouse and keyboard."""
+    made = None
+
+    @classmethod
+    def get(cls):
+        if cls.made is None:
+            cls.made = False
+            from gi.repository import Gdk
+            shown_on = Gdk.Display.get_default()
+            if shown_on is not None and type(shown_on).__name__ == "X11Display":  # (on X: not Wayland's)
+                try:
+                    cls.made = cls()
+                except OSError:
+                    pass
+        return cls.made or None
+
+    def __init__(self):
+        self.x = ctypes.CDLL("libX11.so.6")
+        self.t = ctypes.CDLL("libXtst.so.6")
+        self.x.XOpenDisplay.restype = ctypes.c_void_p
+        self.x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.d = self.x.XOpenDisplay(None)
+        if not self.d:
+            raise OSError("no X display")
+        self.x.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.x.XStringToKeysym.restype = ctypes.c_ulong
+        self.x.XStringToKeysym.argtypes = [ctypes.c_char_p]
+        self.x.XKeysymToKeycode.restype = ctypes.c_ubyte
+        self.x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        self.x.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int,
+                                                 ctypes.c_int, ctypes.POINTER(ctypes.c_int),
+                                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong)]
+        self.x.XFlush.argtypes = [ctypes.c_void_p]
+        for f, args in (("XTestFakeMotionEvent", [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]),
+                        ("XTestFakeButtonEvent", [ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]),
+                        ("XTestFakeKeyEvent", [ctypes.c_uint, ctypes.c_int, ctypes.c_ulong])):
+            getattr(self.t, f).argtypes = [ctypes.c_void_p, *args]
+        self.root = self.x.XDefaultRootWindow(self.d)
+
+    def origin(self, xid):
+        x, y, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()
+        self.x.XTranslateCoordinates(self.d, xid, self.root, 0, 0, ctypes.byref(x), ctypes.byref(y),
+                                     ctypes.byref(child))
+        return x.value, y.value
+
+    def move(self, x, y):
+        self.t.XTestFakeMotionEvent(self.d, -1, x, y, 0)
+        self.x.XFlush(self.d)
+
+    def button(self, n):
+        self.t.XTestFakeButtonEvent(self.d, n, 1, 0)
+        self.t.XTestFakeButtonEvent(self.d, n, 0, 0)
+        self.x.XFlush(self.d)
+
+    def code(self, name):
+        sym = self.x.XStringToKeysym(name.encode())
+        code = self.x.XKeysymToKeycode(self.d, sym) if sym else 0
+        if not code:
+            raise ValueError(f"no key {name!r} here")
+        return code
+
+    def key(self, name):
+        code = self.code(name)
+        self.t.XTestFakeKeyEvent(self.d, code, 1, 0)
+        self.t.XTestFakeKeyEvent(self.d, code, 0, 0)
+        self.x.XFlush(self.d)
+
+    def held(self, mods):
+        xt = self
+
+        class Held:
+            def __enter__(self):
+                self.codes = [xt.code(X_MODS[m]) for m in mods]
+                for c in self.codes:
+                    xt.t.XTestFakeKeyEvent(xt.d, c, 1, 0)
+                xt.x.XFlush(xt.d)
+
+            def __exit__(self, *_):
+                for c in reversed(self.codes):
+                    xt.t.XTestFakeKeyEvent(xt.d, c, 0, 0)
+                xt.x.XFlush(xt.d)
+        return Held()
+
 
 class GtkWeb:
     """One page in WebKitGTK 6.0's WebView, in its place in the window, with its profile's own network session (its
@@ -770,19 +982,140 @@ class GtkWeb:
         if opener is not None:
             self.view = WebKit.WebView(related_view=opener, hexpand=True, vexpand=True)
         else:
-            if profile not in self.sessions:
-                root = self.folder(profile)
-                net = WebKit.NetworkSession.new(os.path.join(root, "data"), os.path.join(root, "cache"))
-                net.get_cookie_manager().set_persistent_storage(os.path.join(root, "cookies.sqlite"),
-                                                                WebKit.CookiePersistentStorage.SQLITE)
-                net.connect("download-started", self.download_started)
-                self.sessions[profile] = net
-            self.view = WebKit.WebView(network_session=self.sessions[profile], hexpand=True, vexpand=True)
+            self.view = WebKit.WebView(network_session=self.session(profile), hexpand=True, vexpand=True)
         self.views[self.view] = self
         self.view.connect("create", lambda v, _action: (new := self.popup and self.popup(v)) and new.view)
         self.view.connect("close", lambda _v: self.closed and GLib.idle_add(self.closed))
         self.view.connect("load-failed", self.failed)
+        self.view.connect("script-dialog", self.script_dialog)
+        self.view.connect("authenticate", self.authenticate)
+        self.view.connect("run-file-chooser", self.file_chooser)
+        self.held = []  # (what WebKit waits on an answer to, kept till it's given)
+        self.view.get_user_content_manager().add_script(WebKit.UserScript.new_for_world(  # (Emission's own world
+            "", WebKit.UserContentInjectedFrames.TOP_FRAME,  # registered: WebKitGTK keeps it, and what's set in it,
+            WebKit.UserScriptInjectionTime.START, "emission", None, None))  # from one call to the next, then)
+        settings = self.view.get_settings()
+        if (agent := os.environ.get("EMISSION_USER_AGENT")):
+            settings.set_user_agent(agent)
         place.append(self.view)
+
+    # (a page's prompts: Emission's own, as on macOS, so a Bot's tools can see and answer them)
+
+    def script_dialog(self, _view, dialog):
+        if self.window is None:
+            return False
+        T = self.WebKit.ScriptDialogType
+        kind = {T.ALERT: "alert", T.CONFIRM: "confirm", T.PROMPT: "prompt",
+                T.BEFORE_UNLOAD_CONFIRM: "confirm"}.get(dialog.get_dialog_type(), "alert")
+        self.held.append(dialog)
+
+        def finish(answer):
+            if kind == "confirm":
+                dialog.confirm_set_confirmed(bool(answer))
+            elif kind == "prompt" and answer is not None:
+                dialog.prompt_set_text(answer)
+            dialog.close()
+            if dialog in self.held:
+                self.held.remove(dialog)
+        self.window.page_dialog(self, kind, dialog.get_message() or "",
+                                dialog.prompt_get_default_text() if kind == "prompt" else "", once(finish))
+        return True
+
+    def authenticate(self, _view, request):
+        if self.window is None or request.get_scheme() not in (
+                self.WebKit.AuthenticationScheme.HTTP_BASIC, self.WebKit.AuthenticationScheme.HTTP_DIGEST,
+                self.WebKit.AuthenticationScheme.DEFAULT):
+            return False
+        self.held.append(request)
+
+        def answer(user, password):
+            if user is None:
+                request.cancel()
+            else:
+                request.authenticate(self.WebKit.Credential.new(user, password,
+                                                                self.WebKit.CredentialPersistence.FOR_SESSION))
+            if request in self.held:
+                self.held.remove(request)
+        self.window.sign_in(self, request.get_host() or "", request.get_realm() or "",
+                            request.is_retry(), once(answer))
+        return True
+
+    def file_chooser(self, _view, request):
+        if self.window is None:
+            return False
+        self.held.append(request)
+
+        def finish(paths):
+            if paths:
+                request.select_files(paths if request.get_select_multiple() else paths[:1])
+            else:
+                request.cancel()
+            if request in self.held:
+                self.held.remove(request)
+        self.window.choose_files(request.get_select_multiple(), False, once(finish), self)
+        return True
+
+    @classmethod
+    def session(cls, profile):
+        """profile's network session (its cookies, logins and cache), made once in this process."""
+        if profile not in cls.sessions:
+            from gi.repository import WebKit
+            root = cls.folder(profile)
+            net = WebKit.NetworkSession.new(os.path.join(root, "data"), os.path.join(root, "cache"))
+            net.get_cookie_manager().set_persistent_storage(os.path.join(root, "cookies.sqlite"),
+                                                            WebKit.CookiePersistentStorage.SQLITE)
+            net.connect("download-started", cls.download_started)
+            cls.sessions[profile] = net
+        return cls.sessions[profile]
+
+    @classmethod
+    def cookies(cls, profile, done):
+        """profile's cookies: done([{name, value, domain, path, expires, secure, http_only, same_site}], None), or
+        (None, why not)."""
+        gi.require_version("Soup", "3.0")
+        from gi.repository import Soup
+        names = {Soup.SameSitePolicy.LAX: "lax", Soup.SameSitePolicy.STRICT: "strict"}
+
+        def got(mgr, result):
+            try:
+                found = mgr.get_all_cookies_finish(result)
+            except GLib.Error as e:
+                done(None, e.message)
+                return
+            done([{"name": c.get_name(), "value": c.get_value(), "domain": c.get_domain(), "path": c.get_path(),
+                   "expires": c.get_expires().to_unix() if c.get_expires() else None, "secure": c.get_secure(),
+                   "http_only": c.get_http_only(), "same_site": names.get(c.get_same_site_policy())}
+                  for c in found], None)
+        cls.session(profile).get_cookie_manager().get_all_cookies(None, got)
+
+    @classmethod
+    def add_cookies(cls, profile, cookies, done):
+        """cookies (as cookies gives them) put in profile's store: done(how many, None) or (None, why not)."""
+        gi.require_version("Soup", "3.0")
+        from gi.repository import Soup
+        mgr, left = cls.session(profile).get_cookie_manager(), list(cookies)
+        policies = {"lax": Soup.SameSitePolicy.LAX, "strict": Soup.SameSitePolicy.STRICT}
+
+        def next_one(*result):
+            if result:
+                try:
+                    result[0].add_cookie_finish(result[1])
+                except GLib.Error as e:
+                    done(None, e.message)
+                    return
+            if not left:
+                done(len(cookies), None)
+                return
+            c = left.pop(0)
+            made = Soup.Cookie.new(str(c["name"]), str(c.get("value") or ""), str(c["domain"]),
+                                   str(c.get("path") or "/"), -1)
+            if c.get("expires"):
+                made.set_expires(GLib.DateTime.new_from_unix_utc(int(c["expires"])))
+            made.set_secure(bool(c.get("secure")))
+            made.set_http_only(bool(c.get("http_only")))
+            made.set_same_site_policy(policies.get(c.get("same_site"), Soup.SameSitePolicy.NONE))
+            mgr.add_cookie(made, None, next_one)
+        next_one()
 
     @classmethod
     def remove_store(cls, profile, done):
@@ -870,6 +1203,83 @@ class GtkWeb:
         return {"title": v.get_title() or "", "url": v.get_uri() or "", "progress": v.get_estimated_load_progress(),
                 "loading": v.is_loading(), "back": v.can_go_back(), "forward": v.can_go_forward()}
 
+    # (what an agent's tools do with it: emission's Control)
+
+    def run_js(self, body, done, page=False):
+        """As MacWeb's: body run in the page's own world (page) or Emission's; done(JSON text, None) or (None, why)."""
+        code = f"return JSON.stringify(await (async () => {{ {body}\n}})() ?? null);"
+
+        def finished(view, result):
+            try:
+                value = view.call_async_javascript_function_finish(result)
+            except GLib.Error as e:
+                done(None, e.message)
+                return
+            done(value.to_string() if value is not None and not value.is_undefined() else "null", None)
+        self.view.call_async_javascript_function(code, -1, None, None if page else "emission", None, None, finished)
+
+    def snapshot(self, done):
+        WebKit = self.WebKit
+
+        def got(view, result):
+            try:
+                texture = view.get_snapshot_finish(result)
+            except GLib.Error as e:
+                done(None, e.message)
+                return
+            done(texture.save_to_png_bytes().get_data(), None)
+        self.view.get_snapshot(WebKit.SnapshotRegion.VISIBLE, WebKit.SnapshotOptions.NONE, None, got)
+
+    def _screen(self, x, y):
+        """(x, y) on the page as a point of the X screen, or None where there's no X (input's then the page's own
+        events, made by script)."""
+        xt = XTest.get()
+        root = self.view.get_root()
+        if xt is None or root is None or root.get_surface() is None:
+            return None
+        from gi.repository import Graphene
+        ok, p = self.view.compute_point(root, Graphene.Point().init(x, y))
+        if not ok:
+            return None
+        tx, ty = root.get_surface_transform()
+        try:
+            gi.require_version("GdkX11", "4.0")
+            from gi.repository import GdkX11
+            xid = GdkX11.X11Surface.get_xid(root.get_surface())
+        except (ValueError, ImportError, TypeError, AttributeError):
+            return None
+        ox, oy = xt.origin(xid)
+        return int(ox + tx + p.x), int(oy + ty + p.y)
+
+    def move(self, x, y):
+        at = self._screen(x, y)
+        if at is not None:
+            XTest.get().move(*at)
+
+    def click(self, x, y, button="left", count=1, mods=()):
+        at = self._screen(x, y)
+        if at is None:
+            raise OSError("no X display here for real clicks")
+        xt = XTest.get()
+        xt.move(*at)
+        with xt.held(mods):
+            for _ in range(count):
+                xt.button(3 if button == "right" else 1)
+
+    def keyed(self):
+        return True
+
+    def key(self, name, mods=()):
+        xt = XTest.get()
+        if xt is None or self._screen(0, 0) is None:
+            raise OSError("no X display here for real keys")
+        with xt.held(mods):
+            xt.key(X_KEYS.get(name, name))
+
+    @staticmethod
+    def user_agent():
+        return None  # (WebKitGTK's own: already Safari's kind)
+
     def close(self):
         self.views.pop(self.view, None)
         self.view.try_close()
@@ -900,8 +1310,11 @@ def engine():
 class Tab:
     """A tab: its page, and where it's drawn. url None: a page another opened, WebKit loading it (opener: what the
     engine was given to make it with)."""
+    made = 0
+
     def __init__(self, win, url, opener=None):
-        self.win = win
+        Tab.made += 1
+        self.id, self.win = f"tab{Tab.made}", win
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
         self.web.window = win
@@ -913,10 +1326,14 @@ class Tab:
 
 
 class Window(Adw.ApplicationWindow):
-    def __init__(self, app, url, profile):
-        super().__init__(application=app, title="Emission", default_width=1200, default_height=820)
+    def __init__(self, app, url, profile, agent=False):
+        """agent: the window of an Emission started for a Bot's tools (its own profile; never shown: on macOS
+        it's kept off the screen, on Linux it's on a display of its own; a page's prompts wait for the tools)."""
+        super().__init__(application=app, title="Emission", default_width=1280, default_height=900)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
+        self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
+        self.used = GLib.get_monotonic_time()
         self.switching, self.asking, self.later, self.dialogs = False, {}, [], 0  # (later: (when, what), by tick)
         self.status, self.done = None, False
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
@@ -979,16 +1396,54 @@ class Window(Adw.ApplicationWindow):
         self.connect("close-request", self.closing_window)
         if self.Engine is not None:
             if not why:
-                self.open(url or HOME_PAGE)
+                self.open(url or ("about:blank" if agent else HOME_PAGE))
             GLib.timeout_add(POLL_MS, self.tick)
+
+    def free_from_agent(self, pid):
+        """True if pid's profile was an agent's Emission's (a Bot's, out of sight) and now isn't: it's asked to go,
+        so the profile can be opened here and seen (the Bot's tools then reach it here)."""
+        try:
+            if not call(pid, {"op": "info"}, timeout=3).get("agent"):
+                return False
+            call(pid, {"op": "quit"}, timeout=3)
+        except (OSError, ValueError):
+            return False
+        end = GLib.get_monotonic_time() + 8_000_000
+        while GLib.get_monotonic_time() < end:
+            if lock_profile(pid):
+                return True
+            GLib.usleep(100_000)
+        return False
 
     def have(self, pid):
         """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
         has it."""
         if not lock_profile(pid):
             return False
-        Door.listen(pid, self.take)
+        Door.listen(pid, self.handle)
         return True
+
+    def handle(self, pid, msg, answer):
+        """A request at pid's door: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
+        (Control's), for pid's profile (this window moved to it if it's elsewhere)."""
+        op = msg.get("op")
+        self.used = GLib.get_monotonic_time()
+        if op == "open":
+            self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
+            return answer({"ok": True})
+        if op == "info":
+            return answer({"agent": self.agent, "profile": self.profile, "tabs": len(self.tabs)})
+        if op == "quit":
+            answer({"ok": True})
+            GLib.timeout_add(100, lambda: self.get_application().quit() or False)
+            return None
+        if self.Engine is None:
+            return answer({"error": "Emission has no page engine on this host"})
+        if pid != self.profile_id:
+            name = next((p["name"] for p in profiles() if p["id"] == pid), None)
+            if name is None or not self.switch_profile(name):
+                return answer({"error": "that profile isn't open here"})
+        return self.control.run(op, msg, answer)
 
     def take(self, pid, urls):
         """Pages handed over by another Emission, for pid's profile (this window moved to it if it's elsewhere)."""
@@ -1028,8 +1483,12 @@ class Window(Adw.ApplicationWindow):
             group.add_action(act)
             menu.append(p["name"] + ("  ✓" if p["name"] == self.profile else ""), f"who.p{i}")
         more = Gio.Menu()
+        bots = [p for p in listed if p.get("bot") and p["id"] != self.profile_id]
+        mine = next((p for p in listed if p["id"] == self.profile_id), {})
         for name, label, fn, on in (("add", "New Profile…", self.ask_profile, True),
-                                    ("rename", "Rename Profile…", self.ask_rename, self.profile != DEFAULT),
+                                    ("copy", "Copy Sign-ins to a Bot…", self.ask_copy, bool(bots) and not mine.get("bot")),
+                                    ("rename", "Rename Profile…", self.ask_rename, self.profile != DEFAULT
+                                     and not mine.get("bot")),
                                     ("remove", "Remove Profile…", self.ask_remove, self.profile != DEFAULT)):
             act = Gio.SimpleAction.new(name, None)
             act.set_enabled(on)
@@ -1066,6 +1525,70 @@ class Window(Adw.ApplicationWindow):
         self.ask_name("New Profile", "A profile keeps its own cookies and logins: sign in once, and it stays signed "
                       "in.", "Add", "", lambda name: (add_profile(name), self.switch_profile(name)))
 
+    def ask_copy(self):
+        """Sign-ins (the cookies of sites chosen) copied from this profile into a Bot's own: it's signed in there as
+        this profile is."""
+        bots = [p for p in profiles() if p.get("bot") and p["id"] != self.profile_id]
+
+        def got(cookies, why):
+            if why:
+                self.say("Couldn't read this profile's sign-ins", why)
+                return
+            sites = sites_of(cookies)
+            if not sites:
+                self.say("No sign-ins here", f"“{self.profile}” has no cookies for any site yet: sign in to sites "
+                         "here first.")
+                return
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            to = Gtk.DropDown.new_from_strings([b["name"] for b in bots])
+            box.append(to)
+            checks = []
+            scroller = Gtk.ScrolledWindow(min_content_height=min(240, 30 * len(sites)), propagate_natural_height=True)
+            listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            for site in sites:
+                c = Gtk.CheckButton(label=site)
+                checks.append(c)
+                listing.append(c)
+            scroller.set_child(listing)
+            box.append(scroller)
+            dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"The Bot is signed in to the sites you "
+                                  f"choose as “{self.profile}” is, with its cookies for them.", extra_child=box,
+                                  default_response="copy", close_response="cancel")
+            dlg.add_response("cancel", "Cancel")
+            dlg.add_response("copy", "Copy")
+            dlg.set_response_appearance("copy", Adw.ResponseAppearance.SUGGESTED)
+
+            def answered(_d, r):
+                chosen = {c.get_label() for c in checks if c.get_active()}
+                if r != "copy" or not chosen:
+                    return
+                bot = bots[to.get_selected()]
+                picked = [c for c in cookies if set(sites_of([c])) & chosen]
+                self.copy_cookies(bot, picked, sorted(chosen))
+            dlg.connect("response", once(answered))
+            self.present_dialog(dlg)
+        self.Engine.cookies(self.profile_id, got)
+
+    def copy_cookies(self, bot, cookies, sites):
+        """cookies given to bot's own Emission (started for it, out of sight, if it isn't running: its store's open
+        in one process only, its)."""
+        def done(n, why):
+            if why:
+                self.say("Not copied", why)
+            else:
+                self.say("Copied", f"“{bot['name']}” is signed in to {', '.join(sites)} now ({n} cookies).")
+        if bot["id"] == self.profile_id or bot["id"] in Door.open:  # (it's this window's, or this process's)
+            self.Engine.add_cookies(bot["id"], cookies, done)
+            return
+
+        def over_there():
+            try:
+                got = call_bot(bot["bot"], None, {"op": "add_cookies", "cookies": cookies}, timeout=30)
+                GLib.idle_add(lambda: done(got.get("added", 0), None) and False)
+            except (OSError, ValueError) as e:
+                GLib.idle_add(lambda: done(None, str(e)) and False)
+        threading.Thread(target=over_there, daemon=True).start()
+
     def ask_rename(self):
         def rename(name):
             rename_profile(self.profile, name)
@@ -1091,7 +1614,7 @@ class Window(Adw.ApplicationWindow):
             return
         if self.profile == name and not self.switch_profile(DEFAULT):
             return
-        if not self.have(pid):
+        if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
             self.say("Still open", f"“{name}” is open in another Emission window, so it's kept. Close that window "
                      "and try again.")
             return
@@ -1125,7 +1648,7 @@ class Window(Adw.ApplicationWindow):
         if pid is None:
             self.say("No such profile", f"There's no profile called “{name}” now.")
             return False
-        if not self.have(pid):
+        if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
             urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
             if hand_over(pid, urls):
                 self.say(f"Opened in “{name}”'s window", f"“{name}” is open in another Emission, so this window's "
@@ -1173,8 +1696,39 @@ class Window(Adw.ApplicationWindow):
         url = web.state().get("url") or ""
         return urllib.parse.urlsplit(url).hostname or "This page"
 
+    def waits(self, web, kind, answer, **about):
+        """A page's prompt kept for the tools (prompts, answer_prompt): answer(msg) given what they say. Its id."""
+        tab = next((t for t in self.tabs.values() if t.web is web), None)
+        pid = f"prompt{len(self.waiting) + 1}-{GLib.get_monotonic_time() % 100000}"
+        self.waiting[pid] = {"about": {"id": pid, "tab": tab.id if tab else None, "kind": kind, **about},
+                             "answer": answer, "web": web}
+        return pid
+
+    def done_waiting(self, pid):
+        self.waiting.pop(pid, None)
+
+    def prompts(self, tab):
+        """What's waiting on an answer (tab's only, if it's given)."""
+        return [w["about"] for w in self.waiting.values() if tab is None or w["about"]["tab"] == tab.id]
+
+    def answer_prompt(self, msg):
+        w = self.waiting.pop(str(msg.get("id") or ""), None) or (
+            self.waiting.pop(next(iter(self.waiting)), None) if len(self.waiting) == 1 and not msg.get("id") else None)
+        if w is None:
+            raise ValueError("no such prompt waiting: prompts lists them")
+        w["answer"](msg)
+        for dlg in self.asking.get(w["web"], [])[:]:
+            if getattr(dlg, "prompt_id", None) == w["about"]["id"]:
+                dlg.force_close()
+
     def page_dialog(self, web, kind, message, text, finish):
         """A page's alert, confirm or prompt: finish(None for an alert; True or False; the text, or None)."""
+        pid = self.waits(web, kind, lambda m: finish(None if kind == "alert" else bool(m.get("accept", True))
+                                                    if kind == "confirm" else
+                                                    (str(m.get("text") or "") if m.get("accept", True) else None)),
+                         message=message, **({"default": text or ""} if kind == "prompt" else {}))
+        if self.agent:
+            return
         dlg = Adw.AlertDialog(heading=f"{self.host_of(web)} says", body=message, close_response="cancel")
         entry = None
         if kind == "prompt":
@@ -1186,13 +1740,20 @@ class Window(Adw.ApplicationWindow):
         dlg.set_default_response("ok")
         if kind == "alert":
             dlg.set_close_response("ok")
-        dlg.connect("response", lambda _d, r: finish(None if kind == "alert" else (r == "ok") if kind == "confirm"
-                                                     else (entry.get_text() if r == "ok" else None)))
+        dlg.prompt_id = pid
+        dlg.connect("response", lambda _d, r: (self.done_waiting(pid), finish(
+            None if kind == "alert" else (r == "ok") if kind == "confirm" else
+            (entry.get_text() if r == "ok" else None))))
         self.present_dialog(dlg, web)
 
     def sign_in(self, web, host, realm, failed_before, answer):
         """A site's own sign-in (HTTP authentication): answer(user, password), or (None, None). Kept for the session
         only."""
+        pid = self.waits(web, "sign_in", lambda m: answer(str(m.get("user") or ""), str(m.get("password") or ""))
+                         if m.get("accept", True) else answer(None, None),
+                         host=host, realm=realm, failed_before=bool(failed_before))
+        if self.agent:
+            return
         user = Gtk.Entry(placeholder_text="User name", activates_default=True)
         password = Gtk.PasswordEntry(placeholder_text="Password", activates_default=True, show_peek_icon=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1206,12 +1767,19 @@ class Window(Adw.ApplicationWindow):
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("ok", "Sign In")
         dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _d, r: answer(user.get_text(), password.get_text()) if r == "ok"
-                    else answer(None, None))
+        dlg.prompt_id = pid
+        dlg.connect("response", lambda _d, r: (self.done_waiting(pid), answer(user.get_text(), password.get_text())
+                                               if r == "ok" else answer(None, None)))
         self.present_dialog(dlg, web)
 
-    def choose_files(self, multiple, folders, finish):
+    def choose_files(self, multiple, folders, finish, web=None):
         """Files for a page's file input: finish([paths]) or finish(None)."""
+        if web is not None:
+            pid = self.waits(web, "files", lambda m: finish([str(f) for f in m.get("files") or [] if os.path.exists(
+                str(f))] or None if m.get("accept", True) else None), multiple=bool(multiple), folders=bool(folders))
+            if self.agent:
+                return
+            finish = (lambda f, pid=pid: lambda paths: (self.done_waiting(pid), f(paths)))(finish)
         dialog = Gtk.FileDialog(modal=True)
 
         def done(d, result):
@@ -1233,8 +1801,9 @@ class Window(Adw.ApplicationWindow):
             (dialog.open_multiple if multiple else dialog.open)(self, None, done)
 
     def saved(self, path, why):
-        """A download finished (or why it didn't): said in the banner for a while."""
+        """A download finished (or why it didn't): said in the banner for a while, and kept for the tools."""
         name = os.path.basename(path)
+        self.downloads.append({"name": name, "path": None if why else path, **({"error": why} if why else {})})
         self.banner.set_title(f"Couldn't download {name}: {why}" if why else f"Saved {name} to Downloads")
         self.banner.set_button_label(None if why else "Show")
         self.shown_path = None if why else path
@@ -1309,6 +1878,9 @@ class Window(Adw.ApplicationWindow):
     def tick(self):
         if self.done:
             return False
+        if self.agent and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and not self.waiting:
+            self.get_application().quit()
+            return False
         if self.later:
             now = GLib.get_monotonic_time()
             due = [fn for when, fn in self.later if when <= now]
@@ -1344,19 +1916,456 @@ class Window(Adw.ApplicationWindow):
         self.set_title(f"{now.get('title') or 'Emission'} — {self.profile}")
 
 
+# ------------------------------------------------------------------ agents --
+
+PAGE_JS = r"""
+if (!globalThis.__em) globalThis.__em = (() => {
+  const ids = new WeakMap(), refs = new Map();
+  let n = 0;
+  const ref = el => {
+    let id = ids.get(el);
+    if (!id) { id = 'ref_' + (++n); ids.set(el, id); refs.set(id, new WeakRef(el)); }
+    return id;
+  };
+  const get = id => {
+    const r = refs.get(id), el = r && r.deref();
+    if (!el || !el.isConnected) throw new Error('no element ' + id + ' on the page now: read_page or find again');
+    return el;
+  };
+  const visible = el => {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') return false;
+    const b = el.getBoundingClientRect();
+    return b.width > 0 && b.height > 0;
+  };
+  const ROLES = {A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'img', NAV: 'navigation',
+    MAIN: 'main', FORM: 'form', TABLE: 'table', LI: 'listitem', UL: 'list', OL: 'list', DIALOG: 'dialog',
+    OPTION: 'option', SUMMARY: 'button', IFRAME: 'iframe', VIDEO: 'video', HEADER: 'banner', FOOTER: 'contentinfo',
+    H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading'};
+  const ACTS = ['link', 'button', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox', 'slider', 'option',
+    'menuitem', 'tab', 'switch', 'spinbutton'];
+  const role = el => {
+    const r = el.getAttribute('role');
+    if (r) return r;
+    if (el.tagName === 'INPUT') {
+      const t = (el.type || 'text').toLowerCase();
+      if (t === 'hidden') return null;
+      return {checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', reset: 'button',
+        image: 'button', range: 'slider', search: 'searchbox', number: 'spinbutton', file: 'button'}[t] || 'textbox';
+    }
+    if (el.tagName === 'A' && !el.hasAttribute('href')) return null;
+    return ROLES[el.tagName] || (el.isContentEditable && el.getAttribute('contenteditable') !== null ? 'textbox' : null);
+  };
+  const NAMED_BY_TEXT = ['link', 'button', 'heading', 'option', 'menuitem', 'tab', 'listitem', 'cell', 'label',
+    'switch', 'checkbox', 'radio', 'treeitem', 'row', 'columnheader', 'rowheader', 'tooltip', 'status', 'alert'];
+  const acts = el => ACTS.includes(role(el)) || el.hasAttribute('onclick') ||
+    (el.hasAttribute('tabindex') && el.tabIndex >= 0);
+  const clip = (t, n = 80) => {
+    t = (t || '').replace(/\s+/g, ' ').trim();
+    return t.length > n ? t.slice(0, n) + '…' : t;
+  };
+  const name = el => {
+    const l = el.getAttribute('aria-label');
+    if (l) return clip(l);
+    const by = el.getAttribute('aria-labelledby');
+    if (by) {
+      const t = by.split(/\s+/).map(i => (document.getElementById(i) || {}).innerText || '').join(' ');
+      if (t.trim()) return clip(t);
+    }
+    if (el.labels && el.labels.length) return clip([...el.labels].map(x => x.innerText).join(' '));
+    const v = el.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(el.type) ? el.value : '';
+    return clip(el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || v ||
+      (NAMED_BY_TEXT.includes(role(el)) ? el.innerText : '') || '');
+  };
+  const line = (el, depth) => {
+    const r = role(el);
+    let s = '  '.repeat(depth) + '- ' + (r || el.tagName.toLowerCase());
+    const nm = name(el);
+    if (nm) s += ' "' + nm.replace(/"/g, '\\"') + '"';
+    s += ' [' + ref(el) + ']';
+    if (el.tagName === 'A' && el.getAttribute('href')) s += ' href="' + clip(el.getAttribute('href'), 120) + '"';
+    if (['textbox', 'searchbox', 'combobox', 'slider', 'spinbutton'].includes(r) && 'value' in el && el.value)
+      s += ' value="' + clip(String(el.value), 80) + '"';
+    if (el.type === 'checkbox' || el.type === 'radio') s += el.checked ? ' checked' : ' unchecked';
+    if (el.disabled) s += ' disabled';
+    if (el === document.activeElement) s += ' focused';
+    return s;
+  };
+  const read = (root, all, max) => {
+    const out = [];
+    let size = 0;
+    const put = l => { out.push(l); size += l.length + 1; };
+    const walk = (el, depth) => {
+      if (size > max || !(el instanceof Element)) return;
+      if (el.matches('script, style, noscript, template, head') || !visible(el)) return;
+      const r = role(el), keep = all ? !!r : (acts(el) || r === 'heading');
+      let d = depth;
+      if (keep) { put(line(el, all ? depth : 0)); d = depth + 1; }
+      if (all) {
+        const own = [...el.childNodes].filter(c => c.nodeType === 3).map(c => c.textContent).join(' ');
+        if (own.trim() && !(keep && name(el))) put('  '.repeat(d) + '- text "' + clip(own, 300) + '"');
+      }
+      if (keep && ['link', 'button', 'option', 'img'].includes(r)) return;
+      for (const c of el.children) walk(c, d);
+      if (el.shadowRoot) for (const c of el.shadowRoot.children) walk(c, d);
+    };
+    walk(root, 0);
+    return out.join('\n') + (size > max ? '\n(… cut short: read a part with ref, or look with find)' : '');
+  };
+  const find = (q, limit) => {
+    q = q.toLowerCase();
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      if (out.length >= limit) break;
+      const r = role(el);
+      if (!(r || acts(el)) || !visible(el)) continue;
+      const hay = [r, name(el), el.getAttribute('placeholder'), el.id, el.getAttribute('name'),
+        el.tagName === 'A' ? el.getAttribute('href') : ''].join(' ').toLowerCase();
+      if (hay.includes(q)) out.push(line(el, 0));
+    }
+    return out;
+  };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const centre = async el => {
+    el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+    await sleep(60);
+    const b = el.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return {x, y, covered: hit && hit !== el && !el.contains(hit) && !hit.contains(el) ? line(hit, 0) : null};
+  };
+  const editable = el => el && (el.isContentEditable ||
+    (el.tagName === 'TEXTAREA') || (el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset',
+      'file', 'image', 'range', 'color', 'hidden'].includes((el.type || 'text').toLowerCase())));
+  const setValue = (el, v) => {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT'
+      ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  return {ref, get, read, find, centre, line, editable, setValue, sleep, visible};
+})();
+const em = globalThis.__em;
+"""
+
+
+def guarded(fn, answer):
+    """fn, its errors answered (a callback's, which nothing else would catch: the request would wait for good)."""
+    def run(*a):
+        try:
+            return fn(*a)
+        except Exception as e:
+            sys.excepthook(*sys.exc_info())
+            answer({"error": f"{type(e).__name__}: {e}"})
+            return None
+    return run
+
+
+class Control:
+    """What a Bot's browser tools ask of a window (emissiontools, through the host process and the door): a request,
+    answered with a dict. Input's real (the pointer moved to a place, then pressed; keys one at a time), as computer
+    use's is; a page's text comes from the page itself, and what's on it is named by refs read_page and find give."""
+    KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
+    TYPE_GAP_MS = 12  # (between characters typed: xdotool type's own pace)
+    LOAD_S = 30  # (a page's load waited for this long at most)
+
+    def __init__(self, win):
+        self.win = win
+        self.scales = {}  # (each tab's last screenshot's pixels to the page's: by tab id)
+
+    # (tabs)
+
+    def tab(self, msg):
+        want = msg.get("tab")
+        for page, t in self.win.tabs.items():
+            if want in (None, "", t.id) and (want or page is self.win.view.get_selected_page()):
+                self.win.view.set_selected_page(page)
+                return t
+        if want:
+            raise ValueError(f"no tab {want}: tabs lists them")
+        return self.win.open("about:blank")
+
+    def describe(self, t):
+        st = t.web.state()
+        return {"tab": t.id, "title": st.get("title") or "", "url": st.get("url") or "",
+                "loading": bool(st.get("loading")), "selected": t is self.win.current(),
+                **({"prompts": got} if (got := self.win.prompts(t)) else {})}
+
+    def settle(self, t, answer, extra=None, started=None):
+        """answer(describe(t) + extra) once t's page has loaded (or LOAD_S has gone), after a moment to start."""
+        started = started or GLib.get_monotonic_time()
+
+        def look():
+            st = t.web.state() if t.web.view is not None else {}
+            waited = (GLib.get_monotonic_time() - started) / 1e6
+            if waited < 0.35 or (st.get("loading") and waited < self.LOAD_S and not self.win.prompts(t)):
+                return True
+            answer({**self.describe(t), **(extra or {})})
+            return False
+        GLib.timeout_add(100, look)
+
+    def js(self, t, body, answer, then=None, page=False):
+        """body run in t's page (Emission's world, PAGE_JS's em there; page: the page's own world, for javascript):
+        then(result) given what it returned, or the error answered."""
+        def done(text, why):
+            if why is not None:
+                answer({"error": why})
+                return
+            try:
+                value = json.loads(text)
+            except ValueError:
+                value = text
+            (then or (lambda v: answer({"result": v})))(value)
+        t.web.run_js(body if page else PAGE_JS + body, guarded(done, answer), page=page)
+
+    def run(self, op, msg, answer):
+        fn = getattr(self, "op_" + str(op), None)
+        if fn is None:
+            raise ValueError(f"no such request: {op}")
+        fn(msg, answer)
+
+    def op_tabs(self, msg, answer):
+        answer({"profile": self.win.profile, "tabs": [self.describe(t) for t in self.win.tabs.values()],
+                "downloads": self.win.downloads[-10:]})
+
+    def op_new_tab(self, msg, answer):
+        t = self.win.open(address(msg.get("url") or "about:blank"))
+        self.settle(t, answer)
+
+    def op_close_tab(self, msg, answer):
+        t = self.tab(msg)
+        self.win.close_tab(t)
+        answer({"closed": t.id, "tabs": [self.describe(x) for x in self.win.tabs.values() if x is not t]})
+
+    def op_navigate(self, msg, answer):
+        t, url = self.tab(msg), msg.get("url") or ""
+        {"back": t.web.back, "forward": t.web.forward, "reload": t.web.reload}.get(
+            url, lambda: t.web.load(address(url)))()
+        self.settle(t, answer)
+
+    # (looking)
+
+    def op_screenshot(self, msg, answer):
+        t = self.tab(msg)
+
+        def sized(view):
+            def shot(png, why):
+                if png is None:
+                    answer({"error": f"no screenshot: {why}"})
+                    return
+                gi.require_version("GdkPixbuf", "2.0")
+                from gi.repository import GdkPixbuf
+                loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+                loader.write(png)
+                loader.close()
+                pic = loader.get_pixbuf()
+                w, h = max(1, int(view["w"])), max(1, int(view["h"]))
+                scale = min(1.0, 1568 / max(w, h))  # (no side over 1568: what a model sees whole)
+                pw, ph = max(1, round(w * scale)), max(1, round(h * scale))
+                flat = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, pw, ph)  # (no alpha: JPEG has none)
+                flat.fill(0xffffffff)
+                pic.composite(flat, 0, 0, pw, ph, 0, 0, pw / pic.get_width(), ph / pic.get_height(),
+                              GdkPixbuf.InterpType.BILINEAR, 255)
+                ok, data = flat.save_to_bufferv("jpeg", ["quality"], ["82"])
+                self.scales[t.id] = scale
+                answer({**self.describe(t), "image": base64.b64encode(data).decode(), "mime": "image/jpeg",
+                        "width": pw, "height": ph,
+                        "note": "x and y for click and scroll are this picture's pixels"})
+            GLib.timeout_add(120, lambda: t.web.snapshot(guarded(shot, answer)) and False)  # (a frame drawn first)
+        self.js(t, "return {w: innerWidth, h: innerHeight}", answer, sized)
+
+    def op_read_page(self, msg, answer):
+        t = self.tab(msg)
+        root = f"em.get({json.dumps(msg['ref'])})" if msg.get("ref") else "document.body"
+        self.js(t, f"return em.read({root}, {json.dumps(msg.get('filter') == 'all')}, "
+                   f"{int(msg.get('max_chars') or 30000)})",
+                answer, lambda text: answer({**self.describe(t), "page": text}))
+
+    def op_find(self, msg, answer):
+        t = self.tab(msg)
+        if not str(msg.get("query") or "").strip():
+            raise ValueError("find needs a query")
+        self.js(t, f"return em.find({json.dumps(str(msg['query']))}, {int(msg.get('limit') or 20)})",
+                answer, lambda found: answer({**self.describe(t), "found": found}))
+
+    def op_get_text(self, msg, answer):
+        t = self.tab(msg)
+        cap = int(msg.get("max_chars") or 50000)
+        self.js(t, f"const el = document.querySelector('main, article, [role=main]') || document.body;"
+                   f"const t = (el.innerText || ''); return t.length > {cap} ? t.slice(0, {cap}) + "
+                   f"'\\n(… ' + (t.length - {cap}) + ' more characters)' : t", answer,
+                lambda text: answer({**self.describe(t), "text": text}))
+
+    def op_javascript(self, msg, answer):
+        t = self.tab(msg)
+        self.js(t, str(msg.get("code") or ""), answer, lambda value: answer({**self.describe(t), "result": value}),
+                page=True)
+
+    # (doing)
+
+    def point(self, t, msg, answer, then):
+        """then(x, y, covered) for a ref's centre (scrolled to first), or for x and y as the last screenshot had them."""
+        if msg.get("ref"):
+            self.js(t, f"return await em.centre(em.get({json.dumps(msg['ref'])}))", answer,
+                    lambda c: then(c["x"], c["y"], c.get("covered")))
+        elif msg.get("x") is not None and msg.get("y") is not None:
+            scale = self.scales.get(t.id, 1.0)
+            then(float(msg["x"]) / scale, float(msg["y"]) / scale, None)
+        else:
+            raise ValueError("a ref, or x and y, says where")
+
+    def op_click(self, msg, answer):
+        t = self.tab(msg)
+        mods = [m for m in (msg.get("modifiers") or []) if m in ("shift", "ctrl", "alt", "cmd")]
+
+        def at(x, y, covered):
+            started = GLib.get_monotonic_time()
+            t.web.click(x, y, "right" if msg.get("button") == "right" else "left", max(1, int(msg.get("count") or 1)),
+                        mods)
+            if not t.web.keyed():  # (a window that isn't key: what's clicked given focus, as a click would give it)
+                t.web.run_js(PAGE_JS + f"const el = document.elementFromPoint({x}, {y});"
+                             "const f = el && el.closest('input, textarea, select, [contenteditable], button, a[href],"
+                             " [tabindex]'); if (f && f.focus) f.focus(); return true", lambda *_: None)
+            self.settle(t, answer, {"clicked": [round(x), round(y)], **({"covered_by": covered} if covered else {})},
+                        started)
+        self.point(t, msg, answer, at)
+
+    def op_hover(self, msg, answer):
+        t = self.tab(msg)
+        self.point(t, msg, answer, lambda x, y, _c: (t.web.move(x, y), GLib.timeout_add(
+            300, lambda: answer(self.describe(t)) and False)))
+
+    def op_type(self, msg, answer):
+        t, text = self.tab(msg), str(msg.get("text") or "")
+        focus = f"em.get({json.dumps(msg['ref'])}).focus();" if msg.get("ref") else ""
+        self.js(t, focus + "const el = document.activeElement;"
+                "if (!em.editable(el)) throw new Error('nothing to type into is focused: click the field, or give "
+                "its ref');"
+                f"for (const ch of {json.dumps(text)}) {{"
+                "  if (!document.execCommand('insertText', false, ch)) {"
+                "    if ('value' in el) em.setValue(el, el.value + ch); else el.textContent += ch; }"
+                f"  await em.sleep({self.TYPE_GAP_MS}); }}"
+                "return 'value' in el ? String(el.value) : el.textContent",
+                answer, lambda value: answer({**self.describe(t), "value": value}))
+
+    def op_key(self, msg, answer):
+        t = self.tab(msg)
+        combos = str(msg.get("keys") or "").split()
+        if not combos:
+            raise ValueError("key needs keys: Enter, Tab, cmd+a, Escape, …")
+        names = {"return": "Enter", "enter": "Enter", "esc": "Escape", "escape": "Escape", "tab": "Tab",
+                 "backspace": "Backspace", "delete": "Delete", "del": "Delete", "space": "Space", "up": "Up",
+                 "down": "Down", "left": "Left", "right": "Right", "home": "Home", "end": "End",
+                 "pageup": "PageUp", "pagedown": "PageDown"}
+        mod_names = {"shift": "shift", "ctrl": "ctrl", "control": "ctrl", "alt": "alt", "option": "alt",
+                     "cmd": "cmd", "command": "cmd", "meta": "cmd", "super": "cmd"}
+        presses = []
+        for combo in combos:
+            parts = combo.split("+")
+            mods = tuple(sorted({mod_names[p.lower()] for p in parts[:-1] if p.lower() in mod_names}))
+            k = parts[-1]
+            k = names.get(k.lower(), k)
+            if len(k) == 1 and k.isupper():
+                k, mods = k.lower(), tuple(sorted(set(mods) | {"shift"}))
+            presses.append((k, mods))
+        started = GLib.get_monotonic_time()
+
+        def press():
+            if not presses:
+                self.settle(t, answer, None, started)
+                return False
+            k, mods = presses.pop(0)
+            try:
+                t.web.key(k, mods)
+            except (ValueError, OSError) as e:
+                answer({"error": str(e)})
+                return False
+            return True
+        if press():
+            GLib.timeout_add(self.KEY_GAP_MS, press)
+
+    def op_scroll(self, msg, answer):
+        t = self.tab(msg)
+        dx, dy = int(msg.get("dx") or 0), int(msg.get("dy") if msg.get("dy") is not None else 600)
+
+        def at(x, y, _c):
+            t.web.move(x, y)
+            self.js(t, f"let el = document.elementFromPoint({x}, {y});"
+                       "while (el && el !== document.body && !(el.scrollHeight > el.clientHeight + 2 && "
+                       "/(auto|scroll)/.test(getComputedStyle(el).overflowY)) && !(el.scrollWidth > el.clientWidth + 2"
+                       " && /(auto|scroll)/.test(getComputedStyle(el).overflowX))) el = el.parentElement;"
+                       f"const s = (el && el !== document.body) ? el : document.scrollingElement;"
+                       f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}}); await em.sleep(150);"
+                       "return {x: s.scrollLeft, y: s.scrollTop, height: s.scrollHeight}", answer,
+                    lambda where: answer({**self.describe(t), "scrolled": where}))
+        if msg.get("ref") or msg.get("x") is not None:
+            self.point(t, msg, answer, at)
+        else:
+            self.js(t, "return {x: innerWidth / 2, y: innerHeight / 2}", answer, lambda c: at(c["x"], c["y"], None))
+
+    def op_form_input(self, msg, answer):
+        t = self.tab(msg)
+        if not msg.get("ref"):
+            raise ValueError("form_input needs the field's ref")
+        self.js(t, f"const el = em.get({json.dumps(msg['ref'])}), v = {json.dumps(msg.get('value'))};"
+                "if (el.tagName === 'SELECT') {"
+                "  const o = [...el.options].find(o => o.value === String(v) || o.text.trim() === String(v));"
+                "  if (!o) throw new Error('no option ' + v + ': ' + [...el.options].map(o => o.text.trim()).join(', '));"
+                "  em.setValue(el, o.value); return o.text.trim(); }"
+                "if (el.type === 'checkbox' || el.type === 'radio') {"
+                "  const want = v === true || v === 'true' || v === 'on' || v === 1;"
+                "  if (el.checked !== want) el.click(); return el.checked; }"
+                "if (!['INPUT', 'TEXTAREA'].includes(el.tagName)) throw new Error(" + json.dumps(str(msg["ref"])) +
+                " + ' is a ' + el.tagName.toLowerCase() + ', not a field');"
+                "em.setValue(el, String(v ?? '')); return el.value", answer,
+                lambda value: answer({**self.describe(t), "value": value}))
+
+    # (a page's own prompts: alert, confirm, prompt, a site's sign-in, files to upload)
+
+    def op_prompts(self, msg, answer):
+        answer({"prompts": self.win.prompts(None)})
+
+    def op_answer_prompt(self, msg, answer):
+        self.win.answer_prompt(msg)
+        GLib.timeout_add(300, lambda: answer({"ok": True, "tabs": [self.describe(t) for t in self.win.tabs.values()]})
+                         and False)
+
+    # (sign-ins)
+
+    def op_sites(self, msg, answer):
+        self.win.Engine.cookies(self.win.profile_id, lambda cookies, why: answer(
+            {"error": why} if why else {"profile": self.win.profile, "sites": sites_of(cookies)}))
+
+    def op_add_cookies(self, msg, answer):
+        self.win.Engine.add_cookies(self.win.profile_id, msg.get("cookies") or [],
+                                    lambda n, why: answer({"error": why} if why else {"added": n}))
+
+
+def sites_of(cookies):
+    """The sites cookies are for (signed in to, as like as not), from their domains."""
+    out = set()
+    for c in cookies or []:
+        d = str(c.get("domain") or "").lstrip(".").lower()
+        if d:
+            parts = d.split(".")
+            out.add(".".join(parts[-3:]) if len(parts) > 2 and len(parts[-2]) <= 3 else ".".join(parts[-2:]))
+    return sorted(out)
+
+
 class App(Adw.Application):
-    def __init__(self, url, profile):
+    def __init__(self, url, profile, agent=False):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.NON_UNIQUE)
-        self.url, self.profile = url, profile
+        self.url, self.profile, self.agent = url, profile, agent
 
     def do_activate(self):
-        Window(self, self.url, self.profile).present()
+        Window(self, self.url, self.profile, self.agent).present()
 
 
-def with_display():
-    """On Linux with no display, this run again under a virtual one of its own (xvfb-run), or why it can't be."""
-    if sys.platform == "darwin" or os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") \
-            or os.environ.get("EMISSION_VIRTUAL_DISPLAY"):
+def with_display(own=False):
+    """On Linux with no display (or, own, whatever there is: an agent's Emission isn't put on anyone's screen), this
+    run again under a virtual one of its own (xvfb-run), or why it can't be."""
+    if sys.platform == "darwin" or os.environ.get("EMISSION_VIRTUAL_DISPLAY") or not own and (
+            os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return None
     if shutil.which("xvfb-run") is None:
         return "There's no display here, and xvfb-run (package xvfb) isn't installed to make one."
@@ -1369,10 +2378,24 @@ def main():
     p = argparse.ArgumentParser(description="Emission, Baude's browser")
     p.add_argument("url", nargs="?")
     p.add_argument("--profile", default=DEFAULT, help="whose cookies and logins (a profile of its own each)")
+    p.add_argument("--bot", help="a Bot's chat id: its own profile (made if it has none)")
+    p.add_argument("--name", help="the Bot's name, with --bot")
+    p.add_argument("--agent", action="store_true", help="for the Bot's tools: out of sight, gone when idle")
     a = p.parse_args()
-    if (why := with_display()) is not None:
+    if a.agent and not a.bot:
+        p.error("--agent is for a Bot's Emission: --bot too")
+    if (why := with_display(own=a.agent)) is not None:
         print(why, file=sys.stderr)
         return 1
+    if a.bot:
+        pid = bot_profile(a.bot, a.name)
+        a.profile = next(p["name"] for p in profiles() if p["id"] == pid)
+        if a.agent:
+            if not lock_profile(pid):
+                return 0  # (another Emission has it already: the tools reach that one)
+            if sys.platform == "darwin":
+                macos.stay_offscreen()
+            return App(None, a.profile, agent=True).run([sys.argv[0]])
     if not a.profile.strip():
         p.error("a profile needs a name")
     pid = add_profile(a.profile.strip())

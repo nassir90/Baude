@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, mesh, meshtools, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, mesh, meshtools, models, notes, providers, selfupdate, transcripts, wire, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -926,6 +926,19 @@ class Server:
             return reply("agent_started", run=run.id)
         if op in ("in", "close", "kill", "mcp", "mcp_close") and getattr(conn, "agent_run", None) is not None:
             return conn.agent_run.take(msg)
+        if op == "emission":  # (a Bot's browser tools: its own Emission profile here, started for it if it isn't
+            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # running; on a thread of its own)
+            if not isinstance(bot.get("id"), str) or not bot["id"] or not isinstance(msg.get("call"), dict):
+                return reply("error", error="emission needs a Bot (its id) and a call")
+
+            def browse():
+                try:
+                    reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
+                                                                   timeout=emissiontools.WAIT_S))
+                except (OSError, ValueError) as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
         if op == "mcp_relay":  # (one of an agent's MCP servers: a relay, carried to its caller)
             run = self.agent_runs.get(msg.get("run"))
             if run is None or run.relay(conn, msg) is None:
@@ -1350,10 +1363,17 @@ class Server:
                                                                             "--socket",
                                                                             os.path.abspath(self.socket_path)],
                                         "env": {"BAUDE_SESSION": s.id}}}
+            if s.meta.get("bot"):  # (a Bot's browser too: its own Emission profile, on any host)
+                servers[emissiontools.NAME] = {"command": sys.executable,
+                                               "args": [agentproxy.HEADLESS, "emission-tools", "--socket",
+                                                        os.path.abspath(self.socket_path)],
+                                               "env": {"BAUDE_SESSION": s.id}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
             if run["program"] == "claude":  # (a Bot's, never asked about; another chat's, its looking only: what it
                 rules = [f"mcp__{meshtools.NAME}__{t}"  # starts or says, as the chat's mode has it)
                          for t in (meshtools.SCHEMAS if s.meta.get("bot") else meshtools.READ_ONLY)]
+                if s.meta.get("bot"):
+                    rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
                 if "--allowedTools" in extra:
                     at = extra.index("--allowedTools") + 1
                     extra[at:at] = rules

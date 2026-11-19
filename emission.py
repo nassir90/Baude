@@ -45,7 +45,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
-                                   note_leftover, profile_id, profiles, rename_profile, unlock_profile)
+                                   note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
+                                   unlock_profile)
 
 
 class ProfileSocket:
@@ -2254,51 +2255,6 @@ def engine():
 
 # ------------------------------------------------------------------ window --
 
-def open_pages(pid, urls=None, why=None):
-    """A Bot's browser's pages, written down as they change (urls; why: it's closing itself, "idle"), so the next one
-    started knows what was lost if this one ends without closing them; or (no urls) what the last wrote, read and
-    forgotten: (urls, why)."""
-    path = os.path.join(data_home(), "profiles", pid + ".open")
-    if urls is None:
-        try:
-            with open(path, encoding="utf-8") as f:
-                had = json.load(f)
-            os.unlink(path)
-            had = had if isinstance(had, dict) else {"urls": had}
-            return [u for u in had.get("urls") or [] if isinstance(u, str)], had.get("why")
-        except (OSError, ValueError, AttributeError):
-            return [], None
-    try:
-        if urls:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"urls": urls, "why": why}, f)
-        elif os.path.exists(path):
-            os.unlink(path)
-    except OSError:
-        pass
-    return urls
-
-
-def pending_note(pid, note=None):
-    """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
-    next): note "" once it's told; note None, what's waiting read."""
-    path = os.path.join(data_home(), "profiles", pid + ".note")
-    try:
-        if note is None:
-            with open(path, encoding="utf-8") as f:
-                return f.read().strip() or None
-        if note:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(note)
-        elif os.path.exists(path):
-            os.unlink(path)
-    except OSError:
-        return None
-    return None
-
-
 class Tab:
     """A tab: its page, and where it's drawn. url None: a page another opened, WebKit loading it (opener: what the
     engine was given to make it with)."""
@@ -2510,7 +2466,7 @@ class Window(Adw.ApplicationWindow):
         busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
         idle_s = 0.0 if busy else (GLib.get_monotonic_time() - self.asked_at) / 1e6  # (work still going: not idle)
         self.used = GLib.get_monotonic_time()
-        if op not in ("info", "watch") and not msg.get("from_pane"):
+        if op not in ("info", "watch", "phone_note") and not msg.get("from_pane"):
             self.asked_at = self.used
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
@@ -2518,6 +2474,16 @@ class Window(Adw.ApplicationWindow):
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
                            "tabs": len(self.tabs), "idle_s": idle_s})
+        if op == "phone_note":  # (its browser was on a phone till now: what the Bot's next request is told, in place
+            said = str(msg.get("note") or "")  # of what a phone said before; "": that taken out)
+            if pid != self.profile_id:
+                return answer({"error": "that profile isn't open in this window"})
+            last = getattr(self, "phone_said", "")
+            now = self.note.replace(last, said) if last and self.note and last in self.note else " ".join(
+                n for n in (self.note, said) if n)
+            self.note, self.phone_said = " ".join(now.split()) or None, said
+            pending_note(self.profile_id, self.note or "")
+            return answer({"ok": True})
         if op == "quit" and self.hosted:  # (someone's Emission wants its profile: let go of, the Bot told after)
             answer({"ok": True})
             if self.released is not None:

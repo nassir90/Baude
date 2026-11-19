@@ -180,9 +180,11 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
     var picture by remember { mutableStateOf(IntSize.Zero) }
     var typing by remember { mutableStateOf(false) }
     Mesh.tick.value
+    val s = Mesh.session(hostId, sid)
     val reachable = Mesh.conn(hostId) != null // (opened before its host's connection is made: watched once it is)
-    DisposableEffect(here, hostId, sid, reachable) {
-        if (here && reachable) watch.start()
+    val phoned = s?.optBoolean("on_phone") == true // (its browser on a phone, as its host lists it: said, not watched)
+    DisposableEffect(here, hostId, sid, reachable, phoned) {
+        if (here && reachable && !phoned) watch.start()
         onDispose { watch.stop() }
     }
     LaunchedEffect(picture) { // (its size told once it's settled)
@@ -204,19 +206,17 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         }
     }
     fun call(o: JSONObject) {
-        if (readOnly) return
+        if (readOnly || phoned) return
         said = null
         if (tab != null && !o.has("tab") && o.optString("op") !in setOf("new_tab", "answer_prompt", "resize")) o.put("tab", tab)
         calls.call(o)
     }
-    Mesh.tick.value
-    val s = Mesh.session(hostId, sid)
     val acting = s?.optBoolean("acting") == true && s.optString("state") == "working"
     Column(Modifier.fillMaxSize()) {
         // the toolbar: back, forward, reload (stop while it loads), the address, a new tab, typing, read-only
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            val on = !readOnly && watch.status.value == "watching"
+            val on = !readOnly && !phoned && watch.status.value == "watching"
             IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", enabled = on && now?.optBoolean("back") != false) {
                 call(JSONObject().put("op", "navigate").put("url", "back")) }
             IconButton(Icons.AutoMirrored.Filled.ArrowForward, "Forward", enabled = on && now?.optBoolean("forward") == true) {
@@ -260,6 +260,11 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             .border(if (acting) 2.dp else 1.dp, if (acting) c.accentBg else c.rule).background(c.inside)
             .padding(if (acting) 2.dp else 1.dp).onSizeChanged { picture = it }) {
             val bmp = watch.frame.value
+            if (phoned) {
+                StatusPage(Icons.Filled.Web, "On a phone", "${name.ifBlank { "The Bot" }}'s browser is on a phone now, " +
+                    "and shown there. It's back here once the phone closes it.")
+                return@Box
+            }
             if (bmp == null) {
                 when (watch.status.value) {
                     "failed" -> StatusPage(Icons.Filled.Web, "Couldn't open the browser", watch.why.value)

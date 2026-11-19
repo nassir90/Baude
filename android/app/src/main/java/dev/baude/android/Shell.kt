@@ -91,7 +91,10 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
         Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
-            end = { Menu(listOf("Send Feedback…" to feedback)) })
+            end = {
+                if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
+                Menu(listOf("Send Feedback…" to feedback))
+            })
         ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))

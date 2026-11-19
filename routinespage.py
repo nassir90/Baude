@@ -43,9 +43,7 @@ class RoutinesPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.sid, self.remote, self.routines, self.asked, self.clock = win, None, None, [], 0, None
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=10, margin_top=8, margin_bottom=4)
-        self.title = Gtk.Label(label="Routines", xalign=0, hexpand=True)
-        self.title.add_css_class("heading")
-        head.append(self.title)
+        head.append(Gtk.Box(hexpand=True))  # (the page's name is the switcher's: New routine at the end)
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New routine")
         add.add_css_class("flat")
         add.connect("clicked", lambda *_: self.edit(None))
@@ -54,8 +52,7 @@ class RoutinesPage(Gtk.Box):
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10)
         self.list.add_css_class("boxed-list")
         self.empty = Adw.StatusPage(icon_name="alarm-symbolic", title="No routines yet", vexpand=True,
-                                    description="Give this Bot work to do on a schedule: it's given a turn with it as "
-                                                "each comes due, on its host, whether Baude's open or not.")
+                                    description="Run a task on a schedule, even when Baude is closed.")
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=10, margin_end=10, margin_top=6)
         self.said.add_css_class("dim-label")
         self.append(Gtk.ScrolledWindow(vexpand=True, child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER))
@@ -90,12 +87,15 @@ class RoutinesPage(Gtk.Box):
     def ask(self, msg):
         self.asked += 1
         asked, sid = self.asked, self.sid
+        doing = "run" if msg.get("op") == "run_routine" else "save" if "set" in msg else "delete" if "delete" in msg \
+            else "load"
 
         def got(r):
             if sid != self.sid or asked != self.asked:
                 return
             if r.get("op") == "error":
-                self.said.set_label(f"Its host said: {r.get('error')}")
+                self.said.set_label(f"Couldn't {doing} the routines." if doing == "load" else f"Couldn't {doing} the routine.")
+                self.said.set_tooltip_text(r.get("error") or None)
                 self.said.set_visible(True)
                 return
             self.said.set_visible(False)
@@ -119,9 +119,9 @@ class RoutinesPage(Gtk.Box):
                                 subtitle=GLib.markup_escape_text(
                                     f"{when(r)} · " + ("paused" if r.get("paused") else
                                                        f"next {stamp(r.get('next'), self.clock)}")
-                                    + f" · last {stamp(r.get('last'), self.clock)}"
+                                    + (f" · last {stamp(r.get('last'), self.clock)}" if r.get("last") else "")
                                     + (f" · {r['error']}" if r.get("error") else "")))
-            on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER, tooltip_text="On, or paused")
+            on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER, tooltip_text="Turn off to pause")
             on.connect("notify::active", lambda sw, _p, x=r: self.save({**x, "paused": not sw.get_active()}))
             row.add_suffix(on)
             for icon, tip, fn in (("media-playback-start-symbolic", "Run now",
@@ -147,7 +147,7 @@ class RoutinesPage(Gtk.Box):
         prompt.get_buffer().set_text(r.get("prompt") or "")
         frame = Gtk.ScrolledWindow(min_content_height=110, child=prompt)
         frame.add_css_class("card")
-        box.append(Gtk.Label(label="What the Bot's to do", xalign=0))
+        box.append(Gtk.Label(label="Task", xalign=0))
         box.append(frame)
         how = Gtk.DropDown.new_from_strings(["Every", "At a time of day"])
         how.set_selected(1 if r.get("at") else 0)
@@ -164,8 +164,8 @@ class RoutinesPage(Gtk.Box):
         box.append(every)
         daily = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         at = Gtk.Entry(placeholder_text="HH:MM", text=r.get("at") or "09:00", max_width_chars=6)
-        daily.append(Gtk.Label(label="On its host's clock" + (f" ({self.clock['zone']})" if self.clock and
-                                                                self.clock.get("zone") else ""), xalign=0))
+        daily.append(Gtk.Label(label=f"Times in {self.clock['zone']}" if self.clock and self.clock.get("zone")
+                                 else "Times on the host's clock", xalign=0))
         daily.append(at)
         days_row = Gtk.Box(spacing=2)
         days = []

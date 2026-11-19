@@ -106,16 +106,18 @@ def _bot_profile(pid, bot_id, name):
     mine = next((p for p in items if p["id"] == pid), None)
     if name is None and mine is not None:
         return pid
-    label = f"{' '.join(str(name or 'Bot').split())[:60]} (Bot)"
-    if mine is None or mine["name"] != label:
-        taken = {p["name"] for p in items if p["id"] != pid} | {DEFAULT}
-        final, n = label, 2
-        while final in taken:
-            final, n = f"{label} {n}", n + 1
-        items = [p for p in items if p["id"] != pid] + [{"name": final, "id": pid, "bot": bot_id}]
-        _write_profiles(items)
-        if mine is None and pid in leftovers():  # (removed once, made again: its new data kept)
-            note_leftover(pid, add=False)
+    label = ' '.join(str(name or 'Bot').split())[:60]
+    taken = {p["name"] for p in items if p["id"] != pid} | {DEFAULT}
+    if mine is not None and (mine["name"] == label or label in taken and mine["name"].startswith(label + " ") and
+                             mine["name"][len(label) + 1:].isdigit() and mine["name"] not in taken):
+        return pid  # (its name, or, that taken, its name and a number: kept, not written again)
+    final, n = label, 2
+    while final in taken:
+        final, n = f"{label} {n}", n + 1
+    items = [p for p in items if p["id"] != pid] + [{"name": final, "id": pid, "bot": bot_id}]
+    _write_profiles(items)
+    if mine is None and pid in leftovers():  # (removed once, made again: its new data kept)
+        note_leftover(pid, add=False)
     return pid
 
 

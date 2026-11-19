@@ -22,6 +22,9 @@ FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
 RETRY_SSH_S = (2, 10, 30, 120, 300)  # (one over ssh: a login each time, on another machine)
 
+UNREACHED = ("the server isn't there", "the server didn't answer", "the server's gone")  # (a request's error when
+# its host wasn't reached, or went before it answered: Remote.request's and call's)
+
 
 def network_home():
     return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "baude", "network")

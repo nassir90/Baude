@@ -18,6 +18,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 from baudelib import emissionlink, wire  # noqa: E402
+from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Browser"
 PING_S = 5  # (a host process takes a connection that's said nothing in wire.SILENT_S for gone)
@@ -220,6 +221,11 @@ class Asks:
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
 
 
+DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
+         "navigate": "open the page", "new_tab": "open a tab", "scroll": "scroll", "select_tab": "switch tabs",
+         "type": "type", "answer_prompt": "answer"}  # (what a call's error says it couldn't do)
+
+
 class BrowserPane(Gtk.Box):
     """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown."""
 
@@ -242,11 +248,10 @@ class BrowserPane(Gtk.Box):
         self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
             {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
         bar.append(self.address)
-        self.host_pick = Gtk.DropDown(tooltip_text="Whose browser: the Bot's on this host (each host has its own)")
+        self.host_pick = Gtk.DropDown(tooltip_text="Host")
         self.host_pick.connect("notify::selected", lambda *_: self.host_picked())
         bar.append(self.host_pick)
-        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only: watch, "
-                                          "don't drive (the Bot still does)")
+        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
         self.read_only.add_css_class("flat")
         self.read_only.connect("toggled", lambda b: self.read_only_set(b.get_active()))
         bar.append(self.read_only)
@@ -263,8 +268,7 @@ class BrowserPane(Gtk.Box):
         self.append(self.prompts)
         self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
                                    focusable=True)
-        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Browser", vexpand=True,
-                                     description="The Bot's own browser shows here, as it uses it.")
+        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="No pages open", vexpand=True)
         self.body = Gtk.Stack(vexpand=True)
         self.body.add_named(self.status, "status")
         self.body.add_named(self.picture, "page")
@@ -325,7 +329,7 @@ class BrowserPane(Gtk.Box):
             return
         if self.sid is None or self.stream is not None:
             return
-        self.say_status("Connecting", f"{self.name or 'The Bot'}'s browser, on its host.")
+        self.say_status("Connecting…", "")
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
@@ -340,9 +344,14 @@ class BrowserPane(Gtk.Box):
 
     def ended(self, why):
         self.stream = None
-        self.say_status("Not showing", why or "Its Emission went: it's started again when you come back here.")
-        self.said.set_label("Not live: " + (why or "its Emission went") + ". Shown again when you come back here.")
-        self.said.set_visible(True)
+        if why and self.picture.get_paintable() is None:  # (it never showed: why, in its place)
+            self.say_status("Couldn't open the browser", why)
+        else:
+            self.say_status("The browser stopped", "It restarts when you open this page again.")
+        self.said.set_tooltip_text(why or None)
+        self.said.set_label("The browser stopped. It restarts when you open this page again.")
+        self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
+        # as the status isn't)
 
     def say_status(self, title, text):
         self.status.set_title(title)
@@ -358,7 +367,7 @@ class BrowserPane(Gtk.Box):
             self.view_size = tuple(view)
         self.picture.set_paintable(texture)
         self.body.set_visible_child_name("page")
-        if self.said.get_label().startswith("Not live"):
+        if self.said.get_label().startswith("The browser stopped"):
             self.said.set_visible(False)
         shown()  # (on screen: the next may come)
 
@@ -443,8 +452,13 @@ class BrowserPane(Gtk.Box):
             if sid != self.sid or remote is not self.remote:
                 return
             why = r.get("error") if isinstance(r, dict) else None
-            self.said.set_label(f"The browser said: {why}" if why else "")
-            self.said.set_visible(bool(why))
+            if why:
+                self.said.set_label("Can't connect to the browser." if why in UNREACHED else
+                                    f"Couldn't {DOING.get(call.get('op'), 'do that')}.")
+                self.said.set_tooltip_text(why)
+                self.said.set_visible(True)
+            elif not self.said.get_label().startswith("The browser stopped"):
+                self.said.set_visible(False)
             if done:
                 done(r)
         self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)

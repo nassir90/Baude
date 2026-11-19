@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Memory"
 SAVE_MS = 600  # (what's typed, saved this long after the last key)
@@ -167,7 +168,7 @@ class _Host:
 
     def open_note(self, name, select=True):
         if name != PAGE:
-            self.toast(f"The memory is one page: there's no page {name} to open")
+            self.toast(f"No page named {name}")
         return self.owner.editor
 
 
@@ -186,6 +187,7 @@ class BotMemory(Gtk.Box):
         self.again = False  # (a read wanted, once what's written is in)
         self.after = {}  # (what's written in a Bot's memory left while a save of it was answered: {asked: (text, seen)},
         # sent once it is)
+        self.failed = False  # (the last read failed: read again when it's shown again)
         self.offline = Gtk.Label(wrap=True, xalign=0, visible=False)  # (its host not reached: said above the memory,
         self.offline.add_css_class("memory-offline")                # greyed below it, as it was last read)
         grey = Gtk.CssProvider()
@@ -228,15 +230,22 @@ class BotMemory(Gtk.Box):
             self.editor.clamp.set_tightening_threshold(100_000 if full else 400)
 
     def reached(self, ok, why=None):
-        """Its host reached (the page as it is), or not: the memory as it was last read, greyed, not to be written
-        in, and why above it."""
-        self.offline.set_label("Can't connect to this Bot's host. This is its memory as it was last read."
-                               if not ok else "")
+        """Read (the page as it is), or not (why: the error said): the memory as it was last read, greyed, not to be
+        written in, under a line saying what's wrong (why in its tooltip); nothing read yet, what's wrong in its
+        place."""
+        self.failed = not ok
+        gone = getattr(self.remote, "state", "alive") != "alive" or why in UNREACHED
+        said = "Can't connect to the host." if gone else "Couldn't load the memory."
+        if not ok and self.base is None:
+            self.offline.set_visible(False)
+            return self._status(said.rstrip("."), "It's shown once the host is back." if gone else why or "")
+        self.offline.set_label(f"{said} Showing the last saved copy." if not ok else "")
+        self.offline.set_tooltip_text(why if not ok and not gone else None)
         self.offline.set_visible(not ok)
         if self.editor is not None:
             self.editor.set_sensitive(ok)
 
-    def _status(self, title="No memory yet", text="What this Bot learns and keeps shows here. You can write in it too."):
+    def _status(self, title="No memory yet", text="Notes the Bot keeps. You can edit them."):
         """The status page in the editor's place: before a Bot's memory is first read, or what went wrong reading it."""
         self.empty.set_title(title)
         self.empty.set_description(text)
@@ -251,6 +260,9 @@ class BotMemory(Gtk.Box):
         info = info or {}
         sid, remote = info.get("id"), info.get("remote")
         bot = bool(info.get("bot")) and sid is not None and remote is not None
+        if bot and sid == self.sid and remote is self.remote and self.failed \
+                and not self.dirty:
+            return self.refresh()  # (the same Bot, its last read failed: its host may be back)
         if bot and sid == self.sid and remote is self.remote or not bot and self.sid is None:
             return  # (shown already: refresh reads it again)
         if sid is not None and sid == self.sid:
@@ -292,16 +304,16 @@ class BotMemory(Gtk.Box):
         if asked != self.asked:
             return
         if reply.get("op") == "error":
-            return self.reached(False, reply.get("error") or "it said nothing more")
+            return self.reached(False, reply.get("error") or "no reason given")
         if self.dirty or self.saving is not None or self.sending:
             self.again = True  # (written in since it was asked for: that's saved, then it's read again)
             return
         self._take(reply)
 
     def _take(self, reply):
-        self.reached(True)
         """The memory as its host has it (a read's, or a save's reply), the page showing it, unless it does already:
         what's accepted, and the Bot's changes since, as Record's proposals; the caret where it was."""
+        self.reached(True)
         text = reply.get("text") or ""
         seen = reply.get("seen")
         seen = text if seen is None else seen  # (a host that keeps no seen: what's there taken as accepted)
@@ -359,7 +371,7 @@ class BotMemory(Gtk.Box):
         if not self.dirty or self.sid is None or self.remote is None or self.base is None or self.sending:
             return False
         if getattr(self.remote, "state", "alive") != "alive":
-            widgets.toast(self, "The memory isn't saved yet: its host isn't there")
+            widgets.toast(self, "Not saved yet: can't connect to the host")
             return False  # (still to save: with the next change, or read)
         self.dirty = False
         self._send(self.asked, self.sid, self.remote, self.base, self.written(), self.editor.kept())
@@ -373,7 +385,7 @@ class BotMemory(Gtk.Box):
         if base.get("theirs") is not None:
             text = merge(base["text"], ours, base["theirs"])
             if text is None:
-                widgets.toast(self, "The Bot changed the lines you'd changed: what it wrote is shown as its changes")
+                widgets.toast(self, "The Bot changed the same lines. Its version is shown as changes to accept or reject.")
                 text = base["theirs"]
         if asked == self.asked:
             self.sending += 1
@@ -393,7 +405,7 @@ class BotMemory(Gtk.Box):
             return self._send(asked, sid, remote, {**said, "text": base["text"], "theirs": said["text"]}, ours, seen,
                               tries - 1)
         if reply.get("op") == "error":
-            widgets.toast(self, f"The memory wasn't saved: {reply.get('error') or 'its host said nothing more'}")
+            widgets.toast(self, f"Couldn't save: {reply.get('error') or 'no reason given'}")
             if mine:
                 self.dirty = True  # (still to save: with the next change, or read)
             self.after.pop(asked, None)

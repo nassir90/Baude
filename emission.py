@@ -1613,7 +1613,7 @@ class Window(Adw.ApplicationWindow):
                                                                       self.current().web.focus()))
         new_tab = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
         new_tab.connect("clicked", lambda *_: self.open(HOME_PAGE))
-        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile: its cookies and logins its own")
+        self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile")
         bar = Adw.HeaderBar()
         for w in (self.back_btn, self.fwd_btn, self.reload_btn):
             bar.pack_start(w)
@@ -1809,7 +1809,7 @@ class Window(Adw.ApplicationWindow):
             if self.status is None:
                 if self.view.get_parent() is not None:
                     self.body.remove(self.view)
-                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages here",
+                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages",
                                              vexpand=True)
                 self.body.append(self.status)
             self.status.set_description(why)
@@ -1826,11 +1826,16 @@ class Window(Adw.ApplicationWindow):
         listed = profiles()
         self.profile = next((p["name"] for p in listed if p["id"] == self.profile_id), self.profile)  # (renamed)
         self.who.set_label(self.profile)
+        people, bot_section = Gio.Menu(), Gio.Menu()  # (the Bots' profiles apart, under their heading)
         for i, p in enumerate(listed):
             act = Gio.SimpleAction.new(f"p{i}", None)
             act.connect("activate", lambda *_a, n=p["name"]: self.switch_profile(n))
             group.add_action(act)
-            menu.append(p["name"] + ("  ✓" if p["name"] == self.profile else ""), f"who.p{i}")
+            (bot_section if p.get("bot") else people).append(p["name"] + ("  ✓" if p["name"] == self.profile else ""),
+                                                             f"who.p{i}")
+        menu.append_section(None, people)
+        if bot_section.get_n_items():
+            menu.append_section("Bots", bot_section)
         more = Gio.Menu()
         bots = [p for p in listed if p.get("bot") and p["id"] != self.profile_id]
         mine = next((p for p in listed if p["id"] == self.profile_id), {})
@@ -1864,7 +1869,7 @@ class Window(Adw.ApplicationWindow):
             if r != "ok" or not name:
                 return
             if profile_id(name) is not None:
-                self.say("That name's taken", f"There's a profile called “{name}” already.")
+                self.say("Name already in use", f"Choose a name other than “{name}”.")
                 return
             then(name)
         dlg.connect("response", once(answered))
@@ -1881,12 +1886,11 @@ class Window(Adw.ApplicationWindow):
 
         def got(cookies, why):
             if why:
-                self.say("Couldn't read this profile's sign-ins", why)
+                self.say("Couldn't read the sign-ins", why)
                 return
             sites = sites_of(cookies)
             if not sites:
-                self.say("No sign-ins here", f"“{self.profile}” has no cookies for any site yet: sign in to sites "
-                         "here first.")
+                self.say("No sign-ins yet", "Sign in to some sites in this profile first.")
                 return
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             to = Gtk.DropDown.new_from_strings([b["name"] for b in bots])
@@ -1900,8 +1904,8 @@ class Window(Adw.ApplicationWindow):
                 listing.append(c)
             scroller.set_child(listing)
             box.append(scroller)
-            dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"The Bot is signed in to the sites you "
-                                  f"choose as “{self.profile}” is, with its cookies for them.", extra_child=box,
+            dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"Copy your sign-ins for the chosen sites "
+                                  f"from “{self.profile}” to the Bot.", extra_child=box,
                                   default_response="copy", close_response="cancel")
             dlg.add_response("cancel", "Cancel")
             dlg.add_response("copy", "Copy")
@@ -1923,9 +1927,9 @@ class Window(Adw.ApplicationWindow):
         in one process only, its)."""
         def done(n, why):
             if why:
-                self.say("Not copied", why)
+                self.say("Couldn't copy the sign-ins", why)
             else:
-                self.say("Copied", f"“{bot['name']}” is signed in to {', '.join(sites)} now ({n} cookies).")
+                self.say("Sign-ins copied", f"“{bot['name']}” is now signed in to {', '.join(sites)}.")
         if bot["id"] == self.profile_id or bot["id"] in Door.open:  # (it's this window's, or this process's)
             self.Engine.add_cookies(bot["id"], cookies, done)
             return
@@ -1964,8 +1968,7 @@ class Window(Adw.ApplicationWindow):
         if self.profile == name and not self.switch_profile(DEFAULT):
             return
         if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
-            self.say("Still open", f"“{name}” is open in another Emission window, so it's kept. Close that window "
-                     "and try again.")
+            self.say(f"“{name}” is open elsewhere", "Close its window and try again.")
             return
 
         tries = [15]
@@ -1979,7 +1982,7 @@ class Window(Adw.ApplicationWindow):
                 if pid != self.profile_id:
                     Door.close(pid)
                     unlock_profile(pid)
-                self.say(f"“{name}” wasn't removed", why)
+                self.say(f"Couldn't remove “{name}”", why)
                 return
             forget_profile(name)
             try:
@@ -1998,15 +2001,14 @@ class Window(Adw.ApplicationWindow):
             return True
         pid = profile_id(name)
         if pid is None:
-            self.say("No such profile", f"There's no profile called “{name}” now.")
+            self.say("Profile not found", f"“{name}” no longer exists.")
             return False
         if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
             urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
             if hand_over(pid, urls):
-                self.say(f"Opened in “{name}”'s window", f"“{name}” is open in another Emission, so this window's "
-                         "pages opened there.")
+                self.say(f"Opened in “{name}”", f"“{name}” is already open, so the pages went there.")
             else:
-                self.say("Not answering", f"“{name}” is open in another Emission that isn't answering.")
+                self.say(f"“{name}” isn't responding", "It's open in another Emission window.")
             return False
         urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
         self.switching = True

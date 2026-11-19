@@ -8389,7 +8389,8 @@ class SessionSidebar(Gtk.Box):
         # (and the host listed: this machine's again while the one picked is gone)
         seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
                                        s.get("said"), s.get("group"), bool(s.get("archived")))
-                                      for s in network().sessions() if self.shows(s, hosts, groups, assigned)))
+                                      for s in network().sessions() if self.shows(s, hosts, groups, assigned)
+                                      or s["id"] in getattr(self, "listed_remote", ())))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
             self.remote_seen = seen
             self.fill()
@@ -8472,10 +8473,17 @@ class SessionSidebar(Gtk.Box):
         # a server's sessions: one on this machine's in its folder's group, with this machine's chats there; another
         # host's in a group of its own for each folder there, its name with it
         self.remote_keys = {}
-        for info in sorted((remote_info(s) for s in network().sessions()  # (not a new chat not written in yet: a
-                            if (self.shows(s, hosts, picked, assigned) or s["id"] in marks) and not s.get("draft")),
-                           # (a draft, the open one's)
-                           key=last_used, reverse=True):
+        everywhere = [s for s in network().sessions() if not s.get("draft")]  # (a draft, the open one's: not a new
+        # chat not written in yet)
+        shown = {s["id"] for s in everywhere if self.shows(s, hosts, picked, assigned) or s["id"] in marks}
+        # a chat an agent started, on another host or in another group: listed under the agent, if that's listed
+        # (pulled: dropped below where the agent isn't, archived, say, or not found by a search)
+        pulled = set()
+        while more := {s["id"] for s in everywhere if s["id"] not in shown and s.get("spawned_by") in shown}:
+            shown |= more
+            pulled |= more
+        self.listed_remote = shown  # (on_network: what's listed of the network's sessions)
+        for info in sorted((remote_info(s) for s in everywhere if s["id"] in shown), key=last_used, reverse=True):
             r = info["remote"]
             if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
                                         (info.get("bot") or {}).get("name") or ""]).lower():
@@ -8506,6 +8514,17 @@ class SessionSidebar(Gtk.Box):
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
         # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)
         home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items}
+        while lost := [(k, i) for k, (_label, _folder, items) in groups.items() for i in items
+                       if i["id"] in pulled and i.get("spawned_by") not in home]:  # (its agent not listed: nor is it)
+            for key, info in lost:
+                groups[key][2].remove(info)
+                home.pop(info["id"], None)
+        archived_ids = {i["id"] for i in gone}  # (archived: under its agent there, if that's there too)
+        while lost := [i for i in gone if i["id"] in pulled and i.get("spawned_by") not in home and
+                       i.get("spawned_by") not in archived_ids]:
+            for info in lost:
+                gone.remove(info)
+                archived_ids.discard(info["id"])
         for key, (_label, _folder, items) in list(groups.items()):
             for info in list(items):
                 if (up := home.get(info.get("spawned_by"))) is not None and up != key:
@@ -8534,8 +8553,8 @@ class SessionSidebar(Gtk.Box):
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
             last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
-        bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads; by date, they're
-        for k, label, folder, rows in ([] if by_date else out):  # among the chats by their time)
+        bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads, whatever host they're
+        for k, label, folder, rows in ([] if by_date else out):  # on; by date, they're among the chats by their time)
             keep, under = [], False
             for row in rows:
                 if not row[1]:
@@ -8612,9 +8631,8 @@ class SessionSidebar(Gtk.Box):
             self.track_days()
         for key, label, folder, rows in self.groups():
             shut = key in collapsed and not searching
-            if key != "bots":  # (Bots, first: no heading, their rows say what they are)
-                self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
-            if shut and key != "bots":
+            self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
+            if shut:
                 continue
             limit = None if searching or key in self.expanded or key == "bots" else self.limit(key)
             # (the limit counts top-level sessions: their forks come with them)
@@ -8700,7 +8718,7 @@ class SessionSidebar(Gtk.Box):
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         box.append(dot)
         r = info.get("remote")
-        tip = [f"{name}, a Bot", info.get("title") or "", info.get("cwd") or "",
+        tip = [name, info.get("title") or "", info.get("cwd") or "",
                f"On {remote_name(r)} ({r.host})" if r is not None else ""]
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")
@@ -8786,10 +8804,10 @@ class SessionSidebar(Gtk.Box):
                 ([("Stop", "stop")] if active else []) + [("Move to Trash…", "trash")]  # (Archive stops it: not at a turn)
         items.insert(1 if items[0][1] == "rename" else 0, ("Move to Group", None))  # (any chat's, on a host or not)
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
-            items[1:1] = [("Bot Settings…", "make_bot"), ("Make a Chat Again", "unbot")] if info.get("bot") else \
+            items[1:1] = [("Bot Settings…", "make_bot"), ("Turn Back into a Chat", "unbot")] if info.get("bot") else \
                 [("Make Bot…", "make_bot")]
         if can_be_bot(info) and not info.get("bot") and (info["remote"].info.get("version") or 1) >= 9:
-            items.insert(2, ("Take Mesh Tools Away", "mesh_off") if info.get("mesh_tools") else
+            items.insert(2, ("Remove Mesh Tools", "mesh_off") if info.get("mesh_tools") else
                          ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
             if action is None:
@@ -8894,7 +8912,7 @@ class SessionSidebar(Gtk.Box):
             images.add_pixbuf_formats()
             store = Gio.ListStore.new(Gtk.FileFilter)
             store.append(images)
-            Gtk.FileDialog(title="A picture for the Bot", filters=store).open(self.win, None, chosen)
+            Gtk.FileDialog(title="Choose a Picture", filters=store).open(self.win, None, chosen)
         choose.connect("clicked", open_picker)
         buttons = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
         buttons.append(choose)
@@ -8904,8 +8922,8 @@ class SessionSidebar(Gtk.Box):
         body.append(buttons)
         body.append(entry)
         dlg = Adw.AlertDialog(heading="Bot Settings" if bot else "Make Bot",
-                              body=None if bot else "A Bot is a chat you keep coming back to: it has a name and a "
-                              "picture here, and a memory it keeps on its host and is given each time it starts.",
+                              body=None if bot else "A Bot is a chat with a name, a picture and a memory it reads "
+                              "each time it starts.",
                               extra_child=body, default_response="save", close_response="cancel")
         dlg.add_response("cancel", "Cancel")
         dlg.add_response("save", "Save" if bot else "Make Bot")
@@ -8938,13 +8956,13 @@ class SessionSidebar(Gtk.Box):
             info["remote"].request({"op": "mesh_tools", "session": info["id"], "on": on}, self.bot_set)
 
     def unbot(self, info):
-        """Make a Chat Again: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
+        """Turn Back into a Chat: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
         if info is not None and info.get("remote") is not None:
             info["remote"].request({"op": "bot", "session": info["id"], "bot": None}, self.bot_set)
 
     def bot_set(self, reply):
         if reply.get("op") == "error":
-            return self.win.note(f"Bot: {reply.get('error')}")
+            return self.win.note(f"Couldn't update the Bot: {reply.get('error')}")
         self.fill()
 
     def rename(self, info, title):

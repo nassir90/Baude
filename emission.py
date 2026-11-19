@@ -2798,9 +2798,6 @@ class Control:
         down (600 if none's given; up negative), dx right; what's under the pointer scrolls."""
         t = self.tab(msg)
         dx, dy = int(msg.get("dx") or 0), int(msg.get("dy") if msg.get("dy") is not None else 600)
-        if msg.get("quick") and msg.get("x") is not None:  # (the Browser page's own wheel: turned, nothing waited for)
-            return self.point(t, msg, answer, lambda x, y, _c: (t.web.wheel(x, y, dx, dy, quick=True),
-                                                                answer({"scrolled": [dx, dy]})))
         under = ("let el = document.elementFromPoint({x}, {y});"
                  "while (el && el !== document.body && el !== document.documentElement && !("
                  "el.scrollHeight > el.clientHeight + 2 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) && !("
@@ -2808,6 +2805,15 @@ class Control:
                  " el = el.parentElement;"
                  "const inner = !!el && el !== document.body && el !== document.documentElement;"
                  "const s = inner ? el : document.scrollingElement;")
+        if msg.get("quick") and msg.get("x") is not None:  # (the Browser page's own wheel: turned, nothing waited for;
+            def turned(x, y, _c):                               # with no display of its own, by script, as below)
+                try:
+                    t.web.wheel(x, y, dx, dy, quick=True)
+                except OSError:
+                    t.web.run_js(under.format(x=x, y=y) + f"s.scrollBy({{left: {dx}, top: {dy}, behavior: 'instant'}});"
+                                 "return true", lambda *_: None, page=True)
+                answer({"scrolled": [dx, dy]})
+            return self.point(t, msg, answer, turned)
 
         def at(x, y, _c):
             def chosen(inner):

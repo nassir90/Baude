@@ -41,13 +41,18 @@ import kotlin.math.roundToInt
 /** A tab: its page (a WebView of its own), what it's said in its console, the sites it's been to. */
 class Tab(val id: String, val web: WebView) {
     var loading = false
+    var progress = 0
     var loads = 0 // (pages started in it: a script's answer lost to one is seen)
     var closed = false
     val console = ArrayList<JSONObject>()
     val visited = LinkedHashSet<String>() // (the origins it's been to: what sites lists, if they've cookies)
     val title: String get() = web.title?.takeIf { it != web.url && it != "about:blank" } ?: ""
     val url: String get() = web.url ?: ""
+    val label: String get() = web.title?.ifBlank { null } ?: web.url?.ifBlank { null } ?: "New Tab" // (its tab's, as Emission's)
 }
+
+/** A tab as its strip shows it. */
+data class Shown(val id: String, val label: String, val loading: Boolean)
 
 /** A page's prompt waiting on the Bot (prompts, answer_prompt): what it is, and its answer given what's said. */
 class Waiting(val about: JSONObject, val tab: Tab?, val answer: (JSONObject) -> Unit)
@@ -57,6 +62,7 @@ class Waiting(val about: JSONObject, val tab: Tab?, val answer: (JSONObject) -> 
 class Stage(ctx: Context, accent: Int) : FrameLayout(ctx) {
     val pages = FrameLayout(ctx)
     val overlay = PointerOverlay(ctx, accent)
+    var touched: () -> Unit = {} // (a person's touch on the page: not the Bot's, which goes straight to its WebView)
     var size: Pair<Int, Int>? = null // (the page's size the Bot asked for, CSS pixels: none, the screen's)
         set(value) {
             field = value
@@ -66,6 +72,11 @@ class Stage(ctx: Context, accent: Int) : FrameLayout(ctx) {
     init {
         pages.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(pages, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) touched()
+        return super.dispatchTouchEvent(ev)
     }
 
     fun show(web: WebView) {
@@ -82,8 +93,8 @@ class Stage(ctx: Context, accent: Int) : FrameLayout(ctx) {
         val h = MeasureSpec.getSize(heightMeasureSpec)
         val want = size
         val d = resources.displayMetrics.density
-        val pw = want?.let { (it.first * d).roundToInt() } ?: w
-        val ph = want?.let { (it.second * d).roundToInt() } ?: h
+        val pw = want?.let { (it.first * d).toInt() } ?: w
+        val ph = want?.let { (it.second * d).toInt() } ?: h
         pages.measure(MeasureSpec.makeMeasureSpec(pw, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(ph, MeasureSpec.EXACTLY))
         val fit = if (want == null) 1f else min(1f, min(w.toFloat() / pw, h.toFloat() / ph))
         pages.pivotX = 0f
@@ -100,13 +111,20 @@ class Stage(ctx: Context, accent: Int) : FrameLayout(ctx) {
     }
 }
 
-/** The Bot's browser on this phone: its tabs, what its pages wait on, its downloads (never kept: none are saved
- * here). Every page's own requests to the phone (its camera, microphone, place, other apps) refused. */
+/** The Bot's browser on this phone: its tabs (phone1, phone2, …: their own ids, apart from a desktop Emission's), what
+ * its pages wait on, the downloads they've asked for. early: what's put in each page as it starts loading. */
 class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
+    var early: String? = null
     val tabs = LinkedHashMap<String, Tab>()
     var current: Tab? = null
     val shownUrl = mutableStateOf("")       // (the tab in front's address, for the bar)
     val count = mutableStateOf(0)           // (how many tabs)
+    val strip = mutableStateListOf<Shown>() // (its tabs, as their strip shows them)
+    val selected = mutableStateOf<String?>(null)
+    val canBack = mutableStateOf(false)
+    val canForward = mutableStateOf(false)
+    val loading = mutableStateOf(false)     // (the tab in front's: its reload a stop, its progress shown)
+    val progress = mutableStateOf(0f)
     val waiting = LinkedHashMap<String, Waiting>()
     val asking = mutableStateListOf<String>() // (what pages wait on the Bot for, said on screen)
     val downloads = ArrayList<JSONObject>()
@@ -114,17 +132,32 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
     private val main = Handler(Looper.getMainLooper())
 
     init {
-        main.post(object : Runnable { // (the bar's address as it changes)
+        main.post(object : Runnable { // (the bars as the pages change: Emission's POLL_MS)
             override fun run() {
-                shownUrl.value = current?.url ?: ""
-                main.postDelayed(this, 300)
+                shown()
+                main.postDelayed(this, 200)
             }
         })
     }
 
+    private fun shown() {
+        val t = current
+        shownUrl.value = t?.url ?: ""
+        canBack.value = t?.web?.canGoBack() ?: false
+        canForward.value = t?.web?.canGoForward() ?: false
+        loading.value = t?.loading ?: false
+        progress.value = (t?.progress ?: 0) / 100f
+        selected.value = t?.id
+        val now = tabs.values.map { Shown(it.id, it.label, it.loading) }
+        if (now != strip.toList()) {
+            strip.clear()
+            strip.addAll(now)
+        }
+    }
+
     fun open(url: String?, transport: WebView.WebViewTransport? = null): Tab {
         made += 1
-        val t = Tab("tab$made", WebView(ctx))
+        val t = Tab("phone$made", WebView(ctx))
         setUp(t)
         tabs[t.id] = t
         count.value = tabs.size
@@ -137,6 +170,7 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
     fun select(t: Tab) {
         current = t
         stage.show(t.web)
+        shown()
         stage.overlay.shownTab = t.id
         stage.overlay.invalidate()
         shownUrl.value = t.url
@@ -217,7 +251,8 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
             allowContentAccess = false
             setGeolocationEnabled(false)
         }
-        web.isFocusable = true
+        web.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS // (the phone's saved sign-ins
+        web.isFocusable = true                                                        // and cards: not offered its pages)
         web.isFocusableInTouchMode = true
         web.setDownloadListener { url, _, disposition, mime, _ ->
             downloads += JSONObject().put("name", URLUtil.guessFileName(url, disposition, mime)).put("path", JSONObject.NULL)
@@ -226,9 +261,9 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                 request.url.scheme?.lowercase() !in listOf("http", "https", "data", "about", "blob", "javascript")
-            // (another app's link, intent:, tel:, mailto:, market:: not opened, here or in another app)
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                early?.let { view.evaluateJavascript(it, null) }
                 t.loading = true
                 t.loads += 1
                 url?.let { u -> Uri.parse(u).takeIf { it.scheme in listOf("http", "https") }?.let {
@@ -254,6 +289,7 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
         }
         web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, progress: Int) {
+                t.progress = progress
                 t.loading = progress < 100
             }
 
@@ -291,7 +327,7 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
             }
 
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
-                waits(t, "files", { callback.onReceiveValue(null) }) { // (none of the phone's files given to a page)
+                waits(t, "files", { callback.onReceiveValue(null) }) {
                     put("multiple", params.mode == FileChooserParams.MODE_OPEN_MULTIPLE).put("folders", false)
                         .put("note", "files can't be uploaded from the phone: answer it to cancel")
                 }
@@ -375,9 +411,8 @@ object Input {
         send(web, mouse(MotionEvent.ACTION_HOVER_MOVE, x, y, 0, 0, now), true)
     }
 
-    /** count clicks of button at x, y (press: held this long, ms, instead), done() once they're let go. */
-    fun click(web: View, x: Float, y: Float, button: String, count: Int, mods: List<String>, press: Long? = null,
-              done: () -> Unit) {
+    /** count clicks of button at x, y, done() once they're let go. */
+    fun click(web: View, x: Float, y: Float, button: String, count: Int, mods: List<String>, done: () -> Unit) {
         val b = when (button) {
             "right" -> MotionEvent.BUTTON_SECONDARY
             "middle" -> MotionEvent.BUTTON_TERTIARY
@@ -391,7 +426,7 @@ object Input {
             main.postDelayed({
                 button(web, x, y, b, m, down, false)
                 if (left > 1) main.postDelayed({ one(left - 1) }, CLICKS_MS) else done()
-            }, press ?: PRESS_MS)
+            }, PRESS_MS)
         }
         one(count.coerceIn(1, 3))
     }

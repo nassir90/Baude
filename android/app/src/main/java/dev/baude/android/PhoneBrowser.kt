@@ -19,9 +19,10 @@ import kotlin.concurrent.thread
 
 /** A Bot's browser on this phone ("Phone Use"): what a Bot's browser tools ask of its Emission, asked of a browser
  * here instead (BrowserActivity, in a process of its own, its profile the Bot's), while you've it open for that Bot
- * and on screen. Its Bot's host is told (wire's emission_serve, on the connection its chat's reached on, directly or
- * through the mesh), and from then on carries the Bot's tools' requests here (emission_call) and takes their answers
- * (emission_answer); once it's closed (or the phone's left it, or locked), they're Emission's on that host again.
+ * and on screen. Its Bot's host is told (wire's emission_serve, on this phone's own connection to it: a host of yours,
+ * not a member reached through the mesh), and from then on carries the Bot's tools' requests here (emission_call)
+ * and takes their answers (emission_answer); once it's closed (or the phone's left it, or locked), they're Emission's
+ * on that host again, the Bot told so with what it hadn't been told yet.
  *
  * The browser's process talks to this one on a socket of the app's own (a uid check: no other app), a line of JSON
  * each way, as Emission's profile socket is. */
@@ -33,19 +34,23 @@ object PhoneBrowser {
     private var server: LocalServerSocket? = null
 
     /** The Bot whose browser's open here (hostId: the connection its chat's on), the browser's link, and whether its
-     * host's been told. */
+     * host carries its requests here. */
     private class Served(val hostId: String, val bot: String, val name: String, val link: Link) {
-        var told: Boolean? = null // (whether its host's been told since its connection came up; false: it's down)
         var up = false // (its host's said it carries its requests here)
         var acting = false
+        var note = "" // (what the browser hadn't told the Bot, as it closed; and the pages it had open)
+        var urls = org.json.JSONArray()
     }
 
     private var served: Served? = null
     private var next: Intent? = null // (a browser asked for while another's closing: opened once it's gone)
-    private val calls = HashMap<Int, Connection>() // (a request carried to the browser: the connection it came on)
+    private val calls = HashMap<String, Connection>() // (a request carried to the browser: the connection it came on)
 
-    /** Whether the Bot's host can carry its tools' requests to a phone. */
-    fun offered(hostId: String): Boolean = (Mesh.conn(hostId)?.info?.optInt("version", 1) ?: 1) >= MIN_VERSION
+    /** Whether the Bot's host can carry its tools' requests to a phone: one of your hosts, connected to directly (a
+     * member reached through the mesh doesn't), new enough. */
+    fun offered(hostId: String): Boolean = Mesh.conn(hostId)?.let {
+        it.place is Place.Direct && (it.info?.optInt("version", 1) ?: 1) >= MIN_VERSION
+    } ?: false
 
     /** The Bot's browser opened here, for you to watch it. */
     fun open(ctx: Context, hostId: String, bot: String, botName: String) {
@@ -127,11 +132,17 @@ object PhoneBrowser {
             "hello" -> {
                 served?.takeIf { it.link !== link }?.let { stop(it) }
                 link.bot = msg.optString("bot").ifEmpty { null }
-                served = Served(msg.optString("host"), msg.optString("bot"), msg.optString("name"), link)
+                val s = Served(msg.optString("host"), msg.optString("bot"), msg.optString("name"), link)
+                served = s
+                Mesh.conn(s.hostId)?.let { changed(it) }
                 tick()
             }
+            "bye" -> served?.takeIf { it.link === link }?.let {
+                it.note = msg.optString("note")
+                it.urls = msg.optJSONArray("urls") ?: org.json.JSONArray()
+            }
             "answer" -> { // (a request's answer: to the host that asked)
-                val id = msg.optInt("id")
+                val id = msg.optString("id")
                 val conn = calls.remove(id) ?: return
                 val reply = JSONObject().put("op", "emission_answer").put("id", id)
                 if (msg.has("result")) reply.put("result", msg.get("result")) else reply.put("error", msg.optString("error"))
@@ -154,7 +165,8 @@ object PhoneBrowser {
     private fun stop(s: Served) {
         if (served === s) served = null
         Mesh.conn(s.hostId)?.let { c ->
-            if (c.state == "up") c.send(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", false))
+            if (c.state == "up") c.send(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", false)
+                .put("note", s.note).put("urls", s.urls))
         }
         for ((id, conn) in calls.toList()) {
             calls.remove(id)
@@ -162,30 +174,47 @@ object PhoneBrowser {
         }
     }
 
-    /** (while one's open: each little while) Its host told, again once it's back after a drop (it's forgotten then);
-     * the browser told how that went; the Bot's turn at its tools or not, for its glow. */
-    private fun tick() {
+    /** (Mesh's, as a connection's state changes) The Bot's host told the phone's browser is its again each time its
+     * connection comes up (it's forgotten when it drops); the browser told how that went; what was carried to the
+     * browser on a connection that's dropped let go of (its host answers those itself). */
+    fun changed(c: Connection) {
         val s = served ?: return
-        val c = Mesh.conn(s.hostId)
-        if (c == null || c.state != "up") {
-            if (s.told != false) s.link.send(JSONObject().put("op", "serving").put("on", false)
-                .put("why", "Can't connect to ${Mesh.label(s.hostId)}" + (c?.why?.let { ": $it" } ?: "")))
-            s.told = false
+        if (s.hostId != c.id) return
+        if (c.state != "up") {
+            calls.entries.removeAll { it.value === c }
+            if (s.up || c.state != "connecting") s.link.send(JSONObject().put("op", "serving").put("on", false)
+                .put("why", "Can't connect to ${Mesh.label(s.hostId)}" + (c.why?.let { ": $it" } ?: "")))
             s.up = false
-        } else if (s.told != true) { // (up, and not told since it came up)
-            s.told = true
-            if ((c.info?.optInt("version", 1) ?: 1) < MIN_VERSION) {
-                s.link.send(JSONObject().put("op", "serving").put("on", false)
-                    .put("why", "${Mesh.label(s.hostId)}'s Baude is too old for this: update it"))
-            } else c.request(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", true)) { r ->
-                main.post {
-                    if (served !== s) return@post
-                    s.up = r.optString("op") == "emission_serving"
-                    s.link.send(JSONObject().put("op", "serving").put("on", s.up)
-                        .apply { if (!s.up) put("why", r.optString("error", "the host said no")) })
-                }
+            return
+        }
+        if ((c.info?.optInt("version", 1) ?: 1) < MIN_VERSION) {
+            s.link.send(JSONObject().put("op", "serving").put("on", false)
+                .put("why", "${Mesh.label(s.hostId)}'s Baude is too old for this: update it"))
+            return
+        }
+        c.request(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", true)) { r ->
+            main.post {
+                if (served !== s) return@post
+                s.up = r.optString("op") == "emission_serving"
+                s.link.send(JSONObject().put("op", "serving").put("on", s.up)
+                    .apply { if (!s.up) put("why", r.optString("error", "the host said no")) })
             }
         }
+    }
+
+    /** (Mesh's) emission_unserved: another phone shows this Bot's browser now. */
+    fun unserved(c: Connection, msg: JSONObject) {
+        val s = served ?: return
+        if (s.hostId != c.id || s.bot != msg.optString("bot")) return
+        s.up = false
+        calls.entries.removeAll { it.value === c }
+        s.link.send(JSONObject().put("op", "serving").put("on", false).put("why", msg.optString("why",
+            "another phone shows this Bot's browser now")))
+    }
+
+    /** (while one's open: each little while) The Bot's turn at its tools or not, for its glow. */
+    private fun tick() {
+        val s = served ?: return
         val acting = Mesh.sessions[s.hostId]?.firstOrNull { it.optString("id") == s.bot }?.optBoolean("acting") ?: false
         if (acting != s.acting) {
             s.acting = acting
@@ -196,7 +225,7 @@ object PhoneBrowser {
 
     /** (Mesh's) emission_call from a host: carried to the browser open for that Bot, if it is; else answered so. */
     fun called(c: Connection, msg: JSONObject) {
-        val id = msg.optInt("id")
+        val id = msg.optString("id")
         val bot = msg.optJSONObject("bot")?.optString("id")
         val s = served
         if (s == null || s.hostId != c.id || s.bot != bot || !s.up) {

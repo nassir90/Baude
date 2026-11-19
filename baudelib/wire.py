@@ -228,8 +228,8 @@ VERSION = 16  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
 # 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
 # gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
-# always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer, a Bot's browser
-# on a phone)
+# always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer,
+# emission_unserved, a session's on_phone: a Bot's browser on a phone)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often

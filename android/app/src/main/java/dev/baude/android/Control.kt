@@ -65,11 +65,27 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         }, 100)
     }
 
-    private var nonce = 0L
+    private val random = java.security.SecureRandom()
+    private fun nonce() = ByteArray(12).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
+    private val key = nonce() // (where em's kept in a page: this process's own, not a name a page's scripts know)
 
-    /** body (an async function's) run in t's page, PAGE_JS's em there (page: without it, for javascript): then(its
-     * result) given what it returned, or the error answered (or given to failed, if there's one). A WebView has one
-     * world for a page's scripts and Emission's: the page's own scripts see em, as they don't on a desktop. */
+    /** PAGE_JS, its em kept in the page under key (not enumerable, not to be replaced or changed once it's there), its
+     * refs the phone's own (ref_p12: not a desktop's ref_12), with what's done by the page's natives as they were
+     * when it was first put in: a hit test, a promise's answer kept for this process to take (not one a page's
+     * script could put there in its place), JSON.stringify; seen and typed, what an op keeps in it between scripts. */
+    private val em: String = run {
+        for (a in listOf(EM_MADE, EM_BOUND, EM_REF)) check(a in pageJs) { "PAGE_JS has changed: $a" }
+        "const K = '$key';\n" + pageJs.replace(EM_REF, "id = 'ref_p' + (++n)")
+            .replace(EM_MADE, "if (!Object.getOwnPropertyDescriptor(globalThis, K)) globalThis[K] = ")
+            .replace(EM_BOUND, "\n" + SEAL + "\nconst em = globalThis[K];")
+    }
+
+    /** What's put in a page as it starts loading (Browser's): em made then, before most of its scripts have run. */
+    val early: String get() = "(() => { $em\n})();"
+
+    /** body (an async function's) run in t's page, em there (page: not in its scope, for javascript): then(its result)
+     * given what it returned, or the error answered (or given to failed, if there's one). Its answer's kept by em,
+     * under an id of this call's, till it's taken. */
     private fun js(t: Tab, body: String, answer: (JSONObject) -> Unit, then: ((Any?) -> Unit)? = null, page: Boolean = false,
                    failed: ((String) -> Unit)? = null) {
         if (t.closed || t.id !in b.tabs) return answer(error("tab ${t.id} has closed: tabs_context lists the open ones"))
@@ -78,19 +94,16 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             "the page is waiting on its prompt, and runs nothing till it's answered (answer_prompt)").put("prompts", JSONArray(waiting)))
         val fail = failed ?: { why: String -> answer(error(why)) }
         val ok = then ?: { v: Any? -> answer(JSONObject().put("result", v ?: JSONObject.NULL)) }
-        nonce += 1
-        val key = "Symbol.for('emission.run.${SystemClock.uptimeMillis()}.$nonce')"
-        val script = "(() => { const K = $key; (async () => { ${if (page) "" else pageJs}\n$body\n})().then(v => {" +
-            " try { window[K] = {ok: JSON.stringify(v ?? null)}; } catch (e) { window[K] = {error: String(e)}; } }," +
-            " e => { window[K] = {error: String(e)}; }); return true; })()"
+        val id = nonce()
+        val script = "(() => { const __em = (() => { $em\nreturn em; })(); __em.settle((async () => {" +
+            (if (page) "" else " const em = __em;") + "\n$body\n})(), '$id'); return true; })()"
         val loads = t.loads
         val started = SystemClock.uptimeMillis()
         t.web.evaluateJavascript(script) { began ->
             if (began != "true") return@evaluateJavascript fail("SyntaxError: the script couldn't be run")
             fun look() {
                 if (t.closed) return fail("tab ${t.id} has closed: tabs_context lists the open ones")
-                t.web.evaluateJavascript("(() => { const K = $key, r = window[K]; if (r === undefined) return null; " +
-                    "delete window[K]; return r; })()") { got ->
+                t.web.evaluateJavascript("(() => { const S = globalThis['$key']; return S && S.take ? S.take('$id') : null; })()") { got ->
                     val r = try {
                         if (got == null || got == "null") null else JSONObject(got)
                     } catch (_: Exception) {
@@ -358,9 +371,13 @@ class Control(private val b: Browser, private val pageJs: String, private val re
     private fun point(t: Tab, msg: JSONObject, answer: (JSONObject) -> Unit, then: (Double, Double, String?, Float) -> Unit) {
         val ref = msg.optString("ref").takeIf { it.isNotEmpty() }
         fun k(iw: Double) = (t.web.width / max(1.0, iw)).toFloat()
-        if (ref != null) js(t, "const c = await em.centre(em.get(${JSONObject.quote(ref)})); return {...c, iw: innerWidth}", answer, { c ->
+        if (ref != null) js(t, "const el = em.get(${JSONObject.quote(ref)}), c = await em.centre(el), h = em.hit(el, c.x, c.y);" +
+            "return {x: h.x, y: h.y, covered: h.at ? null : h.by ? em.line(h.by, 0) : 'nothing: it is off the page'," +
+            " iw: innerWidth, ih: innerHeight}", answer, { c ->
             val o = c as JSONObject
-            then(o.getDouble("x"), o.getDouble("y"), if (o.isNull("covered")) null else o.optString("covered"), k(o.getDouble("iw")))
+            val iw = o.getDouble("iw")
+            then(o.getDouble("x").coerceIn(0.0, iw), o.getDouble("y").coerceIn(0.0, o.getDouble("ih")),
+                if (o.isNull("covered")) null else o.optString("covered"), k(iw))
         })
         else if (msg.has("x") && msg.has("y") && !msg.isNull("x") && !msg.isNull("y")) {
             val scale = if (msg.optBoolean("css")) 1.0 else scales[t.id] ?: 1.0
@@ -376,9 +393,12 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         point(t, msg, answer) { x, y, covered, k ->
             val started = SystemClock.uptimeMillis()
             val count = max(1, msg.optInt("count", 1))
-            pointer.add("click", x, y, count = count, tab = t.id)
+            val press = msg.optInt("press", 0) // (one press of a click count's: the Browser page's)
+            pointer.add("click", x, y, count = if (press > 0) 1 else count, tab = t.id)
             drawn()
-            Input.click(t.web, (x * k).toFloat(), (y * k).toFloat(), msg.optString("button"), count, mods) {
+            Input.click(t.web, (x * k).toFloat(), (y * k).toFloat(), msg.optString("button"), if (press > 0) 1 else count, mods) {
+                if (msg.optBoolean("quick")) return@click answer(JSONObject().put("clicked",
+                    JSONArray(listOf(x.roundToInt(), y.roundToInt()))))
                 val s = if (msg.optBoolean("css")) 1.0 else scales[t.id] ?: 1.0
                 settle(t, answer, JSONObject().put("clicked", JSONArray(listOf((x * s).roundToInt(), (y * s).roundToInt())))
                     .apply { if (covered != null) put("covered_by", covered) }, started)
@@ -460,6 +480,9 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             if (k.length == 1 && k[0].isUpperCase()) {
                 k = k.lowercase()
                 mods = (mods + "shift").toSortedSet()
+            }
+            require(!(k.lowercase() == "v" && ("ctrl" in mods || "cmd" in mods))) {
+                "$combo isn't pressed here: on the phone it would paste its owner's clipboard. Type the text instead"
             }
             k to mods.toList()
         })
@@ -616,13 +639,31 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         const val REPL_THREW = "⁣threw"
         const val REPL_SPLITS = 6
         const val HOME_PAGE = "https://duckduckgo.com/"
+        // (PAGE_JS's text that's changed as it's put in a page: checked as the app's built, in its build.gradle.kts)
+        const val EM_MADE = "if (!globalThis.__em) globalThis.__em = "
+        const val EM_BOUND = "\nconst em = globalThis.__em;"
+        const val EM_REF = "id = 'ref_' + (++n)"
+        const val SEAL = """if (Object.getOwnPropertyDescriptor(globalThis, K).writable) {
+  const R = Reflect.apply, D = Document.prototype.elementFromPoint, B = Element.prototype.getBoundingClientRect,
+    C = Node.prototype.contains, J = JSON.stringify, T = Promise.prototype.then, M = new Map(), MS = Map.prototype.set,
+    MG = Map.prototype.get, MD = Map.prototype.delete, made = globalThis[K];
+  const hit = (el, x, y) => { const h = R(D, document, [x, y]), b = R(B, el, []);
+    return {at: !!h && (h === el || R(C, el, [h]) || R(C, h, [el])), x: b.left + b.width / 2, y: b.top + b.height / 2, by: h}; };
+  const settle = (p, id) => R(T, p, [v => { let s; try { s = {ok: R(J, JSON, [v ?? null])}; } catch (e) { s = {error: String(e)}; }
+    R(MS, M, [id, s]); }, e => R(MS, M, [id, {error: String(e)}])]);
+  const take = id => { const r = R(MG, M, [id]); R(MD, M, [id]); return r === undefined ? null : r; };
+  const sealed = {...made, hit, settle, take}, kept = {};
+  for (const name of ['seen', 'typed']) Object.defineProperty(sealed, name, {get: () => kept[name], set: v => { kept[name] = v; }});
+  Object.defineProperty(globalThis, K, {value: Object.freeze(sealed), enumerable: false, writable: false,
+    configurable: false});
+}"""
         const val SEARCH = "https://duckduckgo.com/?q="
 
         private fun sha1(text: String) = java.security.MessageDigest.getInstance("SHA-1").digest(text.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
         /** What's typed in the address bar as a URL (emission.address): one as it is; a local host or an IP address
-         * given http://, another host https://; anything else searched for (a path: none of the phone's files). */
+         * given http://, another host https://; anything else searched for. */
         fun address(raw: String): String {
             val text = raw.trim()
             if (text.isEmpty()) return HOME_PAGE

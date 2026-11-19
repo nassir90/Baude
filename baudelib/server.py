@@ -353,6 +353,7 @@ class Session:
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "acting": self.acting and self.busy and not self.asks,
+                "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
                 "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
@@ -912,10 +913,13 @@ class Server:
         os.close(self.lock_file)
         self.closed.set()
 
-    def serve(self, sock):
+    def serve(self, sock, tunnel=None):
+        """A connection to this host process (tunnel: the member a mesh tunnel to here is from, "" if it's unknown;
+        None: straight to it)."""
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
         conn = Conn(ch)
+        conn.tunnel = tunnel
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -1074,7 +1078,10 @@ class Server:
 
             def browse():
                 try:
-                    if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there)
+                    if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there, by
+                        if phonebrowser.tunnelled(conn):            # this host's own connections only)
+                            return reply("error", error="this Bot's browser is on a phone now: only its host's own "
+                                                        "connections reach it")
                         return reply("emission", result=self.phones.call(bot, msg["call"]))
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
                                                                    timeout=emissiontools.HOST_WAIT_S))
@@ -1092,8 +1099,7 @@ class Server:
                              name="emission-watch").start()
             return None
         if op == "emission_serve":  # (a phone showing a Bot's browser, or not now: phonebrowser)
-            kind, said = self.phones.serve(conn, msg)
-            return reply(kind, **said)
+            return self.phones.serve(conn, msg, reply)
         if op == "emission_answer":  # (a phone's answer to an emission_call)
             return self.phones.answer(conn, msg)
         if op == "emission_watch_say":  # (what the pane says back: a frame taken, its new size)

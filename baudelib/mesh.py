@@ -1088,7 +1088,8 @@ class Mesh:
             end.link, end.key, end.origin = link, key, origin if wire.is_id(origin) else None
             with self.lock:
                 link.tunnels[key] = end
-            threading.Thread(target=self.server.serve, args=(theirs,), daemon=True, name="tunnel-served").start()
+            threading.Thread(target=self.server.serve, args=(theirs,), kwargs={"tunnel": end.origin or ""}, daemon=True,
+                             name="tunnel-served").start()
             link.tsend(key, {"op": "opened"})
             threading.Thread(target=end.pump, daemon=True, name="tunnel-in").start()
             return

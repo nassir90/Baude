@@ -1,51 +1,73 @@
-"""A Bot's browser on a phone: the Android app, connected to this host process as a head is, says it's showing a Bot
-of this host's browser (emission_serve), and from then on that Bot's browser tools' requests here (wire's emission
-op) are carried to it on its connection (emission_call), its answer back (emission_answer), instead of to this host's
-Emission. Only while the phone says so: once it says it's stopped, or its connection goes, they're Emission's again.
+"""A Bot's browser on a phone: the Android app, connected to this host process directly as a head is (not through
+the mesh), says it's showing a Bot of this host's browser (emission_serve), and from then on that Bot's browser tools'
+requests here (wire's emission op, from this host's own connections) are carried to it on its connection
+(emission_call), its answer back (emission_answer), instead of to this host's Emission. Only while the phone says so:
+once it says it's stopped, another phone takes it (emission_unserved, to the one it was on), or its connection goes,
+they're Emission's again.
 
-What it answers is what Emission would (the same ops, the same answers: the app runs PAGE_JS too)."""
+What it answers is what Emission would (the same ops, the same answers: the app runs PAGE_JS too). Once it's
+Emission's again, the Bot's next request there is told so (emissionlink.pending_note, as a browser that's restarted
+tells it), with what the phone had open and anything it hadn't told the Bot yet."""
 import itertools
+import os
 import threading
 
-from baudelib import emissiontools
+from baudelib import emissionlink, emissiontools
 
 GONE = "the phone's browser closed before it answered"
+THROUGH_MESH = "a phone shows a Bot's browser connected to the Bot's host itself, not through the mesh"
+
+
+def tunnelled(conn):
+    """Whether conn came through the mesh (another member's tunnel to here), not straight to this host process."""
+    return getattr(conn, "tunnel", None) is not None
 
 
 class Phones:
-    """The Bots whose browser is on a phone now (by the Bot's id: the connection it's on, and the Bot's name), and the
-    requests carried to one, waiting on its answer."""
+    """The Bots whose browser is on a phone now (by the Bot's id: the phone's connection), and the requests carried to
+    one, waiting on its answer."""
 
     def __init__(self, server):
         self.server = server
         self.lock = threading.Lock()
         self.serving = {}  # (a Bot's id: the phone's connection)
-        self.waiting = {}  # (a request's id: [its connection, an event set once it's answered, the answer])
+        self.waiting = {}  # (a request's id: [its connection, an event set once it's answered, the answer, the Bot])
+        self.prefix = os.urandom(4).hex()  # (requests' ids this process's own: not one before it restarted)
         self.ids = itertools.count(1)
 
-    def serve(self, conn, msg):
-        """emission_serve {bot: its id, on}: a phone showing that Bot's browser (on), or not now. The Bot's a Bot of
-        this host's: its chat here. What it's answered: (op, its fields)."""
+    def serve(self, conn, msg, reply):
+        """emission_serve {bot: its id, on}: a phone showing that Bot's browser (on), or not now (urls: the pages it
+        had open; note: what it hadn't told the Bot yet). The Bot's a Bot of this host's: its chat here. Answered
+        before the Bot's requests are carried to it."""
         bot = msg.get("bot")
         if not isinstance(bot, str) or not bot:
-            return "error", {"error": "emission_serve needs a Bot's id"}
+            return reply("error", error="emission_serve needs a Bot's id")
+        if tunnelled(conn):
+            return reply("error", error=THROUGH_MESH)
         if not msg.get("on"):
             with self.lock:
-                if self.serving.get(bot) is conn:
+                had = self.serving.get(bot) is conn
+                if had:
                     del self.serving[bot]
             self.fail(conn, bot)
-            return "emission_serving", {"bot": bot, "on": False}
+            if had:
+                urls = [u for u in msg.get("urls") or [] if isinstance(u, str)]
+                self.noted(bot, "the phone closed it", urls, msg.get("note") if isinstance(msg.get("note"), str) else "")
+                self.listed()
+            return reply("emission_serving", bot=bot, on=False)
         with self.server.lock:
             s = self.server.sessions.get(bot)
             is_bot = s is not None and bool(s.meta.get("bot"))
         if not is_bot:
-            return "error", {"error": "that's no Bot of this host's"}
+            return reply("error", error="that's no Bot of this host's")
+        reply("emission_serving", bot=bot, on=True)
         with self.lock:
             was = self.serving.get(bot)
             self.serving[bot] = conn
-        if was is not None and was is not conn:  # (another phone had it: its requests not answered there now)
+        if was is not None and was is not conn:  # (another phone had it: told, and its requests not answered there)
             self.fail(was, bot)
-        return "emission_serving", {"bot": bot, "on": True}
+            was.send({"op": "emission_unserved", "bot": bot, "why": "another phone shows this Bot's browser now"})
+        self.listed()
 
     def phone(self, bot_id):
         with self.lock:
@@ -58,7 +80,7 @@ class Phones:
             conn = self.serving.get(bot["id"])
             if conn is None:
                 raise OSError(GONE)
-            rid = next(self.ids)
+            rid = f"{self.prefix}-{next(self.ids)}"
             box = [conn, threading.Event(), None, bot["id"]]
             self.waiting[rid] = box
         conn.send({"op": "emission_call", "id": rid, "bot": {"id": bot["id"], "name": bot.get("name")}, "call": call})
@@ -94,6 +116,27 @@ class Phones:
     def gone(self, conn):
         """A connection gone: the Bots it was showing, Emission's again."""
         with self.lock:
-            for bot in [b for b, c in self.serving.items() if c is conn]:
+            bots = [b for b, c in self.serving.items() if c is conn]
+            for bot in bots:
                 del self.serving[bot]
         self.fail(conn)
+        for bot in bots:
+            self.noted(bot, "the phone's connection went")
+        if bots:
+            self.listed()
+
+    def listed(self):
+        """Heads told the sessions again: a Bot's on_phone changed (Baude's Browser page says where its browser is)."""
+        with self.server.lock:
+            self.server.changed()
+
+    @staticmethod
+    def noted(bot, why, urls=(), note=""):
+        """What the Bot's next request to this host's Emission is told: its browser's that again, not the phone's."""
+        pid = emissionlink.bot_profile_id(bot)
+        said = (f"Your browser was on a phone till now ({why}): this is this host's browser again, with its own tabs "
+                "(their ids and refs aren't the phone's)" +
+                (", and the pages the phone had open are closed: " + ", ".join(list(urls)[:10]) if urls else "") +
+                "." + (f" {note}" if note else ""))
+        before = emissionlink.pending_note(pid)
+        emissionlink.pending_note(pid, f"{before} {said}" if before else said)

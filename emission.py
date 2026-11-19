@@ -45,7 +45,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
-                                   note_leftover, profile_id, profiles, rename_profile, unlock_profile)
+                                   note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
+                                   unlock_profile)
 
 
 class ProfileSocket:
@@ -2253,51 +2254,6 @@ def engine():
 
 
 # ------------------------------------------------------------------ window --
-
-def open_pages(pid, urls=None, why=None):
-    """A Bot's browser's pages, written down as they change (urls; why: it's closing itself, "idle"), so the next one
-    started knows what was lost if this one ends without closing them; or (no urls) what the last wrote, read and
-    forgotten: (urls, why)."""
-    path = os.path.join(data_home(), "profiles", pid + ".open")
-    if urls is None:
-        try:
-            with open(path, encoding="utf-8") as f:
-                had = json.load(f)
-            os.unlink(path)
-            had = had if isinstance(had, dict) else {"urls": had}
-            return [u for u in had.get("urls") or [] if isinstance(u, str)], had.get("why")
-        except (OSError, ValueError, AttributeError):
-            return [], None
-    try:
-        if urls:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"urls": urls, "why": why}, f)
-        elif os.path.exists(path):
-            os.unlink(path)
-    except OSError:
-        pass
-    return urls
-
-
-def pending_note(pid, note=None):
-    """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
-    next): note "" once it's told; note None, what's waiting read."""
-    path = os.path.join(data_home(), "profiles", pid + ".note")
-    try:
-        if note is None:
-            with open(path, encoding="utf-8") as f:
-                return f.read().strip() or None
-        if note:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(note)
-        elif os.path.exists(path):
-            os.unlink(path)
-    except OSError:
-        return None
-    return None
-
 
 class Tab:
     """A tab: its page, and where it's drawn. url None: a page another opened, WebKit loading it (opener: what the

@@ -208,7 +208,7 @@ class PointerOverlay(ctx: Context, private val accent: Int) : View(ctx) {
     var k = 1f
     var shownTab: String? = null // (the tab in front: the pointer's drawn only if it's in it, the glow whichever)
     private var glowPicture: Bitmap? = null
-    private var glowKey: Triple<Int, Int, Float>? = null
+    private var glowKey: Float? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -226,42 +226,53 @@ class PointerOverlay(ctx: Context, private val accent: Int) : View(ctx) {
     /** Drawn each frame while anything moves. */
     fun kick() = postInvalidateOnAnimation()
 
-    /** The glow for w by h pixels (emission.glow_frame's): each pixel as strong as its two nearest edges make it
-     * together, so its corners are as soft as its sides; made once for each size. */
-    private fun glow(w: Int, h: Int): Bitmap? {
-        if (w <= 0 || h <= 0) return null
-        val key = Triple(w, h, k)
-        if (key == glowKey) return glowPicture
-        val reach = min((BotPointer.GLOW_REACH * k).toInt(), w / 2)
-        val edge = DoubleArray(reach) { BotPointer.glowAt(it / k.toDouble()) }
+    /** The glow's corners and edges (emission.glow_pixels'): a square 2 * its reach and a pixel across, each pixel as
+     * strong as its two nearest edges make it together, so its corners are as soft as its sides; its middle row and
+     * column stretched to the page's size as it's drawn. Made once for each scale. */
+    private fun glow(): Bitmap {
+        glowPicture?.takeIf { glowKey == k }?.let { return it }
+        val reach = (BotPointer.GLOW_REACH * k).toInt().coerceAtLeast(1)
+        val n = 2 * reach + 1
+        val edge = DoubleArray(n) { BotPointer.glowAt(min(it, n - 1 - it) / k.toDouble()) }
         val r = android.graphics.Color.red(accent)
         val g = android.graphics.Color.green(accent)
         val b = android.graphics.Color.blue(accent)
-        fun pixel(a: Double) = android.graphics.Color.argb((255 * a).roundToInt(), r, g, b)
-        val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val row = IntArray(w)
-        for (y in 0 until (h + 1) / 2) {
-            val ey = BotPointer.glowAt(min(y, h - 1 - y) / k.toDouble())
-            for (x in 0 until reach) {
-                val p = pixel(1 - (1 - edge[x]) * (1 - ey))
-                row[x] = p
-                row[w - 1 - x] = p
-            }
-            java.util.Arrays.fill(row, reach, w - reach, pixel(ey))
-            bm.setPixels(row, 0, w, 0, y, w, 1)
-            bm.setPixels(row, 0, w, 0, h - 1 - y, w, 1)
+        val pixels = IntArray(n * n) { i ->
+            val a = 1 - (1 - edge[i % n]) * (1 - edge[i / n])
+            android.graphics.Color.argb((255 * a).roundToInt(), r, g, b)
         }
         glowPicture?.recycle()
-        glowPicture = bm
-        glowKey = key
-        return bm
+        glowPicture = Bitmap.createBitmap(pixels, n, n, Bitmap.Config.ARGB_8888)
+        glowKey = k
+        return glowPicture!!
+    }
+
+    private fun drawGlow(canvas: Canvas, w: Int, h: Int) {
+        val pic = glow()
+        val n = pic.width
+        val reach = n / 2
+        val rx = min(reach, w / 2)
+        val ry = min(reach, h / 2)
+        val xs = intArrayOf(0, reach, reach + 1, n) // (the picture's: its left, its middle column, its right)
+        val ys = xs
+        val dx = intArrayOf(0, rx, w - rx, w)       // (the page's)
+        val dy = intArrayOf(0, ry, h - ry, h)
+        for (i in 0..2) for (j in 0..2) {
+            if (dx[i + 1] <= dx[i] || dy[j + 1] <= dy[j]) continue
+            val sx0 = if (i == 0) 0 else if (i == 1) xs[1] else n - (dx[3] - dx[2])
+            val sx1 = if (i == 0) dx[1] else if (i == 1) xs[2] else n
+            val sy0 = if (j == 0) 0 else if (j == 1) ys[1] else n - (dy[3] - dy[2])
+            val sy1 = if (j == 0) dy[1] else if (j == 1) ys[2] else n
+            canvas.drawBitmap(pic, android.graphics.Rect(sx0, sy0, sx1, sy1),
+                android.graphics.Rect(dx[i], dy[j], dx[i + 1], dy[j + 1]), glowPaint)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
         val look = pointer.look()
-        if (look.glow > 0) glow(width, height)?.let {
+        if (look.glow > 0 && width > 0 && height > 0) {
             glowPaint.alpha = (255 * look.glow).roundToInt()
-            canvas.drawBitmap(it, 0f, 0f, glowPaint)
+            drawGlow(canvas, width, height)
         }
         val a = if (pointer.tab == null || pointer.tab == shownTab) look.alpha else 0.0
         canvas.save()

@@ -1,12 +1,17 @@
 """A Bot's browser, on the side panel's Browser page: its own Emission (emission.py), on its chat's host or any other it
-uses, watched and driven. Its frames come as the page changes: from an Emission of this machine's own host process
-straight from it (its door), the pixels in shared memory, no picture made or copied through anything between; from one
-elsewhere through its host process (wire's emission_watch), each frame a JPEG the size the page is shown at. What you
-do with it (click, drag, type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order
-it's done, as the Bot's tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
+uses, watched and driven. A Bot of this Mac's: its Emission in this process (Here), its pages drawn in the page itself,
+as big as it is, nothing streamed (it's the Bot's again, in a process of its own, once Baude's gone). Elsewhere, its
+frames come as the page changes: from an Emission of this machine's own host process straight from it (its socket), the
+pixels in shared memory; from one elsewhere through its host process (wire's emission_watch), each frame a JPEG the
+size the page is shown at, the page laid out at the side panel's size. What you do with a streamed one (click, drag,
+type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to it in the order it's done, as the Bot's
+tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting)."""
 import json
+import os
 import queue
 import socket
+import subprocess
+import sys
 import threading
 import time
 
@@ -72,18 +77,19 @@ class Stream:
         self.later(lambda: self.on_ended(why))
 
     def run_here(self):
-        """This machine's own Emission: its door, frames in shared memory."""
+        """This machine's own Emission: its socket, frames in shared memory."""
         pid = emissionlink.bot_profile_id(self.bot["id"])
         for attempt in range(2):
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                sock.connect(emissionlink.door_path(pid))
+                sock.connect(emissionlink.profile_socket(pid))
                 break
             except (FileNotFoundError, ConnectionRefusedError):
                 sock.close()
                 if attempt:
                     raise OSError("its Emission didn't open")
-                got = self.remote.call({"op": "emission", "bot": self.bot, "call": {"op": "tabs"}}, timeout=90)
+                got = self.remote.call({"op": "emission", "bot": self.bot, "call": {"op": "tabs", "from_pane": True}},
+                                       timeout=90)
                 if got.get("op") == "error":  # (started by its host, as the Bot's tools would start it)
                     raise OSError(got.get("error") or "its Emission didn't start")
         self.sock = sock
@@ -149,7 +155,7 @@ class Stream:
         self.later(lambda: self.on_frame(made(), w, h, view, lambda: self.say({"ack": seq})))
 
     def say(self, line):
-        """A line to Emission (here: its door; there: through its host)."""
+        """A line to Emission (here: its socket; there: through its host)."""
         with self.lock:
             try:
                 if self.sock is not None:
@@ -208,7 +214,7 @@ class Asks:
             remote, bot, call, answered = self.q.get()
             try:
                 got = None
-                if remote.mine:  # (straight to its door: no host between)
+                if remote.mine:  # (straight to its socket: no host between)
                     try:
                         got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
                     except (FileNotFoundError, ConnectionRefusedError):
@@ -219,6 +225,175 @@ class Asks:
             except (OSError, ValueError) as e:
                 got = {"error": str(e)}
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
+
+
+HERE = {}  # (a Bot's chat id: its Here: this Mac's Bots' Emissions in this process, kept while Baude runs)
+IDLE_TAKE_S = 5  # (a Bot's own Emission taken into Baude only once it's been this long without a request)
+RELEASED = {}  # (a profile's id: when Baude let go of it, for someone's Emission window: not taken back till it's had it)
+RELEASED_S = 15
+BUSY_RETRY_S = 10  # (a Bot busy in its own Emission, watched streamed: tried here again this often)
+OFF_S = 60  # (a Bot whose browser couldn't be had here: streamed, and tried here again after this long)
+HOME = {"app": None}  # (Baude's application, once its home socket's open: where this Mac's Bots' browsers are made)
+
+
+def open_home(app, ours):
+    """This Mac's Bots' browsers made in Baude while it runs: its home socket (emissionlink.call_bot asks it first, as a
+    Bot's tool reaches for a browser it hasn't got) takes {"op": "host", "bot", "name"}, answered once it's here.
+    ours(bot): whether that's a Bot whose chat is on this Mac (another's Bot, using this Mac's browser, has an Emission
+    of its own, as before)."""
+    if HOME["app"] is not None or sys.platform != "darwin":
+        return
+    import emission
+    HOME["app"] = app
+
+    def handle(_pid, msg, answer, _conn=None):
+        if msg.get("op") != "host" or not isinstance(msg.get("bot"), str) or not msg["bot"]:
+            return answer({"error": "the home socket makes a Bot's browser: host {bot, name}"})
+        if not ours(msg["bot"]):
+            return answer({"error": "not a Bot of this Mac's"})
+        here = HERE.get(msg["bot"])
+        if here is None:
+            here = HERE[msg["bot"]] = Here(app, msg["bot"], msg.get("name"))
+        here.when_ready(lambda h: answer({"ok": True} if h.win is not None else {"error": h.why or "not here"}))
+    emission.ProfileSocket.listen("home", handle)
+
+
+def can_host(remote):
+    """Whether a Bot on this host can have its browser here, in this process: this Mac's own host process's (on
+    Linux an agent's input is the display's own, so it keeps a display of its own, and its pages are streamed)."""
+    return sys.platform == "darwin" and remote is not None and remote.mine
+
+
+class Here:
+    """A Bot of this Mac's browser in this process: its profile taken from the Emission it had (its pages opened here),
+    its socket this process's, so the Bot's tools reach it here. ready(here) on the main loop once it's there (win), or
+    it couldn't be (why)."""
+
+    def __init__(self, app, sid, name, force=False):
+        """force: taken from the Bot's own Emission busy or not (Restart as Native: its pages reloaded, the Bot told)."""
+        self.app, self.sid, self.name, self.pid, self.win, self.why, self.waiting = app, sid, name, None, None, None, []
+        self.force = force
+        threading.Thread(target=self.take, daemon=True, name="browser-here").start()
+
+    def when_ready(self, fn):
+        if self.win is not None or self.why is not None:
+            fn(self)
+        else:
+            self.waiting.append(fn)
+
+    def take(self):
+        try:
+            pid = emissionlink.bot_profile(self.sid, self.name)
+            since = time.monotonic() - RELEASED.get(pid, -1e9)  # (just given to someone's Emission: not taken
+            if since < RELEASED_S and not (self.force and since > 3):  # back unasked, nor before it's had it)
+                raise OSError("it was just let go of")
+            urls = []
+            try:
+                info = emissionlink.call(pid, {"op": "info"}, timeout=3)
+                if not info.get("agent"):  # (someone's Emission window has it: watched there instead)
+                    raise OSError("it's open in an Emission window")
+                if info.get("idle_s", IDLE_TAKE_S) < IDLE_TAKE_S and not self.force:  # (the Bot's using it: not
+                    # taken mid-task)
+                    raise OSError("busy")
+                tabs = emissionlink.call(pid, {"op": "tabs", "from_pane": True}, timeout=10).get("tabs") or []
+                urls = [t["url"] for t in tabs if t.get("url") and t["url"] != "about:blank"]  # (Baude's asking,
+                emissionlink.call(pid, {"op": "quit", "from_pane": True}, timeout=3)  # not the Bot: its note kept)
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass  # (none running)
+            end = time.monotonic() + 10
+            while not emissionlink.lock_profile(pid):
+                if time.monotonic() > end:
+                    raise OSError("its Emission didn't let go of its profile")
+                time.sleep(0.1)
+            GLib.idle_add(lambda: self.made(pid, urls) and False)
+        except (OSError, ValueError) as e:
+            why = str(e)  # (e's gone once this block's done: the idle call's after)
+            GLib.idle_add(lambda: self.done(why) and False)
+
+    def made(self, pid, urls):
+        try:
+            import emission
+            profile = next(p["name"] for p in emissionlink.profiles() if p["id"] == pid)
+            win = emission.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
+            if win.Engine is None or win.status is not None:
+                why = win.status.get_description() if win.status is not None else "no page engine here"
+                win.closing_window()
+                win.destroy()
+                emission.ProfileSocket.close(pid)
+                emissionlink.unlock_profile(pid)
+                return self.done(why)
+            for url in urls[1:]:
+                win.open(url)
+            win.released = self.release  # (someone's Emission asking for its profile: let go of)
+            if urls:  # (what the Bot's told, its next request: its pages moved, reloaded)
+                win.note = ((win.note + " ") if win.note else "") + (
+                    "This browser moved into Baude: its pages were opened again from their addresses (what was "
+                    "typed in them, and their history, is gone): " + ", ".join(urls[:10]))
+                emission.pending_note(pid, win.note)
+            win.get_content().set_content(None)  # (its pages, its downloads' banner: the Browser page's to show)
+            if not HOME.get("awake"):
+                HOME["awake"] = True
+                emission.MacWeb.stay_awake()  # (a page of a Bot's runs on while Baude's out of sight)
+            self.pid, self.win = pid, win
+        except Exception as e:  # (streamed instead: its window and socket, if it got that far, let go of)
+            try:
+                import emission
+                if "win" in locals():
+                    win.closing_window()
+                    win.destroy()
+                emission.ProfileSocket.close(pid)
+            except Exception:
+                sys.excepthook(*sys.exc_info())
+            emissionlink.unlock_profile(pid)
+            return self.done(f"{type(e).__name__}: {e}")
+        self.watching = GLib.timeout_add_seconds(60, self.idle_check)
+        self.done(None)
+
+    def idle_check(self):
+        """Gone unused (by the Bot) this long, and not shown: let go of, as an agent's Emission goes when idle."""
+        import emission
+        win = self.win
+        if win is None:
+            return False
+        if not win.body.get_mapped() and (GLib.get_monotonic_time() - win.asked_at) / 1e6 > emission.AGENT_IDLE_S:
+            emission.open_pages(self.pid, win.open_said or [], why="idle")
+            self.release()
+            return False
+        return True
+
+    def release(self):
+        """Its browser closed, its profile let go of (another Emission's to have; the Bot's next one tells it what
+        it had open), and nothing left of it here."""
+        import emission
+        win, self.win = self.win, None
+        HERE.pop(self.sid, None)
+        if win is None:
+            return
+        if win.body.get_parent() is not None:
+            win.body.get_parent().remove(win.body)
+        win.closing_window()
+        win.destroy()
+        emission.ProfileSocket.close(self.pid)
+        pid = self.pid
+        RELEASED[pid] = time.monotonic()
+        GLib.timeout_add(2000, lambda: pid not in emission.ProfileSocket.open and emissionlink.unlock_profile(pid)
+                         and False)
+        # (WebKit's store let go of first; not if it's been taken here again meanwhile)
+
+    def done(self, why):
+        self.why = why
+        if why is not None:  # (asked again next time: a busy Bot's, once it's let it be)
+            HERE.pop(self.sid, None)
+        waiting, self.waiting = self.waiting, []
+        for fn in waiting:
+            fn(self)
+
+    def call(self, call, answered):
+        """call to its Emission, here (answered(reply) on the main loop)."""
+        try:
+            self.win.handle(self.pid, call, answered)
+        except Exception as e:  # (said, as an error of the call's)
+            answered({"error": f"{type(e).__name__}: {e}"})
 
 
 DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
@@ -237,6 +412,11 @@ class BrowserPane(Gtk.Box):
         self.hover_source, self.size_source, self.pointer, self.drag = None, None, None, None
         self.asks, self.hosts, self.sized_to = Asks(), [], None  # (sized_to: the size a streamed Bot's page was
         # last laid out at, here)
+        self.here, self.here_poll, self.here_off, self.here_busy = None, None, {}, None  # (here: the Here shown;
+        # here_off: Bots whose browser couldn't be had here, streamed instead; here_busy: one busy in its own
+        # Emission, streamed till the page is shown again)
+        open_home(win.get_application(), lambda bot: (
+            (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
         bar = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
         self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
         self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
@@ -259,6 +439,11 @@ class BrowserPane(Gtk.Box):
         new.add_css_class("flat")
         new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
         bar.append(new)
+        self.native = Gtk.Button(icon_name="video-display-symbolic", tooltip_text="Restart as Native (its pages reload)",
+                                 visible=False)  # (a browser of this Mac's streamed: drawn in place instead, at once)
+        self.native.add_css_class("flat")
+        self.native.connect("clicked", lambda *_: self.restart_native())
+        bar.append(self.native)
         bar.append(self.read_only)
         self.append(bar)
         self.strip = Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, margin_start=6,
@@ -278,7 +463,7 @@ class BrowserPane(Gtk.Box):
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
         self.said.add_css_class("dim-label")
         self.append(self.said)
-        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.tabs, self.prompts]
+        self.drives = [self.back, self.fwd, self.reload, self.address, new, self.native, self.tabs, self.prompts]
         self.input()
         self.connect("map", lambda *_: self.watch_if_shown())  # (shown: watched; hidden: let go of, till it's back)
         self.connect("unmap", lambda *_: self.stop(keep=True))
@@ -331,16 +516,36 @@ class BrowserPane(Gtk.Box):
             return
         if self.sid is None or self.stream is not None:
             return
+        if self.here is not None and self.here.win is None and self.here.why is not None:  # (let go of meanwhile)
+            self.here = None
+        off = time.monotonic() - self.here_off.get(self.sid, -1e9) < OFF_S
+        ours = self.home is self.remote  # (a Bot whose chat's on this Mac: hosted unasked; another's, when you ask)
+        had = HERE.get(self.sid) if can_host(self.remote) else None  # (hosted already, or being: joined, whose)
+        if had is not None and (had.win is not None or had.why is None) and not off:
+            return self.show_here()
+        if can_host(self.remote) and ours and not off and self.sid != self.here_busy:
+            return self.show_here()
+        self.native.set_visible(can_host(self.remote))
         self.say_status("Connecting…", "")
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
     def stop(self, keep=False):
         """No more watching (keep: the same Bot's, watched again once the page is shown again)."""
+        self.here_busy = None  # (shown again: a Bot busy before tried here again)
         self.sized_to = None  # (watched again, or another's: laid out at the panel's size again)
         if self.stream is not None:
             self.stream.stop()
             self.stream = None
+        if self.here_poll is not None:
+            GLib.source_remove(self.here_poll)
+            self.here_poll = None
+        if not keep:
+            self.native.set_visible(False)  # (another Bot's, or none: offered again if it's hostable)
+        if not keep and self.here is not None:
+            if self.here.win is not None and self.here.win.body.get_parent() is self.body:
+                self.body.remove(self.here.win.body)
+            self.here = None
         if not keep:
             self.picture.set_paintable(None)
             self.body.set_visible_child_name("status")
@@ -356,10 +561,106 @@ class BrowserPane(Gtk.Box):
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
         # as the status isn't)
 
+    # (a Bot of this Mac's: its pages here)
+
+    def restart_native(self):
+        """Restart as Native: this Mac's browser of the Bot's, streamed, made Baude's (taken from its own Emission,
+        busy or not: its pages reloaded there, the Bot told)."""
+        if self.sid is None or not can_host(self.remote) or self.here is not None and self.here.win is not None:
+            return
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream = None
+        self.here_off.pop(self.sid, None)
+        self.here_busy = None
+        self.native.set_visible(False)
+        here = HERE.get(self.sid)
+        if here is not None and here.win is None and here.why is None:  # (being taken already: that one, forced)
+            here.force = True
+        elif here is None or here.win is None:
+            here = HERE[self.sid] = Here(self.win.get_application(), self.sid, self.name, force=True)
+        self.say_status("Connecting…", "")
+        sid = self.sid
+        here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
+
+    def show_here(self):
+        sid = self.sid
+        if self.here is not None and self.here.sid == sid and self.here.win is not None:
+            return self.here_ready(self.here)
+        here = HERE.get(sid)
+        if here is None:
+            here = HERE[sid] = Here(self.win.get_application(), sid, self.name)
+        self.say_status("Connecting…", "")
+        here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
+
+    def here_ready(self, here):
+        if here.force and here.why is not None:  # (Restart as Native asked: why it couldn't, said)
+            self.said.set_label(f"Couldn't restart as native: {here.why}")
+            self.said.set_visible(True)
+        if here.why is not None or here.win is None:  # (couldn't be had here: streamed; a busy Bot's, this time only)
+            if here.why == "busy":  # (tried again while it's watched: the Bot may have let it be by then)
+                self.here_busy = here.sid
+                GLib.timeout_add_seconds(BUSY_RETRY_S, lambda sid=here.sid: self.retry_here(sid) and False)
+            else:
+                self.here_off[here.sid] = time.monotonic()
+            return self.watch_if_shown()
+        body = here.win.body
+        if body.get_parent() is not None and body.get_parent() is not self.body:  # (shown in another window's pane:
+            self.here_off[here.sid] = time.monotonic()                              # streamed in this one)
+            return self.watch_if_shown()
+        if body.get_parent() is None:
+            self.body.add_named(body, "here")
+        if self.stream is not None:  # (a stream begun meanwhile: its frames aren't shown over the page)
+            self.stream.stop()
+            self.stream = None
+        self.here = here
+        self.native.set_visible(False)
+        self.body.set_visible_child_name("here")
+        here.win.blocked = self.read_only.get_active()
+        root = self.get_root()
+        if root is not None and not getattr(root, "keys_back", False):  # (GTK's own widgets clicked: keys theirs
+            root.keys_back = True                                       # again, not the page's)
+            import emission
+            clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+            clicks.connect("pressed", lambda *_: emission.MacWeb.keys_to_gtk(root))
+            root.add_controller(clicks)
+            keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (keys a page has, or a
+            for signal in ("key-pressed", "key-released"):  # Bot's typing in one handed back: not GTK's)
+                keys.connect(signal, lambda c, kv, *_: emission.MacWeb.page_has_keys(root, c.get_current_event_time(),
+                                                                                       kv))
+            root.add_controller(keys)
+        self.here_state()
+        if self.here_poll is None:
+            self.here_poll = GLib.timeout_add(250, self.here_state)
+
+    def retry_here(self, sid):
+        if sid != self.sid or self.here_busy != sid or not self.get_mapped():
+            return
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream = None
+        self.here_busy = None
+        self.watch_if_shown()
+
+    def here_state(self):
+        if self.here is not None and self.here.win is None:  # (let go of: streamed from wherever it is now)
+            self.here, self.here_poll = None, None
+            self.here_off[self.sid] = time.monotonic()
+            self.body.set_visible_child_name("status")
+            self.watch_if_shown()
+            return False
+        if self.here is None or self.here.win is None or not self.get_mapped():
+            self.here_poll = None
+            return False
+        state = self.here.win.watch_state()
+        if state != self.state:
+            self.set_state(state)
+        return True
+
     def say_status(self, title, text):
         self.status.set_title(title)
         self.status.set_description(text)
-        if self.picture.get_paintable() is None:
+        if self.picture.get_paintable() is None and self.here is None:
             self.body.set_visible_child_name("status")
 
     # (what comes)
@@ -453,10 +754,11 @@ class BrowserPane(Gtk.Box):
 
     def ask(self, call, done=None):
         """call to the Bot's Emission (as its tools' are: real input there), after what was asked before it: on this
-        machine straight to its door, elsewhere through its host. Nothing, while it's read-only."""
+        machine straight to its socket, elsewhere through its host. Nothing, while it's read-only."""
         if self.sid is None or self.remote is None or self.read_only.get_active():
             return
         sid, remote = self.sid, self.remote
+        call = {**call, "from_pane": True}  # (not the Bot's: not its activity, nor what it's to be told)
 
         def answered(r):
             if sid != self.sid or remote is not self.remote:
@@ -471,18 +773,22 @@ class BrowserPane(Gtk.Box):
                 self.said.set_visible(False)
             if done:
                 done(r)
+        if self.here is not None and self.here.win is not None:
+            return self.here.call(call, lambda r: GLib.idle_add(lambda: answered(r) and False))
         self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)
 
     def read_only_set(self, on):
         for w in self.drives:
             w.set_sensitive(not on)
+        if self.here is not None and self.here.win is not None:
+            self.here.win.blocked = on
         if self.sid is None:
             return
         if self.stream is not None and self.state.get("agent"):  # (driven again: fitted to the panel; read-only: the
             self.sized_to = None                                    # Bot's page at its own size again)
             if on:
                 self.view_size = None  # (the page's size as it was fitted isn't what it'll be: fitted again after)
-                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True},
+                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True, "from_pane": True},
                               lambda _r: None)
             else:
                 self.fit_page()
@@ -672,4 +978,4 @@ class BrowserPane(Gtk.Box):
         if self.view_size and tuple(self.view_size) == size:
             return
         self.asks.put(self.remote, {"id": self.sid, "name": self.name},
-                      {"op": "resize", "width": size[0], "height": size[1], "fit": True}, lambda _r: None)
+                      {"op": "resize", "width": size[0], "height": size[1], "fit": True, "from_pane": True}, lambda _r: None)

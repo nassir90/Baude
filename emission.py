@@ -40,11 +40,11 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
-                                   data_home, door_path, forget_profile, hand_over, leftovers, lock_profile,
+                                   data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, profile_id, profiles, rename_profile, unlock_profile)
 
 
-class Door:
+class ProfileSocket:
     """This process taking requests for the profiles it has (each one's lock held: no one else listens there): a
     line of JSON each, answered with one, maybe later (a screenshot, a script)."""
     open = {}
@@ -54,9 +54,9 @@ class Door:
         """handle(pid, request, answer) run for each request to pid's profile; answer(dict) sends its answer."""
         if pid in cls.open:
             return
-        path = door_path(pid)
+        path = profile_socket(pid)
         try:
-            os.unlink(path)  # (a door left by an Emission that's gone: its lock's ours now)
+            os.unlink(path)  # (a socket left by an Emission that's gone: its lock's ours now)
         except OSError:
             pass
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -111,7 +111,7 @@ class Door:
             GLib.source_remove(source)
             srv.close()
             try:
-                os.unlink(door_path(pid))
+                os.unlink(profile_socket(pid))
             except OSError:
                 pass
 
@@ -540,12 +540,13 @@ class MacWeb:
             send(script, b"release")
         prefs = send(config, b"preferences")
         for sel in (b"_setHiddenPageDOMTimerThrottlingEnabled:", b"_setPageVisibilityBasedProcessSuppressionEnabled:")\
-                if AGENT["on"] else ():
+                if AGENT["on"] or for_bots(profile) else ():
             if send(prefs, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
                 send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
-        if AGENT["on"] and send(self.view, b"respondsToSelector:", objc_sel(b"_setWindowOcclusionDetectionEnabled:"),
+        if (AGENT["on"] or for_bots(profile)) and send(self.view, b"respondsToSelector:", objc_sel(
+                b"_setWindowOcclusionDetectionEnabled:"),
                                 types=(ctypes.c_void_p,), ret=ctypes.c_bool):
             send(self.view, b"_setWindowOcclusionDetectionEnabled:", False, types=(ctypes.c_bool,))  # (an agent's
             # window is never in front of anyone: its pages drawn as they change while it's in, unseen: in_unseen)
@@ -559,7 +560,7 @@ class MacWeb:
         send(self.view, b"setNavigationDelegate:", delegate, types=(ctypes.c_void_p,))
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
-        self.attached = None
+        self.attached = self.attached_root = self.blocker = None
 
     @staticmethod
     def jar(profile):
@@ -675,20 +676,100 @@ class MacWeb:
         """Put in its window's content view, once the window's shown."""
         if self.attached is not None:
             return True
-        ns = macos.native_window(self.place.get_root())
+        root = self.place.get_root()
+        ns = macos.native_window(root) if root is not None else None
         if not ns:
             return False
         content = macos.objc_send(ns, b"contentView")
         macos.objc_send(content, b"addSubview:", self.view, types=(ctypes.c_void_p,))
-        self.attached = content
+        self.attached, self.attached_root = content, root
         return True
+
+    parked_in = None  # (the unseen window hosted pages out of sight are kept in: parking)
+
+    @classmethod
+    def parking(cls):
+        """The content view of a window of this process's that's in, where no one sees it (see-through, clicked
+        through, at the desktop's level, out of Mission Control and window cycling): a hosted page out of sight is
+        kept in it, so WebKit draws it on (one hidden, or in no window, isn't drawn)."""
+        send, R = macos.objc_send, macos._rect()
+        if cls.parked_in is None:
+            w = send(send(b"NSWindow", b"alloc"), b"initWithContentRect:styleMask:backing:defer:", R(0, 0, 1600, 1200),
+                     0, 2, False, types=(R, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_bool))  # (0: borderless; 2: buffered)
+            send(w, b"setReleasedWhenClosed:", False, types=(ctypes.c_bool,))
+            send(w, b"setAlphaValue:", 0.0, types=(ctypes.c_double,))
+            send(w, b"setIgnoresMouseEvents:", True, types=(ctypes.c_bool,))
+            send(w, b"setHasShadow:", False, types=(ctypes.c_bool,))
+            cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg.CGWindowLevelForKey.restype, cg.CGWindowLevelForKey.argtypes = ctypes.c_int32, [ctypes.c_int32]
+            send(w, b"setLevel:", cg.CGWindowLevelForKey(2), types=(ctypes.c_long,))  # (2: the desktop's)
+            send(w, b"setCollectionBehavior:", (1 << 3) | (1 << 4) | (1 << 6), types=(ctypes.c_ulong,))
+            send(w, b"orderWindow:relativeTo:", -1, 0, types=(ctypes.c_long, ctypes.c_long))  # (-1: below the rest)
+            cls.parked_in = w
+        return send(cls.parked_in, b"contentView")
+
+    def park(self):
+        """A hosted page whose place isn't shown: kept in the unseen window (parking), at the Bot's own size (its
+        window's page_size: what it's laid out at when no one's looking, as an agent's is), hidden only if it isn't
+        its window's selected tab."""
+        content = self.parking()
+        send, R = macos.objc_send, macos._rect()
+        if self.attached != content:
+            self.detach()
+            send(content, b"addSubview:", self.view, types=(ctypes.c_void_p,))
+            self.attached, self.attached_root = content, "parked"
+        w, h = getattr(self.window, "page_size", None) or (1280, 900)
+        now = send(self.view, b"frame", ret=R)
+        if (now.w, now.h) != (w, h):
+            send(self.view, b"setFrame:", R(0, 0, w, h), types=(R,))
+        send(self.view, b"setHidden:", not self.shown, types=(ctypes.c_bool,))
+
+    def detach(self):
+        """Out of the window it was in (its place moved to another's): the keys back to GTK's, if it had them."""
+        if self.attached is None:
+            return
+        ns = macos.objc_send(self.view, b"window")
+        if ns and macos.objc_send(ns, b"firstResponder") == self.view:
+            macos.objc_send(ns, b"makeFirstResponder:", macos.objc_send(ns, b"contentView"), types=(ctypes.c_void_p,))
+        self.block(False)
+        macos.objc_send(self.view, b"removeFromSuperview")
+        self.attached = self.attached_root = None
+
+    def block(self, on):
+        """Clicks, scrolls and keys kept from the page (on), by a view over it that takes them (and gives them to
+        GTK's, under it), or given it again."""
+        send = macos.objc_send
+        if on and self.blocker is None and self.attached is not None:
+            self.blocker = send(send(b"NSView", b"alloc"), b"initWithFrame:", send(self.view, b"frame",
+                                                                                   ret=macos._rect()),
+                                types=(macos._rect(),))
+            send(self.attached, b"addSubview:positioned:relativeTo:", self.blocker, 1, self.view,
+                 types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p))  # (1: NSWindowAbove)
+        elif not on and self.blocker is not None:
+            send(self.blocker, b"removeFromSuperview")
+            send(self.blocker, b"release")
+            self.blocker = None
 
     def follow(self):
         """Its frame kept over its place (the window resized, a bar's height changed)."""
+        if self.view is None:  # (closed)
+            return
+        root = self.place.get_root()
+        hosted = getattr(self.window, "hosted", False)
+        if root is None or not self.place.get_mapped():
+            if hosted:  # (out of sight: drawn on, unseen)
+                return self.park()
+            if self.attached is not None and root is not self.attached_root:
+                self.detach()
+            if self.attached is not None:
+                macos.objc_send(self.view, b"setHidden:", True, types=(ctypes.c_bool,))
+                self.block(False)
+            return
+        if self.attached is not None and root is not self.attached_root:  # (shown again, or in another window)
+            self.detach()
         if not self.attach():
             return
         send, R = macos.objc_send, macos._rect()
-        root = self.place.get_root()
         ok, b = self.place.compute_bounds(root)
         if not ok:
             return
@@ -699,12 +780,19 @@ class MacWeb:
         now = send(self.view, b"frame", ret=R)
         if (now.x, now.y, now.w, now.h) != (frame.x, frame.y, frame.w, frame.h):
             send(self.view, b"setFrame:", frame, types=(R,))
-        send(self.view, b"setHidden:", not self.shown, types=(ctypes.c_bool,))
+        dialog = getattr(root, "get_visible_dialog", None)  # (an Adw dialog in the window: drawn under the page)
+        hidden = not self.shown or (dialog is not None and dialog() is not None)
+        send(self.view, b"setHidden:", hidden, types=(ctypes.c_bool,))
+        self.block(bool(getattr(self.window, "blocked", False)) and not hidden)
+        if self.blocker is not None:
+            send(self.blocker, b"setFrame:", frame, types=(R,))
 
     def show(self, on):
         self.shown = on
         if self.attached is not None:
-            macos.objc_send(self.view, b"setHidden:", not on, types=(ctypes.c_bool,))
+            parked = self.attached_root == "parked"  # (out of sight but drawn: only its window's other tabs hidden)
+            macos.objc_send(self.view, b"setHidden:", not on or not (parked or self.place.get_mapped()),
+                            types=(ctypes.c_bool,))
 
     def show_failure(self, url, why):
         """The failure page in place of url's (its history entry url's, as a page that couldn't load)."""
@@ -924,6 +1012,49 @@ class MacWeb:
             macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
         macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
+    bot_times = {}  # (the times, in ms, the Bot's key events were stamped with, oldest first: what GTK hears with one's a page's
+    bot_n = [0]         # handing back a key of the Bot's it didn't use, dropped by Baude: page_has_keys)
+    bot_text_until = 0.0  # (time.monotonic(): till then, text that comes to GTK with no key, as WebKit gives the text a
+    # Bot's key made to whatever has the keys by the time it's done with it, is the Bot's: dropped)
+
+    @classmethod
+    def bot_stamp(cls):
+        """A Bot's key event's timestamp: from a range a real key's never has (its ms near 2^32), so GTK's event,
+        made from it, is known for the Bot's (its time those ms), however late WebKit hands it back."""
+        cls.bot_n[0] = (cls.bot_n[0] + 1) % 900_000
+        ms = 4_294_000_000 + cls.bot_n[0]
+        for heard in (ms, ms - 1):  # (GDK's ms are the stamp's, cut down: one less, as often as not)
+            cls.bot_times.pop(heard, None)
+            cls.bot_times[heard] = True
+        while len(cls.bot_times) > 4000:  # (the oldest let go of, however the count's come round)
+            cls.bot_times.pop(next(iter(cls.bot_times)))
+        return (ms + 0.5) / 1000.0
+
+    def keys_here(self, fn):
+        """fn() with the page its window's first responder: in Baude's window (hosted), whose own widgets have the
+        keys, a Bot's keys (and the text they make) go to the page only while it is, given back straight after; what
+        WebKit hands back after (a key the page didn't use) is dropped by Baude (bot_stamp, page_has_keys)."""
+        send = macos.objc_send
+        ns = send(self.view, b"window")
+        before = send(ns, b"firstResponder") if ns and getattr(self.window, "hosted", False) else None
+        if before is None or before == self.view:
+            return fn()
+        MacWeb.bot_text_until = time.monotonic() + 1.0
+        send(ns, b"makeFirstResponder:", self.view, types=(ctypes.c_void_p,))
+        try:
+            return fn()
+        finally:
+            send(ns, b"makeFirstResponder:", before, types=(ctypes.c_void_p,))
+
+    @staticmethod
+    def page_has_keys(window, when, keyval):
+        """Whether a key GTK hears (at when: its event's time, ms; keyval its key) isn't its own: a page has the keys
+        (clicked into), it's a Bot's key a page handed back, or text a Bot's key made, come with no key of its own
+        (VoidSymbol, at 0) while the Bot types. Your own keys come with theirs, and at their own times."""
+        if when in MacWeb.bot_times or not MacWeb.gtk_has_keys(window):
+            return True
+        return keyval == 0xffffff and not when and time.monotonic() < MacWeb.bot_text_until
+
     def keyed(self):
         """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
         that isn't key types characters, but doesn't run Return, Delete and the like)."""
@@ -933,6 +1064,9 @@ class MacWeb:
     def key(self, name, mods=()):
         """A key pressed and let go (name: a character, or Enter, Tab, Backspace, Delete, Escape, the arrows, Home,
         End, PageUp, PageDown, Space), as real key events."""
+        return self.keys_here(lambda: self._key(name, mods))
+
+    def _key(self, name, mods=()):
         send = macos.objc_send
         code, chars = MAC_KEYS.get(name, (None, name))
         if code is None and len(name) == 1:
@@ -950,7 +1084,7 @@ class MacWeb:
             return f(send.rt.objc_getClass(b"NSEvent"), objc_sel(
                 b"keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:"
                 b"charactersIgnoringModifiers:isARepeat:keyCode:"), kind, MacPoint(0, 0), flags,
-                GLib.get_monotonic_time() / 1e6, send(ns, b"windowNumber", ret=ctypes.c_long), None,
+                MacWeb.bot_stamp(), send(ns, b"windowNumber", ret=ctypes.c_long), None,
                 macos.ns_string(shown), macos.ns_string(chars), False, code)
         command = MAC_COMMANDS.get((name, tuple(sorted(mods))))
         keyed = self.keyed()
@@ -971,6 +1105,9 @@ class MacWeb:
         if ch == "\n":
             self.key("Enter")
             return True
+        return self.keys_here(lambda: self._type_char(ch))
+
+    def _type_char(self, ch):
         send = macos.objc_send
         base = MAC_SHIFTED.get(ch, ch.lower())
         code = 49 if ch == " " else MAC_CHAR_CODES.get(base, 0)
@@ -983,7 +1120,7 @@ class MacWeb:
             ev = f(send.rt.objc_getClass(b"NSEvent"), objc_sel(
                 b"keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:"
                 b"charactersIgnoringModifiers:isARepeat:keyCode:"), kind, MacPoint(0, 0), flags,
-                GLib.get_monotonic_time() / 1e6, send(ns, b"windowNumber", ret=ctypes.c_long), None,
+                MacWeb.bot_stamp(), send(ns, b"windowNumber", ret=ctypes.c_long), None,
                 macos.ns_string(ch), macos.ns_string(ch.lower()), False, code)
             send(self.view, sel, ev, types=(ctypes.c_void_p,))
         return True
@@ -1038,6 +1175,7 @@ class MacWeb:
 
     def close(self):
         if self.view:
+            self.block(False)
             send = macos.objc_send
             self.views.pop(self.view, None)
             send(self.view, b"setNavigationDelegate:", None, types=(ctypes.c_void_p,))
@@ -1574,6 +1712,51 @@ def engine():
 
 # ------------------------------------------------------------------ window --
 
+def open_pages(pid, urls=None, why=None):
+    """A Bot's browser's pages, written down as they change (urls; why: it's closing itself, "idle"), so the next one
+    started knows what was lost if this one ends without closing them; or (no urls) what the last wrote, read and
+    forgotten: (urls, why)."""
+    path = os.path.join(data_home(), "profiles", pid + ".open")
+    if urls is None:
+        try:
+            with open(path, encoding="utf-8") as f:
+                had = json.load(f)
+            os.unlink(path)
+            had = had if isinstance(had, dict) else {"urls": had}
+            return [u for u in had.get("urls") or [] if isinstance(u, str)], had.get("why")
+        except (OSError, ValueError, AttributeError):
+            return [], None
+    try:
+        if urls:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"urls": urls, "why": why}, f)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
+    return urls
+
+
+def pending_note(pid, note=None):
+    """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
+    next): note "" once it's told; note None, what's waiting read."""
+    path = os.path.join(data_home(), "profiles", pid + ".note")
+    try:
+        if note is None:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip() or None
+        if note:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(note)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        return None
+    return None
+
+
 class Tab:
     """A tab: its page, and where it's drawn. url None: a page another opened, WebKit loading it (opener: what the
     engine was given to make it with)."""
@@ -1584,9 +1767,20 @@ class Tab:
         self.id, self.win = f"tab{Tab.made}", win
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
+        if win.Engine is MacWeb:  # (its view kept over its place as soon as that's shown, hidden or moved: hosted, in a
+            for signal in ("map", "unmap"):  # side panel that's resized and switched, every frame it's shown)
+                self.place.connect(signal, lambda *_: self.web.follow())
+            if win.hosted:  # (followed each frame while it's shown in Baude's window: not in its own, never shown)
+                self.ticking = None
+                self.place.connect("map", lambda p: setattr(self, "ticking", p.add_tick_callback(
+                    lambda *_: self.web.follow() or True)))
+                self.place.connect("unmap", lambda p: self.ticking is not None and (
+                    p.remove_tick_callback(self.ticking), setattr(self, "ticking", None)))
         self.web.window = win
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
+        if win.hosted:
+            self.web.follow()  # (out of sight from the start: parked, at the Bot's own size)
         self.last = {}
         if url is not None:
             self.web.load(address(url))
@@ -1598,11 +1792,29 @@ class Window(Adw.ApplicationWindow):
     FAST_MS, MID_MS, SLOW_MS = (16 if sys.platform == "darwin" else 33), 100, 250
     SAME_FOR_MID = 6  # (this many frames the same in a row: the middle pace)
 
-    def __init__(self, app, url, profile, agent=False):
+    def __init__(self, app, url, profile, agent=False, hosted=False):
         """agent: the window of an Emission started for a Bot's tools (its own profile; never seen: on macOS it's
         kept off the screen, put in unseen only while it's watched, on Linux it's on a display of its own; a page's
-        prompts wait for the tools)."""
-        super().__init__(application=app, title="Emission", default_width=1280, default_height=900)
+        prompts wait for the tools). hosted: an agent's, in Baude's process, its pages shown in Baude's Browser page
+        (body, put there): never shown itself, no shortcuts of its own, not gone when idle, not quit when asked."""
+        super().__init__(application=None if hosted else app, title="Emission", default_width=1280,
+                         default_height=900)
+        self.hosted, self.blocked = hosted, False  # (blocked: its pages not to be clicked or typed in, but watched)
+        self.open_said = None  # (the pages it has open, as last written down for the next to find: open_pages)
+        self.page_size = None  # (hosted: the Bot's own size for its pages, out of sight; None: 1280 by 900)
+        self.asked_at = GLib.get_monotonic_time()  # (the Bot's last request: how long it's left its browser alone)
+        self.released = None  # (hosted: what lets its profile go when someone's Emission asks for it)
+        self.note = None  # (what the Bot's next request is told: this browser's a new one, and what it had's gone)
+        if agent:
+            pid = profile_id(profile) or ""
+            had, why = open_pages(pid)
+            self.note = pending_note(pid)  # (one a browser before it had for the Bot and never gave)
+            if had:
+                self.note = ((self.note + " ") if self.note else "") + (
+                    ("This browser was closed after going unused for a while" if why == "idle" else
+                     "This browser was restarted (Baude or its host restarted)") +
+                    ": these pages it had open are closed now: " + ", ".join(had[:10]))
+            pending_note(pid, self.note)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
         self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
@@ -1632,6 +1844,8 @@ class Window(Adw.ApplicationWindow):
         bar.pack_end(self.who)
         bar.pack_end(new_tab)
         self.view = Adw.TabView(vexpand=True)
+        if hosted:  # (in Baude's window: its tabs' keys are Baude's own tabs')
+            self.view.set_shortcuts(Adw.TabViewShortcuts.NONE)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
         strip = Gtk.Overlay(child=Adw.TabBar(view=self.view, autohide=False))
@@ -1664,8 +1878,9 @@ class Window(Adw.ApplicationWindow):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", lambda *_a, fn=fn: fn())
             self.add_action(act)
-            app.set_accels_for_action(f"win.{name}", keys)
-        if self.Engine is MacWeb:
+            if not hosted:
+                app.set_accels_for_action(f"win.{name}", keys)
+        if self.Engine is MacWeb and not hosted:
             clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
             clicks.connect("pressed", lambda *_: MacWeb.keys_to_gtk(self))
             self.add_controller(clicks)
@@ -1692,37 +1907,47 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def give_back(self, pid):
-        """A Bot's profile this window had, let go of (its door now, its lock once WebKit's let go of its store):
+        """A Bot's profile this window had, let go of (its socket now, its lock once WebKit's let go of its store):
         the Bot's own Emission can have it again."""
-        Door.close(pid)
+        ProfileSocket.close(pid)
         held = GtkWeb.sessions.pop(pid, None)
         if held is not None:
             GtkWeb.given_back[pid] = held  # (taken up again if this window comes back to it first)
 
         def let_go():
-            if pid != self.profile_id and pid not in Door.open:
+            if pid != self.profile_id and pid not in ProfileSocket.open:
                 GtkWeb.given_back.pop(pid, None)
                 unlock_profile(pid)
         self.later.append((GLib.get_monotonic_time() + 10_000_000, let_go))
 
     def have(self, pid):
-        """pid's profile this process's (its lock, and its door for others' pages), or False if another Emission
+        """pid's profile this process's (its lock, and its socket for others' pages), or False if another Emission
         has it."""
         if not lock_profile(pid):
             return False
-        Door.listen(pid, self.handle)
+        ProfileSocket.listen(pid, self.handle)
         return True
 
     def handle(self, pid, msg, answer, conn=None):
-        """A request at pid's door: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
+        """A request at pid's socket: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
         (Control's), for pid's profile (this window moved to it if it's elsewhere)."""
         op = msg.get("op")
+        busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
+        idle_s = 0.0 if busy else (GLib.get_monotonic_time() - self.asked_at) / 1e6  # (work still going: not idle)
         self.used = GLib.get_monotonic_time()
+        if op not in ("info", "watch") and not msg.get("from_pane"):
+            self.asked_at = self.used
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
-        if op == "info":
-            return answer({"agent": self.agent, "profile": self.profile, "tabs": len(self.tabs)})
+        if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
+            return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
+                           "tabs": len(self.tabs), "idle_s": idle_s})
+        if op == "quit" and self.hosted:  # (someone's Emission wants its profile: let go of, the Bot told after)
+            answer({"ok": True})
+            if self.released is not None:
+                GLib.idle_add(lambda: self.released() and False)
+            return None
         if op == "quit":
             answer({"ok": True})
             GLib.timeout_add(100, lambda: (self.closing_window(), self.get_application().quit()) and False)
@@ -1740,8 +1965,8 @@ class Window(Adw.ApplicationWindow):
                 return answer({"error": "that profile isn't open here"})
         if op == "watch":
             self.watchers.append(Watcher(self, conn, msg))
-            if self.agent and sys.platform == "darwin":  # (watched: its window in, where no one sees it, so WebKit
-                macos.in_unseen(self)                     # draws its pages as they change: a picture that moves)
+            if self.agent and not self.hosted and sys.platform == "darwin":  # (watched: its window in, where no one
+                macos.in_unseen(self)  # sees it, so WebKit draws its pages as they change: a picture that moves)
             return self.watch_kick()
         if op == "resize" and self.agent and msg.get("restore"):  # (a watcher gone read-only: the Bot's own size
             if self.watch_size is not None and len(self.watchers) <= 1:  # back, unless another still drives it)
@@ -1749,6 +1974,12 @@ class Window(Adw.ApplicationWindow):
                 self.watch_size = None
             return answer({"ok": True})
         self.watch_kick()  # (something's being done: frames often for a while)
+        if self.note and not msg.get("from_pane"):  # (the first of the Bot's requests told what became of the
+            # browser it had: not Baude's Browser page's)
+            note, said = self.note, answer
+            self.note = None
+            pending_note(self.profile_id, "")
+            answer = lambda r: said({**r, "note": note} if isinstance(r, dict) else r)  # noqa: E731
         return self.control.run(op, msg, answer)
 
     # (watchers: Baude's Browser panes)
@@ -1837,7 +2068,8 @@ class Window(Adw.ApplicationWindow):
             return
         for url in urls or [HOME_PAGE]:
             self.open(url)
-        self.present()
+        if not self.hosted:
+            self.present()
 
     def show_body(self, why):
         """The pages, or (why: there can't be any) a status page saying why."""
@@ -1966,7 +2198,7 @@ class Window(Adw.ApplicationWindow):
                 self.say("Couldn't copy the sign-ins", why)
             else:
                 self.say("Sign-ins copied", f"“{bot['name']}” is now signed in to {', '.join(sites)}.")
-        if bot["id"] == self.profile_id or bot["id"] in Door.open:  # (it's this window's, or this process's)
+        if bot["id"] == self.profile_id or bot["id"] in ProfileSocket.open:  # (it's this window's, or this process's)
             self.Engine.add_cookies(bot["id"], cookies, done)
             return
 
@@ -1975,7 +2207,8 @@ class Window(Adw.ApplicationWindow):
                 got = call_bot(bot["bot"], None, {"op": "add_cookies", "cookies": cookies}, timeout=30)
                 GLib.idle_add(lambda: done(got.get("added", 0), None) and False)
             except (OSError, ValueError) as e:
-                GLib.idle_add(lambda: done(None, str(e)) and False)
+                why = str(e)  # (e's gone once this block's done: the idle call's after)
+                GLib.idle_add(lambda: done(None, why) and False)
         threading.Thread(target=over_there, daemon=True).start()
 
     def ask_rename(self):
@@ -2016,7 +2249,7 @@ class Window(Adw.ApplicationWindow):
                 return
             if why:
                 if pid != self.profile_id:
-                    Door.close(pid)
+                    ProfileSocket.close(pid)
                     unlock_profile(pid)
                 self.say(f"Couldn't remove “{name}”", why)
                 return
@@ -2025,7 +2258,7 @@ class Window(Adw.ApplicationWindow):
                 os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
             except OSError:
                 pass
-            Door.close(pid)
+            ProfileSocket.close(pid)
             unlock_profile(pid)
             self.refresh_profiles()
         self.Engine.remove_store(pid, removed)
@@ -2282,7 +2515,9 @@ class Window(Adw.ApplicationWindow):
             return False
         if self.watchers:
             self.used = GLib.get_monotonic_time()  # (watched: in use)
-        if self.agent and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and not self.waiting:
+        if self.agent and not self.hosted and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and \
+                not self.waiting:
+            open_pages(self.profile_id, self.open_said or [], why="idle")
             self.closing_window()
             self.get_application().quit()
             return False
@@ -2292,6 +2527,11 @@ class Window(Adw.ApplicationWindow):
             self.later = [(when, fn) for when, fn in self.later if when > now]
             for fn in due:
                 fn()
+        if self.agent:
+            urls = [u for t in self.tabs.values() if (u := t.last.get("url")) and u != "about:blank"]
+            if urls != self.open_said:
+                self.open_said = urls
+                open_pages(self.profile_id, urls)
         for page, tab in list(self.tabs.items()):
             tab.web.follow()
             now = tab.web.state()
@@ -2490,7 +2730,7 @@ def guarded(fn, answer):
 
 
 class Control:
-    """What a Bot's browser tools ask of a window (emissiontools, through the host process and the door): a request,
+    """What a Bot's browser tools ask of a window (emissiontools, through the host process and the socket): a request,
     answered with a dict. Input's real (the pointer moved to a place, then pressed; keys one at a time), as computer
     use's is; a page's text comes from the page itself, and what's on it is named by refs read_page and find give."""
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
@@ -2855,6 +3095,29 @@ class Control:
                 lambda got: answer({**self.describe(t), "requests": got}))
 
     def op_resize(self, msg, answer):
+        if self.win.hosted:  # (in Baude: its page laid out at this when it's not shown, its pane's size when it is)
+            return self.resize_hosted(msg, answer)
+        return self.resize_window(msg, answer)
+
+    def resize_hosted(self, msg, answer):
+        t = self.tab(msg)
+        w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
+        if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
+            raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
+        if msg.get("fit"):  # (a pane watching it streamed: its frames scaled, the Bot's own size kept)
+            return answer({**self.describe(t), "size": None})
+        self.win.page_size = (w, h)
+        for tab in self.win.tabs.values():
+            tab.web.follow()
+        shown = t.place.get_mapped()
+        GLib.timeout_add(300, guarded(lambda: self.js(t, "return {width: innerWidth, height: innerHeight}", answer,
+                                                      lambda v: answer({**self.describe(t), "size": v, **(
+                                                          {"note": "its page is shown in Baude's Browser page now, at "
+                                                                   "the page's size: it's laid out at this size again "
+                                                                   "once it isn't"} if shown else {})}))
+                                      and False, answer))
+
+    def resize_window(self, msg, answer):
         """The page's size (its viewport) made width by height, CSS pixels. fit: a watcher's (its pane's size), the
         size the Bot had kept to put back once no one watches; else the Bot's own, kept."""
         t = self.tab(msg)

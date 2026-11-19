@@ -686,6 +686,52 @@ class MacWeb:
         return True
 
     parked_in = None  # (the unseen window hosted pages out of sight are kept in: parking)
+    GESTURES = {22: b"scrollWheel:", 29: b"magnifyWithEvent:", 31: b"swipeWithEvent:", 18: b"rotateWithEvent:",
+                32: b"smartMagnifyWithEvent:"}  # (an NSEvent's type: what a view's given it with)
+
+    @classmethod
+    def take_event(cls, event):
+        """A wheel's turn or a trackpad's gesture over a page (in Emission's window, or hosted in Baude's; not
+        read-only), given to its view as it comes, momentum and all: GTK keeps these for its own surface, so the page
+        would never see them. True if it's taken (macos.route_events)."""
+        send, R = macos.objc_send, macos._rect()
+        kind = send(event, b"type", ret=ctypes.c_ulong)
+        sel = cls.GESTURES.get(kind)
+        if sel is None:
+            return False
+        f = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p)(
+            ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+        at = f(event, objc_sel(b"locationInWindow"))
+        ns = send(event, b"window")
+        if not ns:  # (one of no window yet: its place on the screen, the window there, its place in that)
+            app = send(b"NSApplication", b"sharedApplication")
+            number = send(event, b"windowNumber", ret=ctypes.c_long)
+            if number <= 0:
+                h = ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, MacPoint, ctypes.c_long)(
+                    ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+                number = h(send.rt.objc_getClass(b"NSWindow"), objc_sel(b"windowNumberAtPoint:belowWindowWithWindowNumber:"),
+                           at, 0)
+            ns = send(app, b"windowWithWindowNumber:", number, types=(ctypes.c_long,)) if number > 0 else None
+            if not ns:
+                return False
+            k = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p, MacPoint)(
+                ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+            at = k(ns, objc_sel(b"convertPointFromScreen:"), at)
+        g = ctypes.CFUNCTYPE(MacPoint, ctypes.c_void_p, ctypes.c_void_p, MacPoint, ctypes.c_void_p)(
+            ctypes.cast(send.rt.objc_msgSend, ctypes.c_void_p).value)
+        for view, web in list(cls.views.items()):  # (the hosted page under it, shown in that window)
+            if web.attached_root in (None, "parked"):
+                continue
+            if send(view, b"window") != ns or send(view, b"isHidden", ret=ctypes.c_bool):
+                continue
+            p = g(view, objc_sel(b"convertPoint:fromView:"), at, None)
+            box = send(view, b"bounds", ret=R)
+            if box.x <= p.x <= box.x + box.w and box.y <= p.y <= box.y + box.h:
+                if getattr(web.window, "blocked", False):  # (read-only: not the page's, nor GTK's)
+                    return True
+                send(view, sel, event, types=(ctypes.c_void_p,))
+                return True
+        return False
 
     @classmethod
     def parking(cls):
@@ -1846,6 +1892,8 @@ class Window(Adw.ApplicationWindow):
         self.view = Adw.TabView(vexpand=True)
         if hosted:  # (in Baude's window: its tabs' keys are Baude's own tabs')
             self.view.set_shortcuts(Adw.TabViewShortcuts.NONE)
+        if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages')
+            macos.route_events(MacWeb.take_event)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
         strip = Gtk.Overlay(child=Adw.TabBar(view=self.view, autohide=False))

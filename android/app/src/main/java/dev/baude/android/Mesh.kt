@@ -30,8 +30,9 @@ data class Contact(val hostId: String, val session: JSONObject) {
     val pictureKey: String get() = "$hostId/$id/${session.optJSONObject("bot")?.opt("picture")}"
 }
 
-/** One line of a chat as it's shown: yours, the Bot's, or what it did (a tool it used). */
-data class Line(val kind: String, val text: String)
+/** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
+ * ended, a turn stopped, the conversation compacted). rewind: a revert's mark, text the uuid of the last line kept. */
+data class Line(val kind: String, val text: String, val uuid: String? = null)
 
 /** A chat open: its lines, read from its transcript on its host (more read as it grows), what's sent to it. */
 class Chat(val hostId: String, val sid: String) {
@@ -58,6 +59,7 @@ object Mesh {
     var open: Chat? = null
     var shown = false // (the app in front: no notification for the chat open)
     private val conns = HashMap<String, Connection>()
+    private val catchUp = HashSet<String>() // (hosts back after a drop: Bots' turns that ended meanwhile, notified)
     private var started = false
 
     fun start(ctx: Context) {
@@ -68,6 +70,15 @@ object Mesh {
         hosts.addAll(HostStore.load(app))
         channel()
         hosts.forEach { connect(it) }
+        try { // (the network back: each host that's down tried again at once)
+            app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
+                object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        main.post { conns.values.forEach { it.kick() } }
+                    }
+                })
+        } catch (_: Exception) {
+        }
     }
 
     // ---- hosts
@@ -81,15 +92,17 @@ object Mesh {
         hosts.add(host)
         HostStore.save(app, hosts)
         connect(host)
+        MeshService.keep(app)
     }
 
     fun removeHost(host: Host) {
         hosts.removeAll { it.id == host.id }
         HostStore.save(app, hosts)
-        HostStore.forget(app, host)
+        if (hosts.none { it.address == host.address && it.port == host.port }) HostStore.forget(app, host)
         conns.remove(host.id)?.stop()
         states.remove(host.id)
         sessions.remove(host.id)
+        if (hosts.isEmpty()) app.stopService(Intent(app, MeshService::class.java))
     }
 
     fun connect(host: Host) {
@@ -110,7 +123,10 @@ object Mesh {
     private fun changed(c: Connection) {
         if (conns[c.host.id] !== c) return
         tick.value++
-        if (c.state == "up") open?.let { if (it.hostId == c.host.id) { attach(it); read(it) } }
+        if (c.state == "up") {
+            if (sessions[c.host.id] != null) catchUp.add(c.host.id)
+            open?.let { if (it.hostId == c.host.id) attach(it) } // (read once its sessions are listed: their sizes)
+        }
     }
 
     fun conn(hostId: String): Connection? = conns[hostId]
@@ -121,8 +137,14 @@ object Mesh {
         main.post {
             if (conns[c.host.id] !== c) return@post
             when (msg.optString("op")) {
-                "sessions" -> sessions[c.host.id] = msg.optJSONArray("sessions").list().filter { !it.optBoolean("draft") }
-                "turn_ended" -> ended(c, msg.optString("session"))
+                "sessions" -> {
+                    val now = msg.optJSONArray("sessions").list().filter { !it.optBoolean("draft") }
+                    val before = sessions[c.host.id]
+                    sessions[c.host.id] = now
+                    if (catchUp.remove(c.host.id) && before != null) missed(c, before, now)
+                    open?.let { if (it.hostId == c.host.id && it.offset < 0) read(it) }
+                }
+                "turn_ended" -> ended(c, msg)
                 "claude" -> open?.let { if (it.hostId == c.host.id && it.sid == msg.optString("session")) read(it) }
             }
         }
@@ -141,7 +163,10 @@ object Mesh {
         pictures[c.pictureKey] = null
         conns[c.hostId]?.request(JSONObject().put("op", "bot_picture").put("session", c.id)) { r ->
             val data = r.optString("picture", "")
-            if (data.isEmpty()) return@request
+            if (data.isEmpty()) {
+                main.post { pictures.remove(c.pictureKey) } // (asked again next time it's drawn)
+                return@request
+            }
             val bytes = Base64.getDecoder().decode(data)
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() ?: return@request
             main.post { pictures[c.pictureKey] = bmp }
@@ -181,6 +206,7 @@ object Mesh {
         val c = conns[chat.hostId] ?: return
         val size = sessions[chat.hostId]?.firstOrNull { it.optString("id") == chat.sid }?.optLong("size", 0) ?: 0
         val from = if (chat.offset < 0) (size - TAIL).coerceAtLeast(0) else chat.offset
+        if (chat.offset < 0 && sessions[chat.hostId] == null) return // (its size not known yet: read once it is)
         chat.reading = true
         c.request(JSONObject().put("op", "transcript").put("session", chat.sid).put("offset", from)) { r ->
             val data = r.optString("data", "")
@@ -191,7 +217,16 @@ object Mesh {
             main.post {
                 if (r.optString("op") == "transcript") {
                     chat.offset = next
-                    chat.lines.addAll(lines)
+                    for (line in lines) {
+                        if (line.kind != "rewind") {
+                            chat.lines.add(line)
+                            continue
+                        }
+                        val kept = chat.lines.indexOfLast { it.uuid != null && it.uuid == line.text }
+                        if (kept >= 0 || line.text.isEmpty()) {
+                            while (chat.lines.size > kept + 1) chat.lines.removeAt(chat.lines.size - 1)
+                        }
+                    }
                 }
                 chat.reading = false
                 if (more || chat.again) {
@@ -204,6 +239,19 @@ object Mesh {
 
     /** What you wrote (and the files you chose) sent to the chat, as Baude sends it: a user message for its agent. */
     fun send(chat: Chat, text: String, files: List<Picked>) {
+        chat.busy.value = true
+        chat.said.value = null
+        val c = conns[chat.hostId]
+        if (c == null) {
+            chat.busy.value = false
+            chat.said.value = "Can't connect to the host."
+            return
+        }
+        kotlin.concurrent.thread(name = "send", isDaemon = true) { build(chat, c, text, files) }
+    }
+
+    /** The message made (base64 and all, off the main thread) and sent. */
+    private fun build(chat: Chat, c: Connection, text: String, files: List<Picked>) {
         val blocks = JSONArray()
         val notes = StringBuilder()
         for (f in files) {
@@ -219,16 +267,11 @@ object Mesh {
         }
         val all = (text + notes).trim()
         if (all.isNotEmpty()) blocks.put(JSONObject().put("type", "text").put("text", all))
-        if (blocks.length() == 0) return
-        chat.busy.value = true
-        chat.said.value = null
-        val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", blocks))
-        val c = conns[chat.hostId]
-        if (c == null) {
-            chat.busy.value = false
-            chat.said.value = "Can't connect to the host."
+        if (blocks.length() == 0) {
+            main.post { chat.busy.value = false }
             return
         }
+        val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", blocks))
         c.request(JSONObject().put("op", "input").put("session", chat.sid).put("msg", msg)) { r ->
             main.post {
                 chat.busy.value = false
@@ -248,15 +291,42 @@ object Mesh {
         }
     }
 
-    /** A Bot's turn ended: what it said last, as a notification (none for the chat that's open in front). */
-    private fun ended(c: Connection, sid: String) {
+    /** A Bot's turn ended: what it said last (the turn's own result), as a notification (none for the chat that's
+     * open in front). */
+    private fun ended(c: Connection, msg: JSONObject) {
+        val sid = msg.optString("session")
         val chat = open
         if (chat != null && chat.hostId == c.host.id && chat.sid == sid) {
             read(chat)
             if (shown) return
         }
         val contact = contact(c.host.id, sid) ?: return
-        val size = sessions[c.host.id]?.firstOrNull { it.optString("id") == sid }?.optLong("size", 0) ?: 0
+        val result = if (msg.isNull("result")) "" else msg.optString("result").trim()
+        when {
+            msg.optBoolean("is_error") -> notify(contact, "Couldn't finish" + if (result.isNotEmpty()) ": $result" else "")
+            result.isNotEmpty() -> notify(contact, result)
+            else -> main.postDelayed({ // (no result said: its transcript's end, once its new size is listed)
+                val size = sessions[c.host.id]?.firstOrNull { it.optString("id") == sid }?.optLong("size", 0) ?: 0
+                last(c, sid, size)
+            }, 1_200)
+        }
+    }
+
+    /** Back after a drop: each Bot whose chat grew meanwhile, and is between turns now, notified with what it said
+     * last (its transcript's end). */
+    private fun missed(c: Connection, before: List<JSONObject>, now: List<JSONObject>) {
+        for (s in now) {
+            if (s.optJSONObject("bot") == null || s.optString("state") !in setOf("idle", "stopped")) continue
+            val old = before.firstOrNull { it.optString("id") == s.optString("id") } ?: continue
+            if (s.optLong("size", 0) <= old.optLong("size", 0)) continue
+            val chat = open
+            if (shown && chat != null && chat.hostId == c.host.id && chat.sid == s.optString("id")) continue
+            last(c, s.optString("id"), s.optLong("size", 0))
+        }
+    }
+
+    private fun last(c: Connection, sid: String, size: Long) {
+        val contact = contact(c.host.id, sid) ?: return
         c.request(JSONObject().put("op", "transcript").put("session", sid)
             .put("offset", (size - 64_000).coerceAtLeast(0))) { r ->
             val data = r.optString("data", "")
@@ -290,7 +360,7 @@ object Mesh {
 
     const val MESSAGES = "messages"
     const val LINKED = "linked"
-    private const val TAIL = 400_000L // (a chat's transcript read from this far before its end, the first time)
+    private const val TAIL = 400_000L // (a chat's transcript read from its last this much, the first time)
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
 
@@ -301,8 +371,10 @@ class Picked(val name: String, val mime: String, val bytes: ByteArray) {
 
 fun JSONArray?.list(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
-/** A transcript's lines (claude's JSONL) as a chat shows them: what you wrote, what the agent said, what it did.
- * cutFirst: it starts partway into a line, which is left out. */
+/** A transcript's lines (claude's JSONL) as a chat shows them, by Baude's rules (transcripts.history_item): what you
+ * wrote (reminders a client put before it left out), what the agent said and did, notes (the conversation
+ * compacted, a background task ended, a turn stopped), and reverts' marks. cutFirst: it starts partway into a line,
+ * which is left out. */
 fun parse(text: String, cutFirst: Boolean): List<Line> {
     val out = ArrayList<Line>()
     val rows = text.split("\n").let { if (cutFirst) it.drop(1) else it }
@@ -313,11 +385,20 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
         } catch (_: Exception) {
             continue
         }
-        if (o.optBoolean("isMeta") || o.optBoolean("isSidechain")) continue
         val type = o.optString("type")
+        if (type == "last-prompt" && o.optBoolean("rewound")) {
+            out.add(Line("rewind", o.optString("leafUuid", "")))
+            continue
+        }
+        if (type != "user" && type != "assistant") continue
+        if (o.optBoolean("isMeta") || o.optBoolean("isSidechain")) continue
+        val uuid = o.optString("uuid").ifBlank { null }
+        if (o.optBoolean("isCompactSummary")) {
+            out.add(Line("note", "The conversation was compacted", uuid))
+            continue
+        }
         val msg = o.optJSONObject("message") ?: continue
-        val content = msg.opt("content")
-        val blocks = when (content) {
+        val blocks = when (val content = msg.opt("content")) {
             is JSONArray -> content.list()
             is String -> listOf(JSONObject().put("type", "text").put("text", content))
             else -> emptyList()
@@ -325,19 +406,29 @@ fun parse(text: String, cutFirst: Boolean): List<Line> {
         for (b in blocks) {
             when (b.optString("type")) {
                 "text" -> {
-                    val t = b.optString("text").trim()
-                    if (t.isEmpty() || t.startsWith("<command-") || t.startsWith("<local-command") ||
-                        t.startsWith("<system-reminder>")) continue
-                    out.add(Line(if (type == "user") "you" else "bot", t))
+                    var t = b.optString("text")
+                    if (type == "user") {
+                        t = LEADING_REMINDERS.replace(t, "").trim()
+                        when {
+                            t.startsWith("<task-notification") -> out.add(Line("note", "A background task ended", uuid))
+                            t.startsWith(STOPPED) -> out.add(Line("note", "Stopped", uuid))
+                            t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
+                            else -> out.add(Line("you", t, uuid))
+                        }
+                    } else if (t.isNotBlank()) out.add(Line("bot", t.trim(), uuid))
                 }
-                "image" -> if (type == "user") out.add(Line("you", "🖼 An image"))
-                "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document")))
-                "tool_use" -> if (type == "assistant") out.add(Line("tool", toolLine(b)))
+                "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))
+                "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document"), uuid))
+                "tool_use" -> if (type == "assistant") out.add(Line("tool", toolLine(b), uuid))
             }
         }
     }
     return out
 }
+
+private val LEADING_REMINDERS = Regex("""\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*""", RegexOption.DOT_MATCHES_ALL)
+private const val STOPPED = "[Request interrupted by user"
+private val NOT_TYPED = listOf("<system-reminder", "<local-command", "<command-", "Caveat:", "<ci-monitor-event")
 
 private fun toolLine(b: JSONObject): String {
     val name = b.optString("name")

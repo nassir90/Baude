@@ -1,4 +1,4 @@
-# The versions another of these apps builds with (Gradle 8.9, SDK platform 35), so a build needs nothing it hasn't got.
+# Gradle 8.9 and SDK platform 35's versions, as another of these apps builds with them (built offline: --offline).
 [versions]
 agp = "8.7.3"
 kotlin = "2.3.21"
@@ -6,7 +6,7 @@ coreKtx = "1.16.0"
 activityCompose = "1.10.1"
 lifecycle = "2.9.1"
 composeBom = "2025.06.01"
-# (what savedstate asks for, 1.7.3, isn't had: the version that is, which it takes)
+# (savedstate's serialization, at the version the offline build has: Gradle takes the higher)
 kotlinxSerialization = "1.9.0"
 
 [libraries]

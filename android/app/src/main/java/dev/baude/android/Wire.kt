@@ -13,10 +13,11 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
-const val PING_MS = 5_000L // (as wire.PING_S: a host process takes a connection silent for 16 s for gone)
+const val PING_MS = 5_000L    // (wire.PING_S: each end says something at least this often)
+const val SILENT_MS = 16_000L // (wire.SILENT_S: silent this long, the other end's taken for gone)
+const val MIN_VERSION = 8     // (wire's version 8: Bots)
 
-/** What ssh's offered and taken here: Android's own crypto has P-256's ECDH and ECDSA, RSA and AES, not X25519 or
- * Ed25519 (JSch makes those with Java 11's and 15's classes, or BouncyCastle's: none here). */
+/** What ssh offers and takes here: what Android's own crypto has, P-256's ECDH and ECDSA, RSA and AES. */
 private val KEX = "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group16-sha512," +
     "diffie-hellman-group14-sha256"
 private val HOST_KEYS = "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256"
@@ -44,7 +45,7 @@ class Connection(
     // allows no network from its main thread)
 
     fun start() {
-        thread(name = "ssh-${host.address}", isDaemon = true) { loop() }
+        loopThread = thread(name = "ssh-${host.address}", isDaemon = true) { loop() }
     }
 
     fun stop() {
@@ -61,10 +62,10 @@ class Connection(
     private fun loop() {
         var wait = 1_000L
         while (!stopped) {
+            var reached = false
             try {
-                run()
-                wait = 1_000L
-                if (!stopped) set("down", "the host went")
+                reached = run()
+                if (!stopped) set("down", said.ifBlank { if (reached) "the host went" else "the host's Baude didn't start" })
             } catch (e: Exception) {
                 if (stopped) break
                 val repo = lastRepo
@@ -80,15 +81,30 @@ class Connection(
                 session = null
                 failAll()
             }
-            Thread.sleep(wait)
+            if (reached) wait = 1_000L // (it was up: tried again at once, then more slowly each time it fails)
+            try {
+                Thread.sleep(wait)
+            } catch (_: InterruptedException) {
+                wait = 1_000L
+            }
             wait = (wait * 2).coerceAtMost(30_000L)
         }
     }
 
     @Volatile private var lastRepo: TrustedKeys? = null
+    @Volatile private var heardAt = 0L
+    @Volatile private var loopThread: Thread? = null
+    @Volatile private var said = "" // (what ssh, or the host's command, last said on stderr: why it went)
 
-    private fun run() {
+    /** Tried again now, not after the wait (the network's back). */
+    fun kick() {
+        if (state == "down") loopThread?.interrupt()
+    }
+
+    /** One connection, till it ends: whether it got as far as the host process's hello. */
+    private fun run(): Boolean {
         set("connecting")
+        said = ""
         val jsch = JSch()
         jsch.addIdentity("baude", key.private, key.public, null)
         val repo = TrustedKeys(ctx, host)
@@ -108,7 +124,16 @@ class Connection(
         ch.setCommand("${host.command} connect")
         val input = ch.inputStream
         val stream = ch.outputStream
+        val errors = ch.errStream
         ch.connect(15_000)
+        thread(name = "stderr-${host.address}", isDaemon = true) {
+            try {
+                BufferedReader(InputStreamReader(errors, Charsets.UTF_8)).forEachLine { line ->
+                    if (line.isNotBlank()) said = line.trim().take(200)
+                }
+            } catch (_: Exception) {
+            }
+        }
         val queue = LinkedBlockingQueue<ByteArray>()
         val writer = thread(name = "write-${host.address}", isDaemon = true) {
             try {
@@ -124,18 +149,37 @@ class Connection(
         }
         writes = queue
         out = stream
+        var reached = false
         request(JSONObject().put("op", "hello").put("client", "baude-android")) { reply ->
-            if (reply.optString("op") == "hello") {
-                info = reply.optJSONObject("server")
-                set("up")
-                send(JSONObject().put("op", "subscribe"))
-            } else set("down", reply.optString("error", "the host said no"))
+            val server = reply.optJSONObject("server")
+            when {
+                reply.optString("op") != "hello" -> {
+                    said = reply.optString("error", "the host said no")
+                    s.disconnect()
+                }
+                (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
+                    said = "this host's Baude is too old for Bots: update it"
+                    s.disconnect()
+                }
+                else -> {
+                    info = server
+                    reached = true
+                    set("up")
+                    send(JSONObject().put("op", "subscribe"))
+                }
+            }
         }
+        heardAt = System.currentTimeMillis()
         val pinger = thread(name = "ping-${host.address}", isDaemon = true) {
             try {
                 while (!stopped && out != null) {
                     Thread.sleep(PING_MS)
                     send(JSONObject().put("op", "ping"))
+                    if (System.currentTimeMillis() - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
+                        said = "the host stopped answering"                   // the socket says)
+                        s.disconnect()
+                        break
+                    }
                 }
             } catch (_: InterruptedException) {
             }
@@ -144,6 +188,7 @@ class Connection(
             BufferedReader(InputStreamReader(input, Charsets.UTF_8), 1 shl 16).use { r ->
                 while (!stopped) {
                     val line = r.readLine() ?: break
+                    heardAt = System.currentTimeMillis()
                     val msg = try {
                         JSONObject(line)
                     } catch (_: Exception) {
@@ -159,7 +204,9 @@ class Connection(
             writes = null
             queue.put(ByteArray(0))
             writer.join(1_000)
+            if (said.isBlank() && ch.exitStatus > 0) said = "the host's command ended (status ${ch.exitStatus})"
         }
+        return reached
     }
 
     /** A line to the host process, sent in turn on its own thread (false if there's no connection). */

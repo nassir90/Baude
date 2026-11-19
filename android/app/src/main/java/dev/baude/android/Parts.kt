@@ -57,7 +57,7 @@ fun Avatar(name: String, picture: ImageBitmap?, size: Dp = Gap.avatar) {
     }
 }
 
-/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow), done (blue). */
+/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow); nothing between turns. */
 @Composable
 fun StatusDot(state: String, asking: Boolean) {
     val c = LocalBaude.current

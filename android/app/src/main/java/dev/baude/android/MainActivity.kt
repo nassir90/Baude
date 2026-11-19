@@ -19,8 +19,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Mesh.start(this)
         MeshService.keep(this)
-        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        opened(intent)
+        val kept = savedInstanceState?.getStringArrayList("screen")
+        if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)
+        else {
+            if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            opened(intent)
+        }
         setContent {
             BaudeTheme {
                 val now = screen.value
@@ -54,6 +58,11 @@ class MainActivity : ComponentActivity() {
     private fun back() {
         if (screen.value[0] == "chat") Mesh.close()
         screen.value = listOf("contacts")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList("screen", ArrayList(screen.value))
     }
 
     override fun onResume() {

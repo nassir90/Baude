@@ -124,7 +124,16 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
     var text by remember { mutableStateOf("") }
     val files = remember { mutableStateListOf<Picked>() }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        uris.forEach { uri -> read(ctx, uri)?.let { files.add(it) } }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        kotlin.concurrent.thread(name = "pick", isDaemon = true) { // (read, and pictures made small, off the main thread)
+            for (uri in uris) {
+                val (picked, why) = read(ctx, uri)
+                main.post {
+                    if (picked != null) files.add(picked)
+                    if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
     val list = rememberLazyListState()
     LaunchedEffect(chat.lines.size) { if (chat.lines.isNotEmpty()) list.animateScrollToItem(chat.lines.size - 1) }
@@ -189,6 +198,8 @@ private fun Said(line: Line) {
         }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
+        "note" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }
     }
 }
@@ -253,28 +264,60 @@ private fun inline(text: String, c: BaudeColors) = androidx.compose.ui.text.buil
     append(text.substring(at))
 }
 
-private fun read(ctx: Context, uri: Uri): Picked? {
+/** A file picked, as it's sent (a picture as Baude makes one: prepare), or why it can't be. */
+private fun read(ctx: Context, uri: Uri): Pair<Picked?, String?> {
     val r = ctx.contentResolver
     var name = "file"
     r.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cur ->
         if (cur.moveToFirst()) {
             name = cur.getString(0) ?: name
-            if (!cur.isNull(1) && cur.getLong(1) > MAX_FILE) {
-                Toast.makeText(ctx, "$name is too big to send (20 MB at most)", Toast.LENGTH_SHORT).show()
-                return null
-            }
+            if (!cur.isNull(1) && cur.getLong(1) > MAX_FILE) return null to "$name is too big to send (20 MB at most)"
         }
     }
     val mime = r.getType(uri) ?: "application/octet-stream"
-    val bytes = r.openInputStream(uri)?.use { it.readBytes() } ?: return null
-    val text = mime.startsWith("text/") || mime in setOf("application/json", "application/xml", "application/x-yaml")
-    if (mime !in Mesh.IMAGE_TYPES && mime != "application/pdf" && !text) {
-        Toast.makeText(ctx, "$name can't be sent: pictures, PDFs and text files can", Toast.LENGTH_SHORT).show()
-        return null
+    val bytes = try {
+        r.openInputStream(uri)?.use { it.readBytes() }
+    } catch (e: Exception) {
+        null
+    } ?: return null to "$name couldn't be read"
+    if (mime.startsWith("image/")) {
+        val (type, data) = prepare(bytes, mime) ?: return null to "$name isn't a picture this phone can read"
+        return Picked(name, type, data) to null
     }
-    return Picked(name, mime, bytes)
+    val text = mime.startsWith("text/") || mime in setOf("application/json", "application/xml", "application/x-yaml")
+    if (mime != "application/pdf" && !text) return null to "$name can't be sent: pictures, PDFs and text files can"
+    return Picked(name, mime, bytes) to null
 }
 
+/** A picture as Baude sends one (prepare_image): a type the API takes, at most MAX_EDGE across and MAX_BYTES big
+ * (5 MB once base64'd), made smaller and a JPEG (or a PNG, with see-through parts) where it isn't. */
+private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0) return null
+    if (mime in Mesh.IMAGE_TYPES && maxOf(bounds.outWidth, bounds.outHeight) <= MAX_EDGE && bytes.size <= MAX_BYTES) {
+        return mime to bytes
+    }
+    var bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    val edge = maxOf(bmp.width, bmp.height)
+    if (edge > MAX_EDGE) {
+        val k = MAX_EDGE.toFloat() / edge
+        bmp = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1),
+            (bmp.height * k).toInt().coerceAtLeast(1), true)
+    }
+    if (bmp.hasAlpha()) {
+        val png = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        if (png.size() <= MAX_BYTES) return "image/png" to png.toByteArray()
+    }
+    for (quality in intArrayOf(90, 80, 70, 60, 50)) {
+        val jpg = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, it) }
+        if (jpg.size() <= MAX_BYTES) return "image/jpeg" to jpg.toByteArray()
+    }
+    return null
+}
+
+private const val MAX_EDGE = 1568        // (baude.MAX_IMAGE_EDGE)
+private const val MAX_BYTES = 3_750_000  // (baude.MAX_IMAGE_BYTES)
 private const val MAX_FILE = 20L * 1024 * 1024
 
 // ----------------------------------------------------------------------------------------------------- hosts --
@@ -331,7 +374,8 @@ fun HostsScreen(back: () -> Unit) {
                 val (state, colour) = when (conn?.state) {
                     "up" -> "Connected" to c.success
                     "connecting" -> "Connecting…" to c.dim
-                    "key" -> "Its key isn't trusted yet: tap to check it" to c.warning
+                    "key" -> (if (conn.shown?.changed == true) "Its key changed: tap to see it"
+                              else "Its key isn't trusted yet: tap to check it") to c.warning
                     "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
                     else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
                 }
@@ -358,15 +402,18 @@ fun HostsScreen(back: () -> Unit) {
             title = { Text(if (shown.changed) "${conn.host.label}'s key changed" else "Trust ${conn.host.label}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (shown.changed) "It isn't the key it showed before. Trust it only if you know why it changed."
+                    Text(if (shown.changed) "It isn't the key it showed before, so it isn't connected to. If you know " +
+                        "why it changed, remove the host and add it again."
                         else "Compare its fingerprint with the host's own, from ssh-keygen -lf on its host key.")
                     Text(shown.type, style = Type.caption, color = c.dim)
                     SelectionContainer { Text(shown.fingerprint, style = Type.mono) }
                 }
             },
-            confirmButton = { Button("Trust", suggested = !shown.changed, destructive = shown.changed) {
-                Mesh.trust(conn.host, shown); asking = null } },
-            dismissButton = { Button("Cancel") { asking = null } },
+            confirmButton = {
+                if (shown.changed) Button("OK") { asking = null }
+                else Button("Trust", suggested = true) { Mesh.trust(conn.host, shown); asking = null }
+            },
+            dismissButton = { if (!shown.changed) Button("Cancel") { asking = null } },
             containerColor = c.dialog,
         )
     }

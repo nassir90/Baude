@@ -67,21 +67,23 @@ class Control(private val b: Browser, private val pageJs: String, private val re
 
     private val random = java.security.SecureRandom()
     private fun nonce() = ByteArray(12).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
-    private val key = nonce() // (where em's kept in a page: this process's own, not a name a page's scripts know)
 
-    /** PAGE_JS, its em kept in the page under key (not enumerable, not to be replaced or changed once it's there), its
-     * refs the phone's own (ref_p12: not a desktop's ref_12), with what's done by the page's natives as they were
-     * when it was first put in: a hit test, a promise's answer kept for this process to take (not one a page's
-     * script could put there in its place), JSON.stringify; seen and typed, what an op keeps in it between scripts. */
-    private val em: String = run {
+    init {
         for (a in listOf(EM_MADE, EM_BOUND, EM_REF)) check(a in pageJs) { "PAGE_JS has changed: $a" }
-        "const K = '$key';\n" + pageJs.replace(EM_REF, "id = 'ref_p' + (++n)")
-            .replace(EM_MADE, "if (!Object.getOwnPropertyDescriptor(globalThis, K)) globalThis[K] = ")
-            .replace(EM_BOUND, "\n" + SEAL + "\nconst em = globalThis[K];")
     }
 
+    /** PAGE_JS, its em kept in t's page under its key (made for each page it loads: not one a page's scripts know
+     * ahead; not enumerable, not to be replaced or changed once it's there), its refs the phone's own (ref_p12: not a
+     * desktop's ref_12), with what's done by the page's natives as they were when it was first put in: a hit test, a
+     * promise's answer kept for this process to take (each carrying the page's secret, so one em didn't keep is
+     * seen), JSON.stringify; seen and typed, what an op keeps in it between scripts. */
+    private fun em(t: Tab): String = "const K = '${t.key}', S = '${t.secret}';\n" +
+        pageJs.replace(EM_REF, "id = 'ref_p' + (++n)")
+            .replace(EM_MADE, "if (!Object.getOwnPropertyDescriptor(globalThis, K)) globalThis[K] = ")
+            .replace(EM_BOUND, "\n" + SEAL + "\nconst em = globalThis[K];")
+
     /** What's put in a page as it starts loading (Browser's): em made then, before most of its scripts have run. */
-    val early: String get() = "(() => { $em\n})();"
+    val early: (Tab) -> String = { t -> "(() => { ${em(t)}\n})();" }
 
     /** body (an async function's) run in t's page, em there (page: not in its scope, for javascript): then(its result)
      * given what it returned, or the error answered (or given to failed, if there's one). Its answer's kept by em,
@@ -95,11 +97,17 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         val fail = failed ?: { why: String -> answer(error(why)) }
         val ok = then ?: { v: Any? -> answer(JSONObject().put("result", v ?: JSONObject.NULL)) }
         val id = nonce()
-        val script = "(() => { const __em = (() => { $em\nreturn em; })(); __em.settle((async () => {" +
-            (if (page) "" else " const em = __em;") + "\n$body\n})(), '$id'); return true; })()"
+        val script = "(() => { const __em = (() => { ${em(t)}\nreturn em; })();" +
+            " if (!__em || typeof __em.owns !== 'function' || !__em.owns('${t.secret}')) return 'not ours';" +
+            " __em.settle((async () => {" + (if (page) "" else " const em = __em;") + "\n$body\n})(), '$id');" +
+            " return true; })()"
+        val key = t.key
+        val secret = t.secret
         val loads = t.loads
         val started = SystemClock.uptimeMillis()
         t.web.evaluateJavascript(script) { began ->
+            if (began == "\"not ours\"") return@evaluateJavascript fail("the page has something of its own where " +
+                "Emission's script is kept, so nothing it answers can be trusted: reload it (navigate: reload), and try again")
             if (began != "true") return@evaluateJavascript fail("SyntaxError: the script couldn't be run")
             fun look() {
                 if (t.closed) return fail("tab ${t.id} has closed: tabs_context lists the open ones")
@@ -111,6 +119,8 @@ class Control(private val b: Browser, private val pageJs: String, private val re
                     }
                     val waited = SystemClock.uptimeMillis() - started
                     when {
+                        r != null && r.optString("s") != secret -> fail("an answer came from the page that wasn't " +
+                            "Emission's script's: reload the page (navigate: reload), and try again")
                         r?.has("ok") == true -> {
                             val text = r.optString("ok")
                             val value = try {
@@ -449,7 +459,7 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             answer(if (value != null) describe(t).put("value", value) else describe(t).put("note", "the field's gone (the page changed)"))
         })
         fun nextChar() {
-            val ch = left.removeFirstOrNull() ?: return readBack()
+            val ch = left.removeFirstOrNull() ?: return main.postDelayed({ readBack() }, SETTLE_MS).let { }
             if (!(if (ch == '\n') Input.press(t.web, "Enter", emptyList()).let { true } else Input.type(t.web, ch)))
                 return js(t, "const ch = ${JSONObject.quote(ch.toString())}, el = em.typed;" +
                     "if (!document.execCommand('insertText', false, ch) && el) {" +
@@ -480,9 +490,6 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             if (k.length == 1 && k[0].isUpperCase()) {
                 k = k.lowercase()
                 mods = (mods + "shift").toSortedSet()
-            }
-            require(!(k.lowercase() == "v" && ("ctrl" in mods || "cmd" in mods))) {
-                "$combo isn't pressed here: on the phone it would paste its owner's clipboard. Type the text instead"
             }
             k to mods.toList()
         })
@@ -628,6 +635,7 @@ class Control(private val b: Browser, private val pageJs: String, private val re
     companion object {
         const val KEY_GAP_MS = 30L  // (between keys, as a person's: kept steady)
         const val TYPE_GAP_MS = 12L // (between characters typed)
+        const val SETTLE_MS = 100L  // (the last one typed: taken in by the page before its field's read back)
         const val LOAD_S = 30.0     // (a page's load waited for this long at most)
         const val JS_S = 80.0       // (a script's answer waited for this long at most: the host waits 85 s)
         const val SHOT_MAX = 1024.0 // (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
@@ -651,8 +659,9 @@ class Control(private val b: Browser, private val pageJs: String, private val re
     return {at: !!h && (h === el || R(C, el, [h]) || R(C, h, [el])), x: b.left + b.width / 2, y: b.top + b.height / 2, by: h}; };
   const settle = (p, id) => R(T, p, [v => { let s; try { s = {ok: R(J, JSON, [v ?? null])}; } catch (e) { s = {error: String(e)}; }
     R(MS, M, [id, s]); }, e => R(MS, M, [id, {error: String(e)}])]);
-  const take = id => { const r = R(MG, M, [id]); R(MD, M, [id]); return r === undefined ? null : r; };
-  const sealed = {...made, hit, settle, take}, kept = {};
+  const take = id => { const r = R(MG, M, [id]); R(MD, M, [id]); return r === undefined ? null : {...r, s: S}; };
+  const owns = x => x === S;
+  const sealed = {...made, hit, settle, take, owns}, kept = {};
   for (const name of ['seen', 'typed']) Object.defineProperty(sealed, name, {get: () => kept[name], set: v => { kept[name] = v; }});
   Object.defineProperty(globalThis, K, {value: Object.freeze(sealed), enumerable: false, writable: false,
     configurable: false});

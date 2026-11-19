@@ -1417,7 +1417,7 @@ class BrowserPane(Gtk.Box):
 
     def read_only_set(self, on):
         for w in self.drives:
-            w.set_sensitive(not on)
+            w.set_sensitive(not on and not self.phoned)  # (on a phone: nothing driven here, read-only or not)
         if self.bound is not None:
             self.chrome.who.set_sensitive(False)
         if self.here is not None and self.here.win is not None:

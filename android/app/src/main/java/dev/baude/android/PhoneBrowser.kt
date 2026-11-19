@@ -18,11 +18,11 @@ import java.security.SecureRandom
 import kotlin.concurrent.thread
 
 /** A Bot's browser on this phone ("Phone Use"): what a Bot's browser tools ask of its Emission, asked of a browser
- * here instead (BrowserActivity, in a process of its own, its profile the Bot's), while you've it open for that Bot
- * and on screen. Its Bot's host is told (wire's emission_serve, on this phone's own connection to it: a host of yours,
- * not a member reached through the mesh), and from then on carries the Bot's tools' requests here (emission_call)
- * and takes their answers (emission_answer); once it's closed (or the phone's left it, or locked), they're Emission's
- * on that host again, the Bot told so with what it hadn't been told yet.
+ * here instead (BrowserActivity, in a process of its own, its profile the Bot's), while it's open for that Bot (in
+ * front or out of sight). Its Bot's host is told (wire's emission_serve, on the connection its chat's reached on,
+ * directly or through the mesh), and from then on carries the Bot's tools' requests here (emission_call) and takes
+ * their answers (emission_answer); once it's closed, they're Emission's on that host again, the Bot told so with what
+ * it hadn't been told yet.
  *
  * The browser's process talks to this one on a socket of the app's own (a uid check: no other app), a line of JSON
  * each way, as Emission's profile socket is. */
@@ -46,19 +46,16 @@ object PhoneBrowser {
     private var next: Intent? = null // (a browser asked for while another's closing: opened once it's gone)
     private val calls = HashMap<String, Connection>() // (a request carried to the browser: the connection it came on)
 
-    /** Whether the Bot's host can carry its tools' requests to a phone: one of your hosts, connected to directly (a
-     * member reached through the mesh doesn't), new enough. */
-    fun offered(hostId: String): Boolean = Mesh.conn(hostId)?.let {
-        it.place is Place.Direct && (it.info?.optInt("version", 1) ?: 1) >= MIN_VERSION
-    } ?: false
+    /** Whether the Bot's host can carry its tools' requests to a phone (a host of yours, or a member of its mesh). */
+    fun offered(hostId: String): Boolean = (Mesh.conn(hostId)?.info?.optInt("version", 1) ?: 1) >= MIN_VERSION
 
-    /** The Bot's browser opened here, for you to watch it. */
+    /** The Bot's browser opened here (shown again, if it's open already). */
     fun open(ctx: Context, hostId: String, bot: String, botName: String) {
         listen()
         val intent = Intent(ctx, BrowserActivity::class.java).putExtra("host", hostId).putExtra("bot", bot)
             .putExtra("name", botName).putExtra("socket", name).putExtra("where", Mesh.label(hostId))
         val now = served
-        if (now != null && now.bot != bot) { // (another Bot's: its process ends first, its profile with it)
+        if (now != null && now.bot != bot) { // (another Bot's: its process ends first, its WebView that Bot's profile's)
             next = intent
             now.link.send(JSONObject().put("op", "close"))
             return
@@ -88,7 +85,6 @@ object PhoneBrowser {
 
     /** The browser's process, on the socket. */
     private class Link(val sock: LocalSocket) {
-        var bot: String? = null // (the Bot it said it's the browser of: its profile forgotten once its process ends)
         private val out = sock.outputStream
         private val writes = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
 
@@ -131,11 +127,13 @@ object PhoneBrowser {
         when (msg.optString("op")) {
             "hello" -> {
                 served?.takeIf { it.link !== link }?.let { stop(it) }
-                link.bot = msg.optString("bot").ifEmpty { null }
                 val s = Served(msg.optString("host"), msg.optString("bot"), msg.optString("name"), link)
                 served = s
                 Mesh.conn(s.hostId)?.let { changed(it) }
                 tick()
+            }
+            "again" -> served?.takeIf { it.link === link && !it.up }?.let { s -> // (shown again: served again, if
+                Mesh.conn(s.hostId)?.let { changed(it) }                             // it's been let go of)
             }
             "bye" -> served?.takeIf { it.link === link }?.let {
                 it.note = msg.optString("note")
@@ -154,7 +152,6 @@ object PhoneBrowser {
     private fun gone(link: Link) {
         val s = served
         if (s != null && s.link === link) stop(s)
-        link.bot?.let { if (!BrowserActivity.KEEP) BrowserActivity.forget(Mesh.app, BrowserActivity.botProfileId(it)) }
         next?.let {
             next = null
             Mesh.app.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

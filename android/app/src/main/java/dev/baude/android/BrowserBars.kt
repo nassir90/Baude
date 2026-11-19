@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -29,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -98,17 +104,26 @@ private fun Address(url: String, go: (String) -> Unit, modifier: Modifier) {
     }
 }
 
-/** The tabs' strip (Adw.TabBar's, autohide off: shown with one tab too), a page's progress over its foot. */
+/** The tabs' strip (Adw.TabBar's, autohide off: shown with one tab too; its tabs as wide as each other, never
+ * narrower than TAB_MIN, the strip scrolled sideways once they don't fit), a page's progress over its foot. */
 @Composable
 fun TabStrip(b: Browser, pick: (String) -> Unit, close: (String) -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.fillMaxWidth().background(c.frame)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
+    BoxWithConstraints(Modifier.fillMaxWidth().background(c.frame)) {
+        val n = b.strip.size.coerceAtLeast(1)
+        val wide = maxOf(TAB_MIN, (maxWidth - 12.dp - 6.dp * (n - 1)) / n)
+        val scroll = rememberScrollState()
+        val step = with(LocalDensity.current) { (wide + 6.dp).toPx() }
+        val front = b.strip.indexOfFirst { it.id == b.selected.value }
+        LaunchedEffect(front, n) { // (the tab in front scrolled to, as Adw.TabBar scrolls to it)
+            if (front >= 0) scroll.animateScrollTo((front * step).toInt().coerceAtMost(scroll.maxValue))
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 6.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (t in b.strip) {
                 val front = t.id == b.selected.value
                 Row(
-                    Modifier.weight(1f).height(Gap.composerButton).clip(RoundedCornerShape(8.dp))
+                    Modifier.width(wide).height(Gap.composerButton).clip(RoundedCornerShape(8.dp))
                         .then(if (front) Modifier.background(c.fg.copy(alpha = 0.1f)) else Modifier)
                         .clickable { pick(t.id) }.padding(start = 8.dp, end = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -129,6 +144,8 @@ fun TabStrip(b: Browser, pick: (String) -> Unit, close: (String) -> Unit) {
             .height(3.dp).background(c.accentBg)) // (the osd progress bar: over the strip's foot, the page not moved)
     }
 }
+
+private val TAB_MIN = 120.dp // (a tab's least width, as Adw.TabBar's)
 
 /** What the pages wait on, each a card (browserpane.show_prompts'): answered here, or by the Bot. */
 @Composable

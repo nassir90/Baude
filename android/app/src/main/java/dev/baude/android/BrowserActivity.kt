@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
-import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -42,12 +41,13 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlin.concurrent.thread
 
-/** A Bot's browser on this phone (PhoneBrowser's), on screen while it's used, as an Emission window is (emission.Chrome's
- * bars on the frame, the page set into it: widgets.inside), its pointer over the page and the glow, as Baude's Browser
- * page shows a Bot's Emission. You can use it too: what you do by hand is told to the Bot with its next request, as
- * Emission tells it its browser changed. In a process of its own, so its pages are kept apart from every other Bot's
- * (WebView's data, by the Bot's profile: emissionlink.bot_profile_id's); ended, and that process with it, once it's
- * closed (the phone's back) or the phone leaves it (another app in front, or the screen locked). */
+/** A Bot's browser on this phone (PhoneBrowser's), as an Emission window is (emission.Chrome's bars on the frame, the
+ * page set into it: widgets.inside), its pointer over the page and the glow, as Baude's Browser page shows a Bot's
+ * Emission. You can use it too: what you do by hand is told to the Bot with its next request, as Emission tells it its
+ * browser changed. In a process of its own, its profile the Bot's (WebView's data, by emissionlink.bot_profile_id's
+ * id: its cookies, storage and sign-ins kept from one time to the next, as Emission's profile keeps them); it goes on
+ * serving out of sight (BrowserService), and ends, that process with it, once it's closed (the phone's back, or the
+ * notification's Close). */
 class BrowserActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var browser: Browser
@@ -62,29 +62,57 @@ class BrowserActivity : ComponentActivity() {
     private var serving by mutableStateOf<Boolean?>(null) // (whether its host carries the Bot's requests here)
     private var why by mutableStateOf<String?>(null)
     private var made = false
+    private var suspended = false // (its host stopped carrying the Bot's requests here a while: the Bot told)
+    private var restarted: List<String>? = null // (this browser started again after Android ended it: what it had)
+    private var byHand = false // (what's being done is yours, said as it's done: not a page's)
+    private lateinit var pagesFile: File
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val bot = intent.getStringExtra("bot")
         val profile = bot?.let(::botProfileId)
-        if (profile != null && !KEEP) forget(this, profile) // (before WebView's started here: nothing of before)
-        val suffixed = profile != null && (Build.VERSION.SDK_INT < 28 || try {
+        val suffixed = profile != null && (here == profile || Build.VERSION.SDK_INT < 28 || try {
             WebView.setDataDirectorySuffix("emission-$profile")
             true
         } catch (_: IllegalStateException) { // (this process's WebView started for another Bot: not shown it)
             false
         })
         super.onCreate(savedInstanceState)
-        if (bot == null || !suffixed) return finish()
+        if (bot == null || profile == null || !suffixed) return finish()
+        here = profile
         made = true
         val name = intent.getStringExtra("name") ?: "Bot"
+        pagesFile = File(filesDir, "emission-$profile.open")
+        restarted = try { // (as emission.open_pages: what an earlier one had open, if it ended without closing them)
+            pagesFile.readLines().filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
         enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        BrowserService.keep(this, name)
         stage = Stage(this, ACCENT)
         stage.overlay.k = resources.displayMetrics.density
         browser = Browser(this, name, stage)
         control = Control(browser, assets.open("emission/page.js").reader().readText(),
             assets.open("emission/repl.js").reader().readText(), stage.overlay.pointer) { stage.overlay.kick() }
         browser.early = control.early
+        browser.changed = { t, how -> // (a page's own: a tab a click opened, or one it closed)
+            if (!byHand && busy == 0) hand += if (how == "opened") "a page opened ${t.id}" else "a page closed ${t.id}"
+        }
+        main.post(object : Runnable { // (the pages it has open, written down as they change: open_pages)
+            var said: List<String>? = null
+            override fun run() {
+                if (isDestroyed) return
+                val urls = browser.tabs.values.map { it.url }.filter { it.isNotEmpty() && it != "about:blank" }
+                if (urls != said) {
+                    said = urls
+                    try {
+                        if (urls.isEmpty()) pagesFile.delete() else pagesFile.writeText(urls.joinToString("\n"))
+                    } catch (_: Exception) {
+                    }
+                }
+                main.postDelayed(this, 1000)
+            }
+        })
         stage.touched = {
             touchedAt = SystemClock.uptimeMillis()
             browser.current?.let { hand += "touched the page in ${it.id}" }
@@ -110,29 +138,29 @@ class BrowserActivity : ComponentActivity() {
                         }
                         hand += mapOf("back" to "went back", "forward" to "went forward", "stop" to "stopped a page loading")
                             .getOrElse(how) { "reloaded" } + " in ${t.id}"
-                    } }, newTab = {
-                        val t = browser.open("about:blank")
+                    } }, newTab = { mine {
+                        val t = browser.open(Control.HOME_PAGE)
                         hand += "opened a new tab, ${t.id}"
-                    })
+                    } })
                     TabStrip(browser, pick = { id -> browser.tabs[id]?.let {
                         if (it !== browser.current) hand += "switched to ${it.id}"
                         browser.select(it)
-                    } }, close = { id -> browser.tabs[id]?.let {
+                    } }, close = { id -> browser.tabs[id]?.let { mine {
                         if (browser.tabs.size == 1) browser.open("about:blank")
                         hand += "closed ${it.id}"
                         browser.close(it)
-                    } })
-                    PromptCards(browser) { answer ->
-                        try {
-                            val kind = browser.waiting[answer.optString("id")]?.about?.optString("kind") ?: "prompt"
-                            browser.answerPrompt(answer)
-                            hand += "answered the page's $kind"
-                        } catch (_: Exception) {
-                        }
-                    }
-                    Box(Modifier.weight(1f).fillMaxWidth().padding(start = Gap.inside, end = Gap.inside,
+                    } } })
+                    Column(Modifier.weight(1f).fillMaxWidth().padding(start = Gap.inside, end = Gap.inside,
                         bottom = Gap.inside).border(1.dp, c.rule).padding(1.dp).background(c.inside).clipToBounds()) {
-                        AndroidView({ stage }, Modifier.fillMaxSize())
+                        PromptCards(browser) { answer -> // (where Emission's banner is: in the page's box, over it)
+                            try {
+                                val kind = browser.waiting[answer.optString("id")]?.about?.optString("kind") ?: "prompt"
+                                browser.answerPrompt(answer)
+                                hand += "answered the page's $kind"
+                            } catch (_: Exception) {
+                            }
+                        }
+                        AndroidView({ stage }, Modifier.weight(1f).fillMaxWidth())
                     }
                     val said = when (serving) {
                         null -> "Connecting to $where…"
@@ -144,6 +172,20 @@ class BrowserActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun mine(fn: () -> Unit) {
+        byHand = true
+        try {
+            fn()
+        } finally {
+            byHand = false
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("close", false)) finish() // (the notification's Close)
     }
 
     /** This process's link to the app's (PhoneBrowser's): told which Bot's browser this is, then its requests. */
@@ -196,6 +238,7 @@ class BrowserActivity : ComponentActivity() {
             "serving" -> {
                 val on = msg.optBoolean("on")
                 if (on && serving != true) noted = false // (served again: the Bot told again, its last were a host's)
+                if (!on && serving == true) suspended = true
                 serving = on
                 why = msg.optString("why").ifBlank { null }
             }
@@ -217,15 +260,22 @@ class BrowserActivity : ComponentActivity() {
      * and what you've done by hand since its last; or "" if nothing. */
     private fun note(): String {
         val out = ArrayList<String>()
+        restarted?.let {
+            out += "This browser was started again after Android ended it, out of sight: these pages it had open " +
+                "are closed now: " + it.take(10).joinToString(", ") + "."
+        }
+        if (suspended) out += "Its connection to its host dropped for a while (Android may have held the phone back): " +
+            "what you asked meanwhile went to that host's own browser."
         if (!noted) {
             val d = resources.displayMetrics.density
             out += "Your browser is on a phone now (Android's WebView, its pages laid out at the phone's size, " +
                 "${(stage.width / d).toInt()} by ${(stage.height / d).toInt()}): its tabs (phone1, …) and refs " +
-                "(ref_p1, …) are its own, not your desktop browser's" + (if (KEEP) "." else ", and it keeps nothing " +
-                "once it's closed.") + " Its owner can use it too: what they do is said here, with your next request."
+                "(ref_p1, …) are its own, not your desktop browser's. Its owner can use it too: what they do is said " +
+                "here, with your next request."
         }
         if (hand.isNotEmpty()) out += "Its owner used this browser by hand since your last request: " +
-            hand.joinToString(", ") + ". What you read of it before may have changed."
+            hand.joinToString(", ") + "; ${browser.current?.id ?: "no tab"} is in front now. What you read of it " +
+            "before may have changed."
         return out.joinToString(" ")
     }
 
@@ -246,6 +296,8 @@ class BrowserActivity : ComponentActivity() {
                 if (said.isNotEmpty()) {
                     r.put("note", said)
                     noted = true
+                    suspended = false
+                    restarted = null
                     hand.clear()
                 }
                 out.put("result", r)
@@ -257,17 +309,30 @@ class BrowserActivity : ComponentActivity() {
         control.run(op, call, reply)
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (made) send(JSONObject().put("op", "again")) // (back in front: served again if it's been let go of)
+    }
+
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) finish() // (left, or the screen locked: the Bot's browser is Emission's again)
+        if (made) android.webkit.CookieManager.getInstance().flush()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (!isFinishing || !made) return
+        if (!made) return
+        val urls = browser.tabs.values.map { it.url }.filter { it.isNotEmpty() && it != "about:blank" }
+        for (t in browser.tabs.values.toList()) t.web.destroy()
+        if (!isFinishing) { // (made again, by Android: its link let go of, this one's the new one's)
+            try {
+                link?.close()
+            } catch (_: Exception) {
+            }
+            return
+        }
         val said = if (hand.isNotEmpty()) "Before the phone closed it, its owner used it by hand: " +
             hand.joinToString(", ") + "." else ""
-        val urls = browser.tabs.values.map { it.url }.filter { it.isNotEmpty() && it != "about:blank" }
         val bye = (JSONObject().put("op", "bye").put("note", said).put("urls", JSONArray(urls)).toString() + "\n")
             .toByteArray(Charsets.UTF_8)
         thread { // (said before this process ends: the app's tells the Bot's host, which tells the Bot)
@@ -279,31 +344,17 @@ class BrowserActivity : ComponentActivity() {
             } catch (_: Exception) {
             }
         }.join(500)
-        for (t in browser.tabs.values.toList()) t.web.destroy()
-        if (KEEP) android.webkit.CookieManager.getInstance().flush()
-        Process.killProcess(Process.myPid()) // (its WebView's profile this Bot's: a process of its own each time; its
-        // link closed with it, and what it kept forgotten then by the app's process: PhoneBrowser)
+        pagesFile.delete()
+        android.webkit.CookieManager.getInstance().flush()
+        BrowserService.drop(this)
+        Process.killProcess(Process.myPid()) // (a process of its own each time: its WebView's profile this Bot's)
     }
 
     companion object {
-        /** Whether a Bot's profile here keeps what it had (cookies, sign-ins, storage) from one time it's opened to the
-         * next: not, till you've chosen. */
-        const val KEEP = false
+        private var here: String? = null // (the profile this process's WebView is started for)
         val KEYBOARD_QUIET = setOf("click", "drag", "type", "key", "form_input", "javascript") // (what can focus a field)
         const val ACCENT = 0xFF3584E4.toInt() // (Baude's accent: the pointer's and the glow's colour)
         private val PROFILE_SPACE = UUID.fromString("6b1f0d3e-3c4e-4f51-9b0e-7a1e5e6d2c11") // (emissionlink's)
-
-        /** What's kept of a Bot's profile here, gone: every folder of WebView's named for it (its data, its caches),
-         * while no WebView of it is running. */
-        fun forget(ctx: android.content.Context, profile: String) {
-            val mark = "emission-$profile"
-            for (dir in listOf(ctx.dataDir, ctx.cacheDir, ctx.codeCacheDir, ctx.noBackupFilesDir))
-                dir.listFiles()?.filter { mark in it.name }?.forEach { it.deleteRecursively() }
-            if (Build.VERSION.SDK_INT < 28) { // (one WebView folder for all, then: its own, every time)
-                File(ctx.dataDir, "app_webview").deleteRecursively()
-                File(ctx.cacheDir, "WebView").deleteRecursively()
-            }
-        }
 
         /** A Bot's own profile's id (emissionlink.bot_profile_id: uuid5 of "bot:" and its id). */
         fun botProfileId(bot: String): String {

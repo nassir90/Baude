@@ -40,6 +40,10 @@ import kotlin.math.roundToInt
 
 /** A tab: its page (a WebView of its own), what it's said in its console, the sites it's been to. */
 class Tab(val id: String, val web: WebView) {
+    private val random = java.security.SecureRandom()
+    fun nonce() = ByteArray(12).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
+    var key = nonce()    // (where em's kept in its page now: made again for each page it loads)
+    var secret = nonce() // (what em's answers carry, so one that isn't em's is seen)
     var loading = false
     var progress = 0
     var loads = 0 // (pages started in it: a script's answer lost to one is seen)
@@ -114,7 +118,8 @@ class Stage(ctx: Context, accent: Int) : FrameLayout(ctx) {
 /** The Bot's browser on this phone: its tabs (phone1, phone2, …: their own ids, apart from a desktop Emission's), what
  * its pages wait on, the downloads they've asked for. early: what's put in each page as it starts loading. */
 class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
-    var early: String? = null
+    var early: ((Tab) -> String)? = null // (made for each page as it loads: its own em, key and secret)
+    var changed: (Tab, String) -> Unit = { _, _ -> } // (a tab opened or closed: by a page, or anyone)
     val tabs = LinkedHashMap<String, Tab>()
     var current: Tab? = null
     val shownUrl = mutableStateOf("")       // (the tab in front's address, for the bar)
@@ -177,6 +182,7 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
     }
 
     fun close(t: Tab) {
+        val at = tabs.values.indexOf(t)
         t.closed = true
         tabs.remove(t.id)
         count.value = tabs.size
@@ -187,7 +193,11 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
         said()
         (t.web.parent as? ViewGroup)?.removeView(t.web)
         t.web.destroy()
-        if (current === t) tabs.values.lastOrNull()?.let { select(it) } ?: run { current = null }
+        if (current === t) { // (its neighbour in front, as Adw.TabView has it: the one after it, or before if it was last)
+            val left = tabs.values.toList()
+            (left.getOrNull(at) ?: left.lastOrNull())?.let { select(it) } ?: run { current = null }
+        }
+        changed(t, "closed")
     }
 
     fun prompts(t: Tab?): List<JSONObject> = waiting.values.filter { t == null || it.tab === t }.map { it.about }
@@ -251,8 +261,8 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
             allowContentAccess = false
             setGeolocationEnabled(false)
         }
-        web.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS // (the phone's saved sign-ins
-        web.isFocusable = true                                                        // and cards: not offered its pages)
+        web.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        web.isFocusable = true
         web.isFocusableInTouchMode = true
         web.setDownloadListener { url, _, disposition, mime, _ ->
             downloads += JSONObject().put("name", URLUtil.guessFileName(url, disposition, mime)).put("path", JSONObject.NULL)
@@ -263,7 +273,9 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
                 request.url.scheme?.lowercase() !in listOf("http", "https", "data", "about", "blob", "javascript")
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                early?.let { view.evaluateJavascript(it, null) }
+                t.key = t.nonce()
+                t.secret = t.nonce()
+                early?.let { view.evaluateJavascript(it(t), null) }
                 t.loading = true
                 t.loads += 1
                 url?.let { u -> Uri.parse(u).takeIf { it.scheme in listOf("http", "https") }?.let {
@@ -336,8 +348,9 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
 
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
                 val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
-                open(null, transport)
+                val made = open(null, transport)
                 resultMsg.sendToTarget()
+                changed(made, "opened")
                 return true
             }
 

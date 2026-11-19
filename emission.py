@@ -2466,7 +2466,7 @@ class Window(Adw.ApplicationWindow):
         busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
         idle_s = 0.0 if busy else (GLib.get_monotonic_time() - self.asked_at) / 1e6  # (work still going: not idle)
         self.used = GLib.get_monotonic_time()
-        if op not in ("info", "watch") and not msg.get("from_pane"):
+        if op not in ("info", "watch", "phone_note") and not msg.get("from_pane"):
             self.asked_at = self.used
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
@@ -2474,6 +2474,16 @@ class Window(Adw.ApplicationWindow):
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
                            "tabs": len(self.tabs), "idle_s": idle_s})
+        if op == "phone_note":  # (its browser was on a phone till now: what the Bot's next request is told, in place
+            said = str(msg.get("note") or "")  # of what a phone said before; "": that taken out)
+            if pid != self.profile_id:
+                return answer({"error": "that profile isn't open in this window"})
+            last = getattr(self, "phone_said", "")
+            now = self.note.replace(last, said) if last and self.note and last in self.note else " ".join(
+                n for n in (self.note, said) if n)
+            self.note, self.phone_said = " ".join(now.split()) or None, said
+            pending_note(self.profile_id, self.note or "")
+            return answer({"ok": True})
         if op == "quit" and self.hosted:  # (someone's Emission wants its profile: let go of, the Bot told after)
             answer({"ok": True})
             if self.released is not None:

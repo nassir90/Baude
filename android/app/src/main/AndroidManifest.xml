@@ -30,8 +30,15 @@
             android:name=".BrowserActivity"
             android:exported="false"
             android:process=":emission"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:launchMode="singleTask"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|density|screenSize|smallestScreenSize|layoutDirection|colorMode|fontWeightAdjustment|grammaticalGender"
             android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".BrowserService"
+            android:exported="false"
+            android:process=":emission"
+            android:foregroundServiceType="remoteMessaging" />
 
         <service
             android:name=".MeshService"

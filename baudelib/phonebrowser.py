@@ -1,7 +1,7 @@
-"""A Bot's browser on a phone: the Android app, connected to this host process directly as a head is (not through
-the mesh), says it's showing a Bot of this host's browser (emission_serve), and from then on that Bot's browser tools'
-requests here (wire's emission op, from this host's own connections) are carried to it on its connection
-(emission_call), its answer back (emission_answer), instead of to this host's Emission. Only while the phone says so:
+"""A Bot's browser on a phone: the Android app, connected to this host process as a head is (straight to it, or
+through the mesh), says it's showing a Bot of this host's browser (emission_serve), and from then on that Bot's browser
+tools' requests here (wire's emission op) are carried to it on its connection (emission_call), its answer back
+(emission_answer), instead of to this host's Emission. Only while the phone says so:
 once it says it's stopped, another phone takes it (emission_unserved, to the one it was on), or its connection goes,
 they're Emission's again.
 
@@ -10,17 +10,13 @@ Emission's again, the Bot's next request there is told so (emissionlink.pending_
 tells it), with what the phone had open and anything it hadn't told the Bot yet."""
 import itertools
 import os
+import queue
+import sys
 import threading
 
 from baudelib import emissionlink, emissiontools
 
 GONE = "the phone's browser closed before it answered"
-THROUGH_MESH = "a phone shows a Bot's browser connected to the Bot's host itself, not through the mesh"
-
-
-def tunnelled(conn):
-    """Whether conn came through the mesh (another member's tunnel to here), not straight to this host process."""
-    return getattr(conn, "tunnel", None) is not None
 
 
 class Phones:
@@ -34,6 +30,8 @@ class Phones:
         self.waiting = {}  # (a request's id: [its connection, an event set once it's answered, the answer, the Bot])
         self.prefix = os.urandom(4).hex()  # (requests' ids this process's own: not one before it restarted)
         self.ids = itertools.count(1)
+        self.notes = queue.Queue()  # (what's to be told to the Bots' Emissions here: in the order it comes, on a
+        threading.Thread(target=self.telling, daemon=True, name="phone-notes").start()  # thread of its own)
 
     def serve(self, conn, msg, reply):
         """emission_serve {bot: its id, on}: a phone showing that Bot's browser (on), or not now (urls: the pages it
@@ -42,8 +40,6 @@ class Phones:
         bot = msg.get("bot")
         if not isinstance(bot, str) or not bot:
             return reply("error", error="emission_serve needs a Bot's id")
-        if tunnelled(conn):
-            return reply("error", error=THROUGH_MESH)
         if not msg.get("on"):
             with self.lock:
                 had = self.serving.get(bot) is conn
@@ -52,7 +48,8 @@ class Phones:
             self.fail(conn, bot)
             if had:
                 urls = [u for u in msg.get("urls") or [] if isinstance(u, str)]
-                self.noted(bot, "the phone closed it", urls, msg.get("note") if isinstance(msg.get("note"), str) else "")
+                note = msg.get("note") if isinstance(msg.get("note"), str) else ""
+                self.notes.put((bot, "the phone closed it", urls, note))
                 self.listed()
             return reply("emission_serving", bot=bot, on=False)
         with self.server.lock:
@@ -61,6 +58,7 @@ class Phones:
         if not is_bot:
             return reply("error", error="that's no Bot of this host's")
         reply("emission_serving", bot=bot, on=True)
+        self.notes.put((bot, None, (), ""))  # (what this host's Emission had for the Bot about a phone: not told now)
         with self.lock:
             was = self.serving.get(bot)
             self.serving[bot] = conn
@@ -121,7 +119,7 @@ class Phones:
                 del self.serving[bot]
         self.fail(conn)
         for bot in bots:
-            self.noted(bot, "the phone's connection went")
+            self.notes.put((bot, "the phone's connection went", (), ""))
         if bots:
             self.listed()
 
@@ -130,13 +128,28 @@ class Phones:
         with self.server.lock:
             self.server.changed()
 
+    def telling(self):
+        while True:
+            try:
+                self.noted(*self.notes.get())
+            except Exception:  # (one that couldn't be told: said, and the next told)
+                sys.excepthook(*sys.exc_info())
+
     @staticmethod
     def noted(bot, why, urls=(), note=""):
-        """What the Bot's next request to this host's Emission is told: its browser's that again, not the phone's."""
+        """What the Bot's next request to this host's Emission is told (why None: nothing, now it's a phone's again):
+        its browser's that again, not the phone's. Told to the Emission that has its profile, if one's running (in what
+        it'll tell, in place of what it had about a phone before); else written down for the next one
+        (emissionlink.pending_note, the last of these in place of one before it)."""
         pid = emissionlink.bot_profile_id(bot)
-        said = (f"Your browser was on a phone till now ({why}): this is this host's browser again, with its own tabs "
-                "(their ids and refs aren't the phone's)" +
-                (", and the pages the phone had open are closed: " + ", ".join(list(urls)[:10]) if urls else "") +
-                "." + (f" {note}" if note else ""))
-        before = emissionlink.pending_note(pid)
-        emissionlink.pending_note(pid, f"{before} {said}" if before else said)
+        said = "" if why is None else (
+            f"Your browser was on a phone till now ({why}): this is this host's browser again, with its own tabs "
+            "(their ids and refs aren't the phone's)" +
+            (", and the pages the phone had open are closed: " + ", ".join(list(urls)[:10]) if urls else "") +
+            "." + (f" {note}" if note else ""))
+        try:
+            emissionlink.call(pid, {"op": "phone_note", "note": said}, timeout=5)
+            return
+        except (OSError, ValueError):
+            pass
+        emissionlink.phone_note(pid, said)

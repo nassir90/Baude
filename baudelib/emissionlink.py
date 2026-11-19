@@ -234,6 +234,29 @@ def pending_note(pid, note=None):
     return None
 
 
+def phone_note(pid, note):
+    """pending_note's, about a Bot's browser on a phone: put in place of the last one written (kept beside it, to be
+    found again), or ("") taken out."""
+    path = os.path.join(data_home(), "profiles", pid + ".phone")
+    try:
+        with open(path, encoding="utf-8") as f:
+            last = f.read()
+    except OSError:
+        last = ""
+    before = pending_note(pid) or ""
+    now = before.replace(last, note) if last and last in before else " ".join(n for n in (before, note) if n)
+    pending_note(pid, " ".join(now.split()))
+    try:
+        if note:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(note)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
+
+
 # ----------------------------------------------------------------- the socket --
 
 def profile_socket(pid):

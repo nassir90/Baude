@@ -913,13 +913,10 @@ class Server:
         os.close(self.lock_file)
         self.closed.set()
 
-    def serve(self, sock, tunnel=None):
-        """A connection to this host process (tunnel: the member a mesh tunnel to here is from, "" if it's unknown;
-        None: straight to it)."""
+    def serve(self, sock):
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
         conn = Conn(ch)
-        conn.tunnel = tunnel
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -1078,10 +1075,7 @@ class Server:
 
             def browse():
                 try:
-                    if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there, by
-                        if phonebrowser.tunnelled(conn):            # this host's own connections only)
-                            return reply("error", error="this Bot's browser is on a phone now: only its host's own "
-                                                        "connections reach it")
+                    if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there)
                         return reply("emission", result=self.phones.call(bot, msg["call"]))
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
                                                                    timeout=emissiontools.HOST_WAIT_S))

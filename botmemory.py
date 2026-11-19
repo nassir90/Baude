@@ -260,7 +260,8 @@ class BotMemory(Gtk.Box):
         info = info or {}
         sid, remote = info.get("id"), info.get("remote")
         bot = bool(info.get("bot")) and sid is not None and remote is not None
-        if bot and sid == self.sid and remote is self.remote and self.failed:
+        if bot and sid == self.sid and remote is self.remote and self.failed \
+                and not self.dirty:
             return self.refresh()  # (the same Bot, its last read failed: its host may be back)
         if bot and sid == self.sid and remote is self.remote or not bot and self.sid is None:
             return  # (shown already: refresh reads it again)

@@ -540,15 +540,15 @@ class MacWeb:
             send(script, b"release")
         prefs = send(config, b"preferences")
         for sel in (b"_setHiddenPageDOMTimerThrottlingEnabled:", b"_setPageVisibilityBasedProcessSuppressionEnabled:")\
-                if AGENT["on"] or for_bots(profile) else ():
+                if AGENT["on"] else ():
             if send(prefs, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
                 send(prefs, sel, False, types=(ctypes.c_bool,))  # (a page out of sight runs as one in sight)
         self.view = send(send(b"WKWebView", b"alloc"), b"initWithFrame:configuration:", R(0, 0, 10, 10), config,
                          types=(R, ctypes.c_void_p))
-        if (AGENT["on"] or for_bots(profile)) and send(self.view, b"respondsToSelector:", objc_sel(
-                b"_setWindowOcclusionDetectionEnabled:"), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
-            send(self.view, b"_setWindowOcclusionDetectionEnabled:", False, types=(ctypes.c_bool,))  # (a Bot's page
-            # drawn on, its animations run, in a window off the screen or behind others: watched, it moves)
+        if AGENT["on"] and send(self.view, b"respondsToSelector:", objc_sel(b"_setWindowOcclusionDetectionEnabled:"),
+                                types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(self.view, b"_setWindowOcclusionDetectionEnabled:", False, types=(ctypes.c_bool,))  # (an agent's
+            # window is never in front of anyone: its pages drawn as they change while it's in, unseen: in_unseen)
         if (agent := os.environ.get("EMISSION_USER_AGENT")):
             send(self.view, b"setCustomUserAgent:", macos.ns_string(agent), types=(ctypes.c_void_p,))
         if not opener:
@@ -559,7 +559,7 @@ class MacWeb:
         send(self.view, b"setNavigationDelegate:", delegate, types=(ctypes.c_void_p,))
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
-        self.attached = self.attached_root = self.blocker = None
+        self.attached = None
 
     @staticmethod
     def jar(profile):
@@ -675,53 +675,20 @@ class MacWeb:
         """Put in its window's content view, once the window's shown."""
         if self.attached is not None:
             return True
-        root = self.place.get_root()
-        ns = macos.native_window(root) if root is not None else None
+        ns = macos.native_window(self.place.get_root())
         if not ns:
             return False
         content = macos.objc_send(ns, b"contentView")
         macos.objc_send(content, b"addSubview:", self.view, types=(ctypes.c_void_p,))
-        self.attached, self.attached_root = content, root
+        self.attached = content
         return True
-
-    def detach(self):
-        """Out of the window it was in (its place moved to another's)."""
-        if self.attached is None:
-            return
-        self.block(False)
-        macos.objc_send(self.view, b"removeFromSuperview")
-        self.attached = self.attached_root = None
-
-    def block(self, on):
-        """Clicks, scrolls and keys kept from the page (on), by a view over it that takes them (and gives them to
-        GTK's, under it), or given it again."""
-        send = macos.objc_send
-        if on and self.blocker is None and self.attached is not None:
-            self.blocker = send(send(b"NSView", b"alloc"), b"initWithFrame:", send(self.view, b"frame",
-                                                                                   ret=macos._rect()),
-                                types=(macos._rect(),))
-            send(self.attached, b"addSubview:positioned:relativeTo:", self.blocker, 1, self.view,
-                 types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p))  # (1: NSWindowAbove)
-        elif not on and self.blocker is not None:
-            send(self.blocker, b"removeFromSuperview")
-            send(self.blocker, b"release")
-            self.blocker = None
 
     def follow(self):
         """Its frame kept over its place (the window resized, a bar's height changed)."""
-        if self.view is None:  # (closed)
-            return
-        root = self.place.get_root()
-        if self.attached is not None and root is not self.attached_root:
-            self.detach()
-        if root is None or not self.place.get_mapped():
-            if self.attached is not None:
-                macos.objc_send(self.view, b"setHidden:", True, types=(ctypes.c_bool,))
-                self.block(False)
-            return
         if not self.attach():
             return
         send, R = macos.objc_send, macos._rect()
+        root = self.place.get_root()
         ok, b = self.place.compute_bounds(root)
         if not ok:
             return
@@ -732,17 +699,12 @@ class MacWeb:
         now = send(self.view, b"frame", ret=R)
         if (now.x, now.y, now.w, now.h) != (frame.x, frame.y, frame.w, frame.h):
             send(self.view, b"setFrame:", frame, types=(R,))
-        dialog = getattr(root, "get_visible_dialog", None)  # (an Adw dialog in the window: drawn under the page)
-        hidden = not self.shown or (dialog is not None and dialog() is not None)
-        send(self.view, b"setHidden:", hidden, types=(ctypes.c_bool,))
-        self.block(bool(getattr(self.window, "blocked", False)) and not hidden)
-        if self.blocker is not None:
-            send(self.blocker, b"setFrame:", frame, types=(R,))
+        send(self.view, b"setHidden:", not self.shown, types=(ctypes.c_bool,))
 
     def show(self, on):
         self.shown = on
         if self.attached is not None:
-            macos.objc_send(self.view, b"setHidden:", not on or not self.place.get_mapped(), types=(ctypes.c_bool,))
+            macos.objc_send(self.view, b"setHidden:", not on, types=(ctypes.c_bool,))
 
     def show_failure(self, url, why):
         """The failure page in place of url's (its history entry url's, as a page that couldn't load)."""
@@ -902,7 +864,8 @@ class MacWeb:
             data = ctypes.string_at(cg.CGBitmapContextGetData(ctx), w * 4 * h)
             cg.CGContextRelease(ctx)
             cg.CGColorSpaceRelease(space)
-            GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False)
+            GLib.idle_add(lambda: done(w, h, w * 4, data, None) and False, priority=GLib.PRIORITY_HIGH)  # (not
+            # behind whatever's idle: a frame waiting there kept the next from being taken)
         conf = send(send(b"WKSnapshotConfiguration", b"alloc"), b"init")
         ns = send(self.view, b"window")
         scale = send(ns, b"backingScaleFactor", ret=ctypes.c_double) if ns else 1.0
@@ -961,20 +924,6 @@ class MacWeb:
             macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
         macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
-    def keys_here(self, fn):
-        """fn() with the page its window's first responder: in another app's window (hosted), whose own widgets have
-        the keys, a page's keys (and the text they make) go to the page only while it is, given back straight after."""
-        send = macos.objc_send
-        ns = send(self.view, b"window")
-        before = send(ns, b"firstResponder") if ns and getattr(self.window, "hosted", False) else None
-        if before is None or before == self.view:
-            return fn()
-        send(ns, b"makeFirstResponder:", self.view, types=(ctypes.c_void_p,))
-        try:
-            return fn()
-        finally:
-            send(ns, b"makeFirstResponder:", before, types=(ctypes.c_void_p,))
-
     def keyed(self):
         """Whether its window is the one keys go to (else a key's editing command is given it as well: a window
         that isn't key types characters, but doesn't run Return, Delete and the like)."""
@@ -984,9 +933,6 @@ class MacWeb:
     def key(self, name, mods=()):
         """A key pressed and let go (name: a character, or Enter, Tab, Backspace, Delete, Escape, the arrows, Home,
         End, PageUp, PageDown, Space), as real key events."""
-        return self.keys_here(lambda: self._key(name, mods))
-
-    def _key(self, name, mods=()):
         send = macos.objc_send
         code, chars = MAC_KEYS.get(name, (None, name))
         if code is None and len(name) == 1:
@@ -1025,9 +971,6 @@ class MacWeb:
         if ch == "\n":
             self.key("Enter")
             return True
-        return self.keys_here(lambda: self._type_char(ch))
-
-    def _type_char(self, ch):
         send = macos.objc_send
         base = MAC_SHIFTED.get(ch, ch.lower())
         code = 49 if ch == " " else MAC_CHAR_CODES.get(base, 0)
@@ -1094,7 +1037,6 @@ class MacWeb:
 
     def close(self):
         if self.view:
-            self.block(False)
             send = macos.objc_send
             self.views.pop(self.view, None)
             send(self.view, b"setNavigationDelegate:", None, types=(ctypes.c_void_p,))
@@ -1641,11 +1583,6 @@ class Tab:
         self.id, self.win = f"tab{Tab.made}", win
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
-        if win.Engine is MacWeb:  # (its view kept over its place as soon as that's shown, hidden or moved: hosted, in a
-            for signal in ("map", "unmap"):  # side panel that's resized and switched, every frame it's shown)
-                self.place.connect(signal, lambda *_: self.web.follow())
-            if win.hosted:
-                self.place.add_tick_callback(lambda *_: self.web.follow() or True)
         self.web.window = win
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
@@ -1655,16 +1592,12 @@ class Tab:
 
 
 class Window(Adw.ApplicationWindow):
-    FAST_MS, SLOW_MS = 33, 250  # (a watched page's frames: this often while things happen, this often after)
+    FAST_MS, SLOW_MS = 16, 250  # (a watched page's frames: this often while things happen, this often after)
 
-    def __init__(self, app, url, profile, agent=False, hosted=False):
+    def __init__(self, app, url, profile, agent=False):
         """agent: the window of an Emission started for a Bot's tools (its own profile; never shown: on macOS
-        it's kept off the screen, on Linux it's on a display of its own; a page's prompts wait for the tools).
-        hosted: an agent's, in another app's process (Baude's, its Browser page showing its pages: body, put there),
-        never shown itself, nor that app's: no shortcuts of its own, not gone when idle, not quit when asked."""
-        super().__init__(application=None if hosted else app, title="Emission", default_width=1280,
-                         default_height=900)
-        self.hosted, self.blocked = hosted, False  # (blocked: its pages not to be clicked or typed in, but watched)
+        it's kept off the screen, on Linux it's on a display of its own; a page's prompts wait for the tools)."""
+        super().__init__(application=app, title="Emission", default_width=1280, default_height=900)
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
         self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
@@ -1725,15 +1658,12 @@ class Window(Adw.ApplicationWindow):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", lambda *_a, fn=fn: fn())
             self.add_action(act)
-            if not hosted:
-                app.set_accels_for_action(f"win.{name}", keys)
-        if self.Engine is MacWeb and not hosted:
+            app.set_accels_for_action(f"win.{name}", keys)
+        if self.Engine is MacWeb:
             clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
             clicks.connect("pressed", lambda *_: MacWeb.keys_to_gtk(self))
             self.add_controller(clicks)
         self.connect("close-request", self.closing_window)
-        if agent and not hosted and sys.platform == "darwin":  # (out of sight, but in: its pages drawn as they change)
-            self.connect("map", lambda *_: GLib.idle_add(lambda: macos.in_unseen(self) and False))
         if self.Engine is not None:
             if not why:
                 self.open(url or ("about:blank" if agent else HOME_PAGE))
@@ -1785,11 +1715,8 @@ class Window(Adw.ApplicationWindow):
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
-        if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
-            return answer({"agent": self.agent and not self.hosted, "hosted": self.hosted, "profile": self.profile,
-                           "tabs": len(self.tabs)})
-        if op == "quit" and self.hosted:
-            return answer({"error": "this Bot's browser is shown in Baude"})
+        if op == "info":
+            return answer({"agent": self.agent, "profile": self.profile, "tabs": len(self.tabs)})
         if op == "quit":
             answer({"ok": True})
             GLib.timeout_add(100, lambda: (self.closing_window(), self.get_application().quit()) and False)
@@ -1807,6 +1734,8 @@ class Window(Adw.ApplicationWindow):
                 return answer({"error": "that profile isn't open here"})
         if op == "watch":
             self.watchers.append(Watcher(self, conn, msg))
+            if self.agent and sys.platform == "darwin":  # (watched: its window in, where no one sees it, so WebKit
+                macos.in_unseen(self)                     # draws its pages as they change: a picture that moves)
             return self.watch_kick()
         self.watch_kick()  # (something's being done: frames often for a while)
         return self.control.run(op, msg, answer)
@@ -1823,6 +1752,8 @@ class Window(Adw.ApplicationWindow):
         if watcher in self.watchers:
             self.watchers.remove(watcher)
             watcher.close()
+        if not self.watchers and self.agent and sys.platform == "darwin":
+            macos.out_unseen(self)  # (no one watching: out again, its pages drawn only as the Bot's tools ask)
 
     def watch_state(self):
         tab = self.current()
@@ -1858,6 +1789,9 @@ class Window(Adw.ApplicationWindow):
                 if data is None:
                     return
                 total = zlib.crc32(data)
+                if total != getattr(self, "watch_last", None):  # (it's moving, an animation, a video: fast while it
+                    self.watch_last = total                       # does)
+                    self.watch_fast_until = max(self.watch_fast_until, time.monotonic() + 1)
                 for w in list(self.watchers):
                     w.offer(fw, fh, stride, data, total)
             try:
@@ -1879,8 +1813,7 @@ class Window(Adw.ApplicationWindow):
             return
         for url in urls or [HOME_PAGE]:
             self.open(url)
-        if not self.hosted:
-            self.present()
+        self.present()
 
     def show_body(self, why):
         """The pages, or (why: there can't be any) a status page saying why."""
@@ -2325,8 +2258,7 @@ class Window(Adw.ApplicationWindow):
             return False
         if self.watchers:
             self.used = GLib.get_monotonic_time()  # (watched: in use)
-        if self.agent and not self.hosted and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and \
-                not self.waiting:
+        if self.agent and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and not self.waiting:
             self.closing_window()
             self.get_application().quit()
             return False
@@ -2985,6 +2917,8 @@ class Watcher:
                 continue
             if msg.get("ack") == self.seq:
                 self.waiting_since = None
+                if getattr(self, "pending", None) is not None:  # (the newest frame, taken while it waited: now)
+                    self.offer(*self.pending)
             if msg.get("max_w"):
                 self.max_w = max(100, min(3840, int(msg["max_w"])))
                 self.max_h = max(100, min(2400, int(msg.get("max_h") or self.max_h)))
@@ -3026,9 +2960,14 @@ class Watcher:
         return self.waiting_since is None
 
     def offer(self, w, h, stride, data, total):
-        """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last."""
-        if total == self.sent_sum or not self.ready():
+        """A frame (the page's, w by h): sent if it's new to this watcher and it's taken the last; else kept, the
+        newest, to be sent as soon as it has."""
+        if total == self.sent_sum:
             return
+        if not self.ready():
+            self.pending = (w, h, stride, data, total)
+            return
+        self.pending = None
         if w > self.max_w or h > self.max_h:
             w, h, stride, data = scaled(w, h, stride, data, self.max_w, self.max_h)
         self.seq += 1

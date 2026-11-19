@@ -76,6 +76,13 @@ def in_unseen(window):
     return True
 
 
+def out_unseen(window):
+    """A window in_unseen put in, taken out again (its pages not drawn for anyone)."""
+    ns = native_window(window)
+    if ns:
+        objc_send(ns, b"orderOut:", None, types=(__import__("ctypes").c_void_p,))
+
+
 def objc_send(obj, sel, *args, types=(), ret=None):
     """[obj sel...] through the Objective-C runtime (there's no PyObjC): obj a class name (bytes) or an object;
     types the arguments' ctypes types."""

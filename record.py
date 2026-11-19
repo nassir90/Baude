@@ -829,11 +829,12 @@ def parse_records(lines, items, seen=None, spawned=False):
     """Append the prose of transcript lines to items: [{"role": "user"|"assistant", "text", "id"}]. An assistant
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
-    "failed", "summary"}, as Baude's chat says it. The prompt a session was started with from outside (its first user
-    record, not typed: started_outside) is {"role": "start", "text", "id"}, drawn at the chat's top, unless a Bot
-    started the chat on the mesh (spawned: bot_started), whose task is a message of yours as any prompt is. A revert
-    (rewind_mark) takes back the items after the record it keeps; seen: each record's uuid -> how many items there
-    were after it (kept by a caller that reads on, as written)."""
+    "failed", "summary"}, as Baude's chat says it. Where Claude Code compacted the conversation is {"role": "compact",
+    "text" (widgets.compact_text), "meta" (its compactMetadata), "summary" (what it wrote, once read), "id"}. The prompt
+    a session was started with from outside (its first user record, not typed: started_outside) is {"role": "start",
+    "text", "id"}, drawn at the chat's top, unless a Bot started the chat on the mesh (spawned: bot_started), whose
+    task is a message of yours as any prompt is. A revert (rewind_mark) takes back the items after the record it keeps;
+    seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
         if last:  # (the record before: how many items there were once it was read)
@@ -850,6 +851,16 @@ def parse_records(lines, items, seen=None, spawned=False):
             continue
         last = d.get("uuid")
         kind = d.get("type")
+        if kind == "system" and d.get("subtype") == "compact_boundary" and not d.get("isSidechain"):
+            meta = d.get("compactMetadata") or {}
+            items.append({"role": "compact", "text": widgets.compact_text(meta), "meta": meta, "id": d.get("uuid")})
+            continue
+        if d.get("isCompactSummary"):  # (under its boundary's: the messages a partial compaction kept between them)
+            mark = next((it for it in reversed(items) if it["role"] == "compact"), None)
+            if mark is not None and not mark.get("summary"):
+                mark["summary"] = _text_of((d.get("message") or {}).get("content"))
+                seen.setdefault("\0summaries", []).append(mark)
+            continue
         if kind not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta") or d.get("isCompactSummary"):
             continue
         msg = d.get("message") or {}
@@ -1675,8 +1686,13 @@ def chat_text(path, title, cwd):
         parse_records(f, items, spawned=bot_started(path))
     head = f"# {title or 'Untitled chat'}\n\n{cwd or ''}".strip()
     who = {"user": "You", "start": "Started with"}
-    return "\n\n".join([head] + [f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}" for it in items
-                                  if it["role"] != "note"])  # (a task's ending: said by neither)
+
+    def said(it):
+        if it["role"] != "compact":
+            return f"**{who.get(it['role'], 'Claude')}:**\n\n{it['text']}"
+        summary = it.get("summary")  # (a compaction: what it did, and what it wrote)
+        return f"*{it['text']}*" + (f"\n\n**Summary of the earlier conversation:**\n\n{summary}" if summary else "")
+    return "\n\n".join([head] + [said(it) for it in items if it["role"] != "note"])  # (a task's ending: said by neither)
 
 
 def chats_of(notebook, transcripts):
@@ -5538,6 +5554,10 @@ class Reader(Gtk.Box):
         grew = keep and self.items[keep - 1].pop("grew", False)
         if grew:
             self.rows[keep - 1].prose.set_text(self.items[keep - 1]["text"])
+        for mark in self.seen.pop("\0summaries", ()):  # (a compaction's summary, read after it was drawn)
+            row = next((r for r in reversed(self.rows[:keep]) if r.item is mark), None)
+            if row is not None:
+                row.prose.set_summary(mark["summary"])
         for it in self.items[keep:]:
             it.pop("grew", None)
             self._add(it)
@@ -5554,6 +5574,14 @@ class Reader(Gtk.Box):
             row.add_css_class("reader-note")
             row.append(prose)
             row.prose, row.item = prose, it
+            self.rows.append(row)
+            self.box.append(row)
+            return
+        if it["role"] == "compact":  # (where Claude Code compacted it: its marker, as Baude's chat draws one)
+            mark = widgets.CompactMark(it.get("meta") or {})
+            mark.set_summary(it.get("summary"))
+            row.append(mark)
+            row.prose, row.item = mark, it
             self.rows.append(row)
             self.box.append(row)
             return

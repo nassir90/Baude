@@ -8472,10 +8472,13 @@ class SessionSidebar(Gtk.Box):
         # a server's sessions: one on this machine's in its folder's group, with this machine's chats there; another
         # host's in a group of its own for each folder there, its name with it
         self.remote_keys = {}
-        for info in sorted((remote_info(s) for s in network().sessions()  # (not a new chat not written in yet: a
-                            if (self.shows(s, hosts, picked, assigned) or s["id"] in marks) and not s.get("draft")),
-                           # (a draft, the open one's)
-                           key=last_used, reverse=True):
+        everywhere = [s for s in network().sessions() if not s.get("draft")]  # (not a new chat not written in yet: a
+        shown = {s["id"] for s in everywhere if self.shows(s, hosts, picked, assigned) or s["id"] in marks}  # (a
+        # draft, the open one's.) A chat an agent started, on whatever host and in whatever group: listed under it
+        # wherever it's listed (where it goes: below), as its own host's chats are, whichever host's chats those are
+        while more := {s["id"] for s in everywhere if s["id"] not in shown and s.get("spawned_by") in shown}:
+            shown |= more
+        for info in sorted((remote_info(s) for s in everywhere if s["id"] in shown), key=last_used, reverse=True):
             r = info["remote"]
             if q and q not in " ".join([info.get("title") or "", info.get("cwd") or "", remote_name(r),
                                         (info.get("bot") or {}).get("name") or ""]).lower():
@@ -8534,8 +8537,8 @@ class SessionSidebar(Gtk.Box):
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
             last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
-        bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads; by date, they're
-        for k, label, folder, rows in ([] if by_date else out):  # among the chats by their time)
+        bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads, whatever host they're
+        for k, label, folder, rows in ([] if by_date else out):  # on; by date, they're among the chats by their time)
             keep, under = [], False
             for row in rows:
                 if not row[1]:
@@ -8612,9 +8615,8 @@ class SessionSidebar(Gtk.Box):
             self.track_days()
         for key, label, folder, rows in self.groups():
             shut = key in collapsed and not searching
-            if key != "bots":  # (Bots, first: no heading, their rows say what they are)
-                self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
-            if shut and key != "bots":
+            self.list.append(self.header_row(key, label, folder, key == session_group(self.win.cwd)[0], shut))
+            if shut:
                 continue
             limit = None if searching or key in self.expanded or key == "bots" else self.limit(key)
             # (the limit counts top-level sessions: their forks come with them)

@@ -1864,7 +1864,7 @@ class Window(Adw.ApplicationWindow):
             if r != "ok" or not name:
                 return
             if profile_id(name) is not None:
-                self.say("That name's taken", f"There's a profile called “{name}” already.")
+                self.say("Name already in use", f"Choose a name other than “{name}”.")
                 return
             then(name)
         dlg.connect("response", once(answered))
@@ -1900,8 +1900,8 @@ class Window(Adw.ApplicationWindow):
                 listing.append(c)
             scroller.set_child(listing)
             box.append(scroller)
-            dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"The Bot is signed in to the sites you "
-                                  f"choose as “{self.profile}” is, with its cookies for them.", extra_child=box,
+            dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"Copy your sign-ins for the chosen sites "
+                                  f"from “{self.profile}” to the Bot.", extra_child=box,
                                   default_response="copy", close_response="cancel")
             dlg.add_response("cancel", "Cancel")
             dlg.add_response("copy", "Copy")
@@ -1964,8 +1964,7 @@ class Window(Adw.ApplicationWindow):
         if self.profile == name and not self.switch_profile(DEFAULT):
             return
         if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
-            self.say("Still open", f"“{name}” is open in another Emission window, so it's kept. Close that window "
-                     "and try again.")
+            self.say(f"“{name}” is open elsewhere", "Close its window and try again.")
             return
 
         tries = [15]
@@ -2003,10 +2002,9 @@ class Window(Adw.ApplicationWindow):
         if not self.have(pid) and not (self.free_from_agent(pid) and self.have(pid)):
             urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
             if hand_over(pid, urls):
-                self.say(f"Opened in “{name}”'s window", f"“{name}” is open in another Emission, so this window's "
-                         "pages opened there.")
+                self.say(f"Opened in “{name}”", f"“{name}” is already open, so the pages went there.")
             else:
-                self.say("Not answering", f"“{name}” is open in another Emission that isn't answering.")
+                self.say(f"“{name}” isn't responding", "It's open in another Emission window.")
             return False
         urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
         self.switching = True

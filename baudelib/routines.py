@@ -20,7 +20,7 @@ def clean(r, old=None):
     name = " ".join(str(r.get("name") or "").split())[:80]
     prompt = str(r.get("prompt") or "").strip()
     if not prompt:
-        raise ValueError("a routine needs what the Bot's to do (prompt)")
+        raise ValueError("a routine needs a task (prompt)")
     out = {"id": (old or {}).get("id") or str(r.get("id") or "") or uuid.uuid4().hex[:12],
            "name": name or prompt.splitlines()[0][:40], "prompt": prompt[:20000], "paused": bool(r.get("paused")),
            "last": (old or {}).get("last")}

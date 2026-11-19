@@ -106,7 +106,7 @@ def _bot_profile(pid, bot_id, name):
     mine = next((p for p in items if p["id"] == pid), None)
     if name is None and mine is not None:
         return pid
-    label = f"{' '.join(str(name or 'Bot').split())[:60]} (Bot)"
+    label = ' '.join(str(name or 'Bot').split())[:60]
     if mine is None or mine["name"] != label:
         taken = {p["name"] for p in items if p["id"] != pid} | {DEFAULT}
         final, n = label, 2

@@ -167,7 +167,7 @@ class _Host:
 
     def open_note(self, name, select=True):
         if name != PAGE:
-            self.toast(f"The memory is one page: there's no page {name} to open")
+            self.toast(f"No page named {name}")
         return self.owner.editor
 
 
@@ -230,13 +230,12 @@ class BotMemory(Gtk.Box):
     def reached(self, ok, why=None):
         """Its host reached (the page as it is), or not: the memory as it was last read, greyed, not to be written
         in, and why above it."""
-        self.offline.set_label("Can't connect to this Bot's host. This is its memory as it was last read."
-                               if not ok else "")
+        self.offline.set_label("Can't connect to the host. Showing the last saved copy." if not ok else "")
         self.offline.set_visible(not ok)
         if self.editor is not None:
             self.editor.set_sensitive(ok)
 
-    def _status(self, title="No memory yet", text="What this Bot learns and keeps shows here. You can write in it too."):
+    def _status(self, title="No memory yet", text="Notes the Bot keeps. You can edit them."):
         """The status page in the editor's place: before a Bot's memory is first read, or what went wrong reading it."""
         self.empty.set_title(title)
         self.empty.set_description(text)
@@ -393,7 +392,7 @@ class BotMemory(Gtk.Box):
             return self._send(asked, sid, remote, {**said, "text": base["text"], "theirs": said["text"]}, ours, seen,
                               tries - 1)
         if reply.get("op") == "error":
-            widgets.toast(self, f"The memory wasn't saved: {reply.get('error') or 'its host said nothing more'}")
+            widgets.toast(self, f"Couldn't save: {reply.get('error') or 'no reason given'}")
             if mine:
                 self.dirty = True  # (still to save: with the next change, or read)
             self.after.pop(asked, None)

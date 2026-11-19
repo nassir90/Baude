@@ -49,14 +49,15 @@ class RoutinesPage(Gtk.Box):
         add.connect("clicked", lambda *_: self.edit(None))
         head.append(add)
         self.append(head)
-        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10,
+                                valign=Gtk.Align.START)
         self.list.add_css_class("boxed-list")
-        self.empty = Adw.StatusPage(icon_name="alarm-symbolic", title="No routines yet", vexpand=True,
-                                    description="Run a task on a schedule, even when Baude is closed.")
+        empty = Gtk.Label(label="No routines yet", margin_top=24, margin_bottom=24)  # (as the side panel's other
+        empty.add_css_class("dim-label")                                              # lists say so: _empty)
+        self.list.set_placeholder(empty)
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=10, margin_end=10, margin_top=6)
         self.said.add_css_class("dim-label")
         self.append(Gtk.ScrolledWindow(vexpand=True, child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER))
-        self.append(self.empty)
         self.append(self.said)
         self.timer = GLib.timeout_add_seconds(30, self.tick)  # (next and last, said again as time goes)
         self.connect("destroy", lambda *_: GLib.source_remove(self.timer))
@@ -133,8 +134,6 @@ class RoutinesPage(Gtk.Box):
                 b.connect("clicked", lambda _b, f=fn: f())
                 row.add_suffix(b)
             self.list.append(row)
-        self.list.set_visible(bool(self.routines))
-        self.empty.set_visible(not self.routines)
 
     def edit(self, r):
         """A routine made, or (r) changed: what to do, and when."""

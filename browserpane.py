@@ -255,16 +255,17 @@ class BrowserPane(Gtk.Box):
         self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
         self.read_only.add_css_class("flat")
         self.read_only.connect("toggled", lambda b: self.read_only_set(b.get_active()))
-        bar.append(self.read_only)
-        self.append(bar)
-        strip = Gtk.Box(spacing=2, margin_start=6, margin_end=6)
-        self.tabs = Gtk.Box(spacing=2)
-        strip.append(Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, child=self.tabs))
         new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New tab")
         new.add_css_class("flat")
         new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
-        strip.append(new)
-        self.append(strip)
+        bar.append(new)
+        bar.append(self.read_only)
+        self.append(bar)
+        self.strip = Gtk.ScrolledWindow(hexpand=True, vscrollbar_policy=Gtk.PolicyType.NEVER, margin_start=6,
+                                        margin_end=6, margin_bottom=6, visible=False)  # (the tabs, while there's more
+        self.tabs, self.tabs_key = Gtk.Box(spacing=4), None                                 # than one)
+        self.strip.set_child(self.tabs)
+        self.append(self.strip)
         self.prompts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6)
         self.append(self.prompts)
         self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
@@ -273,7 +274,7 @@ class BrowserPane(Gtk.Box):
         self.body = Gtk.Stack(vexpand=True)
         self.body.add_named(self.status, "status")
         self.body.add_named(self.picture, "page")
-        self.append(self.body)
+        self.append(widgets.inside(self.body, start=False))  # (set into the frame, as the panel's other panes are)
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=8, margin_end=8, margin_bottom=4)
         self.said.add_css_class("dim-label")
         self.append(self.said)
@@ -381,21 +382,26 @@ class BrowserPane(Gtk.Box):
             if self.stream is not None and self.state.get("agent"):
                 self.fit_page()
         tabs = self.state.get("tabs") or []
-        while (c := self.tabs.get_first_child()) is not None:
-            self.tabs.remove(c)
-        for t in tabs:
-            b = Gtk.ToggleButton(active=t.get("selected", False), tooltip_text=t.get("url") or "")
-            label = Gtk.Label(label=(t.get("title") or t.get("url") or "New tab")[:28], ellipsize=3)
-            box = Gtk.Box(spacing=4)
-            box.append(label)
-            close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close tab")
-            close.add_css_class("flat")
-            close.connect("clicked", lambda _b, tid=t["tab"]: self.ask({"op": "close_tab", "tab": tid}))
-            box.append(close)
-            b.set_child(box)
-            b.add_css_class("flat")
-            b.connect("clicked", lambda _b, tid=t["tab"]: self.ask({"op": "select_tab", "tab": tid}))
-            self.tabs.append(b)
+        key = [(t.get("tab"), t.get("title"), t.get("url"), bool(t.get("selected"))) for t in tabs]
+        if key != self.tabs_key:  # (made again only when they change: a click on one isn't lost to its remaking)
+            self.tabs_key = key
+            while (c := self.tabs.get_first_child()) is not None:
+                self.tabs.remove(c)
+            for t in tabs:
+                pick = Gtk.ToggleButton(active=t.get("selected", False), tooltip_text=t.get("url") or "")
+                pick.set_child(Gtk.Label(label=(t.get("title") or t.get("url") or "New tab")[:28], ellipsize=3))
+                pick.add_css_class("flat")
+                pick.connect("clicked", lambda b, tid=t["tab"], on=bool(t.get("selected")): (
+                    b.set_active(on), self.ask({"op": "select_tab", "tab": tid})))  # (shown picked once it is)
+                close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close tab")
+                close.add_css_class("flat")
+                close.connect("clicked", lambda _b, tid=t["tab"]: self.ask({"op": "close_tab", "tab": tid}))
+                tab = Gtk.Box()  # (its name, and its close button beside it)
+                tab.add_css_class("linked")
+                tab.append(pick)
+                tab.append(close)
+                self.tabs.append(tab)
+            self.strip.set_visible(len(tabs) > 1)
         now = next((t for t in tabs if t.get("selected")), None)
         if now is not None and not self.address.get_delegate().has_focus():
             self.address.set_text(now.get("url") or "")
@@ -542,7 +548,7 @@ class BrowserPane(Gtk.Box):
             step = max(1, len(path) // 20)  # (at most about 20 points of it: the shape kept)
             points = [p for p in (self.to_page(*q) for q in path[::step] + [path[-1]]) if p is not None]
             if len(points) >= 2:
-                self.ask({"op": "drag", "tab": self.tab(), "path": points, "css": True})
+                self.ask({"op": "drag", "tab": self.tab(), "path": points, "css": True, "quick": True})
             return
         x, y = path[0]
         at = self.to_page(x, y)
@@ -552,7 +558,7 @@ class BrowserPane(Gtk.Box):
         near = where is not None and abs(where[0] - x) < 6 and abs(where[1] - y) < 6
         n = count + 1 if near and time.monotonic() - when < 0.45 else 1  # (pressed again, quickly, in one place)
         self.last_click = (time.monotonic(), (x, y), n)
-        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "press": n,
+        self.ask({"op": "click", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "press": n, "quick": True,
                   "button": {3: "right", 2: "middle"}.get(press["button"], "left"), "modifiers": press["mods"]})
 
     def moved(self, _c, x, y):
@@ -565,7 +571,7 @@ class BrowserPane(Gtk.Box):
         self.hover_source = None
         at = self.to_page(*self.pointer) if self.pointer and self.drag is None else None
         if at is not None and not self.asks.pending:  # (only with nothing else waiting: never queued behind)
-            self.ask({"op": "hover", "tab": self.tab(), "x": at[0], "y": at[1], "css": True})
+            self.ask({"op": "hover", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "quick": True})
         return False
 
     def scrolled(self, ctl, dx, dy):
@@ -582,7 +588,8 @@ class BrowserPane(Gtk.Box):
         self.scroll_due = [0.0, 0.0]
         at = self.to_page(*self.pointer) if self.pointer else None
         if (dx or dy) and at is not None:
-            self.ask({"op": "scroll", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "dx": dx, "dy": dy})
+            self.ask({"op": "scroll", "tab": self.tab(), "x": at[0], "y": at[1], "css": True, "dx": dx, "dy": dy,
+                      "quick": True})
         return False
 
     @staticmethod

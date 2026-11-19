@@ -1012,7 +1012,7 @@ class MacWeb:
             macos.objc_send(self.view, b"mouseDragged:", self._event(6, x, y), types=(ctypes.c_void_p,))
         macos.objc_send(self.view, b"mouseUp:", self._event(2, x, y), types=(ctypes.c_void_p,))
 
-    bot_times = set()  # (the times, in ms, the Bot's key events were stamped with: what GTK hears with one's a page's
+    bot_times = {}  # (the times, in ms, the Bot's key events were stamped with, oldest first: what GTK hears with one's a page's
     bot_n = [0]         # handing back a key of the Bot's it didn't use, dropped by Baude: page_has_keys)
     bot_text_until = 0.0  # (time.monotonic(): till then, text that comes to GTK with no key, as WebKit gives the text a
     # Bot's key made to whatever has the keys by the time it's done with it, is the Bot's: dropped)
@@ -1023,10 +1023,12 @@ class MacWeb:
         made from it, is known for the Bot's (its time those ms), however late WebKit hands it back."""
         cls.bot_n[0] = (cls.bot_n[0] + 1) % 900_000
         ms = 4_294_000_000 + cls.bot_n[0]
-        cls.bot_times.add(ms)
-        if len(cls.bot_times) > 4000:
-            cls.bot_times = set(sorted(cls.bot_times)[-2000:])
-        return ms / 1000.0
+        for heard in (ms, ms - 1):  # (GDK's ms are the stamp's, cut down: one less, as often as not)
+            cls.bot_times.pop(heard, None)
+            cls.bot_times[heard] = True
+        while len(cls.bot_times) > 4000:  # (the oldest let go of, however the count's come round)
+            cls.bot_times.pop(next(iter(cls.bot_times)))
+        return (ms + 0.5) / 1000.0
 
     def keys_here(self, fn):
         """fn() with the page its window's first responder: in Baude's window (hosted), whose own widgets have the
@@ -2181,7 +2183,8 @@ class Window(Adw.ApplicationWindow):
                 got = call_bot(bot["bot"], None, {"op": "add_cookies", "cookies": cookies}, timeout=30)
                 GLib.idle_add(lambda: done(got.get("added", 0), None) and False)
             except (OSError, ValueError) as e:
-                GLib.idle_add(lambda: done(None, str(e)) and False)
+                why = str(e)  # (e's gone once this block's done: the idle call's after)
+                GLib.idle_add(lambda: done(None, why) and False)
         threading.Thread(target=over_there, daemon=True).start()
 
     def ask_rename(self):
@@ -3077,14 +3080,17 @@ class Control:
         w, h = int(msg.get("width") or 0), int(msg.get("height") or 0)
         if not (200 <= w <= SCREEN[0] - 200 and 200 <= h <= SCREEN[1] - 300):
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
+        if msg.get("fit"):  # (a pane watching it streamed: its frames scaled, the Bot's own size kept)
+            return answer({**self.describe(t), "size": None})
         self.win.page_size = (w, h)
         for tab in self.win.tabs.values():
             tab.web.follow()
         shown = t.place.get_mapped()
         GLib.timeout_add(300, guarded(lambda: self.js(t, "return {width: innerWidth, height: innerHeight}", answer,
                                                       lambda v: answer({**self.describe(t), "size": v, **(
-                                                          {"note": "its page is shown in Baude's Browser page, at "
-                                                                   "that's size, till it's hidden"} if shown else {})}))
+                                                          {"note": "its page is shown in Baude's Browser page now, at "
+                                                                   "the page's size: it's laid out at this size again "
+                                                                   "once it isn't"} if shown else {})}))
                                       and False, answer))
 
     def resize_window(self, msg, answer):

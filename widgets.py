@@ -6893,14 +6893,18 @@ class ChatFind:
         self._root, self.scroller, self.pane = root, scroller, pane or scroller
         self.matches, self.index, self.text, self.back_to = [], -1, "", None
         self.by_label, self.texts = {}, {}  # (each label's matches' places in matches, and its text as it was found)
-        # (a chat with parts not drawn: undrawn() whether there are any; beyond(text, by, y0, y1) draws the nearest
-        # that has text, going by (1 down, -1 up) from height y0 as far as y1 (None: round to y0 again; y0 None: from
-        # the view), and says whether it drew one)
-        self.undrawn = self.beyond = None
+        # (a chat with parts not drawn: undrawn() whether there are any; beyond(text, by, y0, y1, done) draws the
+        # nearest that has text, going by (1 down, -1 up) from height y0 as far as y1 (None: round to y0 again; y0
+        # None: from the view), calls done(whether it drew one) when it knows, and returns what stops its look)
+        # drawn(): something that changes as its parts are drawn (by themselves too, as the view comes near): what
+        # was found is found again then (_stale)
+        self.undrawn = self.beyond = self.drawn = None
+        self.drawn_then = None
         self.waiting = None  # (the frame waited for, a part just drawn laid out: _then)
+        self.searching = None  # (what stops the look through the parts not drawn, while there's one: _step_beyond)
         self.marks = FindMarks(self)
         self.entry = Gtk.SearchEntry(placeholder_text="Find in chat", hexpand=True)
-        self.count = Gtk.Label(width_chars=9, xalign=1, css_classes=["dim-label", "caption"])
+        self.count = Gtk.Label(width_chars=10, xalign=1, css_classes=["dim-label", "caption"])
         bar = Gtk.Box(spacing=4)
         bar.append(self.entry)
         bar.append(self.count)
@@ -7001,6 +7005,7 @@ class ChatFind:
         """The bar closed (Esc, ×, close): the matches gone, and the focus, if it was in the bar, back where it was
         (a label's selection as it was: GTK selects all of one given the focus)."""
         self.matches, self.index, self.text, self.by_label, self.texts = [], -1, "", {}, {}
+        self._stop_search()
         if self.waiting is not None:
             self.waiting[0].remove_tick_callback(self.waiting[1])
             self.waiting = None
@@ -7047,7 +7052,9 @@ class ChatFind:
         """Every match of text in the chat's labels (case ignored), in order; the current one the first at or below
         after (a height in what's scrolled), else the first in view, else the first. quiet: none made the current one
         (its caller picks)."""
+        self._stop_search()
         self.text, self.matches, self.index, self.by_label, self.texts = text, [], -1, {}, {}
+        self.drawn_then = self.drawn() if self.drawn is not None else None
         self.marks.queue_draw()
         if not text:
             self.count.set_label("")
@@ -7090,9 +7097,16 @@ class ChatFind:
             return False
         self.waiting = (scroller, scroller.add_tick_callback(tick))
 
+    def _stop_search(self):
+        if self.searching is not None:
+            self.searching()
+            self.searching = None
+
     def _step_beyond(self, by):
-        """Before the step: an undrawn part with the text between the current match and the next that way drawn
-        (beyond), and the step made once it's laid out, from the same match. Whether it's waiting on one."""
+        """Before the step: an undrawn part with the text between the current match and the next that way looked for
+        (beyond: "searching…" meanwhile, the window still drawn and scrolled), and drawn if there's one; the step's
+        made once that's laid out: to the match next to the current one, which is in the part drawn if it shows the
+        text. None between: the step as it is. Whether it's looking (the step's made later)."""
         if self.beyond is None or not self._more():
             return False
         content, n = self._content(self.scrolling()), len(self.matches)
@@ -7107,23 +7121,36 @@ class ChatFind:
                 y1 = r.get_y()
             if y0 is None:
                 return False
-        if not self.beyond(self.text, by, y0, y1):
-            if not n:
-                self.count.set_label("No matches")
-            return False
+        text = self.text
 
-        def go():
-            text = self.text
+        def go(drew):
+            """The step, among the matches as they are now (found again: parts are drawn by themselves too, as the
+            view comes near them, and their matches weren't in what was found before)."""
+            if text != self.text:
+                return
             self.find(text, quiet=True)
-            at = next((i for i, (label, start, _e) in enumerate(self.matches) if (label, start) == key), None) \
-                if key is not None else None
+            at = next((i for i, (label, start, _e) in enumerate(self.matches) if (label, start) == key), None)
             if at is not None:
-                self.index = at
-            elif self.matches:  # (none before: the first in what was drawn, wherever that is)
-                return self.show(self._first_below(self.scrolling().get_vadjustment().get_value()) if by > 0
-                                 else len(self.matches) - 1)
-            self.step(by)
-        self._then(go)
+                self.show((at + by) % len(self.matches))
+            elif self.matches:  # (none before: the first in what was drawn, or going up its last)
+                self.show(self._first_below(self.scrolling().get_vadjustment().get_value()) if by > 0
+                          else len(self.matches) - 1)
+            elif drew:  # (drawn, and it doesn't show the text after all: the next part that has it)
+                self.step(by)
+            else:
+                self.count.set_label("No matches")
+
+        def done(drew):
+            self.searching = None
+            if drew:
+                self._then(lambda: go(True))  # (once it's laid out: its labels have their places then)
+            else:
+                go(False)
+        self.count.set_label("searching…")
+        self.searching = stop = lambda: None  # (till it's known what stops it: done may be called at once)
+        stops = self.beyond(text, by, y0, y1, done)
+        if self.searching is stop:
+            self.searching = stops
         return True
 
     def _first_below(self, y):
@@ -7138,19 +7165,29 @@ class ChatFind:
         return 0
 
     def _stale(self):
+        if self.drawn is not None and self.drawn() != self.drawn_then:
+            return True
         root = self.root()
         return any(root is None or not label.is_ancestor(root) or label.get_text() != said
                    for label, said in self.texts.items())
 
     def step(self, by):
         """The next match (by 1) or the one before (-1): found again first, from where the current one was, if the
-        chat's changed under them."""
+        chat's changed under them. Not while a look through the parts not drawn is on (_step_beyond: that steps)."""
+        if self.searching is not None:
+            return
         if self.matches and self._stale():
             r = self._rect(self.index, self._content(self.scrolling())) if self.index >= 0 else None
             was = r.get_y() if r is not None else None
-            self.find(self.text, after=None if was is None else was + (1 if by > 0 else 0))
-            if by > 0 or not self.matches:
-                return
+            key = self.matches[self.index][:2] if self.index >= 0 else None
+            self.find(self.text, quiet=True)
+            at = next((i for i, m in enumerate(self.matches) if m[:2] == key), None)
+            if at is not None:  # (the current one's still there, more found around it: the step's from it)
+                self.index = at
+            else:
+                self.find(self.text, after=None if was is None else was + (1 if by > 0 else 0))
+                if by > 0 or not self.matches:
+                    return
         if not self.matches:
             if self.entry.get_text():
                 self.find(self.entry.get_text())

@@ -301,9 +301,8 @@ def main():
     if "pages" not in skip:
         win.show_panel(True, "files")
         settle()
-        # (the copy's history, whatever folder the open chat's in: the one Signal's phase opened is in the copy, but
-        # with that skipped, or no chat of this checkout's to copy, it's in a folder that's no repository, and the
-        # page had no log to wait for)
+        # (the copy's history, whatever folder the open chat's in: Signal's phase opens one in the copy, but skipped,
+        # or with no chat of this checkout's to copy, the chat's in a folder that's no repository)
         copy_repo()
         win.show_git(folder=repo)
         git = win.panel.git_page

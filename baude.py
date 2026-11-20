@@ -787,15 +787,15 @@ class Signal(Names):
     CHATS = 4  # the most chats kept read (_chats): windows of one repository share its Signal, each following its own
 
     def follow(self, transcript, win=None):
-        """The chat shown (its transcript; win: the window showing it): what's new in it is read (what Claude saw, as evidence), and the reader
-        reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
+        """The chat shown (its transcript; win: the window showing it): what's new in it is read (what Claude saw, as
+        evidence), and the reader reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
         decisions carry from reply to reply as they're drawn. This runs for each line another program appends to the
         chat: only what was appended is read (SignalChat). A chat just opened is read FOLLOW_MS at a time between
         frames, once it's still (_follow_some), to the same lists: read at once as it opened, an 85 MB chat and its
         subagents' (96 MB more) held its first frame up 0.9 s. The chats its windows show are kept (shown; CHATS at
         most), each read on from where it was: windows sharing this Signal each follow theirs as it grows, and one
-        being read isn't started again when another's grows. One no window shows any more goes: a chat switched away
-        from left its events, texts and evidence here (some MB of a long one) till four more had been opened."""
+        being read isn't started again when another's grows. One no window shows any more goes, its events, texts and
+        evidence with it (some MB of a long one)."""
         if transcript:
             self.transcript = transcript
             if win is not None:
@@ -13251,6 +13251,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         root.append(self.banner)
         self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
         self.chat_find.undrawn, self.chat_find.beyond = self.find_undrawn, self.find_beyond
+        self.chat_find.drawn = lambda: None if self.history is None else (
+            self.history.shown, sum(len(job.items) + len(job.hidden) for job in self.fill_jobs))
         root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
@@ -13855,10 +13857,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if at == self.cull_at:
             return
         self.cull_at = at
-        if (self.chunk_slots or self.fill_jobs) and self.fill_held is None:
+        if self.chunk_slots or self.fill_jobs:
             # (the view's somewhere else now it's laid out: a chunk near it is drawn. on_scrolled asks as the view
-            # moves, before the frame's layout, when it's still where it was: this asks after it. Not while a chat
-            # just opened is held: fill_held)
+            # moves, before the frame's layout, when it's still where it was: this asks after it)
             self.plan_fill()
         going, slot = set(), hist.get_first_child()
         while slot is not None:
@@ -18148,29 +18149,49 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """Whether the chat has earlier parts not drawn (ChatFind.undrawn: its count says there may be more)."""
         return bool(self.history is not None and (self.chunk_slots or self.fill_jobs or self.history.todo))
 
-    @staticmethod
-    def item_words(item):
-        """What an item of the transcript shows as text once drawn: a message's words, a reply's (not a call's card,
-        closed, nor a summary, folded: find doesn't look in those either)."""
+    _FIND_MARKUP = re.compile(r"[*_`~]+|^[ \t]*(?:#+|>+|[-+]|\d+\.)[ \t]+", re.MULTILINE)
+
+    @classmethod
+    def find_plain(cls, text):
+        """text as find compares what's not drawn: Markdown's marks out (a drawn reply's labels have none: **8.6 m**
+        is found as 8.6 m), spaces and line ends one space, case folded. What's looked for goes through it too."""
+        return " ".join(cls._FIND_MARKUP.sub("", text).split()).casefold()
+
+    @classmethod
+    def item_words(cls, item):
+        """What an item of the transcript shows as text once drawn, as find_plain has it: a message's words, a reply's,
+        and each call's line on its card (summarize_tool: what ChatFind finds there). Not what's folded: a card's input
+        and output, thinking, a summary."""
         kind, content = item[0], item[1] if len(item) > 1 else None
         if kind in ("user", "start_prompt"):
-            return "\n".join(clean_prompt(t) for t in _prompt_texts(content))
-        if kind == "assistant":
-            return content if isinstance(content, str) else "\n".join(
-                c.get("text") or "" for c in content or () if isinstance(c, dict) and c.get("type") == "text")
-        return ""
+            said = [clean_prompt(t) for t in _prompt_texts(content)]
+        elif kind == "assistant":
+            said = [content] if isinstance(content, str) else [
+                c.get("text") or "" if c.get("type") == "text" else summarize_tool(c.get("name") or "", c.get("input") or {})
+                for c in content or () if isinstance(c, dict) and c.get("type") in ("text", "tool_use", "server_tool_use")]
+        else:
+            said = []
+        return cls.find_plain("\n".join(said))
 
-    def find_beyond(self, text, by, y0, y1):
-        """ChatFind.beyond: the nearest earlier chunk not drawn whose items have text (case ignored, in the
-        transcript: item_words) drawn at once, looking by (1 down, -1 up) from height y0 in the chat as far as y1
-        (None: on round its other end, back to y0; y0 None: outward from the view). Whether one was drawn. A chunk
-        looked in is remembered while the text's the same (looked_in): Enter pressed again reads none twice."""
-        if self.history is None or not text:
-            return False
-        self.history.finish()
+    FIND_SLICE = 0.008  # s of looking through the transcript at a time, between frames (find_beyond)
+
+    def find_beyond(self, text, by, y0, y1, done):
+        """ChatFind.beyond: the nearest earlier chunk not drawn whose items have text (item_words) drawn at once,
+        looking by (1 down, -1 up) from height y0 in the chat as far as y1 (None: on round its other end, back to
+        y0; y0 None: outward from the view); done(whether one was drawn) once it's known. The transcript's looked
+        through FIND_SLICE at a time between frames (a long one is hundreds of MB), each line parsed only if it has
+        the text's longest word as it's written (HistoryIndex.holds). A chunk looked in is remembered while the
+        text's the same (looked_in): Enter pressed again reads none twice. Returns what stops the look."""
+        scan = {"on": True}
+        needle = self.find_plain(text)
+        if self.history is None or not needle:
+            done(False)
+            return lambda: None
+        history = self.history
+        history.finish()
         self.make_chunk_slots()
-        if getattr(self, "looked_in", (None,))[0] != (self.history, text):
-            self.looked_in = ((self.history, text), set())
+        if self.looked_in[0] != (history, needle):
+            self.looked_in = ((history, needle), set())
         looked, places = self.looked_in[1], []
         content = widgets.ChatFind._content(self.scroller)  # (heights as find has them: in what's scrolled)
         for slot in list(self.chunk_slots or ()) + [job.slot for job in self.fill_jobs]:
@@ -18188,18 +18209,33 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             below = sorted((p for p in places if p[1] > y0), key=lambda p: p[0])
             order = [p for p in below if p[0] < y1] if y1 is not None else \
                 below + sorted((p for p in places if p[1] <= y0), key=lambda p: p[0])
-        needle = text.casefold()
-        for _top, _bottom, slot in order:
-            begun = next((job for job in self.fill_jobs if job.slot is slot), None)
-            items = None if begun is not None else self.history.peek(*slot.span)
-            if begun is None and items is None:  # (rewritten since it was indexed: drawing it finds where it went)
-                continue
-            if begun is not None or any(needle in self.item_words(item).casefold() for item in items):
-                self.stick_bottom = False
-                self.fill_now(slot)
+        order = collections.deque(slot for _top, _bottom, slot in order)
+        # (a line with the text has its longest run of letters and digits as it's written: in no escape, under no mark)
+        word = max(re.findall(r"[a-z0-9]+", needle), key=len, default="").encode()
+
+        def some():
+            if not scan["on"] or self.history is not history:
+                return False
+            end = time.monotonic() + self.FIND_SLICE
+            while order and time.monotonic() < end:
+                slot = order.popleft()
+                begun = any(job.slot is slot for job in self.fill_jobs)
+                if slot.filled or not (begun or slot in (self.chunk_slots or ())):
+                    continue  # (drawn meanwhile, or gone: the transcript rewritten)
+                # (one begun, part of it drawn, is looked in as the rest are; one rewritten since it was indexed is
+                # passed by)
+                if history.holds(*slot.span, word, lambda item: needle in self.item_words(item)):
+                    self.stick_bottom = False
+                    self.fill_now(slot)
+                    done(True)
+                    return False
+                looked.add(slot)
+            if order:
                 return True
-            looked.add(slot)
-        return False
+            done(False)
+            return False
+        GLib.idle_add(some)
+        return lambda: scan.update(on=False)
 
     def history_rewritten(self):
         """The transcript was rewritten since it opened: what's left to draw indexed again, with places of its own above
@@ -18281,8 +18317,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.estimated_per, self.cull_at, self.place_at = 0, None, None
 
     def plan_fill(self):
-        """Draw on, a frame at a time, if there's a chunk to draw (fill_frame picks which)."""
-        if self.fill_tick is None and self.history is not None and (self.chunk_slots or self.fill_jobs):
+        """Draw on, a frame at a time, if there's a chunk to draw (fill_frame picks which). Not while a chat just
+        opened is held (fill_held: its first FILL_AFTER_MS are its own frames')."""
+        if self.fill_tick is None and self.history is not None and (self.chunk_slots or self.fill_jobs) and \
+                self.fill_held is None:
             self.fill_tick = self.scroller.add_tick_callback(self.fill_frame)
 
     def slot_away(self, slot, top, page):

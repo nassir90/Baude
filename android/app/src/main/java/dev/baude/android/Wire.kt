@@ -59,8 +59,15 @@ object WireStrict {
     /** A message sent or read (how), as it is on the wire: what of it isn't as the schema has it, in the log. */
     fun check(how: String, msg: JSONObject) {
         if (!on) return
-        for (p in WireCheck.problems(JSONObject(msg.toString()))) if (said.add("$how: $p")) android.util.Log.w("wire", "$how: $p")
+        for (p in WireCheck.problems(JSONObject(msg.toString()))) {
+            val line = "$how: $p"
+            if (line in said) continue
+            if (said.size < SAID_MOST) said.add(line) // (each once, the first SAID_MOST; after that, all of them)
+            android.util.Log.w("wire", line)
+        }
     }
+
+    private const val SAID_MOST = 1000
 }
 
 /** What an error says, for a person: its error, and a refusal's detail after it (null: it says nothing). */

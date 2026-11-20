@@ -217,6 +217,7 @@ class Remote:
         self.info, self.seen, self.stopping = info, time.time(), None  # (back: whatever it said as it went, done with)
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
+        ch.refused_here = self.answered  # (a request refused before it went: answered at once, its reader in readline)
         ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
         for msg in ch:
             self.seen = time.time()
@@ -239,8 +240,8 @@ class Remote:
                                  "restart": bool(msg.get("restart")),
                                  "at": self.stopping["at"] if self.stopping else time.monotonic()}
                 self.network.changed()
-            elif op != "ping" and (req := msg.get("req")) is not None and req in self.calls:
-                self.calls.pop(req)(msg)
+            elif op != "ping":
+                self.answered(msg)
         with self.lock:
             self.ch = None
             calls, self.calls = self.calls, {}
@@ -257,8 +258,14 @@ class Remote:
         q = self.stopping
         return stopping_line(name, q["restart"], q["left"], q["procs"])
 
+    def answered(self, msg):
+        """A request's answer (its req's), to what's waiting on it, if anything is."""
+        if (req := msg.get("req")) is not None and (then := self.calls.pop(req, None)) is not None:
+            then(msg)
+
     def request(self, msg, done=None):
-        """Send a request; done(reply) through dispatch (an error reply if the server isn't there)."""
+        """Send a request; done(reply) through dispatch (an error reply if the server isn't there, or the schema's
+        refusal of it, at once, if it isn't one the schema has)."""
         reply = (lambda r: self.network.dispatch(lambda: done(r))) if done else (lambda r: None)
         with self.lock:
             ch = self.ch
@@ -866,6 +873,8 @@ class RemoteProc(claude.ClaudeProc):
             raise (Refused if reply else OSError)(wire.said(reply) or "the server didn't answer")
         self.ch.sock.settimeout(wire.SILENT_S)  # (the server pings: silence this long, and it's gone)
         self.ch.keep_alive()
+        self.ch.refused_here = lambda r: (done := self.answering.pop(r.get("req"), None)) and \
+            self.dispatch(lambda: done(r))  # (held refused before it went: answered at once)
         self.listing = reply.get("session") or {}
         self.asks = {m["request_id"]: m for m in reply.get("asks") or [] if m.get("request_id")}
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()

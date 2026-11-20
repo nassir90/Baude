@@ -70,7 +70,8 @@ STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
 
 
 class SchemaError(Exception):
-    """schema/wire.schema.json isn't as it must be: a version claimed twice, say."""
+    """schema/wire.schema.json isn't as it must be: a key twice in one object, or a ref to a def that isn't there,
+    say."""
 
 
 def _load(path):
@@ -383,11 +384,118 @@ NULLABLE = {op: frozenset(f for n in names for f, p in DEFS[n]["properties"].ite
             for op, names in OPS.items()}  # (an op's fields that may be null, in any of its lines)
 
 
+def _cut(schema, value):
+    """value with what the schema hasn't left out of it: its closed entities' fields, in lists and maps too."""
+    if schema.get("x-open") or value is None:
+        return value
+    ref = _ref(schema)
+    if ref is not None:
+        d = DEFS[ref]
+        if d.get("additionalProperties") is not False or not isinstance(value, dict):
+            return value
+        return {k: _cut(d["properties"][k], v) for k, v in value.items() if k in d["properties"]}
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [_cut(schema["items"], v) for v in value]
+    if isinstance(value, dict) and isinstance(schema.get("additionalProperties"), dict):
+        return {k: _cut(schema["additionalProperties"], v) for k, v in value.items()}
+    return value
+
+
+def cut(msg):
+    """A message with what the schema hasn't left out (a field its op's lines don't have, or one of a closed
+    entity's in it): what a host's broadcast goes as, rather than not at all."""
+    names = OPS.get(msg.get("op")) if isinstance(msg, dict) else None
+    if not names:
+        return msg
+    out = {}
+    for k, v in msg.items():
+        said = [DEFS[n]["properties"][k] for n in names if k in DEFS[n]["properties"]]
+        if said:
+            out[k] = _cut(said[0], v) if all(s == said[0] for s in said) else v
+    return out
+
+
+def _unnuller(schema):
+    """A function that leaves out of a value the fields given as None that can't be null, in the closed entities
+    in it (in lists and maps too), or None if there are none to look at."""
+    if schema.get("x-open"):
+        return None
+    ref = _ref(schema)
+    if ref is not None:
+        return _entity_unnuller(ref) if DEFS[ref].get("additionalProperties") is False else None
+    if isinstance(schema.get("items"), dict) and (inner := _unnuller(schema["items"])) is not None:
+        def items(v):
+            if not isinstance(v, list):
+                return v
+            out = None  # (the same list, if nothing in it changed)
+            for i, x in enumerate(v):
+                if (y := inner(x)) is not x:
+                    out = out or list(v)
+                    out[i] = y
+            return v if out is None else out
+        return items
+    if isinstance(schema.get("additionalProperties"), dict) and \
+            (inner := _unnuller(schema["additionalProperties"])) is not None:
+        def values(v):
+            if not isinstance(v, dict):
+                return v
+            out = {k: inner(x) for k, x in v.items()}
+            return v if all(out[k] is x for k, x in v.items()) else out
+        return values
+    return None
+
+
+_unnullers = {}
+
+
+def _entity_unnuller(name):
+    if name in _unnullers:
+        return _unnullers[name]
+    props = DEFS[name]["properties"]
+    keep = frozenset(f for f, p in props.items() if _nullable(p))
+    strict = tuple(f for f in props if f not in keep)  # (those that can't be null)
+    inner = []
+
+    def unnull(v):
+        if not isinstance(v, dict):
+            return v
+        if None in v.values() and any(v.get(k, 0) is None for k in strict):
+            v = {k: x for k, x in v.items() if x is not None or k in keep}
+        for f, u in inner:
+            if (x := v.get(f)) is not None and (y := u(x)) is not x:
+                v = {**v, f: y}
+        return v
+    _unnullers[name] = unnull
+    inner += [(f, u) for f, p in props.items() if (u := _unnuller(p)) is not None]
+    return unnull
+
+
+def _op_unnuller(op, names):
+    keep = NULLABLE[op]
+    inner = []
+    for f in {f for n in names for f in DEFS[n]["properties"]}:
+        said = {json.dumps(DEFS[n]["properties"][f], sort_keys=True) for n in names if f in DEFS[n]["properties"]}
+        if len(said) == 1 and (u := _unnuller(json.loads(said.pop()))) is not None:
+            inner.append((f, u))
+
+    def unnull(msg):
+        if None in msg.values():
+            msg = {k: v for k, v in msg.items() if v is not None or k in keep}
+        for f, u in inner:
+            if (x := msg.get(f)) is not None and (y := u(x)) is not x:
+                msg = {**msg, f: y}
+        return msg
+    return unnull
+
+
+_UNNULL = {op: _op_unnuller(op, names) for op, names in OPS.items()}
+
+
 def unnulled(msg):
-    """msg without the fields given as None that its op doesn't let be null: left out, as not given."""
-    if isinstance(msg, dict) and None in msg.values():
-        keep = NULLABLE.get(msg.get("op"), frozenset())
-        return {k: v for k, v in msg.items() if v is not None or k in keep}
+    """msg without the fields given as None that can't be null (its own, and its closed entities'): left out, as
+    not given."""
+    if isinstance(msg, dict) and (u := _UNNULL.get(msg.get("op"))) is not None:
+        return u(msg)
     return msg
 
 
@@ -511,6 +619,7 @@ class Channel:
         self.closed = False
         self.serving = False  # (a host's, to a head: what it sends are answers, never requests of its own)
         self.inbox = collections.deque()  # (answers made here, read before what comes: a request refused as it went)
+        self.refused_here = None  # (or what takes such an answer at once, for a channel whose reader's elsewhere)
 
     @classmethod
     def over(cls, sock):
@@ -521,23 +630,34 @@ class Channel:
     def send(self, msg, passed=False):
         """False once the other end's gone. Fields given as None that its op doesn't let be null are left out
         (unnulled). One the schema hasn't (its op, a field: check) isn't sent: a request of this end's own is answered
-        here, refused(INVALID), as if the other end had (read gives it); an answer goes as that refusal, for its
-        request; one with no request (a listing, a turn's end) is only said on stderr. One that can't be written as
+        here, refused(INVALID), as if the other end had (refused_here takes it, else read gives it); an answer goes as
+        that refusal, for its request; one with no request (a listing, a turn's end) goes without what the schema
+        hasn't (cut), said loudly on stderr. One that can't be written as
         JSON goes as an error, for its request. passed: one passed on as it came (a tunnel's), not looked at."""
         if isinstance(msg, Def):
             msg = msg.to_wire()
         if not passed:
             msg = unnulled(msg)
             if (bad := check(msg)) is not None:
-                _say(f"not sent: {bad}")
                 req = msg.get("req") if isinstance(msg, dict) else None
-                if req is None:
+                if req is None:  # (a broadcast: sent without what the schema hasn't, said loudly, not dropped whole)
+                    trimmed = cut(msg)
+                    if check(trimmed) is not None:
+                        _say(f"not sent: {bad}")
+                        return not self.closed
+                    _say(f"LEFT OUT OF A {str(msg.get('op')).upper()} SENT (the schema hasn't it): {bad}")
+                    msg = trimmed
+                elif not self.serving and (not isinstance(msg, dict) or msg.get("op") in TAKEN or
+                                           msg.get("op") not in OPS):
+                    _say(f"not sent: {bad}")
+                    if self.refused_here is not None:  # (its caller answered now, not when the reader next wakes)
+                        self.refused_here(refused(INVALID, req, bad))
+                    else:
+                        self.inbox.append(refused(INVALID, req, bad))
                     return not self.closed
-                if not self.serving and (not isinstance(msg, dict) or msg.get("op") in TAKEN or
-                                         msg.get("op") not in OPS):
-                    self.inbox.append(refused(INVALID, req, bad))
-                    return not self.closed
-                msg = refused(INVALID, req, bad)
+                else:
+                    _say(f"not sent: {bad}")
+                    msg = refused(INVALID, req, bad)
             elif STRICT:
                 for p in problems(msg):
                     _say(f"sent: {p}")

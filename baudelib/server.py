@@ -963,7 +963,12 @@ class Server:
         try:
             for msg in ch:
                 if msg.get("op") in ("join", "relay") and not self.stopped.is_set():  # (another host's link to
-                    with self.lock:  # here, or a tunnel through the mesh: the connection's the mesh's from now on)
+                    # here, or a tunnel through the mesh: the connection's the mesh's from now on; one whose fields
+                    # aren't as the schema has them refused, as any request is)
+                    if (refused := wire.refusal(msg)) is not None:
+                        conn.send(refused)
+                        continue
+                    with self.lock:
                         self.conns.discard(conn)
                     conn.close()
                     (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
@@ -1412,7 +1417,8 @@ class Server:
                 if "refused" in mem:
                     return reply("error", error=mem.pop("refused"), session=s.id, **mem)
                 return reply("memory", session=s.id, **mem)
-        return conn.send(wire.refused(wire.UNSUPPORTED, req))
+        self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
+        return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
 
     def run_routine(self, s, r, schedule=True):
         """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for

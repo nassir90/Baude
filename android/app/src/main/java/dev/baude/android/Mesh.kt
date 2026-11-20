@@ -26,7 +26,7 @@ import java.util.Base64
 /** A Bot, as a contact: its chat (session) on its host. */
 data class Contact(val hostId: String, val session: Msg.Session) {
     val id: String get() = session.id.orEmpty()
-    val name: String get() = session.bot?.name?.ifBlank { null } ?: "Bot"
+    val name: String get() = session.bot?.name?.ifBlank { null } ?: Wording.Sidebar.bot
     val said: Double get() = (session.said ?: session.updated)?.toDouble() ?: 0.0
     val state: String get() = session.state ?: "stopped"
     val asking: Boolean get() = !session.asks.isNullOrEmpty()
@@ -470,8 +470,8 @@ object Mesh {
                 if (inFront || (before == null && shown)) continue // (in front, or there as the app opened: seen)
                 val contact = contact(c.id, sid) ?: continue
                 val tool = ask.tool.orEmpty()
-                post(contact, if (tool == "AskUserQuestion") "Has a question for you"
-                    else "Waiting for your answer: " + toolTitle(tool), "ask:$key/$rid")
+                post(contact, if (tool == "AskUserQuestion") Wording.Asks.hasQuestionForYou(name = contact.name)
+                    else Wording.Asks.waitingForTool(tool = toolTitle(tool).ifBlank { Wording.Asks.aTool }), "ask:$key/$rid")
             }
         }
     }
@@ -504,7 +504,7 @@ object Mesh {
             c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
                 if (r.optString("op") == Op.ERROR) main.post {
                     mine.remove(ask.tool)
-                    chat.said.value = "${toolDisplay(ask.tool).first} isn't always allowed: " + Msg.Error.from(r).said.orEmpty()
+                    chat.said.value = Wording.Asks.notAlwaysAllowed(tool = toolDisplay(ask.tool).first, why = Msg.Error.from(r).said.orEmpty())
                 }
             }
         }
@@ -669,7 +669,7 @@ object Mesh {
                 chat.uses[o.optString("id")] = o
                 if (isAgent(o.optString("name"))) {
                     val input = o.optJSONObject("input") ?: JSONObject()
-                    val a = Subagent(o.optString("id"), input.optString("description").ifBlank { "Subagent" },
+                    val a = Subagent(o.optString("id"), input.optString("description").ifBlank { Wording.SidePanel.subagent },
                         input.optString("subagent_type"), input.optString("prompt"))
                     chat.agents.removeAll { it.toolUseId == a.toolUseId }
                     chat.agents.add(0, a)
@@ -691,7 +691,7 @@ object Mesh {
                 o.optString("status").ifBlank { null }?.let { a.status.value = it }
             }
             "link" -> for (url in o.optJSONArray("urls").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it) } })
-                if (chat.artifacts.none { it.url == url }) chat.artifacts.add(0, Artifact(url, "Claude artifact"))
+                if (chat.artifacts.none { it.url == url }) chat.artifacts.add(0, Artifact(url, Wording.References.claudeArtifact))
         }
     }
 
@@ -703,7 +703,7 @@ object Mesh {
         var a = chat.agents.firstOrNull { it.toolUseId == tool || it.agentId.value == m.optString("task_id") }
         if (a == null) {
             if (m.optString("subtype") != "task_started" || m.optString("task_type") != "local_agent") return
-            a = Subagent(tool, m.optString("description").ifBlank { "Subagent" }, m.optString("subagent_type"),
+            a = Subagent(tool, m.optString("description").ifBlank { Wording.SidePanel.subagent }, m.optString("subagent_type"),
                 m.optString("prompt"))
             chat.agents.add(0, a)
         }
@@ -722,7 +722,7 @@ object Mesh {
         if (i < 0) chat.artifacts.add(0, a)
         else {
             val was = chat.artifacts[i]
-            chat.artifacts[i] = Artifact(a.url, if (a.title == "Claude artifact") was.title else a.title,
+            chat.artifacts[i] = Artifact(a.url, if (a.title == Wording.References.claudeArtifact) was.title else a.title,
                 a.version ?: was.version, a.icon ?: was.icon, a.description ?: was.description, a.path ?: was.path)
         }
     }
@@ -858,8 +858,8 @@ object Mesh {
             main.post {
                 chat.holding.remove(id)
                 if (r.optString("op") == Op.ERROR)
-                    chat.said.value = (if (send) "Not sent: " else "Not deleted: ") +
-                        Msg.Error.from(r).said.orEmpty().ifBlank { "its host said no" }
+                    chat.said.value = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }
+                        .let { if (send) Wording.HeldSend.notSent(why = it) else Wording.HeldSend.notDeleted(why = it) }
                 else read(chat)
             }
         }
@@ -978,7 +978,7 @@ object Mesh {
             .setPublicVersion(NotificationCompat.Builder(app, MESSAGES)
                 .setSmallIcon(R.drawable.ic_baude)
                 .setContentTitle(contact.name)
-                .setContentText(if (tag != null) "Waiting for your answer" else "New message")
+                .setContentText(if (tag != null) Wording.Asks.waiting else "New message")
                 .build())
             .build()
         try {
@@ -1053,7 +1053,7 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
         if (type != "user" && type != "assistant") return
         if (o.optBoolean("isMeta") || (o.optBoolean("isSidechain") && !sidechain)) return
         if (o.optBoolean("isCompactSummary")) {
-            out.add(Line("note", "Conversation compacted", uuid))
+            out.add(Line("note", Wording.Compaction.compacted, uuid))
             return
         }
         val msg = o.optJSONObject("message") ?: return
@@ -1070,10 +1070,10 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                         t = LEADING_REMINDERS.replace(t, "").trim()
                         when {
                             t.startsWith("<task-notification") -> {
-                                out.add(Line("note", "A background task ended", uuid))
+                                out.add(Line("note", taskLine(t), uuid))
                                 out.add(Line("task", taskNote(t).toString(), uuid))
                             }
-                            t.startsWith(STOPPED) -> out.add(Line("note", "interrupted", uuid))
+                            t.startsWith(STOPPED) -> out.add(Line("note", Wording.Meta.interrupted, uuid))
                             t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
                             else -> out.add(Line("you", t, uuid))

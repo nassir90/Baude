@@ -1,0 +1,20 @@
+{
+  "description": "Auto restart on update and the version Baude and Record run: Settings' rows for them, and the toast after an update; the phone's own update words (its Settings row for metered networks, what it says when an update can't go ahead).",
+  "messages": {
+    "auto_restart": "Auto restart on update",
+    "auto_restart_from": "From {$upstream} every {$seconds}s, restarting once idle",
+    "no_upstream": "Not a git checkout following a branch: nothing to update from",
+    "updated": "{$app} updated",
+    "updated_commits": ".input {$n :number} .match $n one {{{$app} updated: {$n} new commit}} * {{{$app} updated: {$n} new commits}}",
+    "version": "Version {$commit}",
+    "version_unknown": "Version unknown",
+    "not_checkout": "Not a git checkout",
+    "metered": "Download updates on metered networks",
+    "metered_subtitle": "From the Baude site as they're published; otherwise once Update's tapped",
+    "closes_to_update": "{$app} closes to update: open it again once it has",
+    "couldnt_update": "Couldn't update: {$why}",
+    "cant_read": "Can't update: the new version can't be read",
+    "not_this_app": "Can't update: the new version isn't a build of this app",
+    "other_key": "Can't update: the new version is signed with another key"
+  }
+}

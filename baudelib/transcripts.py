@@ -11,6 +11,8 @@ import re
 import sys
 import time
 
+from baudelib import wording
+
 
 def ref_epoch(iso):
     if not iso:
@@ -119,7 +121,7 @@ def task_notification(text):
     def tag(name):
         t = re.search(rf"<{name}>(.*?)</{name}>", m.group(1), re.S)
         return t.group(1).strip() if t else ""
-    return {"status": tag("status"), "summary": tag("summary") or "A background task finished",
+    return {"status": tag("status"), "summary": tag("summary") or wording.say("transcript_notes.task_finished"),
             "task_id": tag("task-id"), "tool_use_id": tag("tool-use-id"), "output_file": tag("output-file"),
             "result": tag("result")}  # a subagent's report
 
@@ -132,7 +134,8 @@ def ci_event(text):
         return None
     body = m.group(1).strip()
     said = body.split("\n\n")[1] if "\n\n" in body else ""
-    return {"title": re.split(r" at head commit |\. |\n", said, maxsplit=1)[0].strip()[:120] or "A CI event", "text": body}
+    return {"title": re.split(r" at head commit |\. |\n", said, maxsplit=1)[0].strip()[:120] or
+            wording.say("transcript_notes.ci_event"), "text": body}
 
 
 def clean_prompt(text):

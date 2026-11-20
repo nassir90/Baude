@@ -44,6 +44,7 @@ from widgets import (  # noqa: E402,F401
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 from baudelib import tokens  # noqa: E402  (a diff's green and red: schema/tokens)
+from baudelib import wording  # noqa: E402
 
 
 def _gh_json(*args, timeout=20):
@@ -295,7 +296,7 @@ def git_checkouts(top):
         elif not t.get("name"):  # (a detached checkout: its commit)
             out.append({"rev": t.get("sha", "HEAD"), "name": None, "sha": t.get("sha"), "upstream": None, "ahead": 0,
                         "behind": 0, "gone": False, "worktree": t["worktree"],
-                        "label": f"detached at {(t.get('sha') or '')[:7]} — {here}"})
+                        "label": wording.say("git.detached_at", sha=(t.get('sha') or '')[:7], folder=here)})
     shown = {o["name"] for o in out}
     out += [{**b, "label": b["name"]} for b in branches if b["name"] not in shown]
     return out
@@ -1116,11 +1117,11 @@ class GitPage(Gtk.Stack):
         self.where.add_css_class("dim-label")
         head.append(self.where)
         self.all_btn = Gtk.ToggleButton(icon_name=themed_icon("view-list-bullet-symbolic", "view-list-symbolic"),
-                                        tooltip_text="Show every branch")
+                                        tooltip_text=wording.say("git.show_every_branch"))
         self.all_btn.add_css_class("flat")
         self.all_toggled = self.all_btn.connect("toggled", lambda *_: self.load())
         head.append(self.all_btn)
-        self.refresh_btn = RefreshButton(tooltip_text="Fetch, and read the history again (and ask GitHub)")
+        self.refresh_btn = RefreshButton(tooltip_text=wording.say("git.fetch_tip"))
         self.refresh_btn.connect("clicked", lambda *_: self.load(gh=True))
         head.append(self.refresh_btn)
         top.append(head)
@@ -1132,8 +1133,7 @@ class GitPage(Gtk.Stack):
         # panel (a list's whole names are in its popover, a window of its own)
         self.picker = Gtk.MenuButton(margin_start=10, margin_end=10, always_show_arrow=True,
                                      css_classes=["git-branches"],
-                                     tooltip_text="The branches shown: this chat's first, then the rest. "
-                                                  "Shift or Ctrl (⌘) and a click picks more")
+                                     tooltip_text=wording.say("git.branches_tip"))
         said = Gtk.Box(spacing=6)
         self.picked_name = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
         self.picked_more = Gtk.Label(xalign=0, hexpand=True, visible=False)
@@ -1174,9 +1174,10 @@ class GitPage(Gtk.Stack):
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.add_css_class("git-log")
         self.list.connect("row-activated", lambda _l, row: self.show_commit(row.commit["sha"]))
-        self.list.set_placeholder(empty_label("No commits"))
+        self.list.set_placeholder(empty_label(wording.say("git.no_commits")))
         keep_times(self.list)  # (the history's only read again when something changes)
-        self.more = Gtk.Button(label="Show more", halign=Gtk.Align.CENTER, visible=False, margin_top=6, margin_bottom=10)
+        self.more = Gtk.Button(label=wording.say("git.show_more"), halign=Gtk.Align.CENTER, visible=False, margin_top=6,
+                               margin_bottom=10)
         self.more.add_css_class("flat")
         self.more.connect("clicked", lambda *_: self.load_more())
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -1187,7 +1188,7 @@ class GitPage(Gtk.Stack):
         self.add_named(top, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         dhead = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
-        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="The log")
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=wording.say("git.the_log"))
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.show_list())
         self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
@@ -1309,7 +1310,8 @@ class GitPage(Gtk.Stack):
             row = Gtk.ListBoxRow()
             row.rev, row.touched, row.name = b["rev"], b["touched"], b["name"] or b["label"]
             box = Gtk.Box(spacing=10)
-            box.append(Gtk.Label(label=b["label"] + ("  (this chat)" if b["rev"] == self.state.get("mine") else ""),
+            box.append(Gtk.Label(label=(wording.say("git.this_chat_branch", branch=b["label"])
+                                        if b["rev"] == self.state.get("mine") else b["label"]),
                                  xalign=0, hexpand=True))
             row.tick = Gtk.Image(icon_name="object-select-symbolic", opacity=0)
             box.append(row.tick)
@@ -1359,11 +1361,9 @@ class GitPage(Gtk.Stack):
         """The button: the branch shown, or the first of them and how many more."""
         names = [r.name for r in self.branch_rows() if r.rev in self.picked]
         self.picked_name.set_label(names[0] if names else "")
-        self.picked_more.set_label(f"+ {len(names) - 1} more")
+        self.picked_more.set_label(wording.say("git.more_branches", n=len(names) - 1))
         self.picked_more.set_visible(len(names) > 1)
-        self.picker.set_tooltip_text("\n".join(names) if len(names) > 1 else
-                                     "The branches shown: this chat's first, then the rest. "
-                                     "Shift or Ctrl (⌘) and a click picks more")
+        self.picker.set_tooltip_text("\n".join(names) if len(names) > 1 else wording.say("git.branches_tip"))
 
     def branches_shown(self):
         """The list open: the keys at the first branch shown, so the arrows go on from there. (GTK's popover, opening,
@@ -1396,7 +1396,7 @@ class GitPage(Gtk.Stack):
         count = (self.view_wanted or {}).get("count") or 0  # (a chat come back to: as many as it had read, in pages)
         limit = max(1, -(-count // GIT_LOG_LIMIT)) * GIT_LOG_LIMIT
         self.stale, self.loaded_for = False, (folder, transcript)
-        self.where.set_label("Reading the history…")
+        self.where.set_label(wording.say("git.reading_history"))
         if gh:  # (asked for: its button turns till it's read. The reads a chat going on brings aren't worth the motion)
             self.refresh_btn.set_loading(True)
 
@@ -1474,7 +1474,7 @@ class GitPage(Gtk.Stack):
             discard(row)
         if not self.top:
             self.where.set_label(pretty_path(res["folder"] or ""))
-            self.info.set_label("Not in a git repository.")
+            self.info.set_label(wording.say("host_errors.not_a_repo"))
             self.pulls_scroll.set_visible(False)
             self.picker.set_visible(False)
             self.more.set_visible(False)
@@ -1500,7 +1500,7 @@ class GitPage(Gtk.Stack):
         if res["gh_refresh"]:
             AVATARS.again()
         if res.get("fetched") is False:
-            toast(self.win, "Couldn't fetch: the remotes' branches are as last fetched")
+            toast(self.win, wording.say("git.fetch_failed"))
         self.fill(self.commits)
         self.more.set_visible(len(self.commits) >= res["limit"])
         if (found := res.get("found")) and found["merge"]:  # (in a merge: opened, then highlighted)
@@ -1685,7 +1685,7 @@ class GitPage(Gtk.Stack):
                 done.add(p["number"])
                 parts.append(git_pull_markup(p, self.state.get("repo")))
             parts.append(git_ref_chip(ref))
-        parts += [chip_markup("this chat", "chat")] * bool(made)
+        parts += [chip_markup(wording.say("git.this_chat"), "chat")] * bool(made)
         return " ".join(parts + [html.escape(c["title"], quote=False)])
 
     def pull_at(self, ref):
@@ -1717,16 +1717,19 @@ class GitPage(Gtk.Stack):
         """What the branch tracks and came from, and what GitHub can add."""
         e, b, p, lines = html.escape, res["branch"], res["parent"], []
         if res["every"]:
-            lines.append("Every branch, remote branch and tag")
+            lines.append(wording.say("git.every_branch"))
         if b and b["upstream"]:
-            track = "gone from the remote" if b["gone"] else git_ahead_behind(b["ahead"], b["behind"]) or "up to date"
-            lines.append(f"Tracks <b>{e(b['upstream'])}</b>: {e(track)}")
+            track = wording.say("git.gone_from_remote") if b["gone"] else \
+                git_ahead_behind(b["ahead"], b["behind"]) or wording.say("git.up_to_date")
+            lines.append(wording.say("git.tracks", upstream=f"<b>{e(b['upstream'])}</b>", track=e(track)))
         if p:
-            lines.append(f"From <b>{e(p['name'])}</b> at <tt>{e(p['base'][:7])}</tt>: "
-                         f"{e(git_ahead_behind(p['ahead'], p['behind']) or 'up to date')}")
+            lines.append(wording.say("git.from_branch", branch=f"<b>{e(p['name'])}</b>",
+                                     sha=f"<tt>{e(p['base'][:7])}</tt>",
+                                     track=e(git_ahead_behind(p['ahead'], p['behind']) or
+                                             wording.say("git.up_to_date"))))
         if pr := res["pr"]:  # (only with gh signed in; signed out, there are links and nothing more)
-            lines.append(f'Pull request <a href="{e(pr["url"])}">#{pr["number"]}</a> {e(pr["title"][:60])} '
-                         f'({e(pr["state"].lower())})')
+            lines.append(wording.say("git.pull_request", link=f'<a href="{e(pr["url"])}">#{pr["number"]}</a>',
+                                     title=e(pr["title"][:60]), state=e(pr["state"].lower())))
         return "\n".join(lines)
 
     def fill(self, commits):
@@ -1824,7 +1827,7 @@ class GitPage(Gtk.Stack):
         if merge:  # (a merge in a branch's history: its own commits, on asking)
             opened = c["sha"] in self.opened
             btn = Gtk.Button(icon_name="pan-down-symbolic" if opened else "pan-end-symbolic", valign=Gtk.Align.CENTER,
-                             tooltip_text="Hide the commits it merged" if opened else "Show the commits it merged")
+                             tooltip_text=wording.say("git.hide_merged") if opened else wording.say("git.show_merged"))
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_: self.open_merge(c))
             box.append(btn)
@@ -1834,7 +1837,7 @@ class GitPage(Gtk.Stack):
         row.set_child(box)
         row.set_tooltip_text(f"{c['sha'][:9]} · {c['title']}" +
                              (f"\n{c['subject']}" if c["title"] != c["subject"] else "") +  # (a pull request's name)
-                             (f"\nMade by this chat: {made['subject']}" if made else ""))
+                             ("\n" + wording.say("git.made_by_chat", subject=made["subject"]) if made else ""))
         row.line.set_tooltip_text(row.get_tooltip_text())  # (its own, but over a pill's link: the pull request's)
         return row
 
@@ -1879,7 +1882,7 @@ class GitPage(Gtk.Stack):
         if d is not None:
             self.commit_loaded(sha, d)
         else:
-            body.append(empty_label("Reading the commit…"))
+            body.append(empty_label(wording.say("git.reading_commit")))
 
     def read_card(self, top, sha):
         """A commit's card, if it's been read (None: it's being read; card_read draws it when it is)."""
@@ -1946,7 +1949,7 @@ class GitPage(Gtk.Stack):
             body.remove(c)
             discard(c)
         if not d:
-            body.append(empty_label(f"No commit {sha} here"))
+            body.append(empty_label(wording.say("git.no_commit", sha=sha)))
             return False
         self.card = d
         subject, _, rest = d["message"].partition("\n")
@@ -1960,7 +1963,7 @@ class GitPage(Gtk.Stack):
         body.append(self.card_when)
         made = git_chat_commit(self.chat, d["sha"])
         if made:
-            jump = Gtk.Button(label="Made by this chat: show the command", halign=Gtk.Align.START,
+            jump = Gtk.Button(label=wording.say("git.made_by_chat_show"), halign=Gtk.Align.START,
                               tooltip_text=made["subject"])
             jump.add_css_class("git-chat-btn")
             jump.connect("clicked", lambda *_: self.jump(made))
@@ -1968,11 +1971,11 @@ class GitPage(Gtk.Stack):
         files = d["files"]
         added = sum(a or 0 for _p, a, _r in files)
         removed = sum(r or 0 for _p, _a, r in files)
-        total = sel_label(f"<b>{len(files)} file{'s' * (len(files) != 1)}</b>  "
-                          f'<span foreground="{GIT_ADDED}">+{added:,}</span> '
-                          f'<span foreground="{GIT_REMOVED}">−{removed:,}</span>'
-                          + (f'  <span alpha="70%">against first parent {e(d["parents"][0][:7])}</span>'
-                             if len(d["parents"]) > 1 else ""))
+        total = sel_label("<b>" + wording.say("git.files", n=len(files)) + "</b>  "
+                          f'<span foreground="{GIT_ADDED}">' + wording.say("git.added", n=added) + "</span> "
+                          f'<span foreground="{GIT_REMOVED}">' + wording.say("git.removed", n=removed) + "</span>"
+                          + ('  <span alpha="70%">' + wording.say("git.against_parent", sha=e(d["parents"][0][:7]))
+                             + "</span>" if len(d["parents"]) > 1 else ""))
         body.append(total)
         if files:
             lst = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -1985,13 +1988,14 @@ class GitPage(Gtk.Stack):
                 rowbox.append(name)
                 n = Gtk.Label()
                 n.add_css_class("caption")
-                n.set_markup("binary" if a is None else f'<span foreground="{GIT_ADDED}">+{a}</span> '
-                             f'<span foreground="{GIT_REMOVED}">−{r}</span>')
+                n.set_markup(wording.say("git.binary") if a is None else
+                             f'<span foreground="{GIT_ADDED}">' + wording.say("git.added", n=a) + "</span> "
+                             f'<span foreground="{GIT_REMOVED}">' + wording.say("git.removed", n=r) + "</span>")
                 rowbox.append(n)
                 rowbox.append(GitDelta(a or 0, r or 0, biggest))
                 row = Gtk.ListBoxRow(activatable=True, child=rowbox)
                 row.path = path
-                row.set_tooltip_text(f"{path}: the diff in this commit")
+                row.set_tooltip_text(wording.say("git.file_diff_tip", path=path))
                 lst.append(row)
             lst.connect("row-activated", lambda _l, row: self.diff(d["sha"], row.path))
             body.append(lst)
@@ -2002,7 +2006,7 @@ class GitPage(Gtk.Stack):
         self.card_refs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.append(self.card_refs)
         self.card_actions = Gtk.Box(spacing=6)
-        diff = Gtk.Button(label="Open diff", tooltip_text="The whole commit on the Code page")
+        diff = Gtk.Button(label=wording.say("git.open_diff"), tooltip_text=wording.say("git.open_diff_tip"))
         diff.connect("clicked", lambda *_: self.diff(d["sha"]))
         self.card_actions.append(diff)
         body.append(self.card_actions)
@@ -2020,7 +2024,8 @@ class GitPage(Gtk.Stack):
         when = f"{who} · {e(git_full_when(d['at']))} · " + (f'<a href="{e(d["url"])}">{short}</a>' if d.get("url")
                                                              else short)
         if d["committer"] != d["author"] or abs(d["ct"] - d["at"]) > 60:  # (rebased, amended or applied by another)
-            when += f'\n<span alpha="70%">Committed by {e(d["committer"])} · {e(git_full_when(d["ct"]))}</span>'
+            when += ('\n<span alpha="70%">' + wording.say("git.committed_by", committer=e(d["committer"]),
+                                                           when=e(git_full_when(d["ct"]))) + "</span>")
         return when
 
     def card_more(self, sha, d):
@@ -2033,13 +2038,13 @@ class GitPage(Gtk.Stack):
             box.remove(c)
             discard(c)
         if d.get("branches") is None:
-            box.append(sel_label('<span alpha="70%">On …</span>', css="caption"))
+            box.append(sel_label('<span alpha="70%">' + wording.say("git.on_reading") + "</span>", css="caption"))
         else:
             on = d["branches"] + d["remotes"]
-            box.append(sel_label(f'<span alpha="70%">On {e(", ".join(on[:8]))}' +
-                                 (f" and {len(on) - 8} more" if len(on) > 8 else "") + "</span>" if on else
-                                 '<span alpha="70%">On no branch (rewritten, or only in the reflog)</span>',
-                                 css="caption"))
+            said = (wording.say("git.on_branches_more", branches=e(", ".join(on[:8])), n=len(on) - 8) if len(on) > 8
+                    else wording.say("git.on_branches", branches=e(", ".join(on)))) if on else \
+                wording.say("git.on_no_branch")
+            box.append(sel_label('<span alpha="70%">' + said + "</span>", css="caption"))
         for p in d.get("prs") or []:  # (gh signed in only)
             box.append(sel_label(f'<a href="{e(p["url"])}">#{p["number"]}</a> {e(p["title"])} ({e(p["state"])})'))
         if d.get("url") and not getattr(self.card_actions, "github", None):
@@ -2056,7 +2061,8 @@ class GitPage(Gtk.Stack):
         text = _git(top, *args) or _git(top, *[a for a in args if not a.startswith("--diff-merges")]) or ""
         name = f"{sha[:9]}{'-' + os.path.basename(path) if path else ''}.diff"
         self.win.show_code(os.path.join(top, name), text=text,
-                           note=f"{path} in {sha[:9]}" if path else f"Commit {sha[:9]}")
+                           note=wording.say("git.path_in_commit", path=path, sha=sha[:9]) if path
+                           else wording.say("git.commit_note", sha=sha[:9]))
 
     def jump(self, event):
         """The tool call of this chat's that made a commit: the chat scrolls to it."""
@@ -2064,7 +2070,7 @@ class GitPage(Gtk.Stack):
         if card is not None:
             self.win.jump_to_card(card)
         else:
-            toast(self.win, "That command is further up the chat than what's shown: scroll up to load it")
+            toast(self.win, wording.say("git.chat_further_up"))
 
 
 class GitDelta(Gtk.Widget):
@@ -2090,15 +2096,14 @@ class GitDelta(Gtk.Widget):
 
 def git_ahead_behind(ahead, behind):
     """2 commits ahead, 1 commit behind (either left out at 0; nothing at all if both are)."""
-    commits = lambda n: f"{n} commit{'s' * (n != 1)}"  # noqa: E731
-    return ", ".join(x for x in (f"{commits(ahead)} ahead" if ahead else "", f"{commits(behind)} behind" if behind else "")
-                     if x)
+    return ", ".join(x for x in (wording.say("git.ahead", n=ahead) if ahead else "",
+                                 wording.say("git.behind", n=behind) if behind else "") if x)
 
 
 def git_delta_markup(c):
     """A log row's change: · +12 −3 in 2 files (nothing for a commit that changed nothing)."""
     if not c["files"]:
         return ""
-    return (f' · <span foreground="{GIT_ADDED}">+{c["added"]:,}</span> '
-            f'<span foreground="{GIT_REMOVED}">−{c["removed"]:,}</span>'
-            f' in {c["files"]} file{"s" * (c["files"] != 1)}')
+    return (f' · <span foreground="{GIT_ADDED}">' + wording.say("git.added", n=c["added"]) + "</span> "
+            f'<span foreground="{GIT_REMOVED}">' + wording.say("git.removed", n=c["removed"]) + "</span> "
+            + wording.say("git.in_files", n=c["files"]))

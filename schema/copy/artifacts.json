@@ -1,0 +1,8 @@
+{
+  "description": "Claude's artifacts: the cards in the chat and on the side panel's Artifacts page.",
+  "messages": {
+    "untitled": "Artifact",
+    "link_version": "{$link} · v{$version}",
+    "copy_link": "Copy link"
+  }
+}

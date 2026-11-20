@@ -1,0 +1,22 @@
+{
+  "description": "A Bot's browser on the side panel's Browser page (Baude's) and the Android app's: its bars, tabs, what a page asks, and why it isn't shown.",
+  "messages": {
+    "title": "Browser",
+    "host_said_no": "its host said no",
+    "read_only": "Read-only",
+    "no_pages": "No pages open",
+    "close_tab": "Close tab",
+    "on_phone_title": "On a phone",
+    "on_phone": "{$bot}'s browser is on a phone now, and shown there. It's back here once the phone closes it.",
+    "the_bot": "The Bot",
+    "restarts_soon": "It restarts in a moment, or when you come back to this window.",
+    "restarts_on_open": "It restarts when you open this page again.",
+    "couldnt_open": "Couldn't open the browser",
+    "stopped": "The browser stopped",
+    "stopped_again": "The browser stopped. {$again}",
+    "connecting": "Connecting…",
+    "asks_for_files": "The page asks for files to upload",
+    "cant_connect": "Can't connect to the browser.",
+    "couldnt_do": ".input {$op :string} .match $op click {{Couldn't click.}} close_tab {{Couldn't close the tab.}} drag {{Couldn't drag.}} hover {{Couldn't hover.}} key {{Couldn't press the key.}} navigate {{Couldn't open the page.}} new_tab {{Couldn't open a tab.}} scroll {{Couldn't scroll.}} select_tab {{Couldn't switch tabs.}} type {{Couldn't type.}} answer_prompt {{Couldn't answer.}} * {{Couldn't do that.}}"
+  }
+}

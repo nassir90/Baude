@@ -26,17 +26,27 @@ import threading
 import time
 import urllib.parse
 
+from baudelib import wording
 from fixes import gh_path  # (the gh CLI, or None: BAUDE_GH, for tests)
 
 
-REF_KINDS = {"file": ("File", "Files"), "commit": ("Commit", "Commits"), "branch": ("Branch", "Branches"),
-             "pr": ("Pull request", "Pull requests"), "env": ("Env var", "Env vars"),
-             "constant": ("Constant", "Constants"), "symbol": ("Code symbol", "Code symbols"),
-             "config": ("Config key", "Config keys"), "service": ("Service", "Services"),
-             "k8s": ("Kubernetes object", "Kubernetes objects"), "package": ("Package", "Packages"),
-             "cli": ("Command", "Commands"), "external": ("External tool", "External tools"),
-             "tool": ("Tool", "Tools"), "subagent": ("Subagent type", "Subagent types"), "skill": ("Skill", "Skills"),
-             "route": ("HTTP route", "HTTP routes")}
+REF_KINDS = {"file": (wording.say("lookup.file"), wording.say("lookup.files")),
+             "commit": (wording.say("lookup.commit"), wording.say("lookup.commits")),
+             "branch": (wording.say("lookup.branch"), wording.say("lookup.branches")),
+             "pr": (wording.say("lookup.pull_request"), wording.say("lookup.pull_requests")),
+             "env": (wording.say("lookup.env_var"), wording.say("lookup.env_vars")),
+             "constant": (wording.say("lookup.constant"), wording.say("lookup.constants")),
+             "symbol": (wording.say("lookup.code_symbol"), wording.say("lookup.code_symbols")),
+             "config": (wording.say("lookup.config_key"), wording.say("lookup.config_keys")),
+             "service": (wording.say("lookup.service"), wording.say("lookup.services")),
+             "k8s": (wording.say("lookup.kubernetes_object"), wording.say("lookup.kubernetes_objects")),
+             "package": (wording.say("lookup.package"), wording.say("lookup.packages")),
+             "cli": (wording.say("lookup.command"), wording.say("lookup.commands")),
+             "external": (wording.say("lookup.external_tool"), wording.say("lookup.external_tools")),
+             "tool": (wording.say("lookup.tool"), wording.say("lookup.tools")),
+             "subagent": (wording.say("lookup.subagent_type"), wording.say("lookup.subagent_types")),
+             "skill": (wording.say("lookup.skill"), wording.say("lookup.skills")),
+             "route": (wording.say("lookup.http_route"), wording.say("lookup.http_routes"))}
 
 
 # The glossary: one a repository (its main checkout's .baude/signal.db, its worktrees' too: signal_place), each name in
@@ -105,15 +115,20 @@ def catalogue_ref(surface, entry):
         return Ref(surface, "pr", "resolved", surface, data={"catalogue": True, **github_data(listed)})
     sources = entry.get("sources") or []
     kind = {"k8s": "k8s", "branch": "branch", "file": "file"}.get(entry["kind"], "symbol")
-    what, where = sources[0] if sources else ("Name", "")
+    what, where = sources[0] if sources else (wording.say("common.name"), "")
     data, locs = {"catalogue": True}, []
     if entry.get("db"):
         live, n = entry["db"][0], len(entry["db"])
         table = live["table"]
         data["db"] = live
-        data["note"] = (f"{'Collection' if live['engine'] == 'ArangoDB' else 'Table'} {table} in {live['database']}"
-                        if table else f"Database {live['database']}") + f" ({live['engine']}, {live['container']})" + \
-            (f", and {n - 1} more" if n > 1 else "")
+        database, engine, container = live["database"], live["engine"], live["container"]
+        data["note"] = (wording.say("lookup.database_in", database=database, engine=engine, container=container)
+                        if not table else
+                        wording.say("lookup.collection_in", table=table, database=database, engine=engine,
+                                    container=container) if engine == "ArangoDB" else
+                        wording.say("lookup.table_in", table=table, database=database, engine=engine,
+                                    container=container)) + \
+            (wording.say("lookup.and_more", n=n - 1) if n > 1 else "")
         return Ref(surface, "symbol", "resolved", table or live["database"], data=data)
     for w, at in sources:
         if kind == "file" and at and not re.fullmatch(r"\d+ files", at):
@@ -126,9 +141,9 @@ def catalogue_ref(surface, entry):
     if kind == "branch":
         data["ref"] = surface
     data["note"] = what + (f" ({where})" if where and not locs else "") + \
-        (f", and {len(sources) - 1} more" if len(sources) > 1 and not locs else "")
+        (wording.say("lookup.and_more", n=len(sources) - 1) if len(sources) > 1 and not locs else "")
     return Ref(surface, kind, "ambiguous" if len(locs) > 1 else "resolved", data=data, locations=locs,
-               reason=f"{len(locs)} places the catalogue has" if len(locs) > 1 else "")
+               reason=wording.say("lookup.catalogue_places", n=len(locs)) if len(locs) > 1 else "")
 
 
 def catalogue_shaped(name):
@@ -260,29 +275,34 @@ class Ref:
         """One line on what it is: a row's subtitle, a link's tooltip."""
         d = self.data
         if self.status == "pending":
-            return "Looking it up…"
+            return wording.say("lookup.looking_it_up")
         if self.status == "not_found":
             return f"Not found: {self.reason}"
         if self.status == "stale":
-            return "Stale: the code changed and this couldn't be found again"
+            return wording.say("lookup.stale")
         if d.get("plain"):
-            return "Not a name here: plain English (Haiku), or none of the matches"
+            return wording.say("lookup.plain")
         if self.status == "ambiguous":
-            pick = f", probably {d['pick']}" if d.get("pick") else ""
-            return f"{len(self.locations)} matches{pick}: {self.reason}"
+            if d.get("pick"):
+                return wording.say("lookup.matches_pick", n=len(self.locations), pick=d["pick"], why=self.reason)
+            return wording.say("lookup.matches", n=len(self.locations), why=self.reason)
         if self.kind == "commit":
             return f"{d.get('subject', '')} ({ref_date(d.get('date'))}, +{d.get('added', 0)} −{d.get('removed', 0)})"
         if self.kind == "branch":
             return f"{d.get('subject', '')} ({ref_date(d.get('date'))})"
         if self.kind == "pr":
-            return f"#{d.get('number')} {d.get('title') or ''} ({d.get('state') or 'on GitHub'})".replace("  ", " ")
+            state = d.get("state") or wording.say("lookup.on_github")
+            return f"#{d.get('number')} {d.get('title') or ''} ({state})".replace("  ", " ")
         if self.kind == "env":
             c = self.counts()
             parts = [f"{c[r]} {r}" for r in ("secret source", "set", "read") if c.get(r)]
-            return "Env var: " + (", ".join(parts) or "mentioned only")
+            return wording.say("lookup.env_var_counts", counts=", ".join(parts)) if parts else \
+                wording.say("lookup.env_var_mentioned")
         if self.kind == "tool":
             n = len(d.get("input") or [])
-            return f"Tool {d.get('tool') or self.canonical}" + (f": {n} input{'s' * (n != 1)}" if d.get("input") else "") + \
+            name = d.get("tool") or self.canonical
+            return (wording.say("lookup.tool_inputs", name=name, n=n) if d.get("input") else
+                    wording.say("lookup.tool_named", name=name)) + \
                 (f" · {d['description'][:90]}" if d.get("description") else "")
         if self.kind in ("subagent", "skill"):
             return f"{REF_KINDS[self.kind][0]} {self.canonical}" + (f" · {d['description'][:90]}" if d.get("description") else "")
@@ -290,11 +310,14 @@ class Ref:
             loc = self.locations[0] if self.locations else None
             path = loc and (os.path.basename(loc["path"]) if os.path.isabs(loc["path"]) else loc["path"])
             where = (f" ({path}" + (f":{loc['line']}" if loc.get("line") else "") + ")") if loc else ""
-            return (self.data.get("note") or REF_KINDS.get(self.kind, ("Name",))[0]) + where
+            return (self.data.get("note") or REF_KINDS.get(self.kind, (wording.say("common.name"),))[0]) + where
         if self.kind in ("constant", "route", "symbol", "config") and self.locations:
             loc = self.locations[0]
-            return f"{loc['role'].capitalize()} in {loc['path']}" + (f":{loc['line']}" if loc.get("line") else "") + \
-                (f" ({loc['note']})" if loc.get("note") else "") + (f", on {loc['rev']}" if loc.get("rev") else "")
+            where = loc["path"] + (f":{loc['line']}" if loc.get("line") else "") + \
+                (f" ({loc['note']})" if loc.get("note") else "")
+            if loc.get("rev"):
+                return wording.say("lookup.located_on", role=loc["role"].capitalize(), where=where, rev=loc["rev"])
+            return wording.say("lookup.located", role=loc["role"].capitalize(), where=where)
         return self.canonical
 
 
@@ -1075,18 +1098,18 @@ def kube_run_state(o):
     last run, or suspended."""
     if o.get("kind") == "CronJob":
         if _ks(o, "spec", "suspend"):
-            return {"state": "suspended", "ok": False}
+            return {"state": wording.say("lookup.kube_suspended"), "ok": False}
         now = time.time()
         last = kube_seconds(_ks(o, "status", "lastScheduleTime"), now)
-        return {"state": f"last ran {kube_fmt_age(last)} ago", "ok": True, "at": now - last} if last is not None else \
-            {"state": "not run yet", "ok": True}
+        return {"state": wording.say("lookup.kube_last_ran", ago=kube_fmt_age(last)), "ok": True, "at": now - last} \
+            if last is not None else {"state": wording.say("lookup.kube_not_run_yet"), "ok": True}
     if o.get("kind") == "DaemonSet":
         want, ready = _ks(o, "status", "desiredNumberScheduled", default=0), _ks(o, "status", "numberReady", default=0)
     else:
         want, ready = _ks(o, "spec", "replicas", default=1), _ks(o, "status", "readyReplicas", default=0)
     if not want:
-        return {"state": "scaled to 0", "ok": False}
-    return {"state": f"{ready or 0}/{want} ready", "ok": (ready or 0) >= want}
+        return {"state": wording.say("lookup.kube_scaled_to_0"), "ok": False}
+    return {"state": wording.say("lookup.kube_ready", ready=ready or 0, want=want), "ok": (ready or 0) >= want}
 
 
 def pg_k8s_servers():
@@ -1161,10 +1184,10 @@ def pg_query(server, database, sql):
         try:
             p = subprocess.run(cmd, input=sql, capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as e:
-            raise RuntimeError(f"kubectl: {e}") from e
+            raise RuntimeError(wording.say("kube.kubectl_error", error=e)) from e
         if p.returncode:
             lines = (p.stderr or p.stdout).strip().splitlines()
-            raise RuntimeError(lines[-1] if lines else f"kubectl exited with {p.returncode}")
+            raise RuntimeError(lines[-1] if lines else wording.say("kube.kubectl_exited", code=p.returncode))
         return p.stdout
     return _docker("exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on", server["container"],
                    *psql, stdin=sql)
@@ -1547,26 +1570,27 @@ class Names:
             named = "." in base.strip(".") and len(paths) <= 3  # (README.md, __init__.py: everyone's)
             times = [changed(p) for p in paths]
             if named:
-                add(base, "file", "File", paths[0] if len(paths) == 1 else f"{len(paths)} files",
+                add(base, "file", wording.say("lookup.file"), paths[0] if len(paths) == 1 else f"{len(paths)} files",
                     at=max((t for t in times if t is not None), default=None))
             if not named or len(paths) > 1:  # the rest by their paths: twelve compose.yaml, a Dockerfile
                 for p, t in zip(paths, times):
-                    add(p, "file", "File", p, at=t)
+                    add(p, "file", wording.say("lookup.file"), p, at=t)
         if self.top:
             for line in (_git(self.top, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads",
                               "refs/remotes") or "").splitlines():
                 b, _, when = line.rpartition(" ")
                 if b and b != "HEAD" and not b.endswith("/HEAD"):
-                    add(b, "branch", "Branch", at=float(when) if when.isdigit() else None)
+                    add(b, "branch", wording.say("lookup.branch"), at=float(when) if when.isdigit() else None)
         for o in self._kube_index(st)["objects"]:
             for n, _how in o["names"]:
                 if re.fullmatch(_KUBE_NAME, n):
                     add(n, "k8s", o["kind"], o["path"])
         for c in kube_contexts():
-            add(c["name"], "k8s", "Kubeconfig cluster" if c.get("cluster_only") else "Kubeconfig context",
+            add(c["name"], "k8s", wording.say("lookup.kubeconfig_cluster") if c.get("cluster_only") else
+                wording.say("lookup.kubeconfig_context"),
                 hint="context")
             if made := kube_made_as(c):
-                add(made[1], "k8s", f"{made[0]} cluster", c["name"], hint="context")
+                add(made[1], "k8s", wording.say("lookup.made_cluster", tool=made[0]), c["name"], hint="context")
         try:
             for r in kube_running(None):
                 add(r["name"], "k8s", f"{r['kind']} running", f"{r['context']} · {r['namespace']}")
@@ -1630,7 +1654,7 @@ class Names:
         key = (name, st["fp"])
         if key not in self._cache:
             self._cache = {k: v for k, v in self._cache.items() if k[1] == st["fp"]}
-            self._tell(activity=f"Indexing {name.replace('_', ' ')}…")
+            self._tell(activity=wording.say("lookup.indexing", what=name.replace("_", " ")))
             t0 = time.monotonic()
             self._cache[key] = build()
             built = self._cache[key]
@@ -1912,9 +1936,10 @@ def github_listing(repo, kept):
     """An item of lookup's (items) for a pull request or an issue kept (github_kept). Its name is owner/name#12: the
     same number in two repositories is two names."""
     number, pr, state = kept["number"], kept["pr"], kept["state"]
-    what = {"merged": "Merged pull request", "closed": "Closed pull request"}.get(state) or \
-        ("Draft pull request" if kept["draft"] else "Pull request") if pr else \
-        "Closed issue" if state == "closed" else "Issue"
+    what = {"merged": wording.say("lookup.merged_pull_request"),
+            "closed": wording.say("lookup.closed_pull_request")}.get(state) or \
+        (wording.say("lookup.draft_pull_request") if kept["draft"] else wording.say("lookup.pull_request")) if pr else \
+        wording.say("lookup.closed_issue") if state == "closed" else wording.say("lookup.issue")
     url = f"https://github.com/{repo}/{'pull' if pr else 'issues'}/{number}"
     surface = f"{repo}#{number}"
     entry = {"kind": "pr" if pr else "issue", "hint": None, "sources": [(what, repo)],
@@ -2390,11 +2415,11 @@ def items(source):
     for name, e in list(source.catalogue.items()):
         if name in listed:
             continue
-        sources = e.get("sources") or [("Name", "")]
+        sources = e.get("sources") or [(wording.say("common.name"), "")]
         what, where = sources[0]
         icon = {"k8s": "k8s", "branch": "git", "file": "file"}.get(e["kind"]) or \
             ("db" if what.startswith("Database") else "code")
-        more = f" · {len(sources) - 1} more" if len(sources) > 1 else ""
+        more = wording.say("lookup.more", n=len(sources) - 1) if len(sources) > 1 else ""
         # (a file's path, or the manifest a Kubernetes object is in; not where a workload runs)
         path = where if e["kind"] == "file" and where and not re.fullmatch(r"\d+ files", where) or \
             e["kind"] == "k8s" and "/" in where and not what.endswith(" running") else None

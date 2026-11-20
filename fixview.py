@@ -19,6 +19,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 import feedback  # noqa: E402
 import fixes  # noqa: E402
 import pointers  # noqa: E402
+from baudelib import wording  # noqa: E402
 from widgets import (  # noqa: E402
     MarkdownView, RefreshButton, discard, make_image_interactive, markdown_scroller, paned_grip, retime, say_time,
     time_tip,
@@ -123,23 +124,24 @@ class FixesPage(Gtk.Box):
     def make_list(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, width_request=240)
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=8, margin_top=8, margin_bottom=8)
-        self.ongoing_btn = Gtk.ToggleButton(label="Ongoing", active=True)
-        self.all_btn = Gtk.ToggleButton(label="All", group=self.ongoing_btn)
+        self.ongoing_btn = Gtk.ToggleButton(label=wording.say("fixes.ongoing"), active=True)
+        self.all_btn = Gtk.ToggleButton(label=wording.say("fixes.all"), group=self.ongoing_btn)
         self.ongoing_btn.connect("toggled", lambda b: self.set_show_all(not b.get_active()))
         switch = Gtk.Box(css_classes=["linked"], hexpand=True, halign=Gtk.Align.START)
         switch.append(self.ongoing_btn)
         switch.append(self.all_btn)
         head.append(switch)
-        self.send_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Send Feedback…", css_classes=["flat"])
+        self.send_btn = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=wording.say("fixes.send_feedback"),
+                                   css_classes=["flat"])
         self.send_btn.connect("clicked", lambda *_: self.send_feedback())
         head.append(self.send_btn)
-        self.refresh_btn = RefreshButton(tooltip_text="Read it again")
+        self.refresh_btn = RefreshButton(tooltip_text=wording.say("common.read_again"))
         self.refresh_btn.connect("clicked", lambda *_: self.refresh())
         head.append(self.refresh_btn)
         box.append(head)
         self.rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, css_classes=["navigation-sidebar"])
         self.rows.connect("row-selected", lambda _l, row: row is not None and self.select(row.number))
-        self.empty_note = Gtk.Label(label="Loading issues…", margin_top=24, css_classes=["dim-label"])
+        self.empty_note = Gtk.Label(label=wording.say("fixes.loading"), margin_top=24, css_classes=["dim-label"])
         self.rows.set_placeholder(self.empty_note)  # (till it's been read: then, "Nothing ongoing")
         box.append(Gtk.ScrolledWindow(child=self.rows, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.note = dim("", margin_start=12, margin_end=12, margin_top=6, margin_bottom=8, ellipsize=Pango.EllipsizeMode.END)
@@ -199,7 +201,7 @@ class FixesPage(Gtk.Box):
         meta = Gtk.Box(spacing=8)
         meta.append(status_pill(item["status"]))
         captures = sum(n["captures"] for n in item["notes"])
-        more = f" · {captures} capture{'s' if captures != 1 else ''}" if captures else ""
+        more = wording.say("fixes.captures", n=captures) if captures else ""
         meta.append(say_time(dim("", ellipsize=Pango.EllipsizeMode.END, hexpand=True), item["updated"],
                              "".join(f"{w} · " for w in [fixes.github_location(item)] if w), more))
         box.append(meta)
@@ -227,23 +229,23 @@ class FixesPage(Gtk.Box):
         self.hint = dim("", wrap=True)
         self.bar.append(self.hint)
         line = Gtk.Box(spacing=8)
-        self.reply_entry = Gtk.Entry(hexpand=True, placeholder_text="Ask for changes…")
+        self.reply_entry = Gtk.Entry(hexpand=True, placeholder_text=wording.say("fixes.ask_for_changes"))
         self.reply_entry.connect("activate", lambda *_: self.send_reply())
         self.reply_entry.connect("changed", lambda *_: self.sync_bar())
-        self.reply_btn = Gtk.Button(label="Send", tooltip_text="Say it on the issue, and fix it again")
+        self.reply_btn = Gtk.Button(label=wording.say("common.send"), tooltip_text=wording.say("fixes.send_tip"))
         self.reply_btn.connect("clicked", lambda *_: self.send_reply())
         self.gap = Gtk.Box(hexpand=True)
         self.spinner = Adw.Spinner(visible=False)
-        self.stop_btn = Gtk.Button(label="Stop", tooltip_text="Stop the fix running on this machine")
+        self.stop_btn = Gtk.Button(label=wording.say("common.stop"), tooltip_text=wording.say("fixes.stop_tip"))
         self.stop_btn.connect("clicked", lambda *_: self.run(fixes.stop, fixes.fix_key(self.current())))
-        self.reopen_btn = Gtk.Button(label="Reopen", tooltip_text="Open the issue again")
+        self.reopen_btn = Gtk.Button(label=wording.say("fixes.reopen"), tooltip_text=wording.say("fixes.reopen_tip"))
         self.reopen_btn.connect("clicked", lambda *_: self.run(fixes.reopen, self.repo, self.current()))
-        self.discard_btn = Gtk.Button(label="Discard", css_classes=["destructive-action"],
-                                      tooltip_text="Discard the fix: its PR closed, its branch deleted, the feedback still open")
+        self.discard_btn = Gtk.Button(label=wording.say("common.discard"), css_classes=["destructive-action"],
+                                      tooltip_text=wording.say("fixes.discard_tip"))
         self.discard_btn.connect("clicked", lambda *_: self.discard())
-        self.merge_btn = Gtk.Button(label="Merge", css_classes=["suggested-action"])
+        self.merge_btn = Gtk.Button(label=wording.say("fixes.merge"), css_classes=["suggested-action"])
         self.merge_btn.connect("clicked", lambda *_: self.merge())
-        self.fix_btn = Gtk.Button(label="Fix here", css_classes=["suggested-action"])
+        self.fix_btn = Gtk.Button(label=wording.say("fixes.fix_here"), css_classes=["suggested-action"])
         self.fix_btn.connect("clicked", lambda *_: self.run(fixes.start_fix, fixes.fix_key(self.current()), None,
                                                             self.claude))
         for w in (self.reply_entry, self.reply_btn, self.gap, self.spinner, self.stop_btn, self.reopen_btn,
@@ -285,13 +287,13 @@ class FixesPage(Gtk.Box):
         box.append(Gtk.Label(label=item["title"], xalign=0, wrap=True, selectable=True, css_classes=["title-2"]))
         meta = Gtk.Box(spacing=10)
         meta.append(status_pill(item["status"]))
-        said_by = [f"from {item['author']}"] if item["author"] else []
+        said_by = [wording.say("common.from_who", author=item["author"])] if item["author"] else []
         meta.append(say_time(dim("", ellipsize=Pango.EllipsizeMode.END, hexpand=True), item["created"],
                              "".join(f"{w} · " for w in [fixes.github_location(item), *said_by] if w)))
         if item["url"]:
-            meta.append(self.link("Issue", item["url"]))
+            meta.append(self.link(wording.say("lookup.issue"), item["url"]))
         if item["pr"]:
-            meta.append(self.link(f"PR #{item['pr']['number']}", item["pr"]["url"]))
+            meta.append(self.link(wording.say("fixes.pr", number=item["pr"]["number"]), item["pr"]["url"]))
         box.append(meta)
         if item["body"]:
             box.append(said(item["body"]))
@@ -309,8 +311,8 @@ class FixesPage(Gtk.Box):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, css_classes=["fix-round"])
         if note["resolution"] is not None:
             when = time.strftime("%Y-%m-%d %H:%M", time.localtime(note["resolved_at"]))
-            box.append(Gtk.Label(label=f"Resolved {when}", xalign=0, css_classes=["heading"]))
-            box.append(said(note["resolution"] or "(no note)"))
+            box.append(Gtk.Label(label=wording.say("fixes.resolved_at", when=when), xalign=0, css_classes=["heading"]))
+            box.append(said(note["resolution"] or wording.say("fixes.no_note")))
         names = [os.path.join(note["folder"], f"capture-{n}{m}.png") for n in range(1, note["captures"] + 1)
                  for m in (("-marked",) if os.path.exists(os.path.join(note["folder"], f"capture-{n}-marked.png")) else ("",))]
         for at in range(0, len(names), 2):  # (two to a line, as a fix's before and after are)
@@ -360,11 +362,13 @@ class FixesPage(Gtk.Box):
         if shot["label"]:
             box.append(Gtk.Label(label=shot["label"], xalign=0, wrap=True))
         sides = Gtk.Box(spacing=12, homogeneous=True)
-        for side, path in (("Before", shot["before"]), ("After", shot["after"])):
+        for side, path, missing in (
+                (wording.say("fixes.before"), shot["before"], wording.say("fixes.not_there_before")),
+                (wording.say("fixes.after"), shot["after"], wording.say("fixes.none"))):
             column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             column.append(dim(side))
             if path is None:
-                column.append(dim("Not there before this fix" if side == "Before" else "None", wrap=True))
+                column.append(dim(missing, wrap=True))
             else:
                 column.append(self.image_slot(path, self.read_shot))
             sides.append(column)
@@ -397,7 +401,7 @@ class FixesPage(Gtk.Box):
             make_image_interactive(pic, data, path=path if os.path.isabs(path) else None, name=path)
             slot.append(pic)
         else:
-            slot.append(dim("This image can't be read", wrap=True))
+            slot.append(dim(wording.say("fixes.image_unreadable"), wrap=True))
         return False
 
     # ---- what can be done with it
@@ -420,9 +424,9 @@ class FixesPage(Gtk.Box):
         for btn in (self.fix_btn, self.merge_btn, self.discard_btn, self.reopen_btn, self.stop_btn):
             btn.set_sensitive(writes)
         if status == fixes.READY:
-            self.merge_btn.set_tooltip_text(f"Merge PR #{item['pr']['number']}: every running Baude and Record updates to it")
+            self.merge_btn.set_tooltip_text(wording.say("fixes.merge_tip", number=item["pr"]["number"]))
         elif status == fixes.OPEN:
-            self.fix_btn.set_tooltip_text(f"Fix it on this machine, on branch fix/{fixes.fix_key(item)}")
+            self.fix_btn.set_tooltip_text(wording.say("fixes.fix_tip", key=fixes.fix_key(item)))
         self.hint.set_label(self.hint_for(item) if item else "")
         self.hint.set_visible(bool(self.hint.get_label()))
         shown = self.hint.get_visible() or self.busy or replies or any(
@@ -433,29 +437,32 @@ class FixesPage(Gtk.Box):
     def hint_for(self, item):
         status, working = item["status"], item["working"]
         if status == fixes.FILED:
-            return "Filed as an issue, but it can't be read from GitHub here just now, so this is only the note saved here."
+            return wording.say("fixes.filed_unreadable")
         if status == fixes.WORKING:
             if working:
-                return f"{fixes.github_location(item)} is running on {working['machine'] or 'another machine'}"
-            return f"PR #{item['pr']['number']} is a draft: in progress."
+                if working["machine"]:
+                    return wording.say("fixes.running_on", issue=fixes.github_location(item),
+                                       machine=working["machine"])
+                return wording.say("fixes.running_elsewhere", issue=fixes.github_location(item))
+            return wording.say("fixes.draft", number=item["pr"]["number"])
         if not self.can_write:
-            return f"Only people with write access to {self.repo} can fix or merge." \
+            return wording.say("fixes.write_access", repo=self.repo) \
                 if status in (fixes.OPEN, fixes.READY) else ""
         if item["error"] and status in (fixes.OPEN, fixes.READY):
-            return f"The last fix here didn't go ahead: {item['error']}"
+            return wording.say("fixes.fix_failed", why=item["error"])
         return ""
 
     def merge(self):
         item = self.current()
-        self.confirm(f"Merge the fix for {fixes.github_location(item)}?",
-                     f"PR #{item['pr']['number']} goes into main, and every running Baude and Record updates itself "
-                     "from main.", "Merge", False, lambda: self.run(fixes.merge, self.repo, item))
+        self.confirm(wording.say("fixes.merge_heading", issue=fixes.github_location(item)),
+                     wording.say("fixes.merge_body", number=item["pr"]["number"]), wording.say("fixes.merge"), False,
+                     lambda: self.run(fixes.merge, self.repo, item))
 
     def discard(self):
         item = self.current()
-        self.confirm(f"Discard the fix for {fixes.github_location(item)}?",
-                     f"PR #{item['pr']['number']} is closed and its branch deleted. The feedback stays open.",
-                     "Discard", True, lambda: self.run(fixes.discard, self.repo, item))
+        self.confirm(wording.say("fixes.discard_heading", issue=fixes.github_location(item)),
+                     wording.say("fixes.discard_body", number=item["pr"]["number"]),
+                     wording.say("common.discard"), True, lambda: self.run(fixes.discard, self.repo, item))
 
     def send_reply(self):
         text, item = self.reply_entry.get_text().strip(), self.current()
@@ -464,7 +471,7 @@ class FixesPage(Gtk.Box):
 
     def confirm(self, heading, body, verb, destructive, then):
         dlg = Adw.AlertDialog(heading=heading, body=body, default_response="cancel", close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("go", verb)
         dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE if destructive
                                     else Adw.ResponseAppearance.SUGGESTED)
@@ -614,7 +621,8 @@ class FixesPage(Gtk.Box):
         self.items = with_notes(self.issues, feedback.feedback_items(), self.repo)
         self.fill_list()
         if last.get("read"):
-            say_time(self.note, last["read"], f"{read_from(last.get('locations'), self.repo)} · read ")
+            where = read_from(last.get("locations"), self.repo)
+            say_time(self.note, last["read"], wording.say("fixes.read_from", where=where))
         self.draw_detail()
         self.sync_bar()
         GLib.idle_add(self.count_in_tab)  # (it's shown before its tab's told which it is)
@@ -646,7 +654,7 @@ class FixesPage(Gtk.Box):
         self.refresh_btn.set_loading(False)
         self.read_at = time.monotonic()
         time_tip(self.note, None)  # (read now: it says the clock's time)
-        self.empty_note.set_label("Nothing ongoing")
+        self.empty_note.set_label(wording.say("fixes.nothing_ongoing"))
         self.repo = repo
         if data is not None:
             self.issues, self.can_write = data["items"], data["can_write"]
@@ -662,18 +670,19 @@ class FixesPage(Gtk.Box):
             else:
                 web(self.win, url)
         if not self.items and data is None:
-            self.status.set_title("GitHub isn't connected" if repo is None else "Couldn't read the feedback")
-            self.status.set_description("Feedback lives on GitHub. Sign the gh CLI in (gh auth login) on a checkout of "
-                                        "Baude from GitHub, and it shows here." if repo is None else error or "")
+            self.status.set_title(wording.say("fixes.not_connected") if repo is None
+                                  else wording.say("fixes.unreadable"))
+            self.status.set_description(wording.say("fixes.not_connected_body") if repo is None else error or "")
             self.stack.set_visible_child_name("status")
             self.fill_list()
             self.note.set_label("")
             self.sync_bar()
             return False
         self.fill_list()
-        self.note.set_label("GitHub isn't connected: only what's saved here" if repo is None else
-                            f"Couldn't read it just now: {error.splitlines()[0]}" if error else
-                            f"{read_from(data and data.get('locations'), repo)} · read {time.strftime('%H:%M')}")
+        self.note.set_label(wording.say("fixes.only_saved_here") if repo is None else
+                            wording.say("fixes.read_failed", why=error.splitlines()[0]) if error else
+                            wording.say("fixes.read_from_at", where=read_from(data and data.get("locations"), repo),
+                                        time=time.strftime("%H:%M")))
         self.note.set_tooltip_text(error)
         self.stack.set_visible_child_name("main")
         self.draw_detail()
@@ -686,4 +695,5 @@ class FixesPage(Gtk.Box):
         waiting = sum(i["status"] == fixes.READY for i in self.items)
         tabs = getattr(self.win, "tabs", None)
         if tabs is not None and getattr(self, "tab_key", None) is not None:
-            tabs.retitle(self.tab_key, f"Feedback ({waiting})" if waiting else "Feedback")
+            tabs.retitle(self.tab_key, wording.say("fixes.tab_waiting", n=waiting) if waiting
+                         else wording.say("feedback.title"))

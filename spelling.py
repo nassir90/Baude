@@ -31,6 +31,7 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gsk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+from baudelib import wording  # noqa: E402
 
 SPELLING, GRAMMAR = "spelling", "grammar"
 COLORS = {SPELLING: "#e01b24", GRAMMAR: "#3584e4"}  # (GNOME's red 3 and blue 3: a squiggle reads on light and dark)
@@ -650,7 +651,8 @@ class SpellCheck:
             keep.append_item(self._item("Learn Spelling", "spell.learn", [word]))
         menu.append_section(None if fixes else said or "No Guesses Found", keep)
         edit = Gio.Menu()
-        for label, action in (("Cut", "clipboard.cut"), ("Copy", "clipboard.copy"), ("Paste", "clipboard.paste")):
+        for label, action in (("Cut", "clipboard.cut"), (wording.say("common.copy"), "clipboard.copy"),
+                              ("Paste", "clipboard.paste")):
             edit.append(label, action)  # (the text view's own)
         menu.append_section(None, edit)
         if self.menu is not None:

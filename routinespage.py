@@ -10,28 +10,31 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from baudelib import wire  # noqa: E402
+from baudelib import wire, wording  # noqa: E402
 
-PAGE = "Routines"
-DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+PAGE = wording.say("routines.title")
+DAY_NAMES = (wording.say("routines.mon"), wording.say("routines.tue"), wording.say("routines.wed"),
+             wording.say("routines.thu"), wording.say("routines.fri"), wording.say("routines.sat"),
+             wording.say("routines.sun"))
 
 
 def when(r):
     """How a routine's schedule is said: every 2 hours; weekdays at 09:00."""
     if r.get("every"):
         m = r["every"]
-        return f"every {m // 60} hours" if m % 60 == 0 and m >= 120 else (
-            "every hour" if m == 60 else f"every {m} minutes")
+        return wording.say("routines.every_hours", n=m // 60) if m % 60 == 0 and m >= 120 else (
+            wording.say("routines.every_hour") if m == 60 else wording.say("routines.every_minutes", n=m))
     days = r.get("days") or []
-    said = {(0, 1, 2, 3, 4): "weekdays", (5, 6): "weekends", (0, 1, 2, 3, 4, 5, 6): "every day"}.get(
+    said = {(0, 1, 2, 3, 4): wording.say("routines.weekdays"), (5, 6): wording.say("routines.weekends"),
+            (0, 1, 2, 3, 4, 5, 6): wording.say("routines.every_day")}.get(
         tuple(days), ", ".join(DAY_NAMES[d] for d in days))
-    return f"{said} at {r.get('at')}"
+    return wording.say("routines.days_at", days=said, time=r.get('at'))
 
 
 def stamp(t, clock=None):
     """A time as the host's clock has it (clock: its zone and offset; none known: this machine's)."""
     if not t:
-        return "never"
+        return wording.say("routines.never")
     zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
     d = datetime.datetime.fromtimestamp(t, zone)
     today = datetime.datetime.now(zone).date()
@@ -46,7 +49,7 @@ class RoutinesPage(Gtk.Box):
         self.win, self.sid, self.remote, self.routines, self.asked, self.clock = win, None, None, [], 0, None
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=10, margin_top=8, margin_bottom=4)
         head.append(Gtk.Box(hexpand=True))  # (the page's name is the switcher's: New routine at the end)
-        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New routine")
+        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=wording.say("routines.new_routine"))
         add.add_css_class("flat")
         add.connect("clicked", lambda *_: self.edit(None))
         head.append(add)
@@ -54,8 +57,9 @@ class RoutinesPage(Gtk.Box):
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10,
                                 valign=Gtk.Align.START)
         self.list.add_css_class("boxed-list")
-        empty = Gtk.Label(label="No routines yet", margin_top=24, margin_bottom=24)  # (as the side panel's other
-        empty.add_css_class("dim-label")                                              # lists say so: _empty)
+        empty = Gtk.Label(label=wording.say("routines.no_routines"), margin_top=24,
+                          margin_bottom=24)  # (as the side panel's other lists say so: _empty)
+        empty.add_css_class("dim-label")
         self.list.set_placeholder(empty)
         self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=10, margin_end=10, margin_top=6)
         self.said.add_css_class("dim-label")
@@ -97,7 +101,7 @@ class RoutinesPage(Gtk.Box):
             if sid != self.sid or asked != self.asked:
                 return
             if r.get("op") == "error":
-                self.said.set_label(f"Couldn't {doing} the routines." if doing == "load" else f"Couldn't {doing} the routine.")
+                self.said.set_label(wording.say("routines.couldnt", doing=doing))
                 self.said.set_tooltip_text(wire.said(r) or None)
                 self.said.set_visible(True)
                 return
@@ -118,19 +122,23 @@ class RoutinesPage(Gtk.Box):
         while (row := self.list.get_row_at_index(0)) is not None:
             self.list.remove(row)
         for r in self.routines:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(r.get("name") or "Routine"),
+            row = Adw.ActionRow(title=GLib.markup_escape_text(r.get("name") or wording.say("routines.routine")),
                                 subtitle=GLib.markup_escape_text(
-                                    f"{when(r)} · " + ("paused" if r.get("paused") else
-                                                       f"next {stamp(r.get('next'), self.clock)}")
-                                    + (f" · last {stamp(r.get('last'), self.clock)}" if r.get("last") else "")
+                                    f"{when(r)} · " + (wording.say("routines.paused") if r.get("paused") else
+                                                       wording.say("routines.next",
+                                                                   time=stamp(r.get('next'), self.clock)))
+                                    + (" · " + wording.say("routines.last", time=stamp(r.get('last'), self.clock))
+                                       if r.get("last") else "")
                                     + (f" · {r['error']}" if r.get("error") else "")))
-            on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER, tooltip_text="Turn off to pause")
+            on = Gtk.Switch(active=not r.get("paused"), valign=Gtk.Align.CENTER,
+                            tooltip_text=wording.say("routines.turn_off"))
             on.connect("notify::active", lambda sw, _p, x=r: self.save({**x, "paused": not sw.get_active()}))
             row.add_suffix(on)
-            for icon, tip, fn in (("media-playback-start-symbolic", "Run now",
+            for icon, tip, fn in (("media-playback-start-symbolic", wording.say("routines.run_now"),
                                    lambda rid=r["id"]: self.ask({"op": "run_routine", "session": self.sid, "id": rid})),
-                                  ("document-edit-symbolic", "Change", lambda x=r: self.edit(x)),
-                                  ("user-trash-symbolic", "Delete", lambda rid=r["id"]: self.delete(rid))):
+                                  ("document-edit-symbolic", wording.say("routines.change"), lambda x=r: self.edit(x)),
+                                  ("user-trash-symbolic", wording.say("common.delete"),
+                                   lambda rid=r["id"]: self.delete(rid))):
                 b = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER)
                 b.add_css_class("flat")
                 b.connect("clicked", lambda _b, f=fn: f())
@@ -141,21 +149,21 @@ class RoutinesPage(Gtk.Box):
         """A routine made, or (r) changed: what to do, and when."""
         r = r or {}
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        name = Gtk.Entry(placeholder_text="Name", text=r.get("name") or "")
+        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=r.get("name") or "")
         box.append(name)
         prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=6, bottom_margin=6, left_margin=6,
                               right_margin=6)
         prompt.get_buffer().set_text(r.get("prompt") or "")
         frame = Gtk.ScrolledWindow(min_content_height=110, child=prompt)
         frame.add_css_class("card")
-        box.append(Gtk.Label(label="Task", xalign=0))
+        box.append(Gtk.Label(label=wording.say("routines.task"), xalign=0))
         box.append(frame)
-        how = Gtk.DropDown.new_from_strings(["Every", "At a time of day"])
+        how = Gtk.DropDown.new_from_strings([wording.say("routines.every"), wording.say("routines.at_a_time")])
         how.set_selected(1 if r.get("at") else 0)
         box.append(how)
         every = Gtk.Box(spacing=6)
         amount = Gtk.SpinButton.new_with_range(5, 999, 1)
-        unit = Gtk.DropDown.new_from_strings(["minutes", "hours"])
+        unit = Gtk.DropDown.new_from_strings([wording.say("routines.minutes"), wording.say("routines.hours")])
         unit.connect("notify::selected", lambda u, _p: amount.set_range(*((1, 744) if u.get_selected() else (5, 999))))
         m = r.get("every") or 60
         unit.set_selected(1 if m % 60 == 0 else 0)
@@ -165,8 +173,9 @@ class RoutinesPage(Gtk.Box):
         box.append(every)
         daily = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         at = Gtk.Entry(placeholder_text="HH:MM", text=r.get("at") or "09:00", max_width_chars=6)
-        daily.append(Gtk.Label(label=f"Times in {self.clock['zone']}" if self.clock and self.clock.get("zone")
-                                 else "Times on the host's clock", xalign=0))
+        daily.append(Gtk.Label(label=wording.say("routines.times_in", zone=self.clock['zone'])
+                               if self.clock and self.clock.get("zone") else wording.say("routines.host_clock"),
+                               xalign=0))
         daily.append(at)
         days_row = Gtk.Box(spacing=2)
         days = []
@@ -184,10 +193,11 @@ class RoutinesPage(Gtk.Box):
         shown()
         fits = Gtk.ScrolledWindow(child=box, propagate_natural_height=True, max_content_height=440,
                                   hscrollbar_policy=Gtk.PolicyType.NEVER)  # (a short window: its fields scrolled to)
-        dlg = Adw.AlertDialog(heading="Change Routine" if r else "New Routine", extra_child=fits,
+        dlg = Adw.AlertDialog(heading=wording.say("routines.change_heading") if r else
+                              wording.say("routines.new_heading"), extra_child=fits,
                               default_response="save", close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("save", "Save")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("save", wording.say("common.save"))
         dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
 
         def answered(_d, response):

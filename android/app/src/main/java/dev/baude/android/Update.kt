@@ -89,7 +89,7 @@ object Update {
         val before = prefs(app).getLong("ran", 0L)
         if (before !in 1 until now) return null
         val n = now - before
-        return "Baude updated: $n new commit${if (n != 1L) "s" else ""}"
+        return Wording.Updates.updatedCommits(app = "Baude", n = n)
     }
 
     /** The feed looked at (off the main thread), unless it was less than CHECK_MS ago (force: whatever it was);
@@ -161,7 +161,7 @@ object Update {
         }
         prefs(app).edit().putLong("installing", System.currentTimeMillis()).apply()
         if (!notifies(app)) // (no Baude updated to open it again with: said before it goes)
-            Toast.makeText(app, "Baude closes to update: open it again once it has", Toast.LENGTH_LONG).show()
+            Toast.makeText(app, Wording.Updates.closesToUpdate(app = "Baude"), Toast.LENGTH_LONG).show()
         work.execute {
             if (ready != apk || !apk.exists()) { // (a newer build came since: that one's, fetched first)
                 main.post { install(app) }
@@ -198,7 +198,7 @@ object Update {
     }
 
     fun failed(ctx: Context, why: String) {
-        Toast.makeText(ctx.applicationContext, "Couldn't update: $why", Toast.LENGTH_LONG).show()
+        Toast.makeText(ctx.applicationContext, Wording.Updates.couldntUpdate(why = why), Toast.LENGTH_LONG).show()
     }
 
     /** Installed (this is the new build, just started): what was downloaded for it, and its notification, gone; if it
@@ -213,7 +213,7 @@ object Update {
             ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
         }
-        notify(ctx.applicationContext, updated(ctx.applicationContext) ?: "Baude updated", offer = false)
+        notify(ctx.applicationContext, updated(ctx.applicationContext) ?: Wording.Updates.updated(app = "Baude"), offer = false)
     }
 
     private fun allowed(app: Context) = Build.VERSION.SDK_INT < 26 || app.packageManager.canRequestPackageInstalls()
@@ -337,17 +337,17 @@ object Update {
         val pm = app.packageManager
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else
             @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
-        val info = pm.getPackageArchiveInfo(file.path, flags) ?: return "Can't update: the new version can't be read"
+        val info = pm.getPackageArchiveInfo(file.path, flags) ?: return Wording.Updates.cantRead
         val v = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
         if (info.packageName != app.packageName || v != version)
-            return "Can't update: the new version isn't a build of this app"
+            return Wording.Updates.notThisApp
         val mine = pm.getPackageInfo(app.packageName, flags)
         @Suppress("DEPRECATION")
         fun signers(i: android.content.pm.PackageInfo) = (if (Build.VERSION.SDK_INT >= 28)
             i.signingInfo?.apkContentsSigners else i.signatures)?.map { it.toCharsString() }?.toSet()
         val theirs = signers(info)
         return if (theirs != null && theirs == signers(mine)) null
-        else "Can't update: the new version is signed with another key"
+        else Wording.Updates.otherKey
     }
 
     /** Downloaded and checked: Update shown; installed if it was asked for and the app's in front, else a
@@ -362,7 +362,7 @@ object Update {
                 if (asked) install(app)
             } else if (asked || prefs(app).getString("noted", null) != sha) {
                 prefs(app).edit().putString("noted", sha).apply()
-                notify(app, "A new version is ready", offer = true)
+                notify(app, Wording.UpdateBar.ready, offer = true)
             }
         }
     }
@@ -376,7 +376,7 @@ object Update {
     }
 
     private fun channel(app: Context) = app.getSystemService(NotificationManager::class.java)
-        .createNotificationChannel(NotificationChannel(CHANNEL, "Update", NotificationManager.IMPORTANCE_HIGH))
+        .createNotificationChannel(NotificationChannel(CHANNEL, Wording.UpdateBar.update, NotificationManager.IMPORTANCE_HIGH))
 
     /** A notification that opens the app: A new version is ready (offer: silent, with Update), or Baude updated
      * (shown over what's in front: the app was closed to be replaced, and this opens it again). */
@@ -396,7 +396,7 @@ object Update {
         if (offer) {
             val token = UUID.randomUUID().toString() // (opened: Update.opened installs only with it)
             prefs(app).edit().putString("token", token).apply()
-            n.addAction(0, "Update", PendingIntent.getActivity(app, NOTE + 1, Intent(app, MainActivity::class.java)
+            n.addAction(0, Wording.UpdateBar.update, PendingIntent.getActivity(app, NOTE + 1, Intent(app, MainActivity::class.java)
                 .putExtra("update", token).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }

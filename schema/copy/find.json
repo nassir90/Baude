@@ -1,0 +1,13 @@
+{
+  "description": "Find in a chat: its search box, buttons and count.",
+  "messages": {
+    "placeholder": "Find in chat",
+    "previous": "Previous match (Shift+Enter)",
+    "next": "Next match (Enter)",
+    "earlier": "⏎ earlier",
+    "no_matches": "No matches",
+    "searching": "searching…",
+    "match_of": "{$at} of {$total}",
+    "match_of_more": "{$at} of {$total}+"
+  }
+}

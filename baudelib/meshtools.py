@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from baudelib import wire
+from baudelib import wire, wording
 
 NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
 SUBAGENT_MODES = ("auto", "acceptEdits", "default", "plan")  # (a subagent's: Auto at most; its host holds it to these)
@@ -491,20 +491,21 @@ def shown(got):
     """What a person's shown of a wait cut short as told says it (a held answer's, beside what its agent's sent): the
     answer (an error result's said so), or what became of it in a line, as Baude's card for the call says it."""
     if isinstance(got.get("answer"), str) and got["answer"].strip():
-        return ("Error: " if got.get("error") is True else "") + got["answer"]
+        return wording.say("held_answer.error", answer=got["answer"]) if got.get("error") is True else got["answer"]
     if got.get("interrupted"):
-        return "Interrupted: its host restarted as it worked."
+        return wording.say("held_answer.interrupted")
     if got.get("expired"):
-        return "The wait ran out."
+        return wording.say("held_answer.expired")
     if got.get("still_working"):
-        return "It was still working when the wait ran out."
+        return wording.say("held_answer.still_working")
     if "exited" in got:
-        return "Its claude exited" + (f" ({got['exited']})." if got["exited"] is not None else ".")
+        return wording.say("held_answer.exited", code=got["exited"]) if got["exited"] is not None else \
+            wording.say("held_answer.exited_plain")
     if isinstance(got.get("error"), str) and got["error"].strip():  # (a lost one's too: why)
         return got["error"]
     if got.get("lost"):
-        return "Its host went before it answered."
-    return "It answered with nothing."
+        return wording.say("held_answer.lost")
+    return wording.say("held_answer.nothing")
 
 
 def shown_of_told(text):

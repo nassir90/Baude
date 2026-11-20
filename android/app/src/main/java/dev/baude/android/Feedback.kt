@@ -136,13 +136,13 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         Outbox.send(id, h) { r ->
             sending = false
             if (r.optString("op") == Op.FEEDBACK_FILED) {
-                Toast.makeText(ctx, "Filed as an issue on ${Msg.FeedbackFiled.from(r).repo.orEmpty()}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, Wording.Feedback.filed(repo = Msg.FeedbackFiled.from(r).repo.orEmpty()), Toast.LENGTH_LONG).show()
                 back()
             } else failed = said(Msg.Error.from(r))
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar("Feedback", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Cancel", onClick = back) })
+        Bar(Wording.Feedback.title, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Common.cancel, onClick = back) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             context.firstOrNull()?.let { Text(it, style = Type.bold, color = c.fg, modifier = Modifier.padding(top = 10.dp)) }
@@ -171,7 +171,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
             if (showContext) Text(full.joinToString("\n") { "- $it" }, style = Type.mono, color = c.fg, modifier = Modifier
                 .fillMaxWidth().heightIn(max = 160.dp).clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
                 .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(8.dp))
-            failed?.let { Text("Saved, and it'll be filed${target?.ifBlank { null }?.let { " on $it" }.orEmpty()} when it can be: $it", style = Type.caption, color = c.destructive) }
+            failed?.let { why -> Text(target?.ifBlank { null }?.let { Wording.Feedback.notFiledWhy(repo = it, why = why) }
+                ?: "Saved, and it'll be filed when it can be: $why", style = Type.caption, color = c.destructive) }
         }
         val ready = text.isNotBlank() && host != null && !sending
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).height(52.dp).clip(RoundedCornerShape(12.dp))
@@ -180,7 +181,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
             Text(when {
                 sending -> "Sending…"
                 failed != null -> "Try sending again"
-                else -> "Save"
+                else -> Wording.Common.save
             }, style = Type.bold, color = if (ready) c.accentFg else c.dim)
         }
     }

@@ -1,0 +1,25 @@
+{
+  "description": "Settings → Meta (Intelligence, Provider, Effort, Run commands, Code mode), and the names of the settings Meta changes, as its action lines say them.",
+  "messages": {
+    "intelligence": "Intelligence",
+    "intelligence_detail": "The model Meta thinks with",
+    "provider": "Provider",
+    "provider_detail": "Where the model runs",
+    "provider_picker": "Where Meta's model runs",
+    "effort": "Effort",
+    "effort_default": "Default",
+    "effort_detail": "How hard Meta thinks",
+    "no_effort": "{$model} has no effort setting",
+    "code_mode": "Code mode",
+    "code_mode_detail": "Meta acts by writing up to {$n} lines of Python",
+    "run_commands": "Run commands",
+    "run_commands_detail": "Meta runs shell commands and edits files, in Auto mode",
+    "asks_each": "{$note}: Meta asks before each command",
+    "only_reads": "{$model} only reads: Claude's models run commands",
+    "no_auto": "Claude Code didn't start {$model} in Auto mode here",
+    "text_scale": "Text Scale",
+    "icon_scale": "Icon Scale",
+    "global_scale": "Global Scale",
+    "full_width": "Full-width text"
+  }
+}

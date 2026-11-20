@@ -1,0 +1,14 @@
+{
+  "description": "The banner when an app and this machine's daemon (host process) run different code, and its button.",
+  "messages": {
+    "app_older": "{$app} is older than its daemon",
+    "restart_app": "Restart {$app}",
+    "daemon_older": "Daemon is older than {$app}",
+    "restart_daemon": "Restart Daemon",
+    "both_old": "{$app} and its daemon are out of date",
+    "restart_both": "Restart Both",
+    "elsewhere_folder": "Daemon runs the code in {$folder}",
+    "elsewhere": "Daemon runs another checkout's code",
+    "dismiss": "Dismiss"
+  }
+}

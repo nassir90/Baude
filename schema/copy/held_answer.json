@@ -1,0 +1,13 @@
+{
+  "description": "What's shown of a wait on another chat that was cut short (a held answer), beside what its agent was sent: the answer, or what became of it.",
+  "messages": {
+    "error": "Error: {$answer}",
+    "interrupted": "Interrupted: its host restarted as it worked.",
+    "expired": "The wait ran out.",
+    "still_working": "It was still working when the wait ran out.",
+    "exited": "Its claude exited ({$code}).",
+    "exited_plain": "Its claude exited.",
+    "lost": "Its host went before it answered.",
+    "nothing": "It answered with nothing."
+  }
+}

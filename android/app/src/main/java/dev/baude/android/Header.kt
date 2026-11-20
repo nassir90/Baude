@@ -38,13 +38,16 @@ import java.util.concurrent.atomic.AtomicInteger
 data class ModelChoice(val value: String, val name: String, val efforts: List<String>, val resolved: String? = null)
 
 /** Thinking effort's levels as Baude says them (claude.EFFORT_LABELS). */
-val EFFORT_LABELS = mapOf("off" to "No thinking", "low" to "Low effort", "medium" to "Medium effort",
-    "high" to "High effort", "xhigh" to "Extra-high effort", "max" to "Max effort")
+val EFFORT_LABELS = mapOf("off" to Wording.ModeEffort.effortOff, "low" to Wording.ModeEffort.effortLow,
+    "medium" to Wording.ModeEffort.effortMedium, "high" to Wording.ModeEffort.effortHigh,
+    "xhigh" to Wording.ModeEffort.effortXhigh, "max" to Wording.ModeEffort.effortMax)
 
 /** Permission modes, Claude's (claude.MODES) and Codex's (models.CODEX_MODES). */
-val MODES = listOf("default" to "Manual", "acceptEdits" to "Accept edits", "plan" to "Plan", "auto" to "Auto",
-    "dontAsk" to "Don't ask", "bypassPermissions" to "Bypass permissions")
-val CODEX_MODES = listOf("default" to "Manual", "auto" to "Auto", "bypassPermissions" to "Bypass Permissions")
+val MODES = listOf("default" to Wording.ModeEffort.manual, "acceptEdits" to Wording.ModeEffort.acceptEdits,
+    "plan" to Wording.ModeEffort.plan, "auto" to Wording.ModeEffort.auto, "dontAsk" to Wording.ModeEffort.dontAsk,
+    "bypassPermissions" to Wording.ModeEffort.bypass)
+val CODEX_MODES = listOf("default" to Wording.ModeEffort.manual, "auto" to Wording.ModeEffort.auto,
+    "bypassPermissions" to Wording.ModeEffort.codexBypass)
 
 /** The program a model runs on, as models.model_program says: claude, codex, apple or pi. */
 fun program(model: String?): String = when {
@@ -92,7 +95,7 @@ fun family(m: ModelChoice): String {
     val said = (m.name + " " + m.value.substringAfterLast('/')).lowercase()
     return listOf("Claude" to "claude|opus|sonnet|haiku|fable", "GPT" to "gpt|openai|codex", "Qwen" to "qwen|qwq",
         "Gemma" to "gemma", "Gemini" to "gemini", "Llama" to "llama", "Mistral" to "mistral|mixtral|stral",
-        "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: "Other"
+        "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: Wording.Common.other
 }
 
 /** A copy of a model somewhere in the mesh, as Baude's provider picker lists it (provider_choices): its value as a
@@ -215,13 +218,13 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
             said.msg?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
             done = true
-            then(if (r.optString("subtype") == "error") r.optString("error").ifBlank { "it said no" } else null)
+            then(if (r.optString("subtype") == "error") r.optString("error").ifBlank { Wording.ChatHeader.claudeSaidNo } else null)
         }
     }
     Mesh.listeners.add(heard)
     Mesh.later(30_000) { // (no answer: not waited for any longer)
         if (done || !Mesh.listeners.remove(heard)) return@later
-        then("it didn't answer")
+        then(Wording.HostStatus.noAnswer)
     }
     val msg = JSONObject().put("type", "control_request").put("request_id", rid).put("request", request)
     Mesh.ask(hostId, Msg.Input(session = sid, msg = msg).json()) { r ->
@@ -256,8 +259,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         verticalAlignment = Alignment.CenterVertically) {
         val copies = copiesOf(hostId, model)
         if (copies.isNotEmpty()) { // (where the chat's model runs: each copy of it in the mesh, by host and provider)
-            val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" } ?: "Provider"
-            Picker(face, if (copies.size > 1) "Where the chat's model runs" else "Where the chat's model runs (the only one that has it)",
+            val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" } ?: Wording.MetaSettings.provider
+            Picker(face, if (copies.size > 1) Wording.ChatHeader.providerTip else Wording.ChatHeader.providerTipOnly,
                 copies.map { "${it.host} / ${it.provider}" to it.value }, model, enabled = copies.size > 1) { v ->
                 Moves.cancel(hostId, sid)
                 if (v == listed("model")) { asked.remove("model"); return@Picker } // (the one it's on: no move)
@@ -269,14 +272,15 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 } else pickModel(hostId, sid, s, v, choices, asked, said, open)
             }
         }
-        ModelPicker(now?.name ?: model ?: "Model", choices, now?.value) { v ->
+        ModelPicker(now?.name ?: model ?: Wording.Common.model, choices, now?.value) { v ->
             pickModel(hostId, sid, s, v, choices, asked, said, open)
         }
         val efforts = now?.efforts.orEmpty()
         val effort = asked["effort"] ?: listed("effort")
-        if (efforts.isEmpty()) Picker("Effort", "${now?.name ?: "This model"} has no effort setting", emptyList(), null,
+        if (efforts.isEmpty()) Picker(Wording.MetaSettings.effort,
+            Wording.MetaSettings.noEffort(model = now?.name ?: Wording.ChatHeader.thisModel), emptyList(), null,
             enabled = false) {}
-        else Picker(EFFORT_LABELS[effort] ?: "Effort", "Thinking effort", efforts.map { (EFFORT_LABELS[it] ?: it) to it },
+        else Picker(EFFORT_LABELS[effort] ?: Wording.MetaSettings.effort, Wording.ChatHeader.effortTip, efforts.map { (EFFORT_LABELS[it] ?: it) to it },
             effort) { v ->
             asked["effort"] = v
             control(hostId, sid, JSONObject().put("subtype", "apply_flag_settings")
@@ -288,14 +292,14 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
             // claude's modes whatever the program: a phone's agents)
             val modes = if (prog == "codex") CODEX_MODES else MODES
             val mode = asked["mode"] ?: listed("mode") ?: "default"
-            Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, "Permission mode", modes.map { it.second to it.first },
+            Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, Wording.ChatHeader.modeTip, modes.map { it.second to it.first },
                 mode) { v ->
                 val was = modes.firstOrNull { it.first == mode }?.second ?: mode
                 asked["mode"] = v
                 control(hostId, sid, JSONObject().put("subtype", "set_permission_mode").put("mode", v)) { e ->
                     if (e != null) {
                         asked.remove("mode")
-                        said("couldn't switch to ${modes.firstOrNull { it.first == v }?.second ?: v}: $e (still $was)")
+                        said(Wording.ChatHeader.modeRefusedStill(mode = modes.firstOrNull { it.first == v }?.second ?: v, why = e, was = was))
                     }
                 }
             }
@@ -314,7 +318,7 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
         Mesh.ask(hostId, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) open(hostId, id)
-            else said("${Mesh.label(hostId)} didn't start it: " + Msg.Error.from(r).said.orEmpty())
+            else said(Wording.NewSession.hostRefused(host = Mesh.label(hostId), why = Msg.Error.from(r).said.orEmpty()))
         }
         return
     }
@@ -357,13 +361,13 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Icons.Filled.ArrowDropDown, "Model", tint = c.fg, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.ArrowDropDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(18.dp))
         }
         Popover(open, { open = false }) {
-            SearchField(query, { query = it }, "Search models", Modifier.width(260.dp).padding(horizontal = 8.dp, vertical = 4.dp))
+            SearchField(query, { query = it }, Wording.ModelPicker.search, Modifier.width(260.dp).padding(horizontal = 8.dp, vertical = 4.dp))
             val q = query.trim().lowercase()
             val shown = choices.filter { q.isEmpty() || it.name.lowercase().contains(q) || it.value.lowercase().contains(q) }
-            if (shown.isEmpty()) Text("No models match", style = Type.body, color = c.dim,
+            if (shown.isEmpty()) Text(Wording.ModelPicker.none, style = Type.body, color = c.dim,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
             for ((fam, ms) in shown.groupBy(::family)) {
                 Heading(fam)
@@ -385,11 +389,11 @@ fun StartPickers(hostId: String?, model: String?, effort: String?, mode: String,
                 set(v, effort?.takeIf { m != null && it in m.efforts }, if (program(v) == "codex") "default" else mode)
             }
             val efforts = now?.efforts.orEmpty()
-            if (efforts.isNotEmpty()) Picker(EFFORT_LABELS[effort] ?: "Effort", "Thinking effort",
+            if (efforts.isNotEmpty()) Picker(EFFORT_LABELS[effort] ?: Wording.MetaSettings.effort, Wording.ChatHeader.effortTip,
                 efforts.map { (EFFORT_LABELS[it] ?: it) to it }, effort) { set(model, it, mode) }
         }
         val modes = if (program(now?.value ?: model) == "codex") CODEX_MODES else MODES
-        Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, "Permission mode", modes.map { it.second to it.first },
+        Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, Wording.ChatHeader.modeTip, modes.map { it.second to it.first },
             mode) { set(model, effort, it) }
     }
 }

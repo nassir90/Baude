@@ -1,0 +1,15 @@
+{
+  "description": "Moving a session to the trash: the dialog, and what a host says when it doesn't.",
+  "messages": {
+    "move_dots": "Move to Trash…",
+    "move": "Move to Trash",
+    "heading": "Move “{$title}” to the trash?",
+    "this_session": "this session",
+    "yours": "your trash",
+    "on_host": "the trash on {$host}",
+    "body": "Its transcript will be moved to {$where}, where you can restore it.",
+    "body_copies": ".input {$n :number} .match $n one {{Its transcript and its {$n} earlier copy will be moved to {$where}, where you can restore it.}} * {{Its transcript and its {$n} earlier copies will be moved to {$where}, where you can restore it.}}",
+    "host_refused": ".input {$op :string} .match $op delete {{{$host} didn't delete it: {$why}}} archive {{{$host} didn't archive it: {$why}}} unarchive {{{$host} didn't unarchive it: {$why}}} * {{{$host} didn't {$op} it: {$why}}}",
+    "move_title": "Move “{$title}” to Trash…"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "A background task's ending, as a quiet line in a chat (Baude's, Record's and the Android app's).",
+  "messages": {
+    "background_command": "Background command",
+    "unnamed": "a background task",
+    "finished": "finished",
+    "failed": "failed",
+    "stopped": "stopped",
+    "ending_exit": "{$ending} (exit {$code})"
+  }
+}

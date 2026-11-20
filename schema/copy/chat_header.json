@@ -1,0 +1,14 @@
+{
+  "description": "The chat's header bar: its model, effort, permission-mode and provider pickers, and what they say when a change is refused.",
+  "messages": {
+    "provider_tip": "Where the chat's model runs",
+    "provider_tip_only": "Where the chat's model runs (the only one that has it)",
+    "mode_tip": "Permission mode",
+    "effort_tip": "Thinking effort",
+    "this_model": "This model",
+    "claude_said_no": "claude said no",
+    "mode_refused": "couldn't switch to {$mode}: {$why}",
+    "mode_refused_still": "couldn't switch to {$mode}: {$why} (still {$was})",
+    "menu": "Menu"
+  }
+}

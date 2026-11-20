@@ -1,0 +1,17 @@
+{
+  "description": "A browser's words, in Emission's window and Baude's browser pane: the toolbar, a tab with nothing in it yet, and a site's sign-in.",
+  "messages": {
+    "back": "Back",
+    "forward": "Forward",
+    "reload": "Reload",
+    "address": "Search or type an address",
+    "untitled_tab": "New Tab",
+    "new_tab": "New tab",
+    "new_tab_shortcut": "New tab (⌘T)",
+    "user_name": "User name",
+    "password": "Password",
+    "sign_in": "{$host} asks to sign in",
+    "sign_in_realm": "{$host} asks to sign in (“{$realm}”)",
+    "a_site": "A site"
+  }
+}

@@ -27,7 +27,7 @@ import sys
 import tempfile
 import threading
 
-from baudelib import hosttools, models, wire
+from baudelib import hosttools, models, wire, wording
 from baudelib.claude import ClaudeProc, claude_env
 
 PREFIX = "agent/"
@@ -355,19 +355,19 @@ class ProxiedProc(ClaudeProc):
             path = self.pi_session.claim(self)
             shipped = pack(pi_sessions(), [os.path.basename(path)]) if path else {}  # (the file pi takes up here)
             if shipped is None or path and not shipped:
-                self._say("pi's session is too big to carry to the host that runs this model, or couldn't be read")
+                self._say(wording.say("agent_proxy.pi_too_big"))
                 return self._end(1)
             self.ask_for["sessions"] = shipped
         try:
             ch, info = wire.reach(where, timeout=10)
         except OSError as e:
-            self._say(f"couldn't reach the host that runs this model ({self.member[:8]}): {e}")
+            self._say(wording.say("agent_proxy.unreachable", host=self.member[:8], why=e))
             return self._end(1)
         ch.send(self.ask_for)
         reply = ch.reply()
         if not reply or reply.get("op") != "agent_started":
-            self._say(f"{info.get('name') or self.member[:8]} didn't run it: "
-                      f"{wire.said(reply) or 'no answer'}")
+            self._say(wording.say("agent_proxy.didnt_run", host=info.get("name") or self.member[:8],
+                                  why=wire.said(reply) or wording.say("agent_proxy.no_answer")))
             ch.close()
             return self._end(1)
         with self.lock:
@@ -394,7 +394,7 @@ class ProxiedProc(ClaudeProc):
                     except Exception:  # noqa: BLE001 (said, and the chat goes on)
                         kept = False
                     if not kept:
-                        self._say("pi's session couldn't be kept on this host as it was written")
+                        self._say(wording.say("agent_proxy.pi_not_kept"))
                 elif isinstance(said, dict):
                     if said.get("type") in ("stream_event", "control_request"):  # (what it says once it runs: not
                         # the error a program that didn't start ends its turn with, whose servers never started)
@@ -412,7 +412,7 @@ class ProxiedProc(ClaudeProc):
                 code = msg.get("code") if isinstance(msg.get("code"), int) else 1
                 break
         else:
-            self._say("the connection to the host that runs this model is gone")
+            self._say(wording.say("agent_proxy.connection_gone"))
         self._end(code)
 
     def _check(self, host):
@@ -425,11 +425,10 @@ class ProxiedProc(ClaudeProc):
             missing = sorted(set(self.servers) - self.opened)
         if not missing or not self._calls_tools():
             return
-        which = [f"this chat's tools ({', '.join(self.host_tools)})" if n == hosttools.NAME else
-                 f"{n[:1].upper()}{n[1:]}'s tools" for n in missing]
+        which = [wording.say("agent_proxy.chat_tools", names=", ".join(self.host_tools)) if n == hosttools.NAME else
+                 wording.say("agent_proxy.server_tools", name=f"{n[:1].upper()}{n[1:]}") for n in missing]
         said = " and ".join(which)
-        self._say(f"{said[0].upper()}{said[1:]} didn't reach {host}, which runs this model: it can't use "
-                  "them in this conversation, and may make up what they'd return", warn=True)
+        self._say(wording.say("agent_proxy.tools_missing", tools=f"{said[0].upper()}{said[1:]}", host=host), warn=True)
 
     def _calls_tools(self):
         """Does the model call tools, as its host says (one that doesn't only talks: its program starts no servers)?"""
@@ -449,7 +448,7 @@ class ProxiedProc(ClaudeProc):
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                                  bufsize=1, env=self.env | {k: str(v) for k, v in (server.get("env") or {}).items()})
         except OSError as e:
-            self._say(f"couldn't start the {name} tools here: {e}")
+            self._say(wording.say("agent_proxy.tools_not_started", name=name, why=e))
             return self._send({"op": "mcp_close", "conn": conn})
         with self.lock:
             ended = self.ended
@@ -541,7 +540,7 @@ class Run:
         if split(model) is not None or models.model_program(model) == "claude":
             raise ValueError(f"not a model run as an agent here: {model}")
         if not server.can_run(model):
-            raise ValueError(f"{server.me['name']} can't run {model}: it, or its program, isn't here")
+            raise ValueError(wording.say("host_errors.cant_run", host=server.me["name"], model=model))
         run = models.launch(model, msg.get("mode") or "default", msg.get("effort") or None)
         resume = msg.get("resume") if wire.is_id(msg.get("resume")) else None
         names = [n for n in msg.get("servers") or [] if wire.is_id(n)][:16]
@@ -556,7 +555,7 @@ class Run:
         self.told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
         if self.ids and not unpack(self.sessions, msg.get("sessions"), self.ids, os.path.realpath(self.folder)):
             shutil.rmtree(self.folder, ignore_errors=True)
-            raise ValueError("pi's session couldn't be written here")
+            raise ValueError(wording.say("agent_proxy.pi_not_written"))
         cfg = {"mcpServers": {n: {"command": sys.executable,
                                   "args": [HEADLESS, "mcp-relay", "--socket", server.socket_path, self.id, n,
                                            self.token]} for n in names}}

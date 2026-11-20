@@ -1,0 +1,6 @@
+{
+  "description": "Files attached to a message: the composer's attach button.",
+  "messages": {
+    "attach_tip": "Attach images, PDFs or files (or paste / drop them)"
+  }
+}

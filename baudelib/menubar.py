@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 from macos import ns_string, objc_send  # noqa: E402
+from baudelib import wording  # noqa: E402
 from baudelib.client import stopping_line  # noqa: E402
 
 NS_VARIABLE_LENGTH = -1.0
@@ -41,20 +42,24 @@ def say(listing):
     running = [s for s in listing if s.get("state") in ("working", "waiting", "idle")]
     asking = [s for s in running if s.get("state") == "waiting"]
     working = [s for s in running if s.get("state") == "working"]
-    title = "Baude" + (f" · {len(asking)} asking" if asking else f" · {len(working)} working" if working else "")
+    title = wording.say("host_menu.title_asking", n=len(asking)) if asking else \
+        wording.say("host_menu.title_working", n=len(working)) if working else "Baude"
     n = len(listing)
-    line = f"{n} session{'s' if n != 1 else ''}" + (f", {len(running)} running" if running else ", none running")
+    line = wording.say("host_menu.sessions_running", n=n, running=len(running)) if running else \
+        wording.say("host_menu.sessions_none_running", n=n)
     shown = sorted(running, key=lambda s: ({"waiting": 0, "working": 1}.get(s["state"], 2), -(s.get("said") or 0)))
-    words = {"waiting": "asking", "working": "working", "idle": "waiting for you"}
-    return title, [line], [((s.get("title") or "(untitled)")[:48], words[s["state"]]) for s in shown[:12]]
+    words = {"waiting": wording.say("host_menu.asking"), "working": wording.say("host_menu.working"),
+             "idle": wording.say("host_menu.waiting_for_you")}
+    return title, [line], [((s.get("title") or wording.say("common.untitled"))[:48], words[s["state"]])
+                           for s in shown[:12]]
 
 
 def say_stopping(quitting):
     """(title, line) while it's stopping (Server.quitting; {} for Quit picked, before it's started on that): how many
     of its claudes are still to stop."""
     restart = bool(quitting.get("restart"))
-    return f"Baude · {'restarting' if restart else 'stopping'}", \
-        stopping_line("Daemon", restart, quitting.get("left"), quitting.get("total"))
+    return wording.say("host_menu.title_restarting") if restart else wording.say("host_menu.title_stopping"), \
+        stopping_line(wording.say("host_menu.daemon"), restart, quitting.get("left"), quitting.get("total"))
 
 
 class MenuBar:
@@ -120,7 +125,7 @@ class MenuBar:
         for name, state in sessions:
             self._add(menu, f"{name} — {state}", indent=1)
         objc_send(menu, b"addItem:", objc_send(b"NSMenuItem", b"separatorItem"), types=(ctypes.c_void_p,))
-        quit = self._add(menu, "Quit Baude's Host Process", action=b"quit:", key="q")
+        quit = self._add(menu, wording.say("host_menu.quit"), action=b"quit:", key="q")
         if quitting is not None or self.picked:  # (on it already: shown so, not picked again)
             objc_send(quit, b"setEnabled:", False, types=(ctypes.c_bool,))
         objc_send(self.item, b"setMenu:", menu, types=(ctypes.c_void_p,))

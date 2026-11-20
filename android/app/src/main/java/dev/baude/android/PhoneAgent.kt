@@ -120,7 +120,7 @@ object Inference {
                         Op.INFER_DATA -> sse.feed(Base64.getDecoder().decode(Msg.InferData.from(m).data.orEmpty()))
                         Op.INFER_END -> line.shut()
                         Op.ERROR -> {
-                            error = Msg.Error.from(m).said ?: "the host said no"
+                            error = Msg.Error.from(m).said ?: Wording.BotBrowser.hostSaidNo
                             line.shut()
                         }
                     }

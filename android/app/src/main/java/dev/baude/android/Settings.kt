@@ -131,27 +131,27 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
     Settings.load(ctx)
     val save = { Settings.save(ctx) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Settings", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) })
+        Bar(Wording.Window.settingsTitle, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             BoxedList(listOf<@Composable () -> Unit>(
                 {
                     val names = listOf("system") + Settings.ACCENTS.keys
-                    Choice("Accent Colour", names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
+                    Choice(Wording.SharedSettings.accentColour, names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
                         dot = { if (it == "system") Settings.accentBg(ctx) else Settings.ACCENTS.getValue(it) }) {
                         Settings.accent.value = it.takeIf { n -> n in Settings.ACCENTS }
                         save()
                     }
                 },
                 {
-                    val looks = linkedMapOf("system" to "Follow System", "light" to "Light", "dark" to "Dark")
-                    Choice("Appearance", looks.keys.toList(), Settings.appearance.value, { looks.getValue(it) }) {
+                    val looks = linkedMapOf("system" to Wording.PhoneSettings.followSystem, "light" to Wording.PhoneSettings.light,
+                        "dark" to Wording.PhoneSettings.dark)
+                    Choice(Wording.PhoneSettings.appearance, looks.keys.toList(), Settings.appearance.value, { looks.getValue(it) }) {
                         Settings.appearance.value = it
                         save()
                     }
                 },
                 {
-                    SwitchRow("Download updates on metered networks",
-                        "From the Baude site as they're published; otherwise once Update's tapped",
+                    SwitchRow(Wording.Updates.metered, Wording.Updates.meteredSubtitle,
                         Settings.meteredUpdates.value) {
                         Settings.meteredUpdates.value = it
                         save()
@@ -159,7 +159,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
                     }
                 },
                 {
-                    SwitchRow("Notifications", "When a reply finishes, or asks you something, while you're elsewhere",
+                    SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
                         Settings.notify.value) {
                         Settings.notify.value = it
                         save()
@@ -167,19 +167,19 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
                 },
                 { VersionRow() },
             ), "") { it() }
-            Heading("Size")
+            Heading(Wording.Window.size)
             BoxedList(listOf<@Composable () -> Unit>(
-                { SizeRow("Text Scale", Settings.textScale.value, Settings.SCALE_MIN, Settings.SCALE_MAX) {
+                { SizeRow(Wording.MetaSettings.textScale, Settings.textScale.value, Settings.SCALE_MIN, Settings.SCALE_MAX) {
                     Settings.textScale.value = it
                     save()
                 } },
-                { SizeRow("Global Scale", Settings.globalScale.value, Settings.ZOOM_MIN, Settings.ZOOM_MAX) {
+                { SizeRow(Wording.MetaSettings.globalScale, Settings.globalScale.value, Settings.ZOOM_MIN, Settings.ZOOM_MAX) {
                     Settings.globalScale.value = it
                     save()
                 } },
             ), "") { it() }
             BoxedList(listOf<@Composable () -> Unit>({
-                ActionRow("Send Feedback…", null, onClick = feedback, suffix = {
+                ActionRow(Wording.Fixes.sendFeedback, null, onClick = feedback, suffix = {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim, modifier = Modifier.size(18.dp))
                 })
             }), "") { it() }
@@ -193,7 +193,7 @@ private fun VersionRow() {
     val ctx = LocalContext.current
     val name = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
     val made = remember { ctx.getString(R.string.commit_time).toLongOrNull()?.takeIf { it > 0 } }
-    ActionRow(if (name != null) "Version $name" else "Version unknown", made?.let {
+    ActionRow(if (name != null) Wording.Updates.version(commit = name) else Wording.Updates.versionUnknown, made?.let {
         DateTimeFormatter.ofPattern("d MMMM yyyy, HH:mm").format(Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()))
     })
 }
@@ -247,10 +247,10 @@ private fun SizeRow(title: String, size: Float, low: Float, high: Float, set: (F
         .let { (it * 100).roundToInt() / 100f })
     ActionRow(title, null, suffix = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(Icons.Filled.Remove, "Smaller", enabled = size > low + 0.001f) { step(-1) }
+            IconButton(Icons.Filled.Remove, Wording.PhoneSettings.smaller, enabled = size > low + 0.001f) { step(-1) }
             Text("%.1f".format(size), style = Type.body, color = c.fg, textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(min = 36.dp))
-            IconButton(Icons.Filled.Add, "Larger", enabled = size < high - 0.001f) { step(1) }
+            IconButton(Icons.Filled.Add, Wording.PhoneSettings.larger, enabled = size < high - 0.001f) { step(1) }
         }
     })
 }

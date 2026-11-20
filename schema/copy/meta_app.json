@@ -1,0 +1,7 @@
+{
+  "description": "What Meta says of the app's own things in Baude and Record: its forms and the actions it takes.",
+  "messages": {
+    "its_name": "Its name",
+    "deleted": "Deleted {$what}"
+  }
+}

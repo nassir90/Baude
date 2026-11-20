@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, selfupdate, wire
+from baudelib import claude, mesh, selfupdate, wire, wording
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -89,12 +89,14 @@ STOPPING_SAID_S = 60  # (how long a host's last word as it stopped is said, whil
 
 def stopping_line(name, restart, left, total):
     """A host stopping (or restarting), how far along, as its menu bar item and the heads' banners say it."""
-    verb = "restarting" if restart else "stopping"
-    if left is None:
-        return f"{name} {verb}…"
-    if left > 0:
-        return f"{name} {verb} — {left} of {total} process{'es' if total != 1 else ''} to stop"
-    return f"{name} {verb} — every process stopped" if total else f"{name} {verb}…"
+    if left is not None and left > 0:
+        return wording.say("host_status.restarting_left", host=name, left=left, total=total) if restart else \
+            wording.say("host_status.stopping_left", host=name, left=left, total=total)
+    if left is not None and total:
+        return wording.say("host_status.restarting_all_stopped", host=name) if restart else \
+            wording.say("host_status.stopping_all_stopped", host=name)
+    return wording.say("host_status.restarting", host=name) if restart else \
+        wording.say("host_status.stopping", host=name)
 
 
 class Remote:
@@ -212,7 +214,7 @@ class Remote:
                 self.ch = None
             ch.close()
             if not wire.is_id(info.get("id")):
-                self.error = "it gave no id Baude can use"
+                self.error = wording.say("host_status.no_id")
             return
         self.info, self.seen, self.stopping = info, time.time(), None  # (back: whatever it said as it went, done with)
         ch.sock.settimeout(wire.SILENT_S)
@@ -895,13 +897,15 @@ class RemoteProc(claude.ClaudeProc):
                 self.code = "deleted"
                 break
             elif op == "error":  # (what was sent went nowhere: said, and the turn's over; plain, as the server put it;
-                said = msg.get("error") if msg.get("plain") else f"the server: {wire.said(msg)}"  # gone: a folder's)
+                said = msg.get("error") if msg.get("plain") else \
+                    wording.say("host_status.server_said", why=wire.said(msg))  # gone: a folder's)
                 self.dispatch(lambda e=said, g=msg.get("gone"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": e, **({"gone": g} if g else {})}))
         self.ch.close()
         answering, self.answering = self.answering, {}  # (asked on it, not answered: no answer's coming)
         for done in answering.values():
-            self.dispatch(lambda done=done: done({"op": "error", "error": "the connection to its host dropped"}))
+            dropped = wording.say("host_status.connection_dropped")
+            self.dispatch(lambda done=done: done({"op": "error", "error": dropped}))
         if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
             code = "lost" if self.code is None else self.code
             self.dispatch(lambda: self.on_exit(code))
@@ -917,7 +921,7 @@ class RemoteProc(claude.ClaudeProc):
         self.answering[req] = done
         if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
             self.answering.pop(req, None)
-            self.dispatch(lambda: done({"op": "error", "error": "its host isn't there"}))
+            self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
 
     def close_stdin(self):
         pass  # (nothing to close here: the server's claude goes on)

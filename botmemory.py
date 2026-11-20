@@ -14,7 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
-from baudelib import wire  # noqa: E402
+from baudelib import wire, wording  # noqa: E402
 from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Memory"
@@ -236,17 +236,17 @@ class BotMemory(Gtk.Box):
         place."""
         self.failed = not ok
         gone = getattr(self.remote, "state", "alive") != "alive" or why in UNREACHED
-        said = "Can't connect to the host." if gone else "Couldn't load the memory."
+        said = wording.say("bot_memory.cant_connect") if gone else wording.say("bot_memory.couldnt_load")
         if not ok and self.base is None:
             self.offline.set_visible(False)
-            return self._status(said.rstrip("."), "It's shown once the host is back." if gone else why or "")
-        self.offline.set_label(f"{said} Showing the last saved copy." if not ok else "")
+            return self._status(said.rstrip("."), wording.say("bot_memory.shown_when_back") if gone else why or "")
+        self.offline.set_label(wording.say("bot_memory.last_saved", said=said) if not ok else "")
         self.offline.set_tooltip_text(why if not ok and not gone else None)
         self.offline.set_visible(not ok)
         if self.editor is not None:
             self.editor.set_sensitive(ok)
 
-    def _status(self, title="No memory yet", text="Notes the Bot keeps. You can edit them."):
+    def _status(self, title=wording.say("bot_memory.no_memory"), text=wording.say("bot_memory.empty_text")):
         """The status page in the editor's place: before a Bot's memory is first read, or what went wrong reading it."""
         self.empty.set_title(title)
         self.empty.set_description(text)
@@ -305,7 +305,7 @@ class BotMemory(Gtk.Box):
         if asked != self.asked:
             return
         if reply.get("op") == "error":
-            return self.reached(False, wire.said(reply) or "no reason given")
+            return self.reached(False, wire.said(reply) or wording.say("bot_memory.no_reason"))
         if self.dirty or self.saving is not None or self.sending:
             self.again = True  # (written in since it was asked for: that's saved, then it's read again)
             return
@@ -372,7 +372,7 @@ class BotMemory(Gtk.Box):
         if not self.dirty or self.sid is None or self.remote is None or self.base is None or self.sending:
             return False
         if getattr(self.remote, "state", "alive") != "alive":
-            widgets.toast(self, "Not saved yet: can't connect to the host")
+            widgets.toast(self, wording.say("bot_memory.not_saved"))
             return False  # (still to save: with the next change, or read)
         self.dirty = False
         self._send(self.asked, self.sid, self.remote, self.base, self.written(), self.editor.kept())
@@ -386,7 +386,7 @@ class BotMemory(Gtk.Box):
         if base.get("theirs") is not None:
             text = merge(base["text"], ours, base["theirs"])
             if text is None:
-                widgets.toast(self, "The Bot changed the same lines. Its version is shown as changes to accept or reject.")
+                widgets.toast(self, wording.say("bot_memory.conflict"))
                 text = base["theirs"]
         if asked == self.asked:
             self.sending += 1
@@ -406,7 +406,8 @@ class BotMemory(Gtk.Box):
             return self._send(asked, sid, remote, {**said, "text": base["text"], "theirs": said["text"]}, ours, seen,
                               tries - 1)
         if reply.get("op") == "error":
-            widgets.toast(self, f"Couldn't save: {wire.said(reply) or 'no reason given'}")
+            widgets.toast(self, wording.say("bot_memory.couldnt_save",
+                                            why=wire.said(reply) or wording.say("bot_memory.no_reason")))
             if mine:
                 self.dirty = True  # (still to save: with the next change, or read)
             self.after.pop(asked, None)

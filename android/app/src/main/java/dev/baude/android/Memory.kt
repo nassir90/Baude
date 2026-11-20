@@ -127,7 +127,7 @@ class MemoryState(val hostId: String, val sid: String) {
 
     /** Read from its host: as it is there, or (changed here meanwhile) the Bot's changes since merged into yours. */
     fun load() = Mesh.ask(hostId, Msg.Memory(session = sid).json()) { r ->
-        if (r.optString("op") != Op.MEMORY) { failed = Msg.Error.from(r).said.orEmpty().ifBlank { "no reason given" }; return@ask }
+        if (r.optString("op") != Op.MEMORY) { failed = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotMemory.noReason }; return@ask }
         val got = Msg.MemoryReply.from(r)
         if (edits == 0 || base == null) return@ask took(got)
         val theirs = got.text.orEmpty()
@@ -187,15 +187,15 @@ class MemoryState(val hostId: String, val sid: String) {
                 no.text != null && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
                     val theirs = no.text
                     val merged = merge3(base ?: theirs, text, theirs)
-                    if (merged == null) said("The Bot changed the same lines. Its version is shown as changes to accept or reject.")
+                    if (merged == null) said(Wording.BotMemory.conflict)
                     text = merged ?: theirs
                     base = theirs
                     mtime = no.mtime?.toLong()
                     save(tries - 1, said)
                 }
                 else -> {
-                    failed = no.said.orEmpty().ifBlank { "no reason given" }
-                    said(if (failed in UNREACHED) "Not saved yet: can't connect to the host" else "Couldn't save: $failed")
+                    failed = no.said.orEmpty().ifBlank { Wording.BotMemory.noReason }
+                    said(if (failed in UNREACHED) Wording.BotMemory.notSaved else Wording.BotMemory.couldntSave(why = failed.orEmpty()))
                     if (!retrying) { // (tried again, for as long as it isn't saved: one try waiting at a time)
                         retrying = true
                         val again = wait
@@ -237,25 +237,27 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
         m.save(said = say)
     }
     val failed = m.failed
-    val offline = failed?.let { if (it in UNREACHED) "Can't connect to the host." else "Couldn't load the memory." }
+    val offline = failed?.let { if (it in UNREACHED) Wording.BotMemory.cantConnect else Wording.BotMemory.couldntLoad }
     if (m.base == null) {
         when {
-            failed == null -> StatusPage(Icons.Filled.EditNote, "No memory yet", "Notes the Bot keeps. You can edit them.")
-            failed in UNREACHED -> StatusPage(Icons.Filled.EditNote, "Can't connect to the host", "It's shown once the host is back.")
-            else -> StatusPage(Icons.Filled.EditNote, "Couldn't load the memory", failed)
+            failed == null -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.noMemory, Wording.BotMemory.emptyText)
+            failed in UNREACHED -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.cantConnect.removeSuffix("."),
+                Wording.BotMemory.shownWhenBack)
+            else -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.couldntLoad.removeSuffix("."), failed)
         }
         return
     }
     val a = m.seen.split("\n")
     val pending = remember(m.seen, m.text) { m.pending }
     Column(Modifier.fillMaxSize()) {
-        if (offline != null) GreyBanner("$offline " + if (m.edits > 0) "Your changes are saved once it's back." else "Showing the last saved copy.")
+        if (offline != null) GreyBanner(if (m.edits > 0) "$offline Your changes are saved once it's back."
+            else Wording.BotMemory.lastSaved(said = offline))
         Box(Modifier.fillMaxSize().inside(c)) {
             if (pending.isEmpty()) {
                 BasicTextField(m.seen, { m.edit(it) }, textStyle = Type.body.copy(color = c.fg),
                     cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                         .padding(horizontal = Gap.chatH, vertical = Gap.chatV))
-                if (m.seen.isEmpty()) Text("Notes the Bot keeps. You can edit them.", style = Type.body, color = c.dim,
+                if (m.seen.isEmpty()) Text(Wording.BotMemory.emptyText, style = Type.body, color = c.dim,
                     modifier = Modifier.padding(horizontal = Gap.chatH, vertical = Gap.chatV))
                 return@Box
             }

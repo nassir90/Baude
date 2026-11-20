@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from baudelib import models as modelslib, wire
+from baudelib import models as modelslib, wire, wording
 from baudelib.selfupdate import settings_path
 
 OLLAMA_PORT = 11434
@@ -364,10 +364,10 @@ def unreachable(url, e):
     """Why a server didn't answer, said after its name: "isn't running at http://…"."""
     text = str(e)
     if "refused" in text.lower():
-        return f"isn't running at {url}"
+        return wording.say("model_providers.not_running", url=url)
     if "timed out" in text.lower():
-        return f"isn't answering at {url}"
-    return f"at {url} said: {text}"
+        return wording.say("model_providers.not_answering", url=url)
+    return wording.say("model_providers.said", url=url, why=text)
 
 
 # ---- Ollama
@@ -479,7 +479,7 @@ def endpoint(ep, timeout=TIMEOUT):
         out["error"] = unreachable(ep["url"], e)
         return out
     if not isinstance(listed, dict) or not isinstance(listed.get("data"), list):
-        out["error"] = f"at {ep['url']} didn't list models as OpenAI's API does"
+        out["error"] = wording.say("model_providers.not_openai", url=ep["url"])
         return out
     props = None
     try:  # (llama-server says its window at /props, beside /v1)
@@ -509,7 +509,7 @@ def look_here():
     if sys.platform == "darwin":
         out.append({"id": "apple", "name": "Apple", "models": [modelslib.APPLE_MODEL | {"provider": "apple",
                                                                                          "providerName": "Apple"}],
-                    "error": None if modelslib.apple_exe() else "apple-claude isn't built"})
+                    "error": None if modelslib.apple_exe() else wording.say("model_providers.apple_not_built")})
     missing = modelslib.mlx_missing()  # (its models listed even so, with what they need: they're not to pick till then)
     mlx = [m | {"provider": "mlx", "providerName": "MLX"} for m in modelslib.downloaded_models()]
     out.append({"id": "mlx", "name": "MLX", "models": mlx, "error": "; ".join(missing) or None, "needs": missing})
@@ -788,11 +788,12 @@ def resolve(value, timeout=TIMEOUT):
             shown = fetch(url + "/api/show", {"model": name}, timeout=timeout) or {}
         except (OSError, ValueError) as e:
             text = str(e)
-            out["error"] = f"Ollama doesn't have {name}" if "not found" in text else f"Ollama {unreachable(url, e)}"
+            out["error"] = wording.say("model_providers.ollama_lacks", name=name) if "not found" in text else \
+                wording.say("model_providers.ollama_unreachable", why=unreachable(url, e))
             return out
         entry = ollama_entry(name, shown, ollama_loaded(url, timeout).get(name))
         if entry is None:
-            out["error"] = f"{name} only embeds: there's nothing to talk to"
+            out["error"] = wording.say("model_providers.only_embeds", name=name)
             return out
         return out | {k: entry[k] for k in ("input", "tools", "window")} | {"thinking": bool(entry.get("thinking"))}
     if pid and pid.startswith("openai/"):
@@ -801,7 +802,7 @@ def resolve(value, timeout=TIMEOUT):
         if ep is None:
             return {"value": value, "repo": mid, "displayName": mid, "input": ["text"], "thinking": False,
                     "tools": True, "window": DEFAULT_WINDOW, "provider": pid, "kind": "openai", "url": "",
-                    "baseUrl": "", "apiKey": "none", "error": f"there's no endpoint {eid} in settings.json"}
+                    "baseUrl": "", "apiKey": "none", "error": wording.say("model_providers.no_endpoint", endpoint=eid)}
         if "models" in ep:  # (another host's, in the mesh: what it said of the model, its server asked there)
             listed, error = next((m for m in ep["models"] if m["id"] == mid), {}), None
         else:

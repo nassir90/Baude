@@ -668,7 +668,8 @@ object PhoneHost {
             }
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
         }
-        val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns, durationMs = ms).json()
+        val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns,
+            durationMs = ms).json()
         for (h in subscribed) h.send(end)
         changed()
     }

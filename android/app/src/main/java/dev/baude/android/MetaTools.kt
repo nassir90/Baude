@@ -360,7 +360,8 @@ object MetaTools {
             "read_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
                 val size = s.optLong("size", 0)
-                Mesh.ask(h, Msg.Transcript(session = s.optString("id"), offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
+                Mesh.ask(h, Msg.Transcript(session = s.optString("id"),
+                    offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
                     if (r.optString("op") != Op.TRANSCRIPT) return@ask no(r.optString("error"))
                     val data = r.optString("data", "")
                     val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)

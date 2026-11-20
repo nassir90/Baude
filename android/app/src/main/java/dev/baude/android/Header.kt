@@ -301,7 +301,8 @@ private fun pickModel(hostId: String, sid: String, s: JSONObject, v: String, cho
                       asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit) {
     val was = s.str("model") ?: defaultModel(hostId)
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
-        val msg = Msg.Start(prompt = "", cwd = s.optString("cwd").ifBlank { "~" }, model = v, mode = if (program(v) == "codex") "default" else "auto", draft = true).json()
+        val msg = Msg.Start(prompt = "", cwd = s.optString("cwd").ifBlank { "~" }, model = v,
+            mode = if (program(v) == "codex") "default" else "auto", draft = true).json()
         if (!s.isNull("group")) msg.put("group", s.optString("group"))
         Mesh.ask(hostId, msg) { r ->
             val id = r.optJSONObject("session")?.optString("id")

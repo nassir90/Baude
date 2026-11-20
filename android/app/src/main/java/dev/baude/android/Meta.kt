@@ -270,7 +270,8 @@ object Meta {
                     if (call.optString("method") == "tools/call" && what != null) running[key] = what
                     MetaTools.line(msg.optString("line")) { answer ->
                         if (answer == null) return@line
-                        val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(Msg.Mcp(conn = n, line = answer).json()) == true
+                        val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(Msg.Mcp(conn = n,
+                            line = answer).json()) == true
                         val was = running.remove(key)
                         if (!sent && was != null) ranLate(was, answer) // (its host gone meanwhile: it failed it there)
                     }

@@ -59,7 +59,8 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
         val h = at ?: return
         busy = true
         error = null
-        val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode, group = group.trim()).json()
+        val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode,
+            group = group.trim()).json()
         model?.let { msg.put("model", it) }
         effort?.let { msg.put("effort", it) }
         if (prompt.isBlank()) msg.put("draft", true)

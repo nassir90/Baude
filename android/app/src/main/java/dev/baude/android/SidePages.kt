@@ -128,8 +128,8 @@ fun SideQuestionsPage(chat: Chat) {
         val q = SideQuestion(text)
         chat.btw.add(0, q)
         val model = s?.str("model")
-        val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
-        model?.let { msg.put("model", it) }
+        val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, model = model,
+            mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
         Mesh.ask(hostId, msg) { r ->
             val id = r.optJSONObject("session")?.optString("id")
             if (r.optString("op") != Op.STARTED || id == null) {

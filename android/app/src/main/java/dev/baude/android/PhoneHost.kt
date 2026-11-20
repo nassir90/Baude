@@ -457,10 +457,12 @@ object PhoneHost {
             "user" -> {
                 var message = msg.optJSONObject("message") ?: return
                 // (a uuid each, as a host gives one: who it's from kept by it, if it's not from its user: Senders)
-                val uuid = msg.optString("uuid").takeIf(::isId) ?: UUID.randomUUID().toString()
+                val given = msg.optString("uuid").takeIf(::isId)
+                val uuid = given ?: UUID.randomUUID().toString()
                 if (sender != null) message = JSONObject(message.toString()).put("content", saidBy(sender, message.opt("content")))
                 synchronized(lock) {
                     if (s.deleted) return
+                    if (given != null && repeated(s, given)) return
                     if (sender != null) stamp(s, uuid, sender)
                     if (s.busy) {
                         s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
@@ -745,6 +747,17 @@ object PhoneHost {
         tell(s, JSONObject().put("type", "user").put("isSynthetic", true).put("session_id", s.id)
             .put("message", JSONObject().put("role", "user").put("content", summary)))
         changed()
+    }
+
+    /** Whether a message by uuid was taken already (a head sending it again, its connection gone as it first sent
+     * it), as a host has it: if not, noted, the last TAKEN kept in its meta. */
+    private fun repeated(s: PhoneSession, uuid: String): Boolean {
+        val taken = s.meta.optJSONArray("taken") ?: JSONArray().also { s.meta.put("taken", it) }
+        if ((0 until taken.length()).any { taken.optString(it) == uuid }) return true
+        taken.put(uuid)
+        while (taken.length() > TAKEN) taken.remove(0)
+        save(s)
+        return false
     }
 
     private fun save(s: PhoneSession) {
@@ -1042,6 +1055,7 @@ object PhoneHost {
 
     private const val NL: Byte = 10 // (a newline)
     private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
+    private const val TAKEN = 64 // (server.TAKEN)
     private const val CATALOGUE_LIMIT = 5000
     private const val DIR_LIMIT = 2000 // (hostfiles.DIR_LIMIT)
     private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)

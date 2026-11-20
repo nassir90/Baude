@@ -239,7 +239,8 @@ private fun limit(key: String): Int = when {
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by date and pick
  * groups. */
 @Composable
-fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {}) {
+fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
+         note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -253,6 +254,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
             Menu(listOf(Wording.Fixes.sendFeedback to feedback))
         })
+        note()
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = hosts)
         for (conn in down) GreyBanner(conn.why?.let { Wording.Hosts.downBecause(host = Mesh.label(conn.id), why = it) }
@@ -272,12 +274,13 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
             }
         }
         val all = sections(query)
+        val update = Update.state.value != ""
         if (all.isEmpty()) {
             Text(if (query.isNotBlank()) "No sessions match" else "No sessions yet", style = Type.body, color = c.dim,
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 24.dp))
-            return@Column
-        }
-        LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = Gap.inside)) {
+            Spacer(Modifier.weight(1f))
+        } else LazyColumn(Modifier.fillMaxWidth().weight(1f).then(if (update) Modifier else Modifier.navigationBarsPadding())
+            .padding(horizontal = Gap.inside)) {
             for (sec in all) {
                 val folded = query.isBlank() && sec.key in HomePrefs.collapsed
                 if (sec.key != "bots") item(key = "h:" + sec.key) {
@@ -303,8 +306,25 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
                 }
             }
         }
+        if (update) UpdateBar()
     }
     starting?.let { (h, f) -> NewSession(h, f, done = { starting = null }, opened = open) }
+}
+
+/** At the foot, under a rule from the chats (Baude's UpdateBar): Update, while a newer build's ready or waiting to be
+ * downloaded (Update.kt), how much of it's come while it's downloading; tapped, installed. */
+@Composable
+private fun UpdateBar() {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+        HorizontalDivider(color = c.rule)
+        if (Update.state.value == "downloading")
+            androidx.compose.material3.LinearProgressIndicator({ Update.progress.value }, Modifier.fillMaxWidth(),
+                color = c.accentBg, trackColor = c.rule)
+        Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
+    }
 }
 
 /** A section's header (Baude's header_row): its name (.sidebar-folder), the arrow to fold it, + for a new session

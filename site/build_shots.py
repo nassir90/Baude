@@ -4,10 +4,13 @@
 Takes the screenshot matrix (../screenshots/, made by tests/screenshots.py or tests/screenshots.sh),
 converts the scenes listed below to WebP in both themes (full size, and a smaller one for the grid),
 makes the square card for mpts.ie/apps, writes index.html from page.html with the grid filled in, and puts the Android
-app beside it (baude-android.apk, from android/: npm run build:apk builds it).
+app beside it (baude-android.apk, from android/: npm run build:apk builds it), with what the app looks at to update
+itself (baude-android.json: the APK's versionCode and versionName, its size and sha256).
 Needs Pillow.
 """
+import hashlib
 import html
+import json
 import os
 import shutil
 import sys
@@ -55,6 +58,23 @@ def webp(src, dest, width=None):
     return im.size
 
 
+def write_feed(apk):
+    """baude-android.json beside apk: the build's versionCode and versionName (from the output-metadata.json Gradle
+    writes beside it), the APK's name, size and sha256. The app (android/.../Update.kt) downloads a higher versionCode
+    and installs it only if it's the size and sha256 said here."""
+    with open(os.path.join(os.path.dirname(APK), "output-metadata.json")) as f:
+        built = json.load(f)["elements"][0]
+    sha = hashlib.sha256()
+    with open(apk, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            sha.update(chunk)
+    feed = {"versionCode": built["versionCode"], "versionName": built["versionName"],
+            "apk": os.path.basename(apk), "size": os.path.getsize(apk), "sha256": sha.hexdigest()}
+    with open(os.path.join(os.path.dirname(apk), "baude-android.json"), "w") as f:
+        json.dump(feed, f, indent=1)
+        f.write("\n")
+
+
 def main():
     missing = [f"{name}-{t}.png" for name, _ in SHOTS for t in THEMES
                if not os.path.exists(os.path.join(MATRIX, f"{name}-{t}.png"))]
@@ -84,6 +104,7 @@ def main():
     if not os.path.exists(APK):
         sys.exit(f"missing {os.path.normpath(APK)}: run npm run build:apk first")
     shutil.copyfile(APK, os.path.join(OUT, "baude-android.apk"))
+    write_feed(os.path.join(OUT, "baude-android.apk"))
     total = sum(os.path.getsize(os.path.join(shots, n)) for n in os.listdir(shots))
     print(f"{len(SHOTS)} screenshots in two themes ({total / 1e6:.1f} MB) -> {os.path.relpath(OUT, HERE)}")
 

@@ -4,6 +4,16 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+/** git in the checkout the app's built from: what it printed, or null (not a checkout, no git). */
+fun git(vararg args: String): String? = try {
+    providers.exec {
+        commandLine("git", "-C", rootDir.path, *args)
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().ifEmpty { null }
+} catch (e: Exception) {
+    null
+}
+
 android {
     namespace = "dev.baude.android"
     compileSdk = 35
@@ -12,8 +22,10 @@ android {
         applicationId = "dev.baude.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // (the build's commit, as Baude's Version is: versionCode how many commits it has, so each build of main's
+        // installs over the one before it (Update.kt), and versionName its short hash)
+        versionCode = git("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 1
+        versionName = git("rev-parse", "--short", "HEAD") ?: "0.1.0"
     }
 
     buildTypes {

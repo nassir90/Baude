@@ -133,6 +133,11 @@ open class Connection(
     @Volatile private var session: Session? = null
     @Volatile private var end: () -> Unit = {} // (this connection let go of: its ssh, or a member's channel on another's)
     private val calls = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
+
+    companion object {
+        const val NOT_CONNECTED = "not connected"  // (a request's error: never written)
+        const val WENT = "the connection went"     // (a request's error: written, and maybe had)
+    }
     private val nextReq = AtomicInteger(100)
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
@@ -372,14 +377,14 @@ open class Connection(
         calls[req] = then
         if (!send(msg)) {
             calls.remove(req)
-            then(Msg.Error(error = "not connected").json())
+            then(Msg.Error(error = NOT_CONNECTED).json())
         }
     }
 
     private fun failAll() {
         val waiting = calls.values.toList()
         calls.clear()
-        waiting.forEach { it(Msg.Error(error = "the connection went").json()) }
+        waiting.forEach { it(Msg.Error(error = WENT).json()) }
     }
 
     private fun plain(e: Exception): String {

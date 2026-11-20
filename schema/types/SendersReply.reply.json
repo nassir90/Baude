@@ -18,7 +18,7 @@
     "senders": {
       "type": "object",
       "additionalProperties": {
-        "$ref": "Sender.json"
+        "$ref": "StoredSender.json"
       },
       "description": "By message uuid."
     },

@@ -271,16 +271,21 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
 }
 
 /** Who a message is from, as its bubble's head says it (wire.sender_name): "Ada, a Bot on lab-mac". */
-fun senderName(s: Msg.Sender): String {
-    val name = s.name.orEmpty()
-    val who = when (s.kind.orEmpty()) {
+fun senderName(s: Msg.Sender): String = senderName(s.kind, s.name, s.hostName)
+
+/** The same of a sender as its host's sender store keeps it. */
+fun senderName(s: Msg.StoredSender): String = senderName(s.kind, s.name, s.hostName)
+
+private fun senderName(kind: String?, name0: String?, hostName: String?): String {
+    val name = name0.orEmpty()
+    val who = when (kind.orEmpty()) {
         "bot" -> "${name.ifBlank { "a Bot" }}, a Bot"
         "chat" -> if (name.isBlank()) "a chat" else "“$name”"
         "subagent" -> if (name.isBlank()) "a subagent" else "subagent “$name”"
         else -> name.ifBlank { "a host" }
     }
-    val where = s.hostName.orEmpty()
-    return who + if (where.isNotBlank() && s.kind.orEmpty() != "host") " on $where" else ""
+    val where = hostName.orEmpty()
+    return who + if (where.isNotBlank() && kind.orEmpty() != "host") " on $where" else ""
 }
 
 /** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender
@@ -291,7 +296,7 @@ private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</bau
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
  * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
 @Composable
-fun Said(line: Line, from: Msg.Sender? = null) {
+fun Said(line: Line, from: Msg.StoredSender? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -300,7 +305,7 @@ fun Said(line: Line, from: Msg.Sender? = null) {
                 Text("from " + senderName(from), style = Type.caption, color = c.dim)
                 SelectionContainer {
                     val shown = from.shown
-                    if (shown != null) Prose(SAID_BY.replace(shown, "").trim())
+                    if (shown != null) Prose(SAID_BY.replace(shown, "").trim(), codeBg = c.inside)
                     else Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg)
                 }
             }
@@ -322,7 +327,7 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             Text("from " + (h.sender?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
-            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim)
+            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
         }
     }
 }
@@ -348,18 +353,18 @@ private fun SaidLine(line: Line) {
     }
 }
 
-/** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks. */
+/** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks (codeBg: theirs and inline code's fill,
+ * the view's on a raised bubble, where the raised fill wouldn't show). */
 @Composable
-fun Prose(text: String, color: Color = LocalBaude.current.fg) {
-    val c = LocalBaude.current
+fun Prose(text: String, color: Color = LocalBaude.current.fg, codeBg: Color = LocalBaude.current.raised) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         text.split("```").forEachIndexed { i, part ->
             if (i % 2 == 1) {
                 val code = part.substringAfter("\n", part).trimEnd()
                 Text(code, style = Type.mono, color = color, modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(horizontal = 8.dp, vertical = 6.dp))
+                    .clip(RoundedCornerShape(Gap.codeRadius)).background(codeBg).padding(horizontal = 8.dp, vertical = 6.dp))
             } else if (part.isNotBlank()) {
-                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block, color)
+                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block, color, codeBg)
             }
         }
     }
@@ -368,8 +373,7 @@ fun Prose(text: String, color: Color = LocalBaude.current.fg) {
 /** A paragraph of Markdown as Baude's chat draws it: headings (.md-h1 1.44em, .md-h2 1.2em), bullets, **bold**,
  * *italic* and `code` (monospace, on the raised fill). */
 @Composable
-private fun Markdown(block: String, color: Color) {
-    val c = LocalBaude.current
+private fun Markdown(block: String, color: Color, codeBg: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (raw in block.lines()) {
             val h = Regex("^(#{1,6})\\s+(.*)$").find(raw)
@@ -382,19 +386,19 @@ private fun Markdown(block: String, color: Color) {
                     bullet.groupValues[2]) to Type.body
                 else -> raw to Type.body
             }
-            Text(inline(text, c), style = style, color = color)
+            Text(inline(text, codeBg), style = style, color = color)
         }
     }
 }
 
-private fun inline(text: String, c: BaudeColors) = androidx.compose.ui.text.buildAnnotatedString {
+private fun inline(text: String, codeBg: Color) = androidx.compose.ui.text.buildAnnotatedString {
     val token = Regex("""`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_""")
     var at = 0
     for (m in token.findAll(text)) {
         append(text.substring(at, m.range.first))
         val (v, style) = when {
             m.groups[1] != null -> m.groupValues[1] to androidx.compose.ui.text.SpanStyle(
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, background = c.raised)
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, background = codeBg)
             m.groups[2] != null -> m.groupValues[2] to androidx.compose.ui.text.SpanStyle(
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
             m.groups[3] != null -> m.groupValues[3] to androidx.compose.ui.text.SpanStyle(

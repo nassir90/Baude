@@ -1353,7 +1353,8 @@ class Server:
                     return reply("error", error="no such message held for it")
                 if msg.get("send"):
                     self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
-                                    h.get("sender"), h.get("shown"))
+                                    h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
+                                    meshtools.shown_of_told(h.get("text") or ""))
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)
                 self.changed()

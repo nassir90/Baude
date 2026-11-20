@@ -15337,8 +15337,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             return
         h, sid = turn.held, self.session_id
         sender = baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}
-        if isinstance(h.get("shown"), str):  # (drawn as its host's sender store will have it: what's shown of it)
-            sender = {**sender, "shown": h["shown"]}
+        from baudelib.meshtools import shown_of_told
+        shown = h["shown"] if isinstance(h.get("shown"), str) else shown_of_told(h["text"])
+        if shown is not None:  # (drawn as its host's sender store will have it: what's shown of it)
+            sender = {**sender, "shown": shown}
         sent = self.sender_turn(sender, h["text"], (), None)
         turn.sending = sent
         turn.set_visible(False)
@@ -18136,13 +18138,16 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         is found as 8.6 m), spaces and line ends one space, case folded. What's looked for goes through it too."""
         return " ".join(cls._FIND_MARKUP.sub("", text).split()).casefold()
 
-    @classmethod
-    def item_words(cls, item):
-        """What an item of the transcript shows as text once drawn, as find_plain has it: a message's words, a reply's,
-        and each call's line on its card (summarize_tool: what ChatFind finds there). Not what's folded: a card's input
-        and output, thinking, a summary."""
+    def item_words(self, item):
+        """What an item of the transcript shows as text once drawn, as find_plain has it: a message's words (what its
+        sender store says is shown of it, if it says: sender_turn), a reply's, and each call's line on its card
+        (summarize_tool: what ChatFind finds there). Not what's folded: a card's input and output, thinking, a
+        summary."""
         kind, content = item[0], item[1] if len(item) > 1 else None
-        if kind in ("user", "start_prompt"):
+        shown = (self.chat_senders().get(item[4]) or {}).get("shown") if kind == "user" and len(item) > 4 else None
+        if isinstance(shown, str):
+            said = [shown]
+        elif kind in ("user", "start_prompt"):
             said = [clean_prompt(t) for t in _prompt_texts(content)]
         elif kind == "assistant":
             said = [content] if isinstance(content, str) else [
@@ -18150,7 +18155,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 for c in content or () if isinstance(c, dict) and c.get("type") in ("text", "tool_use", "server_tool_use")]
         else:
             said = []
-        return cls.find_plain("\n".join(said))
+        return self.find_plain("\n".join(said))
 
     FIND_SLICE = 0.008  # s of looking through the transcript at a time, between frames (find_beyond)
 

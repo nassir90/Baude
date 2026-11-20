@@ -489,22 +489,32 @@ def told(wait, got):
 
 def shown(got):
     """What a person's shown of a wait cut short as told says it (a held answer's, beside what its agent's sent): the
-    answer, or what became of it in a line, as Baude's card for the call says it."""
+    answer (an error result's said so), or what became of it in a line, as Baude's card for the call says it."""
     if isinstance(got.get("answer"), str) and got["answer"].strip():
-        return got["answer"]
+        return ("Error: " if got.get("error") is True else "") + got["answer"]
     if got.get("interrupted"):
         return "Interrupted: its host restarted as it worked."
     if got.get("expired"):
         return "The wait ran out."
     if got.get("still_working"):
-        return "Still working."
-    if got.get("exited") is not None:
-        return f"Its claude exited ({got['exited']})."
-    if got.get("lost"):
-        return "Its host went before it answered" + (f": {got['error']}" if isinstance(got.get("error"), str) else ".")
-    if isinstance(got.get("error"), str) and got["error"].strip():
+        return "It was still working when the wait ran out."
+    if "exited" in got:
+        return "Its claude exited" + (f" ({got['exited']})." if got["exited"] is not None else ".")
+    if isinstance(got.get("error"), str) and got["error"].strip():  # (a lost one's too: why)
         return got["error"]
+    if got.get("lost"):
+        return "Its host went before it answered."
     return "It answered with nothing."
+
+
+def shown_of_told(text):
+    """shown for what told said (a held answer kept before heads were shown anything else: its result, after the
+    note), or None if it isn't that."""
+    try:
+        got = json.loads(text.split("\n\n", 1)[1])
+    except (IndexError, ValueError):
+        return None
+    return shown(got) if isinstance(got, dict) else None
 
 
 def cut(parts):

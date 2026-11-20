@@ -104,7 +104,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                             Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
-                        IconButton(Icons.Filled.Delete, "Delete") { deleting = s }
+                        IconButton(Icons.Filled.Delete, "Move to Trash…") { deleting = s }
                     }
                 }
             }
@@ -158,9 +158,9 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     }
     deleting?.let { s ->
         val name = s.bot?.name?.ifBlank { null } ?: "this agent"
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Move $name to the Trash?") },
-            text = { Text("Its chat, its memory and the files in its folder go to this phone's trash, under Trash here, " +
-                "where you can put it back.") },
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Move “$name” to the trash?") },
+            text = { Text("Its transcript, its memory and the files in its folder will be moved to this phone's trash, " +
+                "where you can restore it.") },
             confirmButton = {
                 Button("Move to Trash", destructive = true) {
                     Mesh.conn("phone")?.request(Msg.Delete(session = s.id.orEmpty()).json()) {}

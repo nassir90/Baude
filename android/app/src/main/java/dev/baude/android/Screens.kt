@@ -143,7 +143,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 }
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                if (attach) IconButton(Icons.Filled.Add, "Attach files") { pick.launch(arrayOf("*/*")) }
+                if (attach) IconButton(Icons.Filled.Add, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
                     if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
                     BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
@@ -322,7 +322,8 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         IconButton(Icons.Filled.Close, "Delete this held message") { Mesh.held(chat, h.id.orEmpty(), false) }
-        IconButton(Icons.Filled.ArrowUpward, if (working) "It can be sent once this turn's over" else "Send it to the agent",
+        IconButton(Icons.Filled.ArrowUpward, if (working) "It can be sent once this turn's over"
+            else "Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it",
             enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
@@ -505,7 +506,7 @@ fun HostsScreen(back: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
             end = {
-                IconButton(Icons.Filled.Add, "Add Host") { adding = true }
+                IconButton(Icons.Filled.Add, "Add Host…") { adding = true }
                 if (Mesh.key.value != null) Menu(listOf("New Key…" to { renewing = true }))
             })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
@@ -544,11 +545,11 @@ fun HostsScreen(back: () -> Unit) {
                 val conn = Mesh.conn(h.id)
                 val (state, colour) = when (conn?.state) {
                     "up" -> "Connected" to c.success
-                    "connecting" -> "Connecting…" to c.dim
+                    "connecting" -> "Looking for ${h.label} on the network…" to c.dim
                     "key" -> (if (conn.shown?.changed == true) "Its key changed, so it isn't connected: tap to see it"
                               else "Its key isn't trusted yet: tap to check it") to
                         (if (conn.shown?.changed == true) c.destructive else c.warning)
-                    "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
+                    "down" -> "Can't connect to ${h.label} at the moment${conn.why?.let { ": $it" }.orEmpty()}" to c.destructive
                     else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
                 }
                 Row(
@@ -603,8 +604,8 @@ private fun Members() {
                 val (state, colour) = when {
                     conn?.state == "up" -> "Connected" to c.success
                     conn?.listed == false -> "Not in reach now" to c.dim
-                    conn?.state == "down" -> "Can't connect: ${conn.why ?: "no answer"}" to c.destructive
-                    else -> "Connecting…" to c.dim
+                    conn?.state == "down" -> "Can't connect to ${m.name.orEmpty().ifBlank { m.host.orEmpty() }} at the moment${conn.why?.let { ": $it" }.orEmpty()}" to c.destructive
+                    else -> "Looking for ${m.name.orEmpty().ifBlank { m.host.orEmpty() }} on the network…" to c.dim
                 }
                 if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 12.dp).heightIn(min = 1.dp).background(c.rule))
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -683,12 +684,12 @@ fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.
     val host = Host.parse(dest, name, command)
     AlertDialog(
         onDismissRequest = done,
-        title = { Text("Add Host") },
+        title = { Text("Add a host") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Field(dest, { dest = it }, "user@host (or user@host:port)")
                 Field(name, { name = it }, "Name (optional)")
-                Field(command, { command = it }, "Its Baude, on its PATH")
+                Field(command, { command = it }, "baude_headless.py, on its PATH")
                 Text("Over Tailscale, use the host's Tailscale name or address.", style = Type.caption, color = c.dim)
             }
         },

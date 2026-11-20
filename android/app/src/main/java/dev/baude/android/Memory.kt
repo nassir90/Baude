@@ -127,7 +127,7 @@ class MemoryState(val hostId: String, val sid: String) {
 
     /** Read from its host: as it is there, or (changed here meanwhile) the Bot's changes since merged into yours. */
     fun load() = Mesh.ask(hostId, Msg.Memory(session = sid).json()) { r ->
-        if (r.optString("op") != Op.MEMORY) { failed = Msg.Error.from(r).said.orEmpty(); return@ask }
+        if (r.optString("op") != Op.MEMORY) { failed = Msg.Error.from(r).said.orEmpty().ifBlank { "no reason given" }; return@ask }
         val got = Msg.MemoryReply.from(r)
         if (edits == 0 || base == null) return@ask took(got)
         val theirs = got.text.orEmpty()
@@ -194,7 +194,7 @@ class MemoryState(val hostId: String, val sid: String) {
                     save(tries - 1, said)
                 }
                 else -> {
-                    failed = no.said.orEmpty().ifBlank { "it said no" }
+                    failed = no.said.orEmpty().ifBlank { "no reason given" }
                     said(if (failed in UNREACHED) "Not saved yet: can't connect to the host" else "Couldn't save: $failed")
                     if (!retrying) { // (tried again, for as long as it isn't saved: one try waiting at a time)
                         retrying = true

@@ -495,7 +495,7 @@ object Mesh {
             c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
                 if (r.optString("op") == Op.ERROR) main.post {
                     mine.remove(ask.tool)
-                    chat.said.value = "Couldn't always allow ${ask.tool}: " + Msg.Error.from(r).said.orEmpty()
+                    chat.said.value = "${toolDisplay(ask.tool).first} isn't always allowed: " + Msg.Error.from(r).said.orEmpty()
                 }
             }
         }
@@ -722,7 +722,7 @@ object Mesh {
         val c = conns[chat.hostId]
         if (c == null) {
             chat.busy.value = false
-            chat.said.value = "Can't connect to the host."
+            chat.said.value = "It can't be sent while this chat's host isn't there"
             return
         }
         kotlin.concurrent.thread(name = "send", isDaemon = true) { build(chat, c, text, files) }
@@ -740,7 +740,8 @@ object Mesh {
             main.post {
                 chat.holding.remove(id)
                 if (r.optString("op") == Op.ERROR)
-                    chat.said.value = (if (send) "Not sent: " else "Not deleted: ") + Msg.Error.from(r).said.orEmpty()
+                    chat.said.value = (if (send) "Not sent: " else "Not deleted: ") +
+                        Msg.Error.from(r).said.orEmpty().ifBlank { "its host said no" }
                 else read(chat)
             }
         }
@@ -940,7 +941,7 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
         if (type != "user" && type != "assistant") return
         if (o.optBoolean("isMeta") || (o.optBoolean("isSidechain") && !sidechain)) return
         if (o.optBoolean("isCompactSummary")) {
-            out.add(Line("note", "The conversation was compacted", uuid))
+            out.add(Line("note", "Conversation compacted", uuid))
             return
         }
         val msg = o.optJSONObject("message") ?: return
@@ -960,7 +961,7 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                                 out.add(Line("note", "A background task ended", uuid))
                                 out.add(Line("task", taskNote(t).toString(), uuid))
                             }
-                            t.startsWith(STOPPED) -> out.add(Line("note", "Stopped", uuid))
+                            t.startsWith(STOPPED) -> out.add(Line("note", "interrupted", uuid))
                             t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
                             else -> out.add(Line("you", t, uuid))

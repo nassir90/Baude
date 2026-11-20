@@ -2216,7 +2216,8 @@ class QueuedTurn(Gtk.Box):
 class SenderTurn(UserTurn):
     """A message to the chat from another than you, as its host's sender store says (a Bot, another chat, a subagent's
     answer held for it): where yours are, grey as a queued one is, with who it's from at its top (the window's
-    sender_bubble), and reverted as yours are (uuid: the message's, once it's in the chat's transcript)."""
+    sender_bubble), and reverted as yours are, but its words aren't put in your box: what's there is sent after it, or
+    nothing (uuid: the message's, once it's in the chat's transcript)."""
 
 
 class HeldTurn(Gtk.Box):

@@ -15173,7 +15173,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                                                                   typed.startswith("/cd ")) and self.remake_tree():
             return  # (its worktree being made again: sent once it is, from the box)
         if self.reverting is not None and not (typed in ("/clear", "/new", "/cd") or typed.startswith("/cd ")):
-            if (typed or self.attachments) and not self.revert_asked():
+            if (typed or self.attachments or isinstance(self.reverting["turn"], SenderTurn)) and \
+                    not self.revert_asked():  # (one of another's: made with nothing in the box, nothing sent after)
                 self.commit_revert()  # (sent: the revert made, then this sent, reverted)
             return
         if self.busy:
@@ -15675,8 +15676,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def sender_turn(self, sender, text, atts, said):
         """A message from sender, its host's sender store says (uuid said), as the chat draws it: SenderTurn, without
-        the line its host put at its head for its agent (wire.said_by). It reverts as yours do (its text put in the
-        box)."""
+        the line its host put at its head for its agent (wire.said_by). It reverts as yours do, its words left out of
+        your box."""
         said_text = baudelib.wire.unsaid(text or "").strip()
         return SenderTurn(self, self.sender_bubble(sender, said_text, atts), said_text, said)
 
@@ -15703,7 +15704,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
-        it's written in: it and everything after it hidden, and what it said put in the box. Esc puts them back, and the
+        it's written in: it and everything after it hidden, and what it said put in the box (another's message: the box
+        left as it is, and sending makes the revert with nothing in it too). Esc puts them back, and the
         draft that was there (cancel_revert); sending makes the revert (commit_revert), then sends. One already being
         reverted is put back first (the draft kept: the one from before either)."""
         if not self.can_revert() or turn.uuid is None:
@@ -15725,7 +15727,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.hide_reverted(after)
                 after = after.get_next_sibling()
             w = w.get_parent()
-        buf.set_text(turn.text or "")
+        if not isinstance(turn, SenderTurn):  # (another's words aren't put in your box: it's left as it is)
+            buf.set_text(turn.text or "")
         buf.place_cursor(buf.get_end_iter())
         self.input.grab_focus()
         self.stick_bottom = True

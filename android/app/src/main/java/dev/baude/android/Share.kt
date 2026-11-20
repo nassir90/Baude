@@ -51,7 +51,8 @@ object Shares {
 
     private var started = false // (this process has had the activity made: one made again after it isn't)
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private var written: List<Picked> = emptyList() // (the open chat's files as last kept for the app going)
+    private var written: Pair<String, List<Picked>>? = null // (the open chat and its files as last kept for the app
+    private var wrote = false                                  // going: none, this process, till it's first kept)
     private val published = HashMap<String, String>() // (a shortcut's id: what it was published as, this run)
     private var looking = false
 
@@ -71,8 +72,8 @@ object Shares {
             ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())?.trim()?.ifBlank { null }
             ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim()?.ifBlank { null }?.takeIf { uris.isEmpty() }
         if (text == null && uris.isEmpty()) return null
-        val to = intent.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID)?.let { id ->
-            id.substringBefore('/', "").ifBlank { null }?.let { it to id.substringAfter('/') }
+        val to = intent.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID)?.let { sid ->
+            hostOf(sid)?.let { it to sid }
         }
         return Shared(text, uris) to to
     }
@@ -87,12 +88,17 @@ object Shares {
     fun used(chat: Chat) {
         if (Mesh.session(chat.hostId, chat.sid)?.bot == null) return
         try {
-            ShortcutManagerCompat.reportShortcutUsed(Mesh.app, id(chat.hostId, chat.sid))
+            ShortcutManagerCompat.reportShortcutUsed(Mesh.app, chat.sid)
         } catch (_: Exception) {
         }
     }
 
-    private fun id(hostId: String, sid: String) = "$hostId/$sid"
+    private fun key(hostId: String, sid: String) = "$hostId/$sid"
+
+    /** The host a Bot's chat (a shortcut's id: its session's) is on: where it's listed, or where it was last
+     * published from (kept: a share sheet's pick comes before its host's reached). */
+    private fun hostOf(sid: String): String? = Mesh.contacts.firstOrNull { it.id == sid }?.hostId
+        ?: Mesh.app.getSharedPreferences("shares", Context.MODE_PRIVATE).getString(sid, null)
 
     /** (the activity put away: the app may go while it is) What's shared and not sent yet, kept for if it's made
      * again: a share waiting for its chat, whether the chat open goes back to the app it came from, and the files
@@ -103,20 +109,24 @@ object Shares {
             out.putString("share:text", it.text)
             out.putParcelableArrayList("share:uris", ArrayList(it.uris))
         }
-        val chat = Mesh.open ?: return
-        out.putString("share:chat", id(chat.hostId, chat.sid))
-        chat.draft.value?.let { out.putString("share:draft", it) }
-        val files = chat.files.toList()
-        if (files == written) return
-        written = files
+        val chat = Mesh.open
+        if (chat != null) {
+            out.putString("share:chat", key(chat.hostId, chat.sid))
+            chat.draft.value?.let { out.putString("share:draft", it) }
+        }
+        val now = chat?.let { key(it.hostId, it.sid) to it.files.toList() }
+        if (wrote && now == written) return
+        wrote = true
+        written = now
         val dir = java.io.File(ctx.cacheDir, "attached")
         io.execute {
-            dir.deleteRecursively()
+            dir.deleteRecursively() // (none open: none kept)
+            val (chatKey, files) = now ?: return@execute
             dir.mkdirs()
             files.forEachIndexed { i, f -> java.io.File(dir, "$i").writeBytes(f.bytes) }
             java.io.File(dir, "files.json").writeText(org.json.JSONArray(files.map {
                 org.json.JSONObject().put("name", it.name).put("mime", it.mime) }).toString())
-            java.io.File(dir, "chat").writeText(id(chat.hostId, chat.sid))
+            java.io.File(dir, "chat").writeText(chatKey)
         }
     }
 
@@ -130,14 +140,14 @@ object Shares {
         androidx.core.os.BundleCompat.getParcelableArrayList(saved, "share:uris", Uri::class.java)?.let { uris ->
             pending.value = Shared(saved.getString("share:text"), uris)
         } ?: saved.getString("share:text")?.let { pending.value = Shared(it, emptyList()) }
-        if (screen[0] != "chat" || saved.getString("share:chat") != id(screen[1], screen[2])) return
+        if (screen[0] != "chat" || saved.getString("share:chat") != key(screen[1], screen[2])) return
         val chat = Mesh.openChat(screen[1], screen[2])
         saved.getString("share:draft")?.let { chat.draft.value = it }
         val dir = java.io.File(ctx.cacheDir, "attached")
         val main = Handler(Looper.getMainLooper())
         io.execute {
             val files = try {
-                if (java.io.File(dir, "chat").readText() != id(screen[1], screen[2])) return@execute
+                if (java.io.File(dir, "chat").readText() != key(screen[1], screen[2])) return@execute
                 val a = org.json.JSONArray(java.io.File(dir, "files.json").readText())
                 (0 until a.length()).map { i -> a.getJSONObject(i).let {
                     Picked(it.optString("name"), it.optString("mime"), java.io.File(dir, "$i").readBytes()) } }
@@ -147,7 +157,8 @@ object Shares {
             main.post {
                 if (Mesh.open === chat && chat.files.isEmpty()) {
                     chat.files.addAll(files)
-                    written = chat.files.toList()
+                    written = key(chat.hostId, chat.sid) to chat.files.toList()
+                    wrote = true
                 }
             }
         }
@@ -179,17 +190,17 @@ object Shares {
         val existing = ShortcutManagerCompat.getDynamicShortcuts(app)
         published.keys.retainAll(existing.map { it.id }.toSet())
         val bots = Mesh.contacts.take(most)
-        val wanted = bots.map { id(it.hostId, it.id) }.toSet()
+        val wanted = bots.map { it.id }.toSet()
         val listed = Mesh.sessions.keys
         val settled = Mesh.hosts.all { Mesh.conn(it.id)?.state == "up" } // (the mesh as your hosts list it, whole)
-        fun hostOf(id: String) = id.substringBefore('/')
-        fun gone(id: String): Boolean { // (no longer a Bot of yours)
-            val host = hostOf(id)
-            return if (host in listed) Mesh.contact(host, id.substringAfter('/')) == null
-                else host != "phone" && !host.startsWith("mesh:") && Mesh.hosts.none { it.id == host }
+        val hosts = app.getSharedPreferences("shares", Context.MODE_PRIVATE)
+        fun gone(id: String): Boolean { // (no longer a Bot of yours: not listed anywhere, and its host has listed)
+            if (Mesh.contacts.any { it.id == id }) return false
+            val host = hostOf(id).orEmpty()
+            return host in listed || host != "phone" && !host.startsWith("mesh:") && Mesh.hosts.none { it.id == host }
         }
         val dropped = existing.map { it.id }.filter { id ->
-            id !in wanted && (gone(id) || hostOf(id) in listed || hostOf(id).startsWith("mesh:") && settled)
+            id !in wanted && (gone(id) || hostOf(id) in listed || hostOf(id).orEmpty().startsWith("mesh:") && settled)
         }
         val kept = existing.filter { it.id !in wanted && it.id !in dropped }.sortedBy { it.rank }
         val over = kept.drop((most - bots.size).coerceAtLeast(0)).map { it.id } // (room made for the live ones)
@@ -200,13 +211,15 @@ object Shares {
             (dropped + over).forEach { published.remove(it) }
         }
         if (off.isNotEmpty()) ShortcutManagerCompat.disableShortcuts(app, off, "This Bot isn't there any more")
+        hosts.edit().apply { off.forEach(::remove) }.apply()
         val disabled = ShortcutManagerCompat.getShortcuts(app, ShortcutManagerCompat.FLAG_MATCH_PINNED)
             .filter { !it.isEnabled }.map { it.id }.toSet()
         bots.forEachIndexed { rank, bot ->
             Mesh.picture(bot)
             val picture = Mesh.pictures[bot.pictureKey]
-            val id = id(bot.hostId, bot.id)
-            val was = bot.name + "\n" + (if (picture != null) bot.pictureKey else "")
+            val id = bot.id // (its session's: the same shortcut wherever its machine's reached from, a pinned one too)
+            if (hosts.getString(id, null) != bot.hostId) hosts.edit().putString(id, bot.hostId).apply()
+            val was = bot.hostId + "\n" + bot.name + "\n" + (if (picture != null) bot.pictureKey else "")
             if (published[id] == was && id !in disabled) return@forEachIndexed
             val person = Person.Builder().setName(bot.name).setKey(id).setBot(true).build()
             val open = Intent(app, MainActivity::class.java).setAction(Intent.ACTION_VIEW)

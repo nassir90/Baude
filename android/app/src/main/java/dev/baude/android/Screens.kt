@@ -112,7 +112,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
-            items(Pending.of(at, sid).filter { it.state.value != "sending" }, key = { "unsent:" + it.id }) { Waiting(it) }
+            items(Pending.of(sid), key = { "unsent:" + it.id }) { Waiting(it, Mesh.conn(Mesh.reach(it))?.state == "up") }
             if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -348,15 +348,15 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
 }
 
 /** A message you sent that its host doesn't have yet (Pending), as yours is drawn but faint, how it stands under it:
- * waiting for its host, being looked for, or not sent (why), with ✕ to drop it and ↑ to send it again. */
+ * being sent, waiting for its host, or not sent (why), with ✕ to drop it and ↑ to put it in line again. */
 @Composable
-private fun Waiting(u: Unsent) {
+private fun Waiting(u: Unsent, up: Boolean) {
     val c = LocalBaude.current
     val failed = u.state.value == "failed"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         if (failed) {
             IconButton(Icons.Filled.Close, "Delete this message") { Mesh.dropUnsent(u) }
-            IconButton(Icons.Filled.ArrowUpward, "Send it again") { Mesh.deliver(u) }
+            IconButton(Icons.Filled.ArrowUpward, "Send it again") { Mesh.again(u) }
         }
         Column(Modifier.weight(1f, fill = false).padding(start = if (failed) 0.dp else 48.dp), horizontalAlignment = Alignment.End) {
             Column(Modifier.clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble.copy(alpha = c.bubble.alpha * 0.55f))
@@ -365,10 +365,10 @@ private fun Waiting(u: Unsent) {
                     color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (u.text.isNotBlank()) Text(u.text, style = Type.body, color = c.dim)
             }
-            Text(when (u.state.value) {
-                "waiting" -> "It's sent once this chat's host is there"
-                "checking" -> "Checking whether it was sent…"
-                else -> "Not sent: " + (u.why.value ?: "its host said no")
+            Text(when {
+                failed -> "Not sent: " + (u.why.value ?: "its host said no")
+                u.state.value == "sending" || up -> "Sending…"
+                else -> "It's sent once this chat's host is there"
             }, style = Type.caption, color = if (failed) c.destructive else c.dim, modifier = Modifier.padding(top = 2.dp, end = 4.dp))
         }
     }

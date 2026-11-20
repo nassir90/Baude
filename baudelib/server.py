@@ -37,6 +37,7 @@ GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral sessi
 # to come back)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
+TAKEN = 64  # (a session's messages from heads, by uuid: the last this many kept, a repeat of one taken once)
 FILE_LIMIT = 4 << 20
 CATALOGUE_WAIT_S = 30  # (a folder's catalogue being made: waited for this long before what there is is sent)
 CATALOGUE_LIMIT = 20000  # (files sent of a folder's, at most: its other names all are)
@@ -1883,9 +1884,16 @@ class Server:
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
         (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
-        answer's)."""
+        answer's). One whose uuid it's taken already (a head sending it again, its connection gone as it first sent
+        it) taken once: the last TAKEN kept in its meta."""
         kind = msg.get("type")
         if kind == "user":
+            if wire.is_id(msg.get("uuid") or ""):
+                taken = s.meta.setdefault("taken", [])
+                if msg["uuid"] in taken:
+                    return
+                taken.append(msg["uuid"])
+                del taken[:-TAKEN]
             msg = {**msg, "uuid": msg["uuid"] if wire.is_id(msg.get("uuid") or "") else str(uuid.uuid4())}
         if kind == "user" and wire.clean_sender(sender) is not None:
             message = msg.get("message") or {}

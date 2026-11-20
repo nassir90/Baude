@@ -29,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -289,13 +288,11 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
 @Composable
 private fun Proposal(removed: List<String>, added: List<String>, accept: () -> Unit, reject: () -> Unit) {
     val c = LocalBaude.current
-    val red = if (c == DarkBaude) Color(0xFFFF7B63) else Color(0xFFC01C28)
-    val green = if (c == DarkBaude) Color(0xFF8FF0A4) else Color(0xFF26A269)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).border(1.dp, c.rule, RoundedCornerShape(6.dp))) {
         for (l in removed) Text(l.ifEmpty { " " }, style = Type.body, color = c.fg,
-            modifier = Modifier.fillMaxWidth().background(red.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 1.dp))
+            modifier = Modifier.fillMaxWidth().background(c.removed.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 1.dp))
         for (l in added) Text(l.ifEmpty { " " }, style = Type.body, color = c.fg,
-            modifier = Modifier.fillMaxWidth().background(green.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 1.dp))
+            modifier = Modifier.fillMaxWidth().background(c.added.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 1.dp))
         Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button("Accept", suggested = true, onClick = accept)
             Button("Reject", onClick = reject)

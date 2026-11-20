@@ -29,6 +29,8 @@ data class BaudeColors(
     val warning: Color,
     val success: Color,
     val dialog: Color,     // (dialog_bg_color)
+    val removed: Color,    // (diff.removed: a diff's line taken out, red)
+    val added: Color,      // (diff.added: one put in, green)
 ) {
     val dim: Color get() = fg.copy(alpha = fg.alpha * 0.6f)        // (.sysnote, .dim-label: 0.55–0.6)
     val bubble: Color get() = accentBg.copy(alpha = 0.15f)          // (.user-bubble)
@@ -40,7 +42,7 @@ private fun baudeColors(t: ThemeTokens) = with(t.libadwaita) {
         frame = t.baude.frame, inside = t.baude.inside, window = windowBgColor, fg = windowFgColor, rule = t.baude.rule,
         raised = t.baude.raised, card = cardBgColor, accentBg = accentBgColor, accentFg = accentFgColor,
         accent = accentColor, destructive = destructiveColor, warning = warningColor, success = successColor,
-        dialog = dialogBgColor,
+        dialog = dialogBgColor, removed = t.diff.removed, added = t.diff.added,
     )
 }
 
@@ -71,6 +73,7 @@ object Gap {
     val codeRadius = Tokens.Radius.code             // (.codeblock)
     val inside = Tokens.Gap.inside                  // (widgets.INSIDE_GAP: the inside set this far into the frame)
     val bar = Tokens.Gap.bar                        // (an Adw.HeaderBar's height)
+    val dot = Tokens.Gap.dot                        // (StatusDot's)
 }
 
 val LocalBaude = staticCompositionLocalOf { LightBaude }

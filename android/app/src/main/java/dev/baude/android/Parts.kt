@@ -70,7 +70,7 @@ fun StatusDot(state: String, asking: Boolean) {
         1f, if (state == "working" && !asking) 0.35f else 1f,
         infiniteRepeatable(tween(Tokens.Motion.pulseMs), RepeatMode.Reverse), label = "pulse",
     )
-    Box(Modifier.size(8.dp).alpha(pulse).clip(CircleShape).background(colour))
+    Box(Modifier.size(Gap.dot).alpha(pulse).clip(CircleShape).background(colour))
 }
 
 /** A bar as Adw.HeaderBar is: 46 tall, the frame's colour, its title in the middle. */

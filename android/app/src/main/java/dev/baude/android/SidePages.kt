@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -381,14 +380,12 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                 val t = diffText
                 if (t == null) Empty("Reading it…")
                 else { // (a line at a time, as it's scrolled to: a long diff isn't all drawn)
-                    val add = if (c == DarkBaude) Color(0xFF8FF0A4) else Color(0xFF26A269)
-                    val del = if (c == DarkBaude) Color(0xFFFF7B63) else Color(0xFFC01C28)
                     val lines = remember(t) { t.lines() }
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
                         items(lines) { l ->
                             Text(l, style = Type.mono, color = when {
-                                l.startsWith("+") && !l.startsWith("+++") -> add
-                                l.startsWith("-") && !l.startsWith("---") -> del
+                                l.startsWith("+") && !l.startsWith("+++") -> c.added
+                                l.startsWith("-") && !l.startsWith("---") -> c.removed
                                 l.startsWith("@@") -> c.accent
                                 else -> c.fg
                             })

@@ -370,7 +370,7 @@ private fun Markdown(block: String) {
             val (text, style) = when {
                 h != null -> h.groupValues[2] to Type.body.copy(
                     fontSize = Type.body.fontSize * (if (h.groupValues[1].length == 1) 1.44f else if (h.groupValues[1].length == 2) 1.2f else 1f),
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    fontWeight = Tokens.Font.bold)
                 bullet != null -> ((if (bullet.groupValues[1].first().isDigit()) bullet.groupValues[1] + " " else "•  ") +
                     bullet.groupValues[2]) to Type.body
                 else -> raw to Type.body

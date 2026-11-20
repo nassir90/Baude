@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONArray
@@ -353,7 +354,7 @@ class BrowserActivity : ComponentActivity() {
     companion object {
         private var here: String? = null // (the profile this process's WebView is started for)
         val KEYBOARD_QUIET = setOf("click", "drag", "type", "key", "form_input", "javascript") // (what can focus a field)
-        const val ACCENT = 0xFF3584E4.toInt() // (Baude's accent: the pointer's and the glow's colour)
+        val ACCENT = Tokens.Accent.blue.toArgb() // (Baude's accent: the pointer's and the glow's colour)
         private val PROFILE_SPACE = UUID.fromString("6b1f0d3e-3c4e-4f51-9b0e-7a1e5e6d2c11") // (emissionlink's)
 
         /** A Bot's own profile's id (emissionlink.bot_profile_id: uuid5 of "bot:" and its id). */

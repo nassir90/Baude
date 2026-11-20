@@ -212,9 +212,13 @@ class Asks:
             answered(reply)
         self.q.put((remote, bot, call, done))
 
+    def stop(self):
+        """Its pane's gone: its thread ends, after what's waiting (it went on waiting for good, a thread a pane)."""
+        self.q.put(None)
+
     def run(self):
-        while True:
-            remote, bot, call, answered = self.q.get()
+        while (asked := self.q.get()) is not None:
+            remote, bot, call, answered = asked
             try:
                 got = None
                 if remote.mine:  # (straight to its socket: no host between)
@@ -376,8 +380,13 @@ class Here:
             return
         if win.body.get_parent() is not None:
             win.body.get_parent().remove(win.body)
+        bars = win.get_content()
         win.closing_window()
+        win.set_content(None)
         win.destroy()
+        for part in (win.body, bars, win):  # (freed: held by their own handlers, and the window through them, they
+            if part is not None:           # lived on, its tabs and their pages' engines with them)
+                widgets.discard(part)
         emission.ProfileSocket.close(self.pid)
         pid = self.pid
         RELEASED[pid] = time.monotonic()
@@ -615,8 +624,14 @@ class BrowserWindow(Adw.ApplicationWindow):
                 app.disconnect(self.gone_id)
             self.main = None
         self.pane.stop()
+        # (its pane and itself freed: a window's destroy disposes neither its child nor its keys, whose handlers lead
+        # back to it, and both lived on, with every widget in the pane, its half-second timer running, its thread
+        # waiting)
+        self.set_content(None)
         if not closing:
             self.destroy()
+        widgets.discard(self.pane)
+        widgets.discard(self)
 
 
 class Presence(Gtk.Widget):
@@ -806,7 +821,7 @@ class BrowserPane(Gtk.Box):
         self.connect("unmap", lambda *_: self.stop(keep=True))
         self.size_timer = GLib.timeout_add(500, self.size_check)
         self.connect("destroy", lambda *_: (GLib.source_remove(self.size_timer), PANES.discard(self),
-                                            ALL.discard(self), self.stop()))
+                                            ALL.discard(self), self.stop(), self.asks.stop()))
         ALL.add(self)
         if bound is None:
             PANES.add(self)

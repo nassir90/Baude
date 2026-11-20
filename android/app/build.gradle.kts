@@ -352,7 +352,21 @@ abstract class WireSchema : DefaultTask() {
                 "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { $ir.from(it) } } }")
             if (types(items) == listOf("string")) return Triple("List<String>", { "JSONArray($it)" },
                 "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).map { i -> a.optString(i) } }")
+            val each = "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).mapNotNull { i -> a.opt"
+            if (types(items) == listOf("integer") || types(items) == listOf("number"))
+                return Triple("List<Number>", { "JSONArray($it)" }, "$each(i) as? Number } }")
+            if (types(items) == listOf("object")) // (objects not the wire's own)
+                return Triple("List<JSONObject>", { "JSONArray($it)" }, "${each}JSONObject(i) } }")
             return Triple("JSONArray", { it }, "o.optJSONArray(\"$key\")")
+        }
+        val values = p["additionalProperties"]
+        if (t == listOf("object") && values is Map<*, *> && p["x-open"] != true) { // (a map of entities, or of strings)
+            val vr = ref(map(values))
+            if (vr != null) return Triple("Map<String, $vr>", { "JSONObject($it.mapValues { e -> e.value.json() })" },
+                "o.optJSONObject(\"$key\")?.let { m -> m.keys().asSequence()" +
+                    ".mapNotNull { k -> m.optJSONObject(k)?.let { k to $vr.from(it) } }.toMap() }")
+            if (types(map(values)) == listOf("string")) return Triple("Map<String, String>", { "JSONObject($it)" },
+                "o.optJSONObject(\"$key\")?.let { m -> m.keys().asSequence().associateWith { k -> m.optString(k) } }")
         }
         return when {
             "const" in p || "enum" in p || t == listOf("string") -> Triple("String", { it }, "o.wireStr(\"$key\")")

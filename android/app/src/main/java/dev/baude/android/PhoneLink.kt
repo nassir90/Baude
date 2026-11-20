@@ -198,7 +198,7 @@ object PhoneLink {
         val reached = reachable()
         val now = SystemClock.elapsedRealtime()
         val conn = Mesh.hosts.firstNotNullOfOrNull { h -> // (one that refused, or failed, lately: past it, to the next)
-            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.server?.id !in reached &&
+            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.info?.id !in reached &&
                 (nextTry[it.id] ?: 0L) <= now }
         } ?: return
         pending.add(conn.id)
@@ -239,12 +239,12 @@ object PhoneLink {
 
     /** One request to a member's host process on a tunnel of its own, opened from here as from sender (a chat of
      * this phone's: what's sent through it is from that chat, as the far host stamps it: wire.py's Senders): its reply,
-     * or an error one if there's no way to it (no link of the phone's reaches it), or it didn't answer. */
-    fun request(to: String, sender: JSONObject?, msg: JSONObject, ms: Long = 30_000): JSONObject {
-        fun no(why: String) = JSONObject().put("op", Op.ERROR).put("error", why).put("unreached", true)
+     * or an error one if it didn't answer; null if there's no way to it (no link of the phone's reaches it, or its
+     * tunnel didn't open). */
+    fun request(to: String, sender: JSONObject?, msg: JSONObject, ms: Long = 30_000): JSONObject? {
         val asked = JSONObject(msg.toString()).put("req", 1)
         ownRefusal(asked)?.let { return it }
-        val link = route(to) ?: return no("no link of this phone's reaches it")
+        val link = route(to) ?: return null
         val n = link.next.getAndIncrement()
         val end = Asking()
         link.outs[n] = end
@@ -256,7 +256,7 @@ object PhoneLink {
             } catch (_: Exception) {
                 "it didn't answer"
             }
-            if (error != null) return no(error)
+            if (error != null) return null
             link.wire.send(Msg.Data(t = n, msg = checked(asked) ?: asked).json())
             return try {
                 end.reply.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -288,7 +288,7 @@ object PhoneLink {
 
     /** A member's name, as its record says it (its id's first 8 if there's none). */
     fun nameOf(member: String): String = records[member]?.first?.info?.name?.ifBlank { null }
-        ?: Mesh.states.values.toList().firstNotNullOfOrNull { c -> c.server?.takeIf { it.id == member } }?.name?.ifBlank { null }
+        ?: Mesh.states.values.toList().firstNotNullOfOrNull { c -> c.info?.takeIf { it.id == member } }?.name?.ifBlank { null }
         ?: member.take(8)
 
     /** The members its links reach now, as a host process works it out (mesh.Mesh.reroute): breadth first from the
@@ -448,7 +448,7 @@ object PhoneLink {
                 link.ins.remove(t)?.closed(null) // (a number used again: the tunnel that had it is gone)
                 val to = o.to.orEmpty()
                 // (who what's sent through it is from: the member it came from, and the chat its relay named)
-                val sender = f.optJSONObject("sender")?.let { PhoneHost.cleanSender(it) }
+                val sender = o.sender?.let { PhoneHost.cleanSender(it.json()) }
                 if (to == PhoneHost.id) {
                     link.ins[t] = Tunnel(link, t, o.from?.takeIf(::isId), sender)
                     link.wire.send(Msg.Opened(r = t).json())

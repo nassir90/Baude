@@ -1,7 +1,5 @@
 package dev.baude.android
 
-import org.json.JSONObject
-
 /** The wire version each op a page uses came in (wire.VERSION's history): a host older than that doesn't speak it, so
  * it's never offered for that page. "control" is a control request to a session's claude (set_model, stop_task…),
  * which every version carries. */
@@ -18,13 +16,13 @@ fun offers(hostId: String, op: String): Boolean = offers(Mesh.conn(hostId)?.info
 /** Does a host take op, as its hello says (wire.speaks): by the ops it lists, where it lists them (a host that speaks
  * only part of the wire: a phone's); else by its version, the one that brought op (since; SINCE's, if it's not
  * given). */
-fun offers(info: JSONObject?, op: String, since: Int? = null): Boolean {
+fun offers(info: Msg.Info?, op: String, since: Int? = null): Boolean {
     info ?: return false
-    info.optJSONArray("ops")?.let { ops -> return (0 until ops.length()).any { ops.optString(it) == op } }
-    return info.optInt("version", 1) >= (since ?: SINCE[op] ?: Int.MAX_VALUE)
+    info.ops?.let { ops -> return op in ops }
+    return (info.version?.toInt() ?: 1) >= (since ?: SINCE[op] ?: Int.MAX_VALUE)
 }
 
 /** What to say when a host's too old for something (one that lists the ops it takes: that it doesn't). */
 fun tooOld(hostId: String, what: String) =
-    if (Mesh.conn(hostId)?.info?.has("ops") == true) "${Mesh.label(hostId)} can't $what"
+    if (Mesh.conn(hostId)?.info?.ops != null) "${Mesh.label(hostId)} can't $what"
     else "${Mesh.label(hostId)}'s Baude can't $what: update it"

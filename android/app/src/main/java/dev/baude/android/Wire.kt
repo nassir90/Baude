@@ -40,8 +40,8 @@ fun ownRefusal(msg: JSONObject): JSONObject? {
 }
 
 /** Every message sent and read type-checked against the schema (WireCheck.problems), what's wrong logged under the
- * wire tag, each once, as $BAUDE_WIRE_STRICT has wire.py do: on if the app's files folder has a file wire-strict in it
- * as it starts (adb shell touch /sdcard/Android/data/dev.baude.android/files/wire-strict). */
+ * wire tag, each once, as $BAUDE_WIRE_STRICT has wire.py do: on if the app's external files folder has a file
+ * wire-strict in it as it starts (adb shell touch /sdcard/Android/data/dev.baude.android/files/wire-strict). */
 object WireStrict {
     @Volatile var on = false
         private set
@@ -65,6 +65,10 @@ object WireStrict {
 
 /** What an error says, for a person: its error, and a refusal's detail after it (null: it says nothing). */
 val Msg.Error.said: String? get() = error?.let { e -> detail?.ifBlank { null }?.let { "$e: $it" } ?: e }
+
+/** Why a request didn't do what it asked, for a person: an error's (said), else what its reply's own error field
+ * (own) says; "" for neither. */
+fun said(r: JSONObject, own: String?): String = (if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else own).orEmpty()
 
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
@@ -114,8 +118,7 @@ open class Connection(
     val host: Host? get() = (place as? Place.Direct)?.host
     @Volatile var state = "connecting" // (connecting, up, down, key: the host's key waits to be trusted)
     @Volatile var why: String? = null
-    @Volatile var info: JSONObject? = null
-    val server: Msg.Info? get() = info?.let { Msg.Info.from(it) } // (info, as the schema has it)
+    @Volatile var info: Msg.Info? = null
     @Volatile var shown: ShownKey? = null
     @Volatile var via: Connection? = null // (a member's: the host it's reached through, this time)
     @Volatile var listed = true // (a member's: whether a host that's up lists it)
@@ -275,10 +278,10 @@ open class Connection(
         var reached = false
         val hello = {
             request(Msg.Hello(client = "baude-android").json()) { reply ->
-                val server = reply.optJSONObject("server")
+                val server = Msg.HelloReply.from(reply).server
                 when {
                     reply.optString("op") != Op.HELLO -> {
-                        said = reply.optString("error", "the host said no")
+                        said = Msg.Error.from(reply).said ?: "the host said no"
                         end()
                     }
                     !offers(server, "bot", MIN_VERSION) -> {
@@ -301,7 +304,7 @@ open class Connection(
         else request(Msg.Relay(to = member).json()) { reply -> // (wire.through)
             if (reply.optString("op") == Op.RELAYED) hello()
             else {
-                said = reply.optString("error", "${via?.host?.label ?: "its host"} couldn't reach it")
+                said = Msg.Error.from(reply).said ?: "${via?.host?.label ?: "its host"} couldn't reach it"
                 end()
             }
         }
@@ -331,7 +334,7 @@ open class Connection(
                         continue // (not a line of the host process's: a shell's greeting, say)
                     }
                     WireStrict.check("read", msg)
-                    val req = msg.optInt("req", -1)
+                    val req = (msg.opt("req") as? Number)?.toInt() ?: -1 // (any line's: every op's may have one)
                     val call = if (req >= 0) calls.remove(req) else null
                     if (call != null) call(msg) else heard(this, msg)
                 }

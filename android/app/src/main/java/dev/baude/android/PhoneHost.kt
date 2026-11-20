@@ -152,14 +152,14 @@ object PhoneHost {
             override fun send(sent: JSONObject) {
                 val msg = checked(sent, answer = true) ?: return
                 val req = (msg.opt("req") as? Number)?.toInt() ?: -1
-                if (msg.optString("op") == Op.SESSIONS) msg.optJSONObject("server")?.let { info = it }
+                if (msg.optString("op") == Op.SESSIONS) Msg.Sessions.from(msg).server?.let { info = it }
                 val call = if (req < 0) null else waiting.remove(req)
                 if (call != null) call(msg) else hear(this@Local, msg)
             }
         }
 
         override fun start() {
-            info = PhoneHost.info()
+            info = Msg.Info.from(PhoneHost.info())
             state = "up"
             told(this)
             send(Msg.Subscribe(archived = true).json())
@@ -239,24 +239,40 @@ object PhoneHost {
             Op.HELLO -> return reply(Op.HELLO, "server" to info())
             Op.SUBSCRIBE -> {
                 head.subscribed = true
-                head.archived = msg.optBoolean("archived")
+                head.archived = Msg.Subscribe.from(msg).archived == true
                 return reply(Op.SESSIONS, "sessions" to listing(head.archived), "server" to info())
             }
         }
         if (op == Op.START) return start(head, msg, ::reply)
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
-        if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(if (msg.isNull("path")) "" else msg.optString("path")))
-        if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(if (msg.isNull("cwd")) "" else msg.optString("cwd")))
-        val s = synchronized(lock) { sessions[msg.optString("session")] }
-            ?: return reply(Op.ERROR, "error" to "no session ${msg.optString("session")}")
+        if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
+        if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
+        val sid = when (op) { // (the session each of the rest is about)
+            Op.ATTACH -> Msg.Attach.from(msg).session
+            Op.DETACH -> Msg.Detach.from(msg).session
+            Op.INPUT -> Msg.Input.from(msg).session
+            Op.STOP -> Msg.Stop.from(msg).session
+            Op.TRANSCRIPT -> Msg.Transcript.from(msg).session
+            Op.SUBAGENTS -> Msg.Subagents.from(msg).session
+            Op.SENDERS -> Msg.SendersOp.from(msg).session
+            Op.RENAME -> Msg.Rename.from(msg).session
+            Op.ARCHIVE -> Msg.Archive.from(msg).session
+            Op.UNARCHIVE -> Msg.Unarchive.from(msg).session
+            Op.DELETE -> Msg.Delete.from(msg).session
+            Op.ALWAYS_ALLOW -> Msg.AlwaysAllow.from(msg).session
+            Op.BOT -> Msg.Bot.from(msg).session
+            Op.BOT_PICTURE -> Msg.BotPicture.from(msg).session
+            Op.MEMORY -> Msg.Memory.from(msg).session
+            else -> null
+        }.orEmpty()
+        val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
         when (op) {
             Op.ATTACH -> synchronized(lock) {
-                head.answers = msg.optBoolean("answers", true)
+                val a = Msg.Attach.from(msg)
+                head.answers = a.answers ?: true
                 s.viewers.add(head)
-                if (msg.optBoolean("live")) s.live.add(head)
-                msg.optJSONArray("always_allow")?.let { a ->
-                    for (i in 0 until a.length()) a.optString(i).takeIf { it != ASK_TOOL }?.let { s.alwaysAllow.add(it) }
-                }
+                if (a.live == true) s.live.add(head)
+                for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
                 reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()))
             }
             Op.DETACH -> {
@@ -268,21 +284,23 @@ object PhoneHost {
                 if (last) drop(s)
             }
             Op.INPUT -> {
-                input(head, s, msg.optJSONObject("msg") ?: JSONObject(), sentBy(head, msg))
+                val i = Msg.Input.from(msg)
+                input(head, s, i.msg ?: JSONObject(), sentBy(head, i.`as`))
                 if (req != null) reply(Op.ACCEPTED, "session" to s.id)
             }
             Op.STOP -> {
                 stopTurn(s)
                 reply(Op.STOPPED, "session" to s.id)
             }
-            Op.TRANSCRIPT -> reply(Op.TRANSCRIPT, "session" to s.id, *lines(transcript(s), msg.optLong("offset", 0),
-                msg.optInt("limit", 0)))
+            Op.TRANSCRIPT -> Msg.Transcript.from(msg).let { t ->
+                reply(Op.TRANSCRIPT, "session" to s.id, *lines(transcript(s), t.offset?.toLong() ?: 0, t.limit?.toInt() ?: 0))
+            }
             Op.SUBAGENTS -> reply(Op.SUBAGENTS, "session" to s.id, "files" to JSONArray(), "more" to false)
             Op.SENDERS -> senders(s)?.let { reply(Op.SENDERS, "session" to s.id, "senders" to JSONObject(it.toString()),
                 "rev" to s.meta.optInt("senders")) } ?: reply(Op.ERROR, "error" to "its sender store couldn't be read")
             Op.RENAME -> {
                 live(s) {
-                    s.meta.put("title", (if (msg.isNull("title")) "" else msg.optString("title")).trim().take(200).ifBlank { null } ?: JSONObject.NULL)
+                    s.meta.put("title", Msg.Rename.from(msg).title.orEmpty().trim().take(200).ifBlank { null } ?: JSONObject.NULL)
                     save(s)
                 }
                 changed()
@@ -312,9 +330,10 @@ object PhoneHost {
             }
             Op.ALWAYS_ALLOW -> {
                 synchronized(lock) {
-                    fun given(a: JSONArray) = (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() && it != ASK_TOOL }
-                    msg.optJSONArray("add")?.let { s.alwaysAllow.addAll(given(it)) }
-                        ?: msg.optJSONArray("tools")?.let {
+                    val r = Msg.AlwaysAllow.from(msg)
+                    fun given(a: List<String>) = a.filter { it.isNotBlank() && it != ASK_TOOL }
+                    r.add?.let { s.alwaysAllow.addAll(given(it)) }
+                        ?: r.tools?.let {
                             s.alwaysAllow.clear()
                             s.alwaysAllow.addAll(given(it))
                         }
@@ -324,14 +343,14 @@ object PhoneHost {
             }
             Op.BOT -> {
                 live(s) {
-                    val bot = msg.optJSONObject("bot")
+                    val bot = Msg.Bot.from(msg).bot
                     if (bot == null) s.meta.put("bot", JSONObject.NULL)
                     else {
-                        s.meta.put("bot", JSONObject().put("name", bot.optString("name").trim().take(64).ifBlank { "Agent" })
+                        s.meta.put("bot", JSONObject().put("name", bot.name.orEmpty().trim().take(64).ifBlank { "Agent" })
                             .put("since", s.meta.optJSONObject("bot")?.optDouble("since") ?: now()))
-                        if (bot.has("picture")) { // (a PNG, base64; "" to drop it; left out, kept)
-                            val pic = picture(s)
-                            val data = if (bot.isNull("picture")) "" else bot.optString("picture")
+                        if (msg.optJSONObject("bot")?.has("picture") == true) { // (a PNG, base64; "" or null to drop it;
+                            val pic = picture(s)                                 // left out, kept)
+                            val data = bot.picture.orEmpty()
                             if (data.isEmpty()) pic.delete()
                             else Base64.getDecoder().decode(data).takeIf { it.size <= WireConstants.BOT_PICTURE_MAX }?.let { pic.writeBytes(it) }
                         }
@@ -345,7 +364,7 @@ object PhoneHost {
                 (picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) } ?: JSONObject.NULL))
             Op.MEMORY -> {
                 val file = File(s.folder, MEMORY)
-                if (msg.has("text")) live(s) { file.writeText(msg.optString("text")) }
+                Msg.Memory.from(msg).text?.let { t -> live(s) { file.writeText(t) } }
                 reply(Op.MEMORY, "session" to s.id, "text" to (if (file.exists()) file.readText() else ""),
                     "path" to MEMORY, "mtime" to if (file.exists()) file.lastModified() / 1000.0 else JSONObject.NULL)
             }
@@ -356,23 +375,24 @@ object PhoneHost {
      * (Inference's value; none given, the first of them, as a host runs its own default). ask_timeout, ask_default and
      * spawned_by as a host's start has them (a subagent: Auto at most, meshtools.SUBAGENT_MODES). */
     private fun start(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
-        if (msg.has("adopt") && !msg.isNull("adopt"))
+        val r = Msg.Start.from(msg)
+        if (r.adopt != null)
             return reply(Op.ERROR, arrayOf("error" to "an agent on $name can't take up a conversation it doesn't have", "plain" to true))
-        if (msg.has("ask_default") && !msg.isNull("ask_default") && msg.optString("ask_default") !in setOf("deny", "allow"))
+        if (r.askDefault != null && r.askDefault !in setOf("deny", "allow"))
             return reply(Op.ERROR, arrayOf("error" to "ask_default is deny or allow"))
-        fun str(k: String) = if (msg.isNull(k)) "" else msg.optString(k) // (JSON's null: none given, not "null")
         // (a fork: a copy of one of its agents' conversations, under an id of its own; ephemeral, a side question's,
         // in Plan, kept nowhere and gone with its last head)
-        val ephemeral = msg.optBoolean("ephemeral")
-        val src = str("fork_from").takeIf(::isId)?.let { f ->
+        val ephemeral = r.ephemeral == true
+        val model = r.model.orEmpty()
+        val src = r.forkFrom.orEmpty().takeIf(::isId)?.let { f ->
             session(f) ?: return reply(Op.ERROR, arrayOf("error" to "no conversation here to fork: $f"))
         }
-        val served = (if (str("model").isNotBlank()) Inference.of(str("model"))
+        val served = (if (model.isNotBlank()) Inference.of(model)
             else src?.meta?.optJSONObject("infer")?.let { Served.of(it) } ?: Inference.found().firstOrNull())
-            ?: return reply(Op.ERROR, arrayOf("error" to "$name can't run ${str("model").ifBlank { "a model" }}: its agents " +
+            ?: return reply(Op.ERROR, arrayOf("error" to "$name can't run ${model.ifBlank { "a model" }}: its agents " +
                 "run the models the mesh's machines serve over an API, and none does now", "plain" to true))
         val sid = UUID.randomUUID().toString()
-        val botName = msg.optJSONObject("bot")?.optString("name")?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
+        val botName = r.bot?.let { it.name.orEmpty() }?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
         val slug = (botName ?: if (src != null) "fork" else "chat").lowercase().replace(Regex("[^a-z0-9]+"), "-")
             .trim('-').take(24).ifBlank { "chat" }
         val folder = when { // (named as you'd say it: Baude lists a folder's chats under its name)
@@ -382,22 +402,22 @@ object PhoneHost {
                 if (src != null) src.folder.copyRecursively(this, overwrite = true) else mkdirs() // (a fork: its own copy)
             }
         }
-        val spawnedBy = str("spawned_by").takeIf(::isId)
-        val asked = if (ephemeral) "plan" else str("mode").takeIf { m -> MODES.any { it.first == m } } ?: "default"
-        val prompt = str("prompt")
+        val spawnedBy = r.spawnedBy.orEmpty().takeIf(::isId)
+        val asked = if (ephemeral) "plan" else r.mode.orEmpty().takeIf { m -> MODES.any { it.first == m } } ?: "default"
+        val prompt = r.prompt.orEmpty()
         val meta = JSONObject().put("id", sid).put("cwd", folder.path).put("model", served.value)
-            .put("infer", served.json()).put("title", str("title").trim().ifBlank { null } ?: JSONObject.NULL)
+            .put("infer", served.json()).put("title", r.title.orEmpty().trim().ifBlank { null } ?: JSONObject.NULL)
             .put("created", now()).put("said", now()).put("prompts", 0).put("archived", false)
-            .put("draft", msg.optBoolean("draft") && prompt.isBlank())
+            .put("draft", r.draft == true && prompt.isBlank())
             .put("mode", if (spawnedBy != null && asked !in SUBAGENT_MODES) "auto" else asked)
             .put("spawned_by", spawnedBy ?: JSONObject.NULL)
-            .put("ask_timeout", msg.optDouble("ask_timeout").takeIf { it > 0 } ?: JSONObject.NULL)
-            .put("ask_default", if (str("ask_default") == "allow") "allow" else "deny")
+            .put("ask_timeout", r.askTimeout?.toDouble()?.takeIf { it > 0 } ?: JSONObject.NULL)
+            .put("ask_default", if (r.askDefault == "allow") "allow" else "deny")
             .put("bot", if (botName != null) JSONObject().put("name", botName).put("since", now()) else JSONObject.NULL)
-            .put("start_key", str("start_key").takeIf(::isId) ?: JSONObject.NULL)
+            .put("start_key", r.startKey.orEmpty().takeIf(::isId) ?: JSONObject.NULL)
             .put("fork_from", src?.id ?: JSONObject.NULL).put("ephemeral", ephemeral)
             .put("own_folder", !(ephemeral && src != null))
-        if (src != null && !ephemeral) meta.put("title", str("title").trim().ifBlank { null }
+        if (src != null && !ephemeral) meta.put("title", r.title.orEmpty().trim().ifBlank { null }
             ?: src.meta.opt("title") ?: JSONObject.NULL)
         val s = PhoneSession(meta)
         if (botName != null && !File(folder, MEMORY).exists()) File(folder, MEMORY).writeText("")
@@ -415,14 +435,14 @@ object PhoneHost {
             }
             sessions[sid] = s
             save(s)
-            if (msg.optBoolean("attach")) {
+            if (r.attach == true) {
                 s.viewers.add(head)
                 s.live.add(head)
             }
         }
         reply(Op.STARTED, arrayOf("session" to listing(s), "forked" to (src != null)))
         if (prompt.isNotBlank()) input(head, s, JSONObject().put("type", "user").put("message", textMessage(prompt)),
-            sentBy(head, msg))
+            sentBy(head, r.`as`))
         changed()
     }
 
@@ -854,8 +874,8 @@ object PhoneHost {
     /** Who a request passing a message in (input, start) is from, as server.sent_by has it: through a tunnel, the
      * chat its relay named (else the one its as names) on the member it came from; here, the agent of this phone's its
      * as names; null for the agent's user. */
-    private fun sentBy(head: Head, msg: JSONObject): JSONObject? {
-        val asId = (if (msg.isNull("as")) "" else msg.optString("as")).takeIf(::isId)
+    private fun sentBy(head: Head, asked: String?): JSONObject? {
+        val asId = asked.orEmpty().takeIf(::isId)
         val origin = head.origin ?: return asId?.let { chatSender(it) }
         val said = head.sender ?: asId?.let { JSONObject().put("kind", "chat").put("session", it) } ?: return null
         val name = PhoneLink.nameOf(origin)
@@ -915,12 +935,13 @@ object PhoneHost {
     /** A file in one of its agents' folders, as a host's read_file serves one in a session's folder:
      * {path, size, data (base64), error?}. */
     private fun readFile(msg: JSONObject): Array<Pair<String, Any?>> {
-        val path = if (msg.isNull("path")) "" else msg.optString("path")
+        val r = Msg.ReadFile.from(msg)
+        val path = r.path.orEmpty()
         val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return arrayOf("path" to path, "error" to "not an absolute path")
         val inside = synchronized(lock) { sessions.values.any { f.path.startsWith(it.folder.canonicalPath + File.separator) } }
         if (!inside) return arrayOf("path" to path, "error" to "not in one of its sessions' folders")
         if (!f.isFile) return arrayOf("path" to path, "error" to "No such file")
-        val limit = msg.optInt("limit", FILE_LIMIT).coerceIn(1, FILE_LIMIT)
+        val limit = (r.limit?.toInt() ?: FILE_LIMIT).coerceIn(1, FILE_LIMIT)
         val data = f.inputStream().use { it.readNBytes(limit + 1) }
         return arrayOf("path" to path, "size" to f.length(), "data" to Base64.getEncoder().encodeToString(data))
     }

@@ -118,22 +118,23 @@ class MemoryState(val hostId: String, val sid: String) {
 
     val pending: List<Hunk> get() = hunks(seen.split("\n"), text.split("\n"))
 
-    private fun took(r: JSONObject) {
-        base = r.optString("text")
+    private fun took(r: Msg.MemoryReply) {
+        base = r.text.orEmpty()
         text = base!!
-        seen = if (r.has("seen") && !r.isNull("seen")) r.optString("seen") else base!!
-        mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+        seen = r.seen ?: base!!
+        mtime = r.mtime?.toLong()
         failed = null
     }
 
     /** Read from its host: as it is there, or (changed here meanwhile) the Bot's changes since merged into yours. */
     fun load() = Mesh.ask(hostId, Msg.Memory(session = sid).json()) { r ->
-        if (r.optString("op") != Op.MEMORY) { failed = r.optString("error"); return@ask }
-        if (edits == 0 || base == null) return@ask took(r)
-        val theirs = r.optString("text")
+        if (r.optString("op") != Op.MEMORY) { failed = Msg.Error.from(r).said.orEmpty(); return@ask }
+        val got = Msg.MemoryReply.from(r)
+        if (edits == 0 || base == null) return@ask took(got)
+        val theirs = got.text.orEmpty()
         if (theirs != base) text = merge3(base!!, text, theirs) ?: text
         base = theirs
-        mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+        mtime = got.mtime?.toLong()
         failed = null
     }
 
@@ -174,25 +175,27 @@ class MemoryState(val hostId: String, val sid: String) {
         mtime?.let { msg.put("base_mtime", it) }
         Mesh.ask(hostId, msg) { r ->
             saving = false
+            val no = Msg.Error.from(r) // (memory's refusal: the memory as the Bot left it, with it)
             when {
                 r.optString("op") == Op.MEMORY -> {
+                    val got = Msg.MemoryReply.from(r)
                     wait = 5_000L
-                    base = r.optString("text")
-                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+                    base = got.text.orEmpty()
+                    mtime = got.mtime?.toLong()
                     failed = null
-                    if (edits == n) { took(r); edits = 0 } else save(said = said) // (changed meanwhile: that saved next)
+                    if (edits == n) { took(got); edits = 0 } else save(said = said) // (changed meanwhile: that saved next)
                 }
-                r.has("text") && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
-                    val theirs = r.optString("text")
+                no.text != null && tries > 0 -> { // (the Bot wrote it since: its change and yours made one)
+                    val theirs = no.text
                     val merged = merge3(base ?: theirs, text, theirs)
                     if (merged == null) said("The Bot changed the same lines. Its version is shown as changes to accept or reject.")
                     text = merged ?: theirs
                     base = theirs
-                    mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
+                    mtime = no.mtime?.toLong()
                     save(tries - 1, said)
                 }
                 else -> {
-                    failed = r.optString("error").ifBlank { "it said no" }
+                    failed = no.said.orEmpty().ifBlank { "it said no" }
                     said(if (failed in UNREACHED) "Not saved yet: can't connect to the host" else "Couldn't save: $failed")
                     if (!retrying) { // (tried again, for as long as it isn't saved: one try waiting at a time)
                         retrying = true
@@ -224,7 +227,7 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     DisposableEffect(m) { onDispose { m.save(said = say) } }
     DisposableEffect(hostId, sid) {
         val l: (String, JSONObject) -> Unit = { at, msg ->
-            if (at == hostId && msg.optString("op") == Op.TURN_ENDED && msg.optString("session") == sid) m.load()
+            if (at == hostId && msg.optString("op") == Op.TURN_ENDED && Msg.TurnEnded.from(msg).session.orEmpty() == sid) m.load()
         }
         Mesh.listeners.add(l)
         onDispose { Mesh.listeners.remove(l) }

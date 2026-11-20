@@ -81,7 +81,7 @@ class Chat(hostId: String, sid: String) {
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
-    val senders = mutableStateMapOf<String, Msg.Sender>() // (a message's uuid: who it's from, if not you, as its
+    val senders = mutableStateMapOf<String, Msg.StoredSender>() // (a message's uuid: who it's from, if not you, as its
     // host's sender store has it: wire's Senders)
     var sendersRev = 0L                       // (the store's revision fetched: what its host lists is checked against)
     val holding = mutableStateListOf<String>() // (held messages being sent or dropped: not shown meanwhile)

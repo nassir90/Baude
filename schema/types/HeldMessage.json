@@ -9,7 +9,11 @@
     },
     "text": {
       "type": "string",
-      "description": "What it says."
+      "description": "What it says: what its agent's sent, as it's sent."
+    },
+    "shown": {
+      "type": "string",
+      "description": "What a person's shown of it: the answer itself, or what became of it in a line (still working, an error). Heads show text where it's missing."
     },
     "sender": {
       "anyOf": [

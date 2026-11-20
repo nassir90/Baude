@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Who a message to a session is from, as its host's sender store keeps it (by the message's uuid): a Sender, and what heads show of the message in place of its text, if the host says (shown).",
+  "properties": {
+    "kind": {
+      "enum": ["bot", "chat", "subagent", "host"],
+      "description": "What it is."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its host's id."
+    },
+    "host_name": {
+      "type": "string",
+      "description": "Its host's name."
+    },
+    "session": {
+      "type": "string",
+      "description": "Its session's id, on its host."
+    },
+    "shown": {
+      "type": "string",
+      "description": "What heads show of the message in place of its text: set by the host only (a held answer sent: its shown, its agent having been told more)."
+    }
+  },
+  "required": ["kind"],
+  "additionalProperties": false
+}

@@ -46,9 +46,11 @@ class MainActivity : ComponentActivity() {
                             feedback = { go(listOf("feedback", now[1], now[2])) })
                     }
                     "hosts" -> HostsScreen(::back)
+                    "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
+                    "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
-                        feedback = { go(listOf("feedback")) })
+                        feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) })
                 }
                 HostKeyAsk()
             }

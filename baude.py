@@ -7889,7 +7889,8 @@ def can_be_bot(info):
     """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and knows Bots (wire
     version 8), on a model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
     r = info.get("remote")
-    return r is not None and not info.get("dead") and r.state == "alive" and (r.info.get("version") or 1) >= 8 and \
+    return r is not None and not info.get("dead") and r.state == "alive" and \
+        baudelib.wire.speaks(r.info, "bot") and \
         modelslib.model_program(info.get("model")) in ("claude", "pi")
 
 
@@ -9032,7 +9033,7 @@ class SessionSidebar(Gtk.Box):
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
             items[1:1] = [("Bot Settings…", "make_bot"), ("Turn Back into a Chat", "unbot")] if info.get("bot") else \
                 [("Make Bot…", "make_bot")]
-        if can_be_bot(info) and not info.get("bot") and (info["remote"].info.get("version") or 1) >= 9:
+        if can_be_bot(info) and not info.get("bot") and baudelib.wire.speaks(info["remote"].info, "mesh_tools"):
             items.insert(2, ("Remove Mesh Tools", "mesh_off") if info.get("mesh_tools") else
                          ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
@@ -14709,9 +14710,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
                 return None, False
-        if r is None or (r.info.get("version") or 1) < 2:
+        if r is None or not baudelib.wire.speaks(r.info, "ephemeral"):  # (a phone's lists it, its ops)
             self.note("Daemon is older than Baude: restart it to ask a side question" if r is not None and r.mine else
-                      f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question: restart it")
+                      f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question" +
+                      ("" if r is not None and isinstance(r.info.get("ops"), list) else ": restart it"))
             return None, False
         mode = "default" if model_program(self.model) == "codex" else "plan"
         params = {"op": "start", "ephemeral": True, "mode": mode, "model": self.model, "prompt": ""}
@@ -16094,8 +16096,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """Show the permission and effort controls available for this backend."""
         program = model_program(self.model)
         self.effort_dd.set_visible(program == "claude" or self.effort_dd.get_sensitive())
-        self.mode_dd.set_visible(program in ("claude", "codex"))
+        self.mode_dd.set_visible(program in ("claude", "codex") or self.host_speaks("set_permission_mode"))
         self.sync_mode(self.mode)
+
+    def host_speaks(self, op):
+        """Does this chat's host take op as claude's own modes and always-allow have it, whatever its model's program,
+        as it says (its hello's ops: a phone's agents)? Not one that lists no ops: that's said by its program."""
+        r = self.remote
+        return r is not None and isinstance(r.info.get("ops"), list) and baudelib.wire.speaks(r.info, op)
 
     def sync_models(self, models):
         """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and the models this
@@ -16326,7 +16334,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.mode_dd.set_choices(choices)
         if mode and program == "codex":
             mode = modelslib.codex_mode(mode)
-        elif mode and program != "claude":
+        elif mode and program != "claude" and not self.host_speaks("set_permission_mode"):
             mode = "default"
         if mode:
             self.mode = mode
@@ -19390,7 +19398,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 allowed = self.allowed_in(self.session_id)
                 allowed.add(name)
                 if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
-                    new = (self.remote.info.get("version") or 1) >= 15  # added to its list; an older one's replaced)
+                    # added to its list; an older one's replaced)
+                    new = baudelib.wire.speaks(self.remote.info, "always_allow.add")
                     self.remote.request({"op": "always_allow", "session": self.session_id,
                                          **({"add": [name]} if new else {"tools": sorted(allowed)})})
             proc.asks.pop(rid, None)
@@ -19422,8 +19431,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         choices = [("Allow", "allow", False, "suggested-action"),
                    (f"Always allow {tool_display(name)[0]}", "allow", True, None),
                    ("Deny", "deny", False, "destructive-action")]
-        if model_program(self.model) != "claude":  # (Apple's model, or one on this Mac: each call asked, no always)
-            del choices[1]
+        if model_program(self.model) != "claude" and not self.host_speaks("always_allow"):  # (Apple's model, or one on
+            del choices[1]  # this Mac: each call asked, no always; a host's that keeps it, as a phone's: offered)
         if asking:  # (claude's questions: answered in a form, sent back as the call's answers)
             choices = []
             row.set_orientation(Gtk.Orientation.VERTICAL)

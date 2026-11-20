@@ -189,7 +189,7 @@ object Moves {
         listening = true
         Mesh.listeners.add { at, msg ->
             when (msg.optString("op")) {
-                "turn_ended" -> waiting.remove("$at/${msg.optString("session")}")?.let { (v, go) -> go(v) }
+                Op.TURN_ENDED -> waiting.remove("$at/${msg.optString("session")}")?.let { (v, go) -> go(v) }
                 "connected" -> for (k in waiting.keys.filter { it.startsWith("$at/") }) { // (its turn may have ended
                     val s = Mesh.session(at, k.substringAfter("/"))                    // while it was away)
                     if (s == null || s.optString("state") !in setOf("working", "waiting")) waiting.remove(k)?.let { (v, go) -> go(v) }
@@ -276,7 +276,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 if (e != null) { asked.remove("effort"); said("Couldn't change the effort: $e") }
             }
         }
-        if (prog == "claude" || prog == "codex") {
+        if (prog == "claude" || prog == "codex" || offers(hostId, Since.SET_PERMISSION_MODE)) { // (a host that keeps
+            // claude's modes whatever the program: a phone's agents)
             val modes = if (prog == "codex") CODEX_MODES else MODES
             val mode = asked["mode"] ?: s.str("mode") ?: "default"
             Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, "Permission mode", modes.map { it.second to it.first },

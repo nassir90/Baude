@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,9 +96,16 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         }
     }
     val list = rememberLazyListState()
-    LaunchedEffect(chat.lines.size, chat.asks.size) { // (to the end: what it said last, or what it asks)
-        val n = chat.lines.size + chat.asks.size
-        if (n > 0) list.animateScrollToItem(n - 1)
+    // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
+    // as it grows; scrolled up to read, left where it is)
+    var follow by remember(chat) { mutableStateOf(true) }
+    LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
+    LaunchedEffect(chat.lines.size, chat.asks.size, chat.streaming.value.length / 120) {
+        val n = list.layoutInfo.totalItemsCount
+        if (n > 0 && follow) {
+            list.animateScrollToItem(n - 1)
+            list.scrollBy(1e6f)
+        }
     }
     Mesh.tick.value
     Column(Modifier.fillMaxSize().inside(c)) {
@@ -105,7 +113,11 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
-            items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, alwaysOffered(session?.optString("model"))) }
+            if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
+            items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
+                Asked(chat, ask, alwaysOffered(session?.optString("model"), at),
+                    if (session?.optJSONObject("bot") != null) name else "Claude") // (a Bot's question: its name's)
+            }
             val held = session?.optJSONArray("held").list().filter { it.optString("id") !in chat.holding }
             items(held, key = { "held:" + it.optString("id") }) { h -> Held(chat, h, working) }
             if (working && chat.asks.isEmpty()) item {
@@ -152,12 +164,12 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
  * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean) {
+fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
     Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (ask.tool == "AskUserQuestion" && questions != null) {
-            Text("Claude has a question", style = Type.bold, color = c.fg)
+            Text("$name has a question", style = Type.bold, color = c.fg)
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
             return@Column
@@ -169,7 +181,8 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean) {
                 .padding(horizontal = 8.dp, vertical = 6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button("Allow", suggested = true) { Mesh.answer(chat, ask, allow = true) }
-            if (alwaysOffered) Button("Always allow ${toolDisplay(ask.tool).first}") {
+            // (a plan's agreed to each time)
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button("Always allow ${toolDisplay(ask.tool).first}") {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }
             Button("Deny", destructive = true) { Mesh.answer(chat, ask, allow = false) }

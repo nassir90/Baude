@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/nassir90/Baude/schema/wire.schema.json",
  "title": "Baude's wire",
- "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-since: the wire version an op, entity or field came with (none: 1). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
+ "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-since: the wire version an op, entity or field came with (none: 1). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). x-features: what a host may take that isn't an op of its own (its sessions' programs' control requests, an op's field), by the name a host's ops list it by. x-hosts: hosts that speak only part of the wire, and what they take. baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
  "x-versions": {
   "1": {
    "description": "The first (#98-#123): every op and field with no later version."
@@ -191,9 +191,11 @@
    ]
   },
   "18": {
-   "description": "input's, start's and relay's as, held, senders, a session's held and senders.",
+   "description": "input's, start's and relay's as, held, senders, a session's held and senders; info's ops (a phone's).",
    "adds": [
     "HeldMessage",
+    "Info.ops",
+    "Info.phone",
     "Sender",
     "Session.held",
     "Session.senders",
@@ -203,7 +205,8 @@
     "open.sender",
     "relay.as",
     "senders",
-    "start.as"
+    "start.as",
+    "start.bot"
    ]
   }
  },
@@ -287,6 +290,61 @@
    "value": 72,
    "unit": "JPEG quality",
    "description": "A watched browser's frames' (emission_frame)."
+  }
+ },
+ "x-features": {
+  "control": {
+   "since": 1,
+   "description": "Control requests to a session's agent (input's msg a control_request: interrupt, set_model, ...), as its program takes them."
+  },
+  "set_permission_mode": {
+   "since": 1,
+   "description": "The control request that changes a session's permission mode, where its program takes it (claude's, codex's; a phone's agents')."
+  },
+  "set_model": {
+   "since": 1,
+   "description": "The control request that changes a session's model."
+  },
+  "ephemeral": {
+   "field": "start.ephemeral",
+   "description": "start's ephemeral: a side question."
+  },
+  "app_tools": {
+   "field": "start.app_tools",
+   "description": "start's (and attach's) app_tools: a head's own tools for its session's agent."
+  }
+ },
+ "x-hosts": {
+  "phone": {
+   "description": "A phone's host (the Android app's PhoneHost), which speaks only part of the wire: what its hello lists as its ops.",
+   "ops": [
+    "hello",
+    "ping",
+    "subscribe",
+    "start",
+    "attach",
+    "detach",
+    "input",
+    "stop",
+    "transcript",
+    "subagents",
+    "rename",
+    "archive",
+    "unarchive",
+    "delete",
+    "always_allow",
+    "bot",
+    "bot_picture",
+    "memory",
+    "read_file",
+    "catalogue",
+    "list_dir",
+    "senders",
+    "ephemeral",
+    "control",
+    "set_permission_mode",
+    "set_model"
+   ]
   }
  },
  "oneOf": [
@@ -1611,6 +1669,19 @@
      "description": "Record's notebooks here, as written last (notes.stamp).",
      "x-since": 6,
      "x-open": true
+    },
+    "phone": {
+     "type": "boolean",
+     "description": "A phone's host.",
+     "x-since": 18
+    },
+    "ops": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Given by a host that speaks only part of these lines (a phone's, x-hosts): the ops it takes, and the features (x-features) its sessions take, which a head checks (speaks) instead of its version.",
+     "x-since": 18
     }
    },
    "required": [
@@ -2728,6 +2799,11 @@
     "as": {
      "type": "string",
      "description": "As input's, for the prompt.",
+     "x-since": 18
+    },
+    "bot": {
+     "$ref": "#/$defs/BotFields",
+     "description": "A Bot made of it as it starts (a phone's host takes it; picture left out).",
      "x-since": 18
     }
    },

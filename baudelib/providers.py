@@ -538,7 +538,7 @@ def look():
         if p is None:
             continue
         if not p["error"] and not pi and p["models"]:
-            p["error"] = "pi isn't installed"
+            p["error"] = NO_PI
         out.append(p)
     return out
 
@@ -615,6 +615,9 @@ def found(wait=False, max_age=MAX_AGE):
     return list(_STATE["providers"] or [])
 
 
+NO_PI = "pi isn't installed"  # (an Ollama's or an endpoint's error here: it serves, but pi-claude can't run it here)
+
+
 def usable(providers=None, tools=False):
     """The providers that run models now: with models and no error (tools: those models only that call tools)."""
     out = []
@@ -631,7 +634,8 @@ def local_providers():
     program runs: Apple's, MLX's), "models": [{"value", "displayName", "id" (its name to its server), "tools",
     "window", "input", "thinking", "version", "digest" (where they're said)}]}]."""
     out = []
-    for p in usable(found(wait=True)):
+    found_now = found(wait=True)  # (one pi-claude can't run here still serves the mesh its API: its runs elsewhere)
+    for p in usable([{**p, "error": None} if p["error"] == NO_PI else p for p in found_now]):
         kind = "openai" if p["id"].startswith("openai/") else p["id"]
         base = p["url"] + "/v1" if kind == "ollama" else p.get("url") if kind == "openai" else None
         out.append({"id": p["id"], "kind": kind, "name": p["name"], "base_url": base, "models": [

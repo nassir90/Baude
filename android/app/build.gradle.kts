@@ -393,6 +393,13 @@ abstract class WireSchema : DefaultTask() {
                 "don't say it, and not ${have - said} that do: is it claimed twice?")
         }
         val version = numbers.last()
+        val features = map(s["x-features"]).mapValues { map(it.value) }
+        val listedBy = features.filterValues { "field" in it }.entries.associate { (n, f) -> f["field"] as String to n }
+        for ((n, f) in features) if (n in since || ("field" in f) == ("since" in f) || "field" in f && f["field"] !in since)
+            throw GradleException("wire schema: x-features' $n is an op, or isn't a field or a version of its own")
+        val hosts = map(s["x-hosts"]).mapValues { (map(it.value)["ops"] as List<*>).map { o -> o as String } }
+        for ((n, ops) in hosts) ops.filter { it !in since && it !in features }.takeIf { it.isNotEmpty() }?.let {
+            throw GradleException("wire schema: x-hosts' $n takes $it, which are neither ops nor features") }
         since.filterValues { it > version }.keys.takeIf { it.isNotEmpty() }?.let {
             throw GradleException("wire schema: these came with a version past $version: $it") }
 
@@ -402,23 +409,36 @@ abstract class WireSchema : DefaultTask() {
         out.append("/** The wire's ops. */\nobject Op {\n")
         for (o in messages.map { op(defs[it]!!) }.distinct()) out.append("    const val ${upper(o)} = \"$o\"\n")
         out.append("}\n\n")
-        out.append("/** Something a host takes from a version on (or, where its hello lists its ops, if it lists it). */\n")
-        out.append("class Feature(val key: String, val since: Int)\n\n")
+        out.append("/** Something a host takes: from a version on, or, where its hello lists its ops, if it lists it (by listed, " +
+            "the op's name or a feature's). */\n")
+        out.append("class Feature(val key: String, val since: Int, val listed: String)\n\n")
+        fun listed(k: String) = listedBy[k] ?: k.substringBefore('.')
         out.append("/** The version each op (START) and entity (SESSION) came with, and their fields (Start.EPHEMERAL). */\n")
         out.append("object Since {\n    const val VERSION = $version\n")
         val names = HashSet<String>()
         for ((k, v) in since) if ('.' !in k) {
             if (!names.add(upper(k))) throw GradleException("wire schema: two of its names are ${upper(k)} in Kotlin")
-            out.append("    val ${upper(k)} = Feature(\"$k\", $v)\n")
+            out.append("    val ${upper(k)} = Feature(\"$k\", $v, \"${listed(k)}\")\n")
+        }
+        for ((n, f) in features) {
+            if (!names.add(upper(n))) throw GradleException("wire schema: two of its names are ${upper(n)} in Kotlin")
+            val v = (f["since"] as Number?)?.toInt() ?: since[f["field"] as String]!!
+            out.append(doc(f["description"], "    "))
+            out.append("    val ${upper(n)} = Feature(\"${f["field"] ?: n}\", $v, \"$n\")\n")
         }
         for (owner in since.keys.filter { '.' !in it }) {
             val obj = owner.split("_").joinToString("") { w -> w.replaceFirstChar { it.uppercase() } }
             if (!names.add(obj)) throw GradleException("wire schema: two of its names are $obj in Kotlin")
             out.append("\n    object $obj {\n")
             for ((k, v) in since) if (k.substringBefore('.') == owner && '.' in k)
-                out.append("        val ${upper(k.substringAfter('.'))} = Feature(\"$k\", $v)\n")
+                out.append("        val ${upper(k.substringAfter('.'))} = Feature(\"$k\", $v, \"${listed(k)}\")\n")
             out.append("    }\n")
         }
+        out.append("}\n\n")
+        out.append("/** Hosts that speak only part of the wire: what each takes, as its hello lists its ops. */\nobject WireHosts {\n")
+        for ((n, ops) in hosts) out.append("    val ${upper(n)} = listOf(${ops.joinToString { "\"$it\"" }})\n")
+        out.append("    /** What a host may take that isn't an op (x-features), by the name its ops list it by. */\n")
+        out.append("    val FEATURES = setOf(${features.keys.joinToString { "\"$it\"" }})\n")
         out.append("}\n\n")
         out.append("/** The protocol's constants. */\nobject WireConstants {\n")
         for ((k, c) in map(s["x-constants"])) {
@@ -427,6 +447,62 @@ abstract class WireSchema : DefaultTask() {
             out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
         }
         out.append("}\n\n")
+        // (WireCheck: what wire.check does, a field or op the schema hasn't, in what's sent; entities looked into)
+        fun closed(n: String) = defs[n]?.get("additionalProperties") == false
+        fun nested(p: Map<String, Any?>): String? {
+            if (p["x-open"] == true) return null
+            ref(p)?.let { r -> return if ("array" in types(p) || !closed(r)) null else r }
+            if ("array" in types(p)) return ref(map(p["items"]))?.takeIf { closed(it) }
+            val values = p["additionalProperties"]
+            if (values is Map<*, *>) return ref(map(values))?.takeIf { closed(it) }?.let { "{$it}" }
+            return null
+        }
+        fun shape(fields: Set<String>, inner: Map<String, String>) =
+            "Shape(setOf(${fields.joinToString { "\"$it\"" }}), mapOf(${inner.entries.joinToString { "\"${it.key}\" to \"${it.value}\"" }}))"
+        out.append("/** What of a message isn't the schema's (an op, a field: wire.check's): what's sent is checked by it. */\n")
+        out.append("object WireCheck {\n    private class Shape(val fields: Set<String>, val inner: Map<String, String>)\n\n")
+        out.append("    private val ENTITIES = mapOf(\n")
+        for ((n, d) in defs) if (n !in messages && closed(n)) {
+            val inner = props(d).mapNotNull { (f, p) -> nested(p)?.let { f to it } }.toMap()
+            out.append("        \"$n\" to ${shape(props(d).keys, inner)},\n")
+        }
+        out.append("    )\n\n    private val OPS = mapOf(\n")
+        for (o in messages.map { op(defs[it]!!) }.distinct()) {
+            val lines = messages.filter { op(defs[it]!!) == o }.map { props(defs[it]!!) }
+            val fields = lines.flatMap { it.keys }.toSet()
+            val inner = fields.mapNotNull { f ->
+                val said = lines.mapNotNull { it[f] }.map { nested(it) }.distinct()
+                said.singleOrNull()?.let { f to it } }.toMap()
+            out.append("        \"$o\" to ${shape(fields, inner)},\n")
+        }
+        out.append("    )\n\n")
+        out.append("""    fun problem(msg: JSONObject): String? {
+        val op = msg.optString("op")
+        val shape = OPS[op] ?: return "no op '${'$'}op' in the schema"
+        return within(op, shape, msg)
+    }
+
+    private fun within(at: String, shape: Shape, o: JSONObject): String? {
+        for (k in o.keys()) {
+            if (k !in shape.fields) return "${'$'}at.${'$'}k: no such field"
+            val e = shape.inner[k] ?: continue
+            val v = o.opt(k)
+            val bad = if (e.startsWith("{")) (v as? JSONObject)?.let { m ->
+                m.keys().asSequence().firstNotNullOfOrNull { key -> entity("${'$'}at.${'$'}k[${'$'}key]", e.trim('{', '}'), m.opt(key)) } }
+                else entity("${'$'}at.${'$'}k", e, v)
+            if (bad != null) return bad
+        }
+        return null
+    }
+
+    private fun entity(at: String, name: String, v: Any?): String? = when (v) {
+        is JSONObject -> within(at, ENTITIES.getValue(name), v)
+        is JSONArray -> (0 until v.length()).firstNotNullOfOrNull { entity("${'$'}at[${'$'}it]", name, v.opt(it)) }
+        else -> null
+    }
+}
+
+""")
         out.append("private fun JSONObject.wireStr(key: String): String? = if (isNull(key)) null else optString(key)\n\n")
         out.append("/** The wire's messages and the entities in them: each built with the fields it's given (those left null aren't " +
             "sent), json() as it goes, from() as it came (a field it doesn't have left out). */\nobject Msg {\n")

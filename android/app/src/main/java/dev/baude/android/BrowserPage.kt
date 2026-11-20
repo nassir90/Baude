@@ -107,10 +107,10 @@ class Watch(private val hostId: String, private val bot: Msg.BotRef) {
     private fun heard(c: Connection, msg: JSONObject) {
         if (msg.optInt("req", -1) != REQ) return
         when (msg.optString("op")) {
-            "emission_watching" -> Mesh.post { status.value = "watching"; why.value = null }
-            "error" -> Mesh.post { status.value = "failed"; why.value = msg.optString("error") }
-            "emission_watch_end" -> Mesh.post { status.value = "stopped" }
-            "emission_frame" -> {
+            Op.EMISSION_WATCHING -> Mesh.post { status.value = "watching"; why.value = null }
+            Op.ERROR -> Mesh.post { status.value = "failed"; why.value = msg.optString("error") }
+            Op.EMISSION_WATCH_END -> Mesh.post { status.value = "stopped" }
+            Op.EMISSION_FRAME -> {
                 msg.optJSONObject("state")?.let { s -> Mesh.post { state.value = s } }
                 if (msg.has("error")) Mesh.post { status.value = "failed"; why.value = msg.optString("error") }
                 val jpeg = msg.optString("jpeg")

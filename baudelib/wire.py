@@ -144,6 +144,15 @@ def _check_schema():
 
 
 VERSION, SINCE = _check_schema()
+FEATURES = SCHEMA["x-features"]  # (what a host may take that isn't an op: by the name its ops list it by)
+LISTED = {f["field"]: name for name, f in FEATURES.items() if "field" in f}  # (an op's field: its feature's name)
+for _name, _f in FEATURES.items():
+    if _name in OPS or ("field" in _f) == ("since" in _f) or "field" in _f and _f["field"] not in SINCE:
+        raise SchemaError(f"x-features' {_name} is an op, or isn't a field or a version of its own")
+HOSTS = {name: h["ops"] for name, h in SCHEMA["x-hosts"].items()}  # (hosts that speak only part of the wire: theirs)
+for _name, _ops in HOSTS.items():
+    if bad := [o for o in _ops if o not in OPS and o not in FEATURES]:
+        raise SchemaError(f"x-hosts' {_name} takes {bad}, which are neither ops nor features")
 CONSTANTS = {k: c["value"] for k, c in SCHEMA["x-constants"].items()}
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
@@ -153,17 +162,21 @@ OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: t
 
 
 def since(key):
-    """The version an op ("git"), an op's field ("start.ephemeral"), an entity or its field ("Session.held") came
-    with. KeyError for one the schema hasn't."""
+    """The version an op ("git"), an op's field ("start.ephemeral"), an entity or its field ("Session.held"), or a
+    feature ("set_model") came with. KeyError for one the schema hasn't."""
+    if key in FEATURES:
+        f = FEATURES[key]
+        return f["since"] if "since" in f else SINCE[f["field"]]
     return SINCE[key]
 
 
 def speaks(info, key):
     """Does a host take key (as since() has it): as its hello's ops say, where it lists them (a host that speaks only
-    part of these lines); else by its version."""
+    part of these lines: a phone's), by the op's name, or the feature's an op's field is listed by (else its op's);
+    else by its version."""
     ops = (info or {}).get("ops")
     if isinstance(ops, list):
-        return key in ops or key.rsplit(".", 1)[-1] in ops
+        return LISTED.get(key, key if key in FEATURES else key.split(".")[0]) in ops
     return ((info or {}).get("version") or 1) >= since(key)
 
 

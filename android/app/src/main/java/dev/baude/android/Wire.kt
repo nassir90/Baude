@@ -15,11 +15,18 @@ import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
-const val PING_MS = 5_000L    // (wire.PING_S: each end says something at least this often)
-const val SILENT_MS = 16_000L // (wire.SILENT_S: silent this long, the other end's taken for gone)
-const val MIN_VERSION = 8     // (wire's version 8: Bots)
+const val PING_MS = WireConstants.PING_S * 1000L     // (each end says something at least this often)
+const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the other end's taken for gone)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
-const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long to open)
+const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
+/** msg as it may go: one the wire's schema hasn't (an op, a field: WireCheck) goes as an error, for its request, in
+ * its place, said in the log, as wire.py's Channel.send has it. */
+fun checked(msg: JSONObject): JSONObject {
+    val bad = WireCheck.problem(msg) ?: return msg
+    android.util.Log.w("wire", "not sent: $bad")
+    return Msg.Error(req = msg.opt("req") as? Number, error = "not sent: $bad").json()
+}
+
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
 
@@ -42,6 +49,11 @@ sealed class Place {
     data class Member(val member: String) : Place() {
         override val id: String get() = "mesh:$member"
     }
+
+    /** This phone's own host (PhoneHost), talked to in the app. */
+    object Phone : Place() {
+        override val id: String get() = "phone"
+    }
 }
 
 /** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, "<command> connect" run
@@ -50,7 +62,7 @@ sealed class Place {
  * member, and from then on a tunnel to it, hello first as ever (wire.through). Made again whenever it drops, a little
  * later each time (a member: every RELAY_RETRY_MS while a host lists it, else once one does); not while the host's key
  * isn't one you've trusted (shown, for you to say). */
-class Connection(
+open class Connection(
     private val ctx: Context,
     val place: Place,
     private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
@@ -76,11 +88,11 @@ class Connection(
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
 
-    fun start() {
+    open fun start() {
         thread(name = "conn-$id", isDaemon = true) { loop() }
     }
 
-    fun stop() {
+    open fun stop() {
         stopped = true
         wake.offer(Unit)
         end()
@@ -170,6 +182,7 @@ class Connection(
             s.connect(15_000)
             (s.openChannel("exec") as ChannelExec).apply { setCommand("${p.host.command} connect") }
         }
+        is Place.Phone -> throw NoRoute("this phone's own host isn't reached over ssh")
         is Place.Member -> {
             val v = route(p.member) ?: throw NoRoute("none of your hosts reaches it now")
             via = v
@@ -228,7 +241,7 @@ class Connection(
                         said = reply.optString("error", "the host said no")
                         end()
                     }
-                    (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
+                    !offers(server, Since.BOT) -> {
                         said = "this host's Baude is too old for Bots: update it"
                         end()
                     }
@@ -297,15 +310,15 @@ class Connection(
     }
 
     /** A line to the host process, sent in turn on its own thread (false if there's no connection). */
-    fun send(msg: JSONObject): Boolean {
+    open fun send(msg: JSONObject): Boolean {
         val q = writes ?: return false
-        q.put((msg.toString() + "\n").toByteArray(Charsets.UTF_8))
+        q.put((checked(msg).toString() + "\n").toByteArray(Charsets.UTF_8))
         return true
     }
 
     /** A request, its reply to then (on this connection's thread), or an error reply if it can't be sent or the
      * connection goes first. */
-    fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
+    open fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
         val req = nextReq.getAndIncrement()
         calls[req] = then
         if (!send(msg.put("req", req))) {

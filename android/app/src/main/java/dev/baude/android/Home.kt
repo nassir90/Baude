@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
@@ -239,7 +240,7 @@ private fun limit(key: String): Int = when {
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by date and pick
  * groups. */
 @Composable
-fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit) {
+fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -249,6 +250,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
     val more = remember { mutableStateListOf<String>() } // (sections shown whole this run: Show N more)
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Baude", end = {
+            IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
             Menu(listOf("Send Feedback…" to feedback))
         })
@@ -410,7 +412,7 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     val pick = HomePrefs.host.value
     val ids = (Mesh.hosts.map { it.id } + Mesh.sessions.keys).distinct()
-        .filter { Mesh.conn(it)?.info == null || offers(it, "subscribe") }
+        .filter { Mesh.conn(it)?.info == null || offers(it, Since.SUBSCRIBE) }
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically) {

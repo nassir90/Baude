@@ -30,15 +30,17 @@ data class Contact(val hostId: String, val session: JSONObject) {
     val said: Double get() = session.optDouble("said", session.optDouble("updated", 0.0))
     val state: String get() = session.optString("state", "stopped")
     val asking: Boolean get() = (session.optJSONArray("asks")?.length() ?: 0) > 0
-    val alwaysOffered: Boolean get() = alwaysOffered(session.optString("model"))
+    val alwaysOffered: Boolean get() = alwaysOffered(session.optString("model"), hostId)
     val pictureKey: String get() = "$hostId/$id/${session.optJSONObject("bot")?.opt("picture")}"
 }
 
-/** Whether "always allow" is offered for what a chat asks, as Baude offers it: for Claude Code's models only
- * (another program's asks each call: models.model_program). */
-fun alwaysOffered(m: String?): Boolean = m == null ||
+/** Whether "always allow" is offered for what a chat asks, as Baude offers it: for Claude Code's models (another
+ * program's asks each call: models.model_program); or, whatever its program, where its host lists the ops it takes
+ * and always_allow's one of them (a phone's agents, which keep it as claude's). */
+fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
     !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
-        m.startsWith("agent/") || m.startsWith("mlx-"))
+        m.startsWith("agent/") || m.startsWith("mlx-")) ||
+    hostId != null && Mesh.conn(hostId)?.info?.has("ops") == true && offers(hostId, Since.AlwaysAllow.ADD)
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
@@ -76,6 +78,7 @@ class Chat(hostId: String, sid: String) {
     val busy = mutableStateOf(false)
     val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
+    val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     val senders = mutableStateMapOf<String, JSONObject>() // (a message's uuid: who it's from, if not you, as its
@@ -135,6 +138,7 @@ object Mesh {
         hosts.addAll(HostStore.load(app))
         channel()
         hosts.forEach { connect(it) }
+        start(PhoneHost.connection(app, ::heard) { conn -> main.post { changed(conn) } }) // (this phone's own agents)
         try { // (the network back: each host that's down tried again at once)
             app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
                 object : android.net.ConnectivityManager.NetworkCallback() {
@@ -245,7 +249,7 @@ object Mesh {
             for (m in c.info?.optJSONObject("mesh")?.optJSONArray("members").list()) {
                 val id = m.optString("id").takeIf(::isId) ?: continue
                 seen.add(id)
-                if (id in known || heldBy(m) != null) continue
+                if (id in known || heldBy(m) != null || id == PhoneHost.id) continue // (this phone, as the mesh has it)
                 val now = best[id]
                 if (now == null || m.optInt("hops", 99) < now.first.optInt("hops", 99)) best[id] = m to c
             }
@@ -314,7 +318,11 @@ object Mesh {
             if (sessions[c.id] != null) catchUp.add(c.id)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
-        if (c.place is Place.Direct) meshed()
+        if (c.place is Place.Direct) {
+            meshed()
+            PhoneLink.look()
+        }
+        if (c.place !is Place.Phone) PhoneHost.changed() // (the models the mesh serves the phone's agents: heads told)
         if (c.state == "up") for (l in listeners.toList()) l(c.id, JSONObject().put("op", "connected")) // (its pages:
     }                                                                                                    // attached again)
 
@@ -341,16 +349,17 @@ object Mesh {
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): JSONObject? = sessions[hostId]?.firstOrNull { it.optString("id") == sid }
 
-    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (offers): (id,
-     * label), your hosts first. */
-    fun reached(op: String? = null): List<Pair<String, String>> = conns.values
-        .filter { it.state == "up" && (op == null || offers(it.id, op)) }
+    /** Every connection that's up, as a host or a member of the mesh, that takes what's given (offers): (id, label),
+     * your hosts first. */
+    fun reached(takes: Feature? = null): List<Pair<String, String>> = conns.values
+        .filter { it.state == "up" && (takes == null || offers(it.id, takes)) }
         .sortedWith(compareBy({ it.place is Place.Member }, { label(it.id).lowercase() })).map { it.id to label(it.id) }
 
     /** Another connection to where hostId is, for a watch of its own (it doesn't subscribe): started; stop it when
      * it's done with. */
     fun watch(hostId: String, heard: (Connection, JSONObject) -> Unit, changed: (Connection) -> Unit): Connection? {
-        val c = conns[hostId] ?: return null
+        // (this phone's own host is in the app: no watch of its own)
+        val c = conns[hostId]?.takeIf { it.place !is Place.Phone } ?: return null
         return Connection(app, c.place, ::identify, { routes[it] }, heard, subscribes = false) { w ->
             main.post { changed(w) }
         }.also { it.start() }
@@ -363,7 +372,7 @@ object Mesh {
             if (conns[c.id] !== c) return@post
             for (l in listeners.toList()) l(c.id, msg)
             when (msg.optString("op")) {
-                "sessions" -> {
+                Op.SESSIONS -> {
                     val now = msg.optJSONArray("sessions").list()
                     val before = sessions[c.id]
                     sessions[c.id] = now
@@ -379,16 +388,36 @@ object Mesh {
                         read(it) // (its first read, or what it missed)
                     }
                 }
-                "turn_ended" -> ended(c, msg)
-                "emission_call" -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
-                "emission_unserved" -> PhoneBrowser.unserved(c, msg)
-                "claude" -> open?.let {
+                Op.TURN_ENDED -> ended(c, msg)
+                Op.EMISSION_CALL -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
+                Op.EMISSION_UNSERVED -> PhoneBrowser.unserved(c, msg)
+                Op.CLAUDE -> open?.let {
                     if (it.hostId != c.id || it.sid != msg.optString("session")) return@let
                     msg.optJSONObject("msg")?.let { m -> if (m.optString("type") == "system") task(it, m) }
+                    streamed(it, msg.optJSONObject("msg"))
+                    if (msg.optJSONObject("msg")?.optString("type") == "stream_event") return@let // (its text: no read)
                     val ask = msg.optJSONObject("msg")?.let(Ask::of)
                     if (ask != null && it.asks.none { a -> a.rid == ask.rid }) it.asks.add(ask)
                     read(it)
                 }
+            }
+        }
+    }
+
+    /** What an agent's writing, shown as it comes (claude's stream_event: its text's deltas), and gone once its
+     * message is whole (what its transcript has, read). */
+    private fun streamed(chat: Chat, m: JSONObject?) {
+        m ?: return
+        if (m.optString("type") != "stream_event") {
+            if (m.optString("type") in setOf("assistant", "result")) chat.streaming.value = ""
+            return
+        }
+        if (!m.isNull("parent_tool_use_id")) return
+        val e = m.optJSONObject("event") ?: return
+        when (e.optString("type")) {
+            "message_start" -> chat.streaming.value = ""
+            "content_block_delta" -> e.optJSONObject("delta")?.takeIf { it.optString("type") == "text_delta" }?.let {
+                chat.streaming.value += it.optString("text")
             }
         }
     }
@@ -462,10 +491,9 @@ object Mesh {
         if (always) {
             val all = alwaysAllowed(chat) + ask.tool
             allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
-            val req = Msg.AlwaysAllow(session = chat.sid).json()
-            if ((c.info?.optInt("version", 1) ?: 1) >= 15) req.put("add", JSONArray(listOf(ask.tool))) // (added to
-            else req.put("tools", JSONArray(all.sorted())) // its list; an older host's replaced: all that's known here)
-            c.request(req) {}
+            val req = if (offers(c.info, Since.AlwaysAllow.ADD)) Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool))
+            else Msg.AlwaysAllow(session = chat.sid, tools = all.sorted()) // (added to its list; an older host's replaced:
+            c.request(req.json()) {}                                       // all that's known here)
         }
         c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
             if (r.optString("op") == Op.ERROR) main.post {

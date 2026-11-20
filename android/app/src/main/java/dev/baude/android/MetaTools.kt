@@ -135,7 +135,7 @@ object MetaTools {
         "No chat ${missing.joinToString(", ") { "'$it'" }}: app_index chats lists them, each with its id."
 
     fun hostByName(name: String): String? =
-        Mesh.reached("start").firstOrNull { it.second.equals(name, true) || it.first == name }?.first
+        Mesh.reached(Since.START).firstOrNull { it.second.equals(name, true) || it.first == name }?.first
 
     fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
         Mesh.conn(id)?.info?.optJSONArray("groups").strings() - (Mesh.conn(id)?.info?.optString("group") ?: "")
@@ -257,7 +257,7 @@ object MetaTools {
             else { HomePrefs.by.value = v; HomePrefs.save(); null }
         "sidebar_host" -> {
             val to = if (v == "all") "all" else hostByName(v) ?: Mesh.conn(v)?.id
-            if (to == null) "no host $v: all, or ${Mesh.reached("subscribe").joinToString(", ") { it.second }}"
+            if (to == null) "no host $v: all, or ${Mesh.reached(Since.SUBSCRIBE).joinToString(", ") { it.second }}"
             else { HomePrefs.host.value = to; HomePrefs.save(); null }
         }
         else -> "No setting '$name': they're sidebar_group, sidebar_host."
@@ -287,7 +287,7 @@ object MetaTools {
             Triple("name", "the group's name", { _: JSONObject -> null }))),
         "spawn_agent" to FormDef("Spawn an agent", "Start", "start an agent (a session) on a host: the host, then what it " +
             "offers to run, the folder, group and prompt", listOf(
-            Triple("host", "the host it runs on", { _: JSONObject -> Mesh.reached("start").map { it.second } }),
+            Triple("host", "the host it runs on", { _: JSONObject -> Mesh.reached(Since.START).map { it.second } }),
             Triple("agent", "what runs it: one of the host's", ::agents),
             Triple("folder", "the folder it starts in, on that host", { _: JSONObject -> null }),
             Triple("group", "its group (or empty)", { _: JSONObject -> null }),
@@ -515,7 +515,7 @@ object MetaTools {
             }
             "changelog" -> {
                 val h = Meta.host.value ?: return no("Meta's host isn't connected.")
-                if (!offers(h, "git")) return no(tooOld(h, "show its changelog"))
+                if (!offers(h, Since.GIT)) return no(tooOld(h, "show its changelog"))
                 Meta.under(Line("rows", JSONObject().put("changelog", h).toString()))
             }
             "button" -> {
@@ -529,7 +529,7 @@ object MetaTools {
                     }
                     "host" -> {
                         val h = item?.let { hostByName(it) } ?: return no("No host '${item.orEmpty()}': they're " +
-                            Mesh.reached("start").joinToString(", ") { it.second } + ".")
+                            Mesh.reached(Since.START).joinToString(", ") { it.second } + ".")
                         Meta.under(Line("rows", JSONObject().put("button", "host").put("host", h)
                             .put("label", "Open ${Mesh.label(h)}").toString()))
                     }

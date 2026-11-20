@@ -91,7 +91,8 @@ object Meta {
         val lines = ArrayList<String>()
         lines.add("Baude for Android · ${Mesh.hosts.size} host(s) added")
         lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }}")
-        for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") })) {
+        for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") } +
+                listOf("phone" to Mesh.label("phone")))) { // (this phone's own agents too)
             val conn = Mesh.conn(id)
             lines.add("host $label: ${conn?.state ?: "not connected"}")
             for (s in Mesh.sessions[id].orEmpty().filter { !it.optBoolean("draft") }.take(60)) {
@@ -198,7 +199,7 @@ object Meta {
     fun send(text: String) {
         val h = host.value ?: return
         val c = chat
-        if (!offers(h, "app_tools")) {
+        if (!offers(h, Since.APP_TOOLS)) {
             c.said.value = tooOld(h, "run Meta for a phone")
             return
         }
@@ -259,9 +260,9 @@ object Meta {
             if (at != h) return@l
             when (msg.optString("op")) {
                 "connected" -> return@l reattach(h)
-                "mcp_open" -> if (msg.optString("name") == MetaTools.NAME && (msg.optString("session") == c.sid || c.sid.isEmpty()))
+                Op.MCP_OPEN -> if (msg.optString("name") == MetaTools.NAME && (msg.optString("session") == c.sid || c.sid.isEmpty()))
                     relays.add(msg.optInt("conn"))
-                "mcp" -> if (msg.optInt("conn") in relays) {
+                Op.MCP -> if (msg.optInt("conn") in relays) {
                     val n = msg.optInt("conn")
                     val call = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
                     val what = call.optJSONObject("params")?.let { p -> "${p.optString("name")} ${p.optJSONObject("arguments") ?: "{}"}" }
@@ -274,16 +275,16 @@ object Meta {
                         if (!sent && was != null) ranLate(was, answer) // (its host gone meanwhile: it failed it there)
                     }
                 }
-                "mcp_late" -> { // (it ran here, but its host had failed it to Meta already: Meta's told it did run)
+                Op.MCP_LATE -> { // (it ran here, but its host had failed it to Meta already: Meta's told it did run)
                     val r = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
                     running.remove("${msg.optInt("conn")}/${r.opt("id")}")?.let { ranLate(it, msg.optString("line")) }
                 }
-                "mcp_close" -> relays.remove(msg.optInt("conn"))
+                Op.MCP_CLOSE -> relays.remove(msg.optInt("conn"))
             }
             if (msg.optString("session") != c.sid || c.sid.isEmpty()) return@l
             when (msg.optString("op")) {
-                "exited" -> { c.thinking.value = false; shownNow() }
-                "claude" -> {
+                Op.EXITED -> { c.thinking.value = false; shownNow() }
+                Op.CLAUDE -> {
                     val m = msg.optJSONObject("msg") ?: return@l
                     Ask.of(m)?.let { a -> if (c.asks.none { it.rid == a.rid }) c.asks.add(a) }
                     when (m.optString("type")) {
@@ -340,7 +341,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
     val c = LocalBaude.current
     Mesh.tick.value
     Meta.version.value
-    val up = Mesh.reached("app_tools")
+    val up = Mesh.reached(Since.APP_TOOLS)
     androidx.compose.runtime.LaunchedEffect(up, chatHost) { // (a host it's on kept, even while it's away: its session
         if (Meta.host.value == null)                          // waits for the phone there)
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
@@ -465,7 +466,7 @@ fun MetaRows(text: String) {
         }
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-            val up = Mesh.reached("subscribe")
+            val up = Mesh.reached(Since.SUBSCRIBE)
             Picker(HomePrefs.host.value.let { if (it == "all") "All hosts" else Mesh.label(it) }, "Hosts shown",
                 listOf("All hosts" to "all") + up.map { it.second to it.first }, HomePrefs.host.value) {
                 HomePrefs.host.value = it; HomePrefs.save()

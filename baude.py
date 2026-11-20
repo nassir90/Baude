@@ -15299,9 +15299,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.queue_box.remove(t)
         last = None
         for hid, h in held.items():
-            if hid not in turns:  # (from whom its host says it is)
+            if hid not in turns:  # (from whom its host says it is; what a person's shown of it, else what it says)
+                said = h["shown"] if isinstance(h.get("shown"), str) else h["text"]
                 turns[hid] = HeldTurn(self, self.sender_bubble(baudelib.wire.clean_sender(h.get("sender")) or
-                                                               {"kind": "host"}, h["text"].strip()), h)
+                                                               {"kind": "host"}, baudelib.wire.unsaid(said).strip()), h)
                 self.queue_box.insert_child_after(turns[hid], last)  # (over what's queued, in the order held)
             last = turns[hid]
         self.queue_box.set_visible(bool(self.queued or any(t.get_visible() for t in turns.values())))

@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -304,7 +305,8 @@ fun Said(line: Line, from: Msg.Sender? = null) {
 }
 
 /** A message its host holds for the chat (a subagent's answer after its host restarted), as Baude's queue box shows
- * one: grey, from whom at its top, ✕ to drop it and ↑ to send it to the agent (once no turn's going). */
+ * one: grey, from whom at its top, what a person's shown of it (shown: its answer, as an answer's drawn, or what
+ * became of it; else what it says), ✕ to drop it and ↑ to send it to the agent (once no turn's going). */
 @Composable
 private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
@@ -315,7 +317,7 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             Text("from " + (h.sender?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
-            Text(h.text.orEmpty().trim(), style = Type.body, color = c.dim)
+            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim)
         }
     }
 }
@@ -343,16 +345,16 @@ private fun SaidLine(line: Line) {
 
 /** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks. */
 @Composable
-fun Prose(text: String) {
+fun Prose(text: String, color: Color = LocalBaude.current.fg) {
     val c = LocalBaude.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         text.split("```").forEachIndexed { i, part ->
             if (i % 2 == 1) {
                 val code = part.substringAfter("\n", part).trimEnd()
-                Text(code, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
+                Text(code, style = Type.mono, color = color, modifier = Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(horizontal = 8.dp, vertical = 6.dp))
             } else if (part.isNotBlank()) {
-                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block)
+                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block, color)
             }
         }
     }
@@ -361,7 +363,7 @@ fun Prose(text: String) {
 /** A paragraph of Markdown as Baude's chat draws it: headings (.md-h1 1.44em, .md-h2 1.2em), bullets, **bold**,
  * *italic* and `code` (monospace, on the raised fill). */
 @Composable
-private fun Markdown(block: String) {
+private fun Markdown(block: String, color: Color) {
     val c = LocalBaude.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (raw in block.lines()) {
@@ -375,7 +377,7 @@ private fun Markdown(block: String) {
                     bullet.groupValues[2]) to Type.body
                 else -> raw to Type.body
             }
-            Text(inline(text, c), style = style, color = c.fg)
+            Text(inline(text, c), style = style, color = color)
         }
     }
 }

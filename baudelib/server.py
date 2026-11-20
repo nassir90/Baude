@@ -374,8 +374,8 @@ class Session:
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
-                "held": [{"id": h["id"], "text": h["text"], "sender": h.get("sender"), "at": h.get("at")}
-                         for h in self.meta.get("held") or []],
+                "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
+                          "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,
                 "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
@@ -812,8 +812,8 @@ class Server:
     def answer_wait(self, s, w):
         """A wait of a session's agent (waits_on's: a subagent's answer, or a chat's) that this host's stop cut short:
         followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that held for the
-        session (held), from that chat, till a head sends it or drops it: its claude isn't started for it. Stopped
-        again meanwhile: kept, for the next start."""
+        session (held: what its agent's sent, told, and what heads show, shown), from that chat, till a head sends it
+        or drops it: its claude isn't started for it. Stopped again meanwhile: kept, for the next start."""
         with self.lock:
             self.following.add((s.id, w["session"]))
         try:
@@ -835,7 +835,8 @@ class Server:
                                         "name": w.get("title"), "host": host, "session": w["session"],
                                         "host_name": got.get("host_name") or (named if named != host[:8] else None)})
             s.meta["held"] = (s.meta.get("held") or []) + [{
-                "id": str(uuid.uuid4()), "text": meshtools.told(w, got), "sender": sender, "at": time.time()}]
+                "id": str(uuid.uuid4()), "text": meshtools.told(w, got), "shown": meshtools.shown(got),
+                "sender": sender, "at": time.time()}]
             self.save(s)
             self.log(f"{s.id}: the answer it waited on from {w['session']} held for it")
             self.changed()

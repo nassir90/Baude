@@ -2225,8 +2225,8 @@ class HeldTurn(Gtk.Box):
     """A message its host held for the chat, not sent (its held: a subagent's answer that came after the chat's host
     restarted, which doesn't start its agent): under the conversation with the queue, as a queued message is, and
     with the pointer on its row ✕ (dropped) and ↑ (sent) fade in beside it, as a queued message's do. held: as its
-    host lists it ({id, text, sender, at}); sending: what's drawn as sent while its host's answer's to come; win: its
-    held_drop, held_send."""
+    host lists it ({id, text, shown, sender, at}); sending: what's drawn as sent while its host's answer's to come;
+    win: its held_drop, held_send."""
 
     def __init__(self, win, bubble, held):
         super().__init__(spacing=6, hexpand=True)

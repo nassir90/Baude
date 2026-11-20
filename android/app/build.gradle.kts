@@ -352,7 +352,21 @@ abstract class WireSchema : DefaultTask() {
                 "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { $ir.from(it) } } }")
             if (types(items) == listOf("string")) return Triple("List<String>", { "JSONArray($it)" },
                 "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).map { i -> a.optString(i) } }")
+            val each = "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).mapNotNull { i -> a.opt"
+            if (types(items) == listOf("integer") || types(items) == listOf("number"))
+                return Triple("List<Number>", { "JSONArray($it)" }, "$each(i) as? Number } }")
+            if (types(items) == listOf("object")) // (objects not the wire's own)
+                return Triple("List<JSONObject>", { "JSONArray($it)" }, "${each}JSONObject(i) } }")
             return Triple("JSONArray", { it }, "o.optJSONArray(\"$key\")")
+        }
+        val values = p["additionalProperties"]
+        if (t == listOf("object") && values is Map<*, *> && p["x-open"] != true) { // (a map of entities, or of strings)
+            val vr = ref(map(values))
+            if (vr != null) return Triple("Map<String, $vr>", { "JSONObject($it.mapValues { e -> e.value.json() })" },
+                "o.optJSONObject(\"$key\")?.let { m -> m.keys().asSequence()" +
+                    ".mapNotNull { k -> m.optJSONObject(k)?.let { k to $vr.from(it) } }.toMap() }")
+            if (types(map(values)) == listOf("string")) return Triple("Map<String, String>", { "JSONObject($it)" },
+                "o.optJSONObject(\"$key\")?.let { m -> m.keys().asSequence().associateWith { k -> m.optString(k) } }")
         }
         return when {
             "const" in p || "enum" in p || t == listOf("string") -> Triple("String", { it }, "o.wireStr(\"$key\")")
@@ -366,16 +380,81 @@ abstract class WireSchema : DefaultTask() {
     private fun doc(text: Any?, indent: String) = if (text == null) "" else
         "$indent/** ${(text as String).replace("*/", "*&#47;")} */\n"
 
+    private fun fail(what: String): Nothing = throw GradleException("wire.schema.json: $what")
+
+    /** f, made of def (or constant) n: what goes wrong in it said with n's name. */
+    private fun <T> about(n: String, f: () -> T): T = try {
+        f()
+    } catch (e: GradleException) {
+        throw e
+    } catch (e: Exception) {
+        fail("$n: $e")
+    }
+
+    /** A key twice in one of the JSON text's objects, and where (its path), if there's one: JsonSlurper keeps the last
+     * one, where wire.py's loader refuses the file. */
+    private fun twice(text: String): String? {
+        class At(val keys: HashSet<String>?, var key: String? = null) // (an object's keys so far, and its last; null: an array)
+        val at = ArrayList<At>()
+        var i = 0
+        while (i < text.length) {
+            when (text[i]) {
+                '{' -> at.add(At(HashSet()))
+                '[' -> at.add(At(null))
+                '}', ']' -> at.removeAt(at.size - 1)
+                '"' -> {
+                    val start = i
+                    i++
+                    while (text[i] != '"') i += if (text[i] == '\\') 2 else 1
+                    var j = i + 1
+                    while (j < text.length && text[j].isWhitespace()) j++
+                    val here = at.lastOrNull()
+                    if (j < text.length && text[j] == ':' && here?.keys != null) {
+                        val k = (groovy.json.JsonSlurper().parseText("[" + text.substring(start, i + 1) + "]") as List<*>)[0] as String
+                        if (!here.keys.add(k))
+                            return "'$k' at " + at.dropLast(1).mapNotNull { it.key }.joinToString("/").ifEmpty { "the top" }
+                        here.key = k
+                    }
+                }
+            }
+            i++
+        }
+        return null
+    }
+
     @Suppress("UNCHECKED_CAST")
     @TaskAction
     fun write() {
-        val s = map(plain(groovy.json.JsonSlurper().parse(schema.get().asFile)))
+        val text = schema.get().asFile.readText()
+        twice(text)?.let { fail("a key twice in one object: $it") }
+        val s = map(plain(groovy.json.JsonSlurper().parseText(text)))
         val defs = map(s["\$defs"]).mapValues { map(it.value) }
-        val messages = (s["oneOf"] as List<*>).map { (map(it)["\$ref"] as String).substringAfterLast("/") }
+        val messages = (s["oneOf"] as? List<*> ?: fail("no oneOf")).map {
+            val r = map(it)["\$ref"] as? String ?: fail("oneOf: $it isn't a \$ref")
+            r.substringAfterLast("/").also { n -> if (n !in defs) fail("oneOf: no def $n") }
+        }
         fun props(d: Map<String, Any?>) = map(d["properties"]).mapValues { map(it.value) }
         fun op(d: Map<String, Any?>) = props(d)["op"]?.get("const") as String
+        for ((n, d) in defs) { // (every line in oneOf with its op and kind, every def with an op a line, every $ref a def)
+            val o = props(d)["op"]?.get("const")
+            if (n in messages) {
+                if (o !is String) fail("$n: in oneOf, but no op const (properties.op.const)")
+                if (d["x-op"] != o) fail("$n: x-op isn't its op const, '$o'")
+                if (d["x-kind"] !in setOf("request", "reply", "event", "frame", "both"))
+                    fail("$n: x-kind ${d["x-kind"] ?: "missing"}, not request, reply, event, frame or both")
+            } else if (o != null || "x-op" in d) fail("$n: an op ('${o ?: d["x-op"]}'), but not in oneOf")
+            fun refs(v: Any?): Unit = when (v) {
+                is Map<*, *> -> {
+                    (v["\$ref"] as? String)?.let { r -> if (r.substringAfterLast("/") !in defs) fail("$n: no def $r") }
+                    v.values.forEach { refs(it) }
+                }
+                is List<*> -> v.forEach { refs(it) }
+                else -> {}
+            }
+            refs(d)
+        }
 
-        val version = (s["x-version"] as Number).toInt()
+        val version = (s["x-version"] as? Number ?: fail("no x-version")).toInt()
 
         val out = StringBuilder()
         out.append("package dev.baude.android\n\nimport org.json.JSONArray\nimport org.json.JSONObject\n\n")
@@ -385,8 +464,8 @@ abstract class WireSchema : DefaultTask() {
         out.append("}\n\n")
         out.append("/** The protocol's constants, and the wire's version (as a host's hello says it). */\nobject WireConstants {\n")
         out.append("    const val VERSION = $version\n")
-        for ((k, c) in map(s["x-constants"])) {
-            val v = map(c)["value"]
+        for ((k, c) in map(s["x-constants"])) about(k) {
+            val v = map(c)["value"] as? Number ?: fail("$k: its value isn't a number")
             out.append(doc("${map(c)["description"]} (${map(c)["unit"]})", "    "))
             out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
         }
@@ -406,12 +485,12 @@ abstract class WireSchema : DefaultTask() {
         out.append("/** What of a message isn't the schema's (an op, a field: wire.check's): what's sent is checked by it. */\n")
         out.append("object WireCheck {\n    private class Shape(val fields: Set<String>, val inner: Map<String, String>)\n\n")
         out.append("    private val ENTITIES = mapOf(\n")
-        for ((n, d) in defs) if (n !in messages && closed(n)) {
+        for ((n, d) in defs) if (n !in messages && closed(n)) about(n) {
             val inner = props(d).mapNotNull { (f, p) -> nested(p)?.let { f to it } }.toMap()
             out.append("        \"$n\" to ${shape(props(d).keys, inner)},\n")
         }
         out.append("    )\n\n    private val OPS = mapOf(\n")
-        for (o in messages.map { op(defs[it]!!) }.distinct()) {
+        for (o in messages.map { op(defs[it]!!) }.distinct()) about(messages.filter { op(defs[it]!!) == o }.joinToString()) {
             val lines = messages.filter { op(defs[it]!!) == o }.map { props(defs[it]!!) }
             val fields = lines.flatMap { it.keys }.toSet()
             val inner = fields.mapNotNull { f ->
@@ -421,10 +500,21 @@ abstract class WireSchema : DefaultTask() {
         }
         out.append("    )\n\n")
         val requests = messages.filter { defs[it]!!["x-kind"] in setOf("request", "both") }
-        out.append("    /** The ops a host takes, and their request lines. */\n")
+        fun nullable(p: Map<String, Any?>) = p["type"] == "null" || (p["type"] as? List<*>)?.contains("null") == true ||
+            (p["anyOf"] as? List<*>)?.any { map(it)["type"] == "null" } == true
+        out.append("    /** The ops a host takes. */\n")
         out.append("    val TAKEN = setOf(${requests.map { op(defs[it]!!) }.distinct().joinToString { "\"$it\"" }})\n")
-        out.append("    private val REQUESTS = mapOf(${requests.groupBy { op(defs[it]!!) }.entries.joinToString {
-            "\"${it.key}\" to listOf(${it.value.joinToString { n -> "\"$n\"" }})" }})\n\n")
+        out.append("    private val LINES = mapOf( // (an op's lines: each def's name, and its x-kind)\n")
+        for (o in messages.map { op(defs[it]!!) }.distinct())
+            out.append("        \"$o\" to listOf(${messages.filter { op(defs[it]!!) == o }.joinToString {
+                "\"$it\" to \"${defs[it]!!["x-kind"]}\"" }}),\n")
+        out.append("    )\n    private val NULLABLE = mapOf( // (an op's fields that may be null, in any of its lines)\n")
+        for (o in messages.map { op(defs[it]!!) }.distinct()) {
+            val fields = messages.filter { op(defs[it]!!) == o }
+                .flatMap { n -> props(defs[n]!!).filterValues { nullable(it) }.keys }.distinct()
+            if (fields.isNotEmpty()) out.append("        \"$o\" to setOf(${fields.joinToString { "\"$it\"" }}),\n")
+        }
+        out.append("    )\n    private val REQUEST = setOf(\"request\", \"both\")\n\n")
         out.append("""    fun problem(msg: JSONObject): String? {
         val op = msg.optString("op")
         val shape = OPS[op] ?: return "no op '${'$'}op' in the schema"
@@ -450,26 +540,32 @@ abstract class WireSchema : DefaultTask() {
         else -> null
     }
 
+    /** msg without the nulls its op's fields can't have (at its top: a field whose type hasn't null), as what's sent
+     * leaves them out; msg itself if it has none. */
+    fun unnulled(msg: JSONObject): JSONObject {
+        val keep = NULLABLE[msg.optString("op")].orEmpty()
+        val names = msg.keys().asSequence().filter { !msg.isNull(it) || it in keep }.toList()
+        return if (names.size == msg.length()) msg else JSONObject(msg, names.toTypedArray())
+    }
+
     const val UNSUPPORTED = "unsupported_operation" // (the schema's own refusals: their codes, and what each says)
     const val INVALID = "invalid_data_type"
     private val SAID = mapOf(UNSUPPORTED to "unsupported operation", INVALID to "invalid data type")
 
-    /** One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host. */
-    fun refused(code: String, req: Any?): JSONObject = JSONObject().put("op", Op.ERROR)
+    /** One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+     * with what was wrong in detail. */
+    fun refused(code: String, req: Any?, detail: String? = null): JSONObject = JSONObject().put("op", Op.ERROR)
         .apply { if (req != null && req != JSONObject.NULL) put("req", req) }.put("error", SAID.getValue(code)).put("code", code)
+        .apply { if (detail != null) put("detail", detail) }
 
     /** What a request a host takes (one of takes' ops, as a request's line has it) is answered with if it can't be:
      * refused(UNSUPPORTED) for an op it doesn't take, refused(INVALID) for fields not as the schema has them; null for
-     * one it takes as it is (wire.refusal). */
+     * one it takes as it is (wire.refusal). What's wrong, in the log too. */
     fun refusal(msg: JSONObject, takes: Set<String> = TAKEN): JSONObject? {
         val op = msg.optString("op")
-        if (op !in takes) {
-            android.util.Log.w("wire", "refused: no op '" + op + "' here")
-            return refused(UNSUPPORTED, msg.opt("req"))
-        }
-        val bad = invalid(msg) ?: return null
+        val bad = if (op !in takes) "no op '" + op + "' here" else invalid(msg) ?: return null
         android.util.Log.w("wire", "refused: " + bad)
-        return refused(INVALID, msg.opt("req"))
+        return refused(if (op !in takes) UNSUPPORTED else INVALID, msg.opt("req"), bad)
     }
 
     private val schema: JSONObject by lazy {
@@ -478,45 +574,67 @@ abstract class WireSchema : DefaultTask() {
     private val defs: JSONObject by lazy { schema.getJSONObject("\${'$'}defs") }
 
     /** What of a request isn't as its op's request lines have it, types too; null if one of them fits. */
-    fun invalid(msg: JSONObject): String? {
-        var first: String? = null
-        for (name in REQUESTS[msg.optString("op")].orEmpty()) {
-            val bad = valid(defs.getJSONObject(name), msg, msg.optString("op")) ?: return null
-            if (first == null) first = bad
+    fun invalid(msg: JSONObject): String? =
+        if (LINES[msg.optString("op")].orEmpty().none { it.second in REQUEST }) "no request " + msg.optString("op")
+        else problems(msg, REQUEST).firstOrNull()
+
+    /** Everything about a message that isn't as the schema has it, types too (wire.problems): as the one of its op's
+     * lines (of those kinds, if kinds is given) it's nearest; none if it's one of them. */
+    fun problems(msg: JSONObject, kinds: Set<String>? = null): List<String> {
+        val op = msg.optString("op")
+        val lines = LINES[op] ?: return listOf(problem(msg) ?: "not a message")
+        var best: List<String>? = null
+        for ((name, kind) in lines) {
+            if (kinds != null && kind !in kinds) continue
+            val found = ArrayList<String>()
+            valid(defs.getJSONObject(name), msg, op, found)
+            if (found.isEmpty()) return found
+            if (best == null || found.size < best.size) best = found
         }
-        return first ?: "no request " + msg.optString("op")
+        return best.orEmpty()
     }
 
-    private fun valid(s: JSONObject, v: Any?, at: String): String? {
+    private fun valid(s: JSONObject, v: Any?, at: String, out: MutableList<String>) {
         val ref = s.optString("\${'$'}ref")
-        if (ref.isNotEmpty()) return valid(defs.getJSONObject(ref.substringAfterLast('/')), v, at)
+        if (ref.isNotEmpty()) return valid(defs.getJSONObject(ref.substringAfterLast('/')), v, at, out)
         s.optJSONArray("anyOf")?.let { a ->
-            return if ((0 until a.length()).any { valid(a.getJSONObject(it), v, at) == null }) null
-            else at + ": none of what it may be"
+            if ((0 until a.length()).none { ArrayList<String>().also { t -> valid(a.getJSONObject(it), v, at, t) }.isEmpty() })
+                out.add(at + ": " + v.toString().take(60) + " is none of what it may be")
+            return
         }
-        if (s.has("const") && v != s.get("const")) return at + ": not " + s.get("const")
-        s.optJSONArray("enum")?.let { e -> if ((0 until e.length()).none { e.get(it) == v }) return at + ": not one of " + e }
+        if (s.has("const") && v != s.get("const")) {
+            out.add(at + ": not " + s.get("const"))
+            return
+        }
+        s.optJSONArray("enum")?.let { e ->
+            if ((0 until e.length()).none { e.get(it) == v }) {
+                out.add(at + ": " + v + " isn't one of " + e)
+                return
+            }
+        }
         if (s.has("type")) {
             val kinds = s.optJSONArray("type")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(s.getString("type"))
-            if (kinds.none { fits(it, v) }) return at + ": not " + kinds.joinToString("/")
+            if (kinds.none { fits(it, v) }) {
+                out.add(at + ": " + (v?.javaClass?.simpleName ?: "nothing") + " where it's " + kinds.joinToString("/"))
+                return
+            }
         }
-        if (s.optBoolean("x-open")) return null
+        if (s.optBoolean("x-open")) return
         if (v is JSONObject) {
             val props = s.optJSONObject("properties")
             if (props != null) {
                 s.optJSONArray("required")?.let { r ->
-                    for (i in 0 until r.length()) if (!v.has(r.getString(i))) return at + "." + r.getString(i) + ": missing" }
+                    for (i in 0 until r.length()) if (!v.has(r.getString(i))) out.add(at + "." + r.getString(i) + ": missing") }
                 for (k in v.keys()) {
                     val p = props.optJSONObject(k)
-                    if (p != null) valid(p, v.opt(k), at + "." + k)?.let { return it }
-                    else if (s.opt("additionalProperties") == false) return at + "." + k + ": no such field"
+                    if (p != null) valid(p, v.opt(k), at + "." + k, out)
+                    else if (s.opt("additionalProperties") == false) out.add(at + "." + k + ": no such field")
                 }
             } else s.optJSONObject("additionalProperties")?.let { each ->
-                for (k in v.keys()) valid(each, v.opt(k), at + "[" + k + "]")?.let { return it } }
+                for (k in v.keys()) valid(each, v.opt(k), at + "[" + k + "]", out) }
         }
         if (v is JSONArray) s.optJSONObject("items")?.let { each ->
-            for (i in 0 until v.length()) valid(each, v.opt(i), at + "[" + i + "]")?.let { return it } }
-        return null
+            for (i in 0 until v.length()) valid(each, v.opt(i), at + "[" + i + "]", out) }
     }
 
     private fun fits(kind: String, v: Any?) = when (kind) {
@@ -535,7 +653,7 @@ abstract class WireSchema : DefaultTask() {
         out.append("private fun JSONObject.wireStr(key: String): String? = if (isNull(key)) null else optString(key)\n\n")
         out.append("/** The wire's messages and the entities in them: each built with the fields it's given (those left null aren't " +
             "sent), json() as it goes, from() as it came (a field it doesn't have left out). */\nobject Msg {\n")
-        for ((name, d) in defs) {
+        for ((name, d) in defs) about(name) {
             val fields = props(d).filterKeys { it != "op" }
             out.append(doc(d["description"], "    "))
             out.append("    class $name(\n")

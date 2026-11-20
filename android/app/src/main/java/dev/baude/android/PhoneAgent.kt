@@ -28,7 +28,7 @@ data class Served(val member: String, val memberName: String, val provider: Stri
         fun of(o: JSONObject) = Served(o.optString("member"), o.optString("member_name"), o.optString("provider"),
             o.optString("provider_name"), o.optString("model"), o.optString("display"), o.optInt("window", WINDOW))
 
-        const val WINDOW = 32768 // (providers.DEFAULT_WINDOW: a model's context, where its host says none)
+        const val WINDOW = WireConstants.DEFAULT_WINDOW // (a model's context, where its host says none)
     }
 }
 
@@ -52,17 +52,17 @@ object Inference {
         for (c in Mesh.states.values.toList()) {
             if (c.state != "up" || c.place is Place.Phone) continue
             val info = c.info ?: continue
-            val member = info.optString("id").takeIf(::isId) ?: continue
+            val member = info.id?.takeIf(::isId) ?: continue
             if (!seen.add(member)) continue
-            for (p in info.optJSONArray("providers").list()) {
-                if (!p.optBoolean("http") && p.isNull("base_url")) continue
-                for (m in p.optJSONArray("models").list()) {
-                    if (!m.optBoolean("tools", true)) continue
-                    val id = m.optString("id").ifBlank { m.optString("value") }
+            for (p in info.providers.orEmpty()) {
+                if (p.http != true && p.baseUrl == null) continue
+                for (m in p.models.orEmpty()) {
+                    if (m.tools == false) continue
+                    val id = m.id.orEmpty().ifBlank { m.value.orEmpty() }
                     if (id.isBlank()) continue
-                    out.add(Served(member, info.optString("name").ifBlank { member.take(8) }, p.optString("id"),
-                        p.optString("name").ifBlank { p.optString("id") }, id, m.optString("displayName").ifBlank { id },
-                        m.optInt("window", Served.WINDOW).takeIf { it > 0 } ?: Served.WINDOW))
+                    out.add(Served(member, info.name.orEmpty().ifBlank { member.take(8) }, p.id.orEmpty(),
+                        p.name.orEmpty().ifBlank { p.id.orEmpty() }, id, m.displayName.orEmpty().ifBlank { id },
+                        m.window?.toInt()?.takeIf { it > 0 } ?: Served.WINDOW))
                 }
             }
         }
@@ -78,7 +78,7 @@ object Inference {
 
     /** The connection to a member's host process that's up now (a host of yours, or reached through one). */
     fun connTo(member: String): Connection? = Mesh.states.values.toList().firstOrNull {
-        it.state == "up" && it.place !is Place.Phone && it.info?.optString("id") == member
+        it.state == "up" && it.place !is Place.Phone && it.info?.id.orEmpty() == member
     }
 
     class Failed(why: String) : Exception(why)
@@ -103,7 +103,7 @@ object Inference {
         val line = WireLine(ch.inputStream, ch.outputStream) { ch.disconnect() }
         s.stopModel = { line.shut() }
         val infer = Msg.Infer(provider = served.provider, method = "POST", path = "/chat/completions",
-            headers = JSONObject().put("content-type", "application/json").put("accept", "text/event-stream"),
+            headers = mapOf("content-type" to "application/json", "accept" to "text/event-stream"),
             body = Base64.getEncoder().encodeToString(body.put("stream", true).toString().toByteArray()), req = 2).json()
         thread(name = "infer", isDaemon = true) {
             try {
@@ -115,11 +115,12 @@ object Inference {
                     when (m.optString("op")) {
                         Op.RELAYED -> line.send(Msg.Hello(client = "baude-android", req = 1).json())
                         Op.HELLO -> line.send(infer)
-                        Op.INFER_HEAD -> sse.head(m.optInt("status"), m.optJSONObject("headers")?.optString("Content-Type").orEmpty())
-                        Op.INFER_DATA -> sse.feed(Base64.getDecoder().decode(m.optString("data")))
+                        Op.INFER_HEAD -> Msg.InferHead.from(m).let { h ->
+                            sse.head(h.status?.toInt() ?: 0, h.headers?.optString("Content-Type").orEmpty()) }
+                        Op.INFER_DATA -> sse.feed(Base64.getDecoder().decode(Msg.InferData.from(m).data.orEmpty()))
                         Op.INFER_END -> line.shut()
                         Op.ERROR -> {
-                            error = m.optString("error", "the host said no")
+                            error = Msg.Error.from(m).said ?: "the host said no"
                             line.shut()
                         }
                     }

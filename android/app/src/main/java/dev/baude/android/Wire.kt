@@ -20,13 +20,55 @@ const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the o
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
 const val MIN_VERSION = 8     // (wire's version 8: Bots)
 const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
-/** msg as it may go: one the wire's schema hasn't (an op, a field: WireCheck) goes as its INVALID error, for its
- * request, in its place, said in the log, as wire.py's Channel.send has it. */
-fun checked(msg: JSONObject): JSONObject {
-    val bad = WireCheck.problem(msg) ?: return msg
+/** msg as it goes, as wire.py's Channel.send has it: its nulls left out where its fields can't be null
+ * (WireCheck.unnulled). One the wire's schema hasn't (an op, a field: WireCheck.problem) is said in the log and not
+ * sent (null); a host's answer (answer true) goes as its request's INVALID refusal instead, if it has a req. */
+fun checked(msg: JSONObject, answer: Boolean = false): JSONObject? {
+    val out = WireCheck.unnulled(msg)
+    val bad = WireCheck.problem(out) ?: return out.also { WireStrict.check("sent", it) }
     android.util.Log.w("wire", "not sent: $bad")
-    return WireCheck.refused(WireCheck.INVALID, msg.opt("req"))
+    val req = out.opt("req")?.takeIf { it != JSONObject.NULL } ?: return null
+    return if (answer) WireCheck.refused(WireCheck.INVALID, req, bad) else null
 }
+
+/** A head's own request that the schema hasn't (an op, a field: WireCheck.problem), as its INVALID refusal, for its
+ * caller: it isn't sent (null: it's one the schema has). */
+fun ownRefusal(msg: JSONObject): JSONObject? {
+    val bad = WireCheck.problem(msg) ?: return null
+    android.util.Log.w("wire", "not sent: $bad")
+    return WireCheck.refused(WireCheck.INVALID, msg.opt("req"), bad)
+}
+
+/** Every message sent and read type-checked against the schema (WireCheck.problems), what's wrong logged under the
+ * wire tag, each once, as $BAUDE_WIRE_STRICT has wire.py do: on if the app's external files folder has a file
+ * wire-strict in it as it starts (adb shell touch /sdcard/Android/data/dev.baude.android/files/wire-strict). */
+object WireStrict {
+    @Volatile var on = false
+        private set
+    private val said = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    fun look(ctx: Context) {
+        on = try {
+            ctx.getExternalFilesDir(null)?.let { java.io.File(it, "wire-strict").exists() } == true
+        } catch (_: Exception) {
+            false
+        }
+        if (on) android.util.Log.i("wire", "strict: what's sent and read is checked")
+    }
+
+    /** A message sent or read (how), as it is on the wire: what of it isn't as the schema has it, in the log. */
+    fun check(how: String, msg: JSONObject) {
+        if (!on) return
+        for (p in WireCheck.problems(JSONObject(msg.toString()))) if (said.add("$how: $p")) android.util.Log.w("wire", "$how: $p")
+    }
+}
+
+/** What an error says, for a person: its error, and a refusal's detail after it (null: it says nothing). */
+val Msg.Error.said: String? get() = error?.let { e -> detail?.ifBlank { null }?.let { "$e: $it" } ?: e }
+
+/** Why a request didn't do what it asked, for a person: an error's (said), else what its reply's own error field
+ * (own) says; "" for neither. */
+fun said(r: JSONObject, own: String?): String = (if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else own).orEmpty()
 
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
@@ -76,7 +118,7 @@ open class Connection(
     val host: Host? get() = (place as? Place.Direct)?.host
     @Volatile var state = "connecting" // (connecting, up, down, key: the host's key waits to be trusted)
     @Volatile var why: String? = null
-    @Volatile var info: JSONObject? = null
+    @Volatile var info: Msg.Info? = null
     @Volatile var shown: ShownKey? = null
     @Volatile var via: Connection? = null // (a member's: the host it's reached through, this time)
     @Volatile var listed = true // (a member's: whether a host that's up lists it)
@@ -236,10 +278,10 @@ open class Connection(
         var reached = false
         val hello = {
             request(Msg.Hello(client = "baude-android").json()) { reply ->
-                val server = reply.optJSONObject("server")
+                val server = Msg.HelloReply.from(reply).server
                 when {
                     reply.optString("op") != Op.HELLO -> {
-                        said = reply.optString("error", "the host said no")
+                        said = Msg.Error.from(reply).said ?: "the host said no"
                         end()
                     }
                     !offers(server, "bot", MIN_VERSION) -> {
@@ -262,7 +304,7 @@ open class Connection(
         else request(Msg.Relay(to = member).json()) { reply -> // (wire.through)
             if (reply.optString("op") == Op.RELAYED) hello()
             else {
-                said = reply.optString("error", "${via?.host?.label ?: "its host"} couldn't reach it")
+                said = Msg.Error.from(reply).said ?: "${via?.host?.label ?: "its host"} couldn't reach it"
                 end()
             }
         }
@@ -291,7 +333,8 @@ open class Connection(
                     } catch (_: Exception) {
                         continue // (not a line of the host process's: a shell's greeting, say)
                     }
-                    val req = msg.optInt("req", -1)
+                    WireStrict.check("read", msg)
+                    val req = (msg.opt("req") as? Number)?.toInt() ?: -1 // (any line's: every op's may have one)
                     val call = if (req >= 0) calls.remove(req) else null
                     if (call != null) call(msg) else heard(this, msg)
                 }
@@ -310,19 +353,22 @@ open class Connection(
         return reached
     }
 
-    /** A line to the host process, sent in turn on its own thread (false if there's no connection). */
+    /** A line to the host process, sent in turn on its own thread (false if there's no connection; one the schema
+     * hasn't, said in the log, isn't sent). */
     open fun send(msg: JSONObject): Boolean {
         val q = writes ?: return false
-        q.put((checked(msg).toString() + "\n").toByteArray(Charsets.UTF_8))
+        val line = checked(msg) ?: return true
+        q.put((line.toString() + "\n").toByteArray(Charsets.UTF_8))
         return true
     }
 
     /** A request, its reply to then (on this connection's thread), or an error reply if it can't be sent or the
-     * connection goes first. */
+     * connection goes first (one the schema hasn't: its INVALID refusal, here, not sent). */
     open fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
         val req = nextReq.getAndIncrement()
+        ownRefusal(msg.put("req", req))?.let { return then(it) }
         calls[req] = then
-        if (!send(msg.put("req", req))) {
+        if (!send(msg)) {
             calls.remove(req)
             then(Msg.Error(error = "not connected").json())
         }

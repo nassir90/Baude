@@ -194,7 +194,7 @@ object PhoneBrowser {
                 if (served !== s) return@post
                 s.up = r.optString("op") == Op.EMISSION_SERVING
                 s.link.send(JSONObject().put("op", "serving").put("on", s.up)
-                    .apply { if (!s.up) put("why", r.optString("error", "the host said no")) })
+                    .apply { if (!s.up) put("why", Msg.Error.from(r).said ?: "the host said no") })
             }
         }
     }
@@ -202,17 +202,18 @@ object PhoneBrowser {
     /** (Mesh's) emission_unserved: another phone shows this Bot's browser now. */
     fun unserved(c: Connection, msg: JSONObject) {
         val s = served ?: return
-        if (s.hostId != c.id || s.bot != msg.optString("bot")) return
+        val gone = Msg.EmissionUnserved.from(msg)
+        if (s.hostId != c.id || s.bot != gone.bot.orEmpty()) return
         s.up = false
         calls.entries.removeAll { it.value === c }
-        s.link.send(JSONObject().put("op", "serving").put("on", false).put("why", msg.optString("why",
-            "another phone shows this Bot's browser now")))
+        s.link.send(JSONObject().put("op", "serving").put("on", false).put("why", gone.why
+            ?: "another phone shows this Bot's browser now"))
     }
 
     /** (while one's open: each little while) The Bot's turn at its tools or not, for its glow. */
     private fun tick() {
         val s = served ?: return
-        val acting = Mesh.sessions[s.hostId]?.firstOrNull { it.optString("id") == s.bot }?.optBoolean("acting") ?: false
+        val acting = Mesh.session(s.hostId, s.bot)?.acting ?: false
         if (acting != s.acting) {
             s.acting = acting
             s.link.send(JSONObject().put("op", "acting").put("on", acting))
@@ -222,15 +223,16 @@ object PhoneBrowser {
 
     /** (Mesh's) emission_call from a host: carried to the browser open for that Bot, if it is; else answered so. */
     fun called(c: Connection, msg: JSONObject) {
-        val id = msg.optString("id")
-        val bot = msg.optJSONObject("bot")?.optString("id")
+        val call = Msg.EmissionCall.from(msg)
+        val id = call.id.orEmpty()
+        val bot = call.bot?.id.orEmpty()
         val s = served
         if (s == null || s.hostId != c.id || s.bot != bot || !s.up) {
             c.send(Msg.EmissionAnswer(id = id, error = "the phone's browser is closed").json())
             return
         }
         calls[id] = c
-        s.link.send(JSONObject().put("op", "call").put("id", id).put("call", msg.optJSONObject("call") ?: JSONObject()))
+        s.link.send(JSONObject().put("op", "call").put("id", id).put("call", call.call ?: JSONObject()))
     }
 }
 

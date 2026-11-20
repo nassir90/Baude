@@ -95,12 +95,12 @@ object Meta {
                 listOf("phone" to Mesh.label("phone")))) { // (this phone's own agents too)
             val conn = Mesh.conn(id)
             lines.add("host $label: ${conn?.state ?: "not connected"}")
-            for (s in Mesh.sessions[id].orEmpty().filter { !it.optBoolean("draft") }.take(60)) {
-                val bot = s.optJSONObject("bot")?.str("name")
-                lines.add("  ${s.optString("id").take(8)} " + listOfNotNull(
-                    (s.str("title") ?: "(untitled)").let { "\"$it\"" }, shortPath(id, s.optString("cwd")),
-                    s.optString("state"), bot?.let { "Bot $it" }, groupOf(id, s).ifEmpty { null }?.let { "group $it" },
-                    if (s.optBoolean("archived")) "archived" else null, s.str("model")).joinToString(" · "))
+            for (s in Mesh.sessions[id].orEmpty().filter { it.draft != true }.take(60)) {
+                val bot = s.bot?.name?.ifBlank { null }
+                lines.add("  ${s.id.orEmpty().take(8)} " + listOfNotNull(
+                    (s.title?.ifBlank { null } ?: "(untitled)").let { "\"$it\"" }, shortPath(id, s.cwd.orEmpty()),
+                    s.state.orEmpty(), bot?.let { "Bot $it" }, groupOf(id, s).ifEmpty { null }?.let { "group $it" },
+                    if (s.archived == true) "archived" else null, s.model?.ifBlank { null }).joinToString(" · "))
             }
         }
         Mesh.open?.let { lines.add("open: ${it.sid.take(8)} on ${Mesh.label(it.hostId)}") }
@@ -165,10 +165,11 @@ object Meta {
                 save()
                 return@ask
             }
-            val busy = r.optJSONObject("session")?.optString("state") in setOf("working", "waiting")
+            val got = Msg.Attached.from(r)
+            val busy = got.session?.state in setOf("working", "waiting")
             c.thinking.value = busy
             c.asks.clear()
-            c.asks.addAll(r.optJSONArray("asks").list().mapNotNull(Ask::of))
+            c.asks.addAll(got.asks.orEmpty().mapNotNull(Ask::of))
             if (was && !busy) {
                 c.lines.add(Line("note", "Meta's reply came while the phone was away: it isn't shown here"))
                 shownNow()
@@ -223,7 +224,7 @@ object Meta {
                 allowedTools = listOf("Read", "Grep", "Glob"), attach = true, appTools = listOf(MetaTools.NAME)).json()
             haiku?.let { msg.put("model", it.value) }
             Mesh.ask(h, msg) { r ->
-                val id = r.optJSONObject("session")?.optString("id")
+                val id = Msg.Started.from(r).session?.id
                 if (r.optString("op") == Op.STARTED && id != null) {
                     c.sid = id
                     save()
@@ -232,7 +233,7 @@ object Meta {
                     waiting.clear()
                     started = false
                     c.thinking.value = false
-                    c.said.value = "Couldn't start Meta on ${Mesh.label(h)}: " + r.optString("error")
+                    c.said.value = "Couldn't start Meta on ${Mesh.label(h)}: " + Msg.Error.from(r).said.orEmpty()
                 }
             }
             return
@@ -244,9 +245,10 @@ object Meta {
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", text))
         Mesh.ask(h, Msg.Input(session = c.sid, msg = msg).json()) { r ->
             if (r.optString("op") == Op.ERROR) {
+                val e = Msg.Error.from(r)
                 c.thinking.value = false
-                c.said.value = "Couldn't send: " + r.optString("error")
-                if (r.optString("error").startsWith("no session")) { started = false; c.sid = ""; save() }
+                c.said.value = "Couldn't send: " + e.said.orEmpty()
+                if (e.error.orEmpty().startsWith("no session")) { started = false; c.sid = ""; save() }
             }
         }
     }
@@ -258,17 +260,20 @@ object Meta {
         val l: (String, JSONObject) -> Unit = l@{ at, msg ->
             val c = chat
             if (at != h) return@l
-            when (msg.optString("op")) {
+            val op = msg.optString("op")
+            when (op) {
                 "connected" -> return@l reattach(h)
-                Op.MCP_OPEN -> if (msg.optString("name") == MetaTools.NAME && (msg.optString("session") == c.sid || c.sid.isEmpty()))
-                    relays.add(msg.optInt("conn"))
-                Op.MCP -> if (msg.optInt("conn") in relays) {
-                    val n = msg.optInt("conn")
-                    val call = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
+                Op.MCP_OPEN -> Msg.McpOpen.from(msg).let { o ->
+                    if (o.name == MetaTools.NAME && (o.session.orEmpty() == c.sid || c.sid.isEmpty())) relays.add(o.conn?.toInt() ?: 0)
+                }
+                Op.MCP -> Msg.Mcp.from(msg).takeIf { (it.conn?.toInt() ?: 0) in relays }?.let { o ->
+                    val n = o.conn?.toInt() ?: 0
+                    val line = o.line.orEmpty()
+                    val call = try { JSONObject(line) } catch (_: Exception) { JSONObject() }
                     val what = call.optJSONObject("params")?.let { p -> "${p.optString("name")} ${p.optJSONObject("arguments") ?: "{}"}" }
                     val key = "$n/${call.opt("id")}"
                     if (call.optString("method") == "tools/call" && what != null) running[key] = what
-                    MetaTools.line(msg.optString("line")) { answer ->
+                    MetaTools.line(line) { answer ->
                         if (answer == null) return@line
                         val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(Msg.Mcp(conn = n,
                             line = answer).json()) == true
@@ -277,16 +282,22 @@ object Meta {
                     }
                 }
                 Op.MCP_LATE -> { // (it ran here, but its host had failed it to Meta already: Meta's told it did run)
-                    val r = try { JSONObject(msg.optString("line")) } catch (_: Exception) { JSONObject() }
-                    running.remove("${msg.optInt("conn")}/${r.opt("id")}")?.let { ranLate(it, msg.optString("line")) }
+                    val o = Msg.McpLate.from(msg)
+                    val r = try { JSONObject(o.line.orEmpty()) } catch (_: Exception) { JSONObject() }
+                    running.remove("${o.conn?.toInt() ?: 0}/${r.opt("id")}")?.let { ranLate(it, o.line.orEmpty()) }
                 }
-                Op.MCP_CLOSE -> relays.remove(msg.optInt("conn"))
+                Op.MCP_CLOSE -> relays.remove(Msg.McpClose.from(msg).conn?.toInt() ?: 0)
             }
-            if (msg.optString("session") != c.sid || c.sid.isEmpty()) return@l
-            when (msg.optString("op")) {
+            val session = when (op) {
+                Op.EXITED -> Msg.Exited.from(msg).session
+                Op.CLAUDE -> Msg.Claude.from(msg).session
+                else -> return@l
+            }
+            if (session.orEmpty() != c.sid || c.sid.isEmpty()) return@l
+            when (op) {
                 Op.EXITED -> { c.thinking.value = false; shownNow() }
                 Op.CLAUDE -> {
-                    val m = msg.optJSONObject("msg") ?: return@l
+                    val m = Msg.Claude.from(msg).msg ?: return@l
                     Ask.of(m)?.let { a -> if (c.asks.none { it.rid == a.rid }) c.asks.add(a) }
                     when (m.optString("type")) {
                         "assistant" -> if (m.isNull("parent_tool_use_id")) for (b in m.optJSONObject("message")
@@ -405,8 +416,8 @@ fun MetaRows(text: String) {
             {
                 val (h, sid) = r.optString(0) to r.optString(1)
                 val s = Mesh.session(h, sid)
-                ActionRow(s?.optJSONObject("bot")?.str("name") ?: s?.str("title") ?: "(untitled)",
-                    listOfNotNull(Mesh.label(h), s?.optString("cwd")?.let { shortPath(h, it) }).joinToString(" · "),
+                ActionRow(s?.bot?.name?.ifBlank { null } ?: s?.title?.ifBlank { null } ?: "(untitled)",
+                    listOfNotNull(Mesh.label(h), s?.let { shortPath(h, it.cwd.orEmpty()) }).joinToString(" · "),
                     onClick = { Meta.opener(h, sid) }, suffix = chevron)
             }
         })
@@ -415,13 +426,15 @@ fun MetaRows(text: String) {
         boxed(rows.strings().map { p -> { ActionRow(p, null, onClick = { Meta.pageOpener(p) }, suffix = chevron) } })
     }
     o.str("changelog")?.let { h ->
-        var log by androidx.compose.runtime.remember(text) { mutableStateOf<List<JSONObject>?>(null) }
+        var log by androidx.compose.runtime.remember(text) { mutableStateOf<List<Msg.Commit>?>(null) }
         var why by androidx.compose.runtime.remember(text) { mutableStateOf<String?>(null) }
         androidx.compose.runtime.LaunchedEffect(text) {
-            val checkout = Mesh.conn(h)?.info?.str("checkout") ?: return@LaunchedEffect run { why = "Its host didn't say where its code is." }
+            val checkout = Mesh.conn(h)?.info?.checkout?.ifBlank { null }
+                ?: return@LaunchedEffect run { why = "Its host didn't say where its code is." }
             Mesh.ask(h, Msg.Git(what = "log", cwd = checkout, limit = 15).json()) { r ->
-                if (r.optString("op") == Op.GIT && r.str("error") == null) log = r.optJSONArray("commits").list()
-                else why = r.optString("error").ifBlank { "Couldn't read it." }
+                val g = Msg.GitReply.from(r)
+                if (r.optString("op") == Op.GIT && g.error.isNullOrBlank()) log = g.commits.orEmpty()
+                else why = said(r, g.error).ifBlank { "Couldn't read it." }
             }
         }
         Column {
@@ -429,8 +442,8 @@ fun MetaRows(text: String) {
             when {
                 why != null -> Text(why!!, style = Type.caption, color = c.dim)
                 log == null -> Text("Reading it…", style = Type.caption, color = c.dim)
-                else -> boxed(log!!.map { m -> { ActionRow(m.optString("subject"), java.text.SimpleDateFormat("d MMM",
-                    java.util.Locale.ENGLISH).format(java.util.Date(m.optLong("at") * 1000)) + " · " + m.optString("sha").take(7)) } })
+                else -> boxed(log!!.map { m -> { ActionRow(m.subject.orEmpty(), java.text.SimpleDateFormat("d MMM",
+                    java.util.Locale.ENGLISH).format(java.util.Date((m.at?.toLong() ?: 0L) * 1000)) + " · " + m.sha.orEmpty().take(7)) } })
             }
         }
     }
@@ -446,14 +459,14 @@ fun MetaRows(text: String) {
         if (asking) {
             val h = o.optString("host")
             val sid = o.optString("sid")
-            val title = Mesh.session(h, sid)?.let { it.optJSONObject("bot")?.str("name") ?: it.str("title") } ?: "(untitled)"
+            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: "(untitled)"
             androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
                 title = { Text("Move “$title” to Trash?") },
                 text = { Text("Its transcript goes to ${Mesh.label(h)}'s trash. It can't be undone here.") },
                 confirmButton = { Button("Move to Trash", destructive = true) {
                     asking = false
                     Mesh.ask(h, Msg.Delete(session = sid).json()) { r ->
-                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "Couldn't: " + r.optString("error")
+                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "Couldn't: " + Msg.Error.from(r).said.orEmpty()
                     }
                 } },
                 dismissButton = { Button("Cancel") { asking = false } }, containerColor = c.dialog)

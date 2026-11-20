@@ -76,11 +76,18 @@ fun sideQuestions(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
         chat.btw.filter { it.status.value == "running" }.forEach { it.status.value = "interrupted" }
         return@l
     }
-    val q = chat.btw.firstOrNull { it.sid.isNotEmpty() && it.sid == msg.optString("session") } ?: return@l
-    when (msg.optString("op")) {
+    val op = msg.optString("op")
+    val session = when (op) {
+        Op.EXITED -> Msg.Exited.from(msg).session
+        Op.DELETED -> Msg.Deleted.from(msg).session
+        Op.CLAUDE -> Msg.Claude.from(msg).session
+        else -> return@l
+    }
+    val q = chat.btw.firstOrNull { it.sid.isNotEmpty() && it.sid == session.orEmpty() } ?: return@l
+    when (op) {
         Op.EXITED, Op.DELETED -> if (q.status.value == "running") q.status.value = "interrupted"
         Op.CLAUDE -> {
-            val m = msg.optJSONObject("msg") ?: return@l
+            val m = Msg.Claude.from(msg).msg ?: return@l
             Ask.of(m)?.let { a -> // (no tools that ask: denied, as Baude's side questions deny them)
                 Mesh.ask(at, Msg.Input(session = q.sid, msg = JSONObject()
                     .put("type", "control_response").put("response", JSONObject().put("subtype", "success")
@@ -119,21 +126,21 @@ fun SideQuestionsPage(chat: Chat) {
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
             .put("content", (if (q.thread.count { it.kind == "you" } == 1) PREFACE else "") + text))
         Mesh.ask(hostId, Msg.Input(session = q.sid, msg = msg).json()) { r ->
-            if (r.optString("op") == Op.ERROR) { q.status.value = "error"; q.thread.add(Line("error", r.optString("error"))) }
+            if (r.optString("op") == Op.ERROR) { q.status.value = "error"; q.thread.add(Line("error", Msg.Error.from(r).said.orEmpty())) }
         }
     }
     fun start(text: String) {
         val s = Mesh.session(hostId, chat.sid)
         val q = SideQuestion(text)
         chat.btw.add(0, q)
-        val model = s?.str("model")
+        val model = s?.model?.ifBlank { null }
         val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, model = model,
             mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
         Mesh.ask(hostId, msg) { r ->
-            val id = r.optJSONObject("session")?.optString("id")
+            val id = Msg.Started.from(r).session?.id
             if (r.optString("op") != Op.STARTED || id == null) {
                 q.status.value = "error"
-                q.thread.add(Line("error", "The side question couldn't be asked: " + r.optString("error")))
+                q.thread.add(Line("error", "The side question couldn't be asked: " + Msg.Error.from(r).said.orEmpty()))
                 return@ask
             }
             q.sid = id
@@ -199,18 +206,19 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
 @Composable
 fun FilesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
-    val root = Mesh.session(hostId, sid)?.str("cwd")
+    val root = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
     if (!offers(hostId, "list_dir")) return StatusPage(Icons.Filled.Folder, "Files", tooOld(hostId, "list its folders for a phone"))
     if (root == null) return StatusPage(Icons.Filled.Folder, "Files", "No folder yet")
     var at by remember(root) { mutableStateOf(root) }
-    var entries by remember(at) { mutableStateOf<List<JSONObject>?>(null) }
+    var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
     var error by remember(at) { mutableStateOf<String?>(null) }
     var file by remember(root) { mutableStateOf<String?>(null) }
     var again by remember { mutableStateOf(0) }
     LaunchedEffect(at, again) {
         Mesh.ask(hostId, Msg.ListDir(path = at).json()) { r ->
-            if (r.optString("op") == Op.DIR && r.str("error") == null) entries = r.optJSONArray("entries").list()
-            else error = r.optString("error").ifBlank { "Couldn't read it" }
+            val d = Msg.Dir.from(r)
+            if (r.optString("op") == Op.DIR && d.error.isNullOrBlank()) entries = d.entries.orEmpty()
+            else error = said(r, d.error).ifBlank { "Couldn't read it" }
         }
     }
     file?.let { f -> return FileView(hostId, f) { file = null } }
@@ -230,11 +238,12 @@ fun FilesPage(hostId: String, sid: String) {
                 error != null -> Empty(error!!)
                 entries == null -> Empty("Reading it…")
                 else -> BoxedList(entries!!, "Nothing in this folder") { e ->
-                    val path = "$at/${e.optString("name")}"
-                    Box(Modifier.alpha(if (e.optBoolean("ignored")) 0.55f else 1f)) {
-                        ActionRow(e.optString("name"), if (e.optBoolean("dir")) null else size(e.optLong("size")),
-                            onClick = { if (e.optBoolean("dir")) at = path else file = path },
-                            prefix = { androidx.compose.material3.Icon(if (e.optBoolean("dir")) Icons.Filled.Folder
+                    val path = "$at/${e.name.orEmpty()}"
+                    val dir = e.dir == true
+                    Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
+                        ActionRow(e.name.orEmpty(), if (dir) null else size(e.size?.toLong() ?: 0L),
+                            onClick = { if (dir) at = path else file = path },
+                            prefix = { androidx.compose.material3.Icon(if (dir) Icons.Filled.Folder
                                 else Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
                     }
                 }
@@ -261,10 +270,11 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
     var cut by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) {
         Mesh.ask(hostId, Msg.ReadFile(path = path, limit = 1_000_000).json()) { r ->
-            if (r.optString("op") == Op.FILE && r.str("error") == null) {
-                data = Base64.getDecoder().decode(r.optString("data"))
-                cut = r.optBoolean("truncated") || r.optLong("size") > (data?.size ?: 0)
-            } else why = r.optString("error").ifBlank { "Couldn't read it" }
+            val f = Msg.File.from(r)
+            if (r.optString("op") == Op.FILE && f.error.isNullOrBlank()) {
+                data = Base64.getDecoder().decode(f.data.orEmpty())
+                cut = f.truncated == true || (f.size?.toLong() ?: 0L) > (data?.size ?: 0)
+            } else why = said(r, f.error).ifBlank { "Couldn't read it" }
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -299,26 +309,27 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
 @Composable
 fun GitPage(hostId: String, sid: String) {
     val c = LocalBaude.current
-    val cwd = Mesh.session(hostId, sid)?.str("cwd")
+    val cwd = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
     if (!offers(hostId, "git")) return StatusPage(Icons.Filled.Schedule, "Git", tooOld(hostId, "read its git for a phone"))
     if (cwd == null) return StatusPage(Icons.Filled.Schedule, "Git", "No folder yet")
-    var log by remember(cwd) { mutableStateOf<JSONObject?>(null) }
-    val commits = remember(cwd) { mutableStateListOf<JSONObject>() }
+    var log by remember(cwd) { mutableStateOf<Msg.GitReply?>(null) }
+    val commits = remember(cwd) { mutableStateListOf<Msg.Commit>() }
     var why by remember(cwd) { mutableStateOf<String?>(null) }
     var commit by remember(cwd) { mutableStateOf<String?>(null) }
     var again by remember { mutableStateOf(0) }
     fun more(skip: Int) = Mesh.ask(hostId, Msg.Git(what = "log", cwd = cwd, limit = 50, skip = skip).json()) { r ->
-        if (r.optString("op") == Op.GIT && r.str("error") == null) {
-            log = r
+        val g = Msg.GitReply.from(r)
+        if (r.optString("op") == Op.GIT && g.error.isNullOrBlank()) {
+            log = g
             if (skip == 0) commits.clear()
-            commits.addAll(r.optJSONArray("commits").list())
-        } else why = r.optString("error").ifBlank { "Couldn't read it" }
+            commits.addAll(g.commits.orEmpty())
+        } else why = said(r, g.error).ifBlank { "Couldn't read it" }
     }
     LaunchedEffect(cwd, again) { more(0) }
     commit?.let { sha -> return CommitCard(hostId, cwd, sha) { commit = null } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(shortPath(hostId, log?.str("top") ?: cwd), style = Type.caption, color = c.dim, maxLines = 1,
+            Text(shortPath(hostId, log?.top?.ifBlank { null } ?: cwd), style = Type.caption, color = c.dim, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconButton(Icons.Filled.Refresh, "Read the history again") { why = null; log = null; again++ }
         }
@@ -326,24 +337,24 @@ fun GitPage(hostId: String, sid: String) {
             why != null -> StatusPage(Icons.Filled.Schedule, "Git", why)
             log == null -> Empty("Reading it…")
             else -> Scrolled {
-                val b = log!!.optJSONObject("branch")
-                b?.str("name")?.let { name ->
+                val b = log!!.branch
+                b?.name?.ifBlank { null }?.let { name ->
                     Text(name, style = Type.bold, color = c.fg, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp))
                 }
-                b?.str("upstream")?.let { up ->
-                    val a = b.optInt("ahead")
-                    val be = b.optInt("behind")
+                b?.upstream?.ifBlank { null }?.let { up ->
+                    val a = b.ahead?.toInt() ?: 0
+                    val be = b.behind?.toInt() ?: 0
                     val how = if (a == 0 && be == 0) "up to date" else listOfNotNull(
                         a.takeIf { it > 0 }?.let { "$it commit${if (it != 1) "s" else ""} ahead" },
                         be.takeIf { it > 0 }?.let { "$it commit${if (it != 1) "s" else ""} behind" }).joinToString(", ")
                     Text("Tracks $up: $how", style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 12.dp))
                 }
                 BoxedList(commits.toList(), "No commits") { m ->
-                    ActionRow(m.optString("subject"), listOf(m.optString("author"), stamped(m.optLong("at")),
-                        m.optString("sha").take(7)).joinToString(" · ") + m.optJSONArray("refs").strings().let {
-                        if (it.isEmpty()) "" else " · " + it.joinToString(", ") }, onClick = { commit = m.optString("sha") })
+                    ActionRow(m.subject.orEmpty(), listOf(m.author.orEmpty(), stamped(m.at?.toLong() ?: 0L),
+                        m.sha.orEmpty().take(7)).joinToString(" · ") + m.refs.orEmpty().let {
+                        if (it.isEmpty()) "" else " · " + it.joinToString(", ") }, onClick = { commit = m.sha.orEmpty() })
                 }
-                if (log!!.optBoolean("more")) Text("Show more", style = Type.body, color = c.accent, modifier = Modifier
+                if (log!!.more == true) Text("Show more", style = Type.body, color = c.accent, modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(6.dp)).clickable { more(commits.size) })
             }
         }
@@ -356,17 +367,20 @@ private fun stamped(at: Long) = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.ENG
 private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Unit) {
     val c = LocalBaude.current
     BackHandler(onBack = back)
-    var card by remember(sha) { mutableStateOf<JSONObject?>(null) }
+    var card by remember(sha) { mutableStateOf<Msg.GitReply?>(null) }
     var diff by remember(sha) { mutableStateOf<String?>(null) }
     var diffText by remember(sha) { mutableStateOf<String?>(null) }
     LaunchedEffect(sha) {
-        Mesh.ask(hostId, Msg.Git(what = "card", cwd = cwd, sha = sha).json()) { card = it }
+        Mesh.ask(hostId, Msg.Git(what = "card", cwd = cwd, sha = sha).json()) { r ->
+            card = Msg.GitReply.from(r).let { g -> if (r.optString("op") == Op.ERROR) Msg.GitReply(error = said(r, null)) else g }
+        }
     }
     LaunchedEffect(diff) {
         val p = diff ?: return@LaunchedEffect
         diffText = null
         Mesh.ask(hostId, Msg.Git(what = "diff", cwd = cwd, sha = sha, path = p).json()) { r ->
-            diffText = r.str("error") ?: r.optString("text")
+            val g = Msg.GitReply.from(r)
+            diffText = said(r, g.error).ifBlank { null } ?: g.text.orEmpty()
         }
     }
     diff?.let { p ->
@@ -404,16 +418,16 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
         val k = card
         when {
             k == null -> Empty("Reading the commit…")
-            k.str("error") != null -> Empty(k.optString("error"))
+            !k.error.isNullOrBlank() -> Empty(k.error)
             else -> Scrolled {
-                val msg = k.optString("message")
+                val msg = k.message.orEmpty()
                 Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(msg.lines().first(), style = Type.bold, color = c.fg)
-                    Text("${k.optString("author")} · ${stamped(k.optLong("at"))} · ${k.optString("sha")}", style = Type.caption, color = c.dim)
-                    if (k.optString("committer") != k.optString("author")) Text("Committed by ${k.optString("committer")}",
+                    Text("${k.author.orEmpty()} · ${stamped(k.at?.toLong() ?: 0L)} · ${k.sha.orEmpty()}", style = Type.caption, color = c.dim)
+                    if (k.committer.orEmpty() != k.author.orEmpty()) Text("Committed by ${k.committer.orEmpty()}",
                         style = Type.caption, color = c.dim)
                 }
-                val files = (0 until (k.optJSONArray("files")?.length() ?: 0)).mapNotNull { k.optJSONArray("files")!!.optJSONArray(it) }
+                val files = k.files.let { a -> (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONArray(it) } }
                 val added = files.sumOf { if (it.isNull(1)) 0 else it.optInt(1) }
                 val removed = files.sumOf { if (it.isNull(2)) 0 else it.optInt(2) }
                 Text("${files.size} file${if (files.size != 1) "s" else ""}  +$added −$removed", style = Type.caption,
@@ -424,7 +438,7 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                 }
                 val rest = msg.lines().drop(1).joinToString("\n").trim()
                 if (rest.isNotEmpty()) Text(rest, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 12.dp))
-                val on = k.optJSONArray("branches").strings()
+                val on = k.branches.orEmpty()
                 Text(if (on.isEmpty()) "On no branch (rewritten, or only in the reflog)" else "On ${on.joinToString(", ")}",
                     style = Type.caption, color = c.dim, modifier = Modifier.padding(12.dp))
             }
@@ -447,16 +461,18 @@ private val KINDS = mapOf("file" to "Files", "commit" to "Commits", "branch" to 
 fun SignalPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val s = Mesh.session(hostId, sid)
-    val cwd = s?.str("cwd")
+    val cwd = s?.cwd?.ifBlank { null }
     if (!offers(hostId, "signal_names")) return StatusPage(Icons.Filled.HelpOutline, "Signal", tooOld(hostId, "list Signal's names for a phone"))
     if (cwd == null) return StatusPage(Icons.Filled.HelpOutline, "Signal", "No folder yet")
-    var got by remember(cwd, sid) { mutableStateOf<JSONObject?>(null) }
+    var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
     var filter by remember { mutableStateOf("") }
     var again by remember { mutableStateOf(0) }
     LaunchedEffect(cwd, sid, again) {
         val msg = Msg.SignalNames(cwd = cwd, session = sid).json()
-        s.str("cli_id")?.let { msg.put("cli_id", it) }
-        Mesh.ask(hostId, msg) { got = it }
+        s.cliId?.ifBlank { null }?.let { msg.put("cli_id", it) }
+        Mesh.ask(hostId, msg) { r ->
+            got = Msg.SignalNamesReply.from(r).let { g -> if (r.optString("op") == Op.ERROR) Msg.SignalNamesReply(error = said(r, null)) else g }
+        }
     }
     val g = got
     Column(Modifier.fillMaxSize()) {
@@ -466,24 +482,24 @@ fun SignalPage(hostId: String, sid: String) {
         }
         when {
             g == null -> Empty("Reading them…")
-            g.optString("op") == Op.ERROR || g.str("error") != null -> Empty(g.optString("error"))
+            !g.error.isNullOrBlank() -> Empty(g.error)
             else -> {
-                val refs = g.optJSONArray("refs").list()
+                val refs = g.refs.orEmpty()
                 if (refs.isEmpty()) return@Column StatusPage(Icons.Filled.HelpOutline, "Signal",
                     "No names yet: the files, commits, env vars and routes in Claude's replies show up here.")
-                fun n(st: String) = refs.count { it.optString("status") == st }
+                fun n(st: String) = refs.count { it.status == st }
                 Scrolled {
                     Text(listOf("${n("resolved")} linked", "${n("ambiguous")} with several matches", "${n("pending")} looking up",
                         "${n("not_found")} not found", "${n("stale")} stale").joinToString(" · ") +
-                        (g.str("glossary")?.let { "\nGlossary: $it" } ?: ""), style = Type.caption, color = c.dim,
+                        (g.glossary?.ifBlank { null }?.let { "\nGlossary: $it" } ?: ""), style = Type.caption, color = c.dim,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     val f = filter.trim().lowercase()
-                    for ((kind, rows) in refs.filter { f.isEmpty() || it.optString("surface").lowercase().contains(f) }
-                        .groupBy { it.optString("kind") }) {
+                    for ((kind, rows) in refs.filter { f.isEmpty() || it.surface.orEmpty().lowercase().contains(f) }
+                        .groupBy { it.kind.orEmpty() }) {
                         Text(KINDS[kind] ?: kind, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 14.dp, top = 8.dp))
                         BoxedList(rows, "") { r ->
-                            val st = r.optString("status")
-                            ActionRow(r.optString("surface"), r.optString("summary"), prefix = {
+                            val st = r.status.orEmpty()
+                            ActionRow(r.surface.orEmpty(), r.summary.orEmpty(), prefix = {
                                 androidx.compose.material3.Icon(when (st) {
                                     "resolved" -> Icons.Filled.CheckCircle
                                     "pending" -> Icons.Filled.Schedule

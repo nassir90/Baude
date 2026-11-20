@@ -71,7 +71,7 @@ import java.util.Base64
  * state (tabs, the page's size, what's asked) kept; its picture's size told as it changes. */
 class Watch(private val hostId: String, private val bot: Msg.BotRef) {
     val frame = mutableStateOf<ImageBitmap?>(null)
-    val state = mutableStateOf<JSONObject?>(null)
+    val state = mutableStateOf<Msg.WatchState?>(null)
     val status = mutableStateOf("connecting") // (connecting, watching, failed, stopped)
     val why = mutableStateOf<String?>(null)
     @Volatile var size = IntSize(1080, 1600)
@@ -108,16 +108,17 @@ class Watch(private val hostId: String, private val bot: Msg.BotRef) {
         if (msg.optInt("req", -1) != REQ) return
         when (msg.optString("op")) {
             Op.EMISSION_WATCHING -> Mesh.post { status.value = "watching"; why.value = null }
-            Op.ERROR -> Mesh.post { status.value = "failed"; why.value = msg.optString("error") }
+            Op.ERROR -> Mesh.post { status.value = "failed"; why.value = Msg.Error.from(msg).said.orEmpty() }
             Op.EMISSION_WATCH_END -> Mesh.post { status.value = "stopped" }
             Op.EMISSION_FRAME -> {
-                msg.optJSONObject("state")?.let { s -> Mesh.post { state.value = s } }
-                if (msg.has("error")) Mesh.post { status.value = "failed"; why.value = msg.optString("error") }
-                val jpeg = msg.optString("jpeg")
+                val f = Msg.EmissionFrame.from(msg)
+                f.state?.let { s -> Mesh.post { state.value = s } }
+                f.error?.let { e -> Mesh.post { status.value = "failed"; why.value = e } }
+                val jpeg = f.jpeg.orEmpty()
                 if (jpeg.isEmpty()) return
                 val bytes = Base64.getDecoder().decode(jpeg)
                 val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() ?: return
-                val n = msg.optInt("frame")
+                val n = f.frame?.toInt() ?: 0
                 Mesh.post {
                     frame.value = bmp
                     status.value = "watching"
@@ -148,8 +149,8 @@ private class Calls(val hostId: String, val bot: Msg.BotRef, val failed: (String
         going = true
         Mesh.ask(hostId, Msg.Emission(bot = bot, call = c).json()) { r ->
             going = false
-            val error = if (r.optString("op") == Op.ERROR) r.optString("error")
-            else r.optJSONObject("result")?.optString("error")?.ifBlank { null }
+            val error = if (r.optString("op") == Op.ERROR) Msg.Error.from(r).error.orEmpty()
+            else Msg.EmissionReply.from(r).result?.optString("error")?.ifBlank { null }
             if (error != null) failed(if (error in setOf("the server isn't there", "the server's gone", "not connected"))
                 "Can't connect to the browser." else "Couldn't ${DOING[c.optString("op")] ?: "do that"}.")
             next()
@@ -182,7 +183,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
     Mesh.tick.value
     val s = Mesh.session(hostId, sid)
     val reachable = Mesh.conn(hostId) != null // (opened before its host's connection is made: watched once it is)
-    val phoned = s?.optBoolean("on_phone") == true // (its browser on a phone, as its host lists it: said, not watched)
+    val phoned = s?.onPhone == true // (its browser on a phone, as its host lists it: said, not watched)
     DisposableEffect(here, hostId, sid, reachable, phoned) {
         if (here && reachable && !phoned) watch.start()
         onDispose { watch.stop() }
@@ -193,9 +194,9 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         watch.resized(picture)
     }
     val state = watch.state.value
-    val tab = state?.optString("selected")?.ifBlank { null }
-    val now = state?.optJSONObject("now")
-    val agent = state?.optBoolean("agent") == true
+    val tab = state?.selected?.ifBlank { null }
+    val now = state?.now
+    val agent = state?.agent == true
     LaunchedEffect(agent, readOnly, picture) { // (the page made the picture's size, while the Bot's own browser's watched)
         if (!agent || picture.width == 0) return@LaunchedEffect
         delay(300)
@@ -211,20 +212,20 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         if (tab != null && !o.has("tab") && o.optString("op") !in setOf("new_tab", "answer_prompt", "resize")) o.put("tab", tab)
         calls.call(o)
     }
-    val acting = s?.optBoolean("acting") == true && s.optString("state") == "working"
+    val acting = s?.acting == true && s.state == "working"
     Column(Modifier.fillMaxSize()) {
         // the toolbar: back, forward, reload (stop while it loads), the address, a new tab, typing, read-only
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             val on = !readOnly && !phoned && watch.status.value == "watching"
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", enabled = on && now?.optBoolean("back") != false) {
+            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", enabled = on && (now == null || now.back == true)) {
                 call(JSONObject().put("op", "navigate").put("url", "back")) }
-            IconButton(Icons.AutoMirrored.Filled.ArrowForward, "Forward", enabled = on && now?.optBoolean("forward") == true) {
+            IconButton(Icons.AutoMirrored.Filled.ArrowForward, "Forward", enabled = on && now?.forward == true) {
                 call(JSONObject().put("op", "navigate").put("url", "forward")) }
-            val loading = now?.optBoolean("loading") == true
+            val loading = now?.loading == true
             IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, if (loading) "Stop" else "Reload", enabled = on) {
                 call(JSONObject().put("op", "navigate").put("url", "reload")) }
-            Address(now?.optString("url").orEmpty(), on, Modifier.weight(1f)) { call(JSONObject().put("op", "navigate").put("url", it)) }
+            Address(now?.url.orEmpty(), on, Modifier.weight(1f)) { call(JSONObject().put("op", "navigate").put("url", it)) }
             IconButton(Icons.Filled.Add, "New tab", enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
             IconButton(Icons.Filled.Keyboard, "Type into the page", enabled = on,
                 background = if (typing) c.fg.copy(alpha = 0.10f) else null) { typing = !typing }
@@ -234,15 +235,15 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
                 prefs.edit().putBoolean("ro:$sid", readOnly).apply()
             }
         }
-        val tabs = state?.optJSONArray("tabs").list()
+        val tabs = state?.tabs.orEmpty()
         if (tabs.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .padding(start = 6.dp, end = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             for (t in tabs) {
-                val id = t.optString("tab")
+                val id = t.tab.orEmpty()
                 val picked = id == tab
                 Row(Modifier.clip(RoundedCornerShape(8.dp)).background(if (picked) c.fg.copy(alpha = 0.10f) else c.frame)
                     .border(1.dp, c.rule, RoundedCornerShape(8.dp)), verticalAlignment = Alignment.CenterVertically) {
-                    val label = t.optString("title").ifBlank { t.optString("url") }.ifBlank { "New tab" }
+                    val label = t.title.orEmpty().ifBlank { t.url.orEmpty() }.ifBlank { "New tab" }
                     Text(if (label.length > 28) label.take(27) + "…" else label, style = Type.caption, color = c.fg, maxLines = 1,
                         modifier = Modifier.clickable { call(JSONObject().put("op", "select_tab").put("tab", id)) }
                             .padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp).widthIn(max = 180.dp))
@@ -250,7 +251,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
                 }
             }
         }
-        for (p in state?.optJSONArray("prompts").list()) PromptCard(p) { accept, text ->
+        for (p in state?.prompts.orEmpty()) PromptCard(p) { accept, text ->
             call(JSONObject().put("op", "answer_prompt").put("id", p.optString("id")).put("accept", accept).apply {
                 if (text != null) put("text", text) })
         }
@@ -275,7 +276,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             }
             val latest = androidx.compose.runtime.rememberUpdatedState(state)
             val send = androidx.compose.runtime.rememberUpdatedState<(JSONObject) -> Unit> { call(it) }
-            Image(bmp, now?.optString("title"), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
+            Image(bmp, now?.let { it.title.orEmpty() }, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
                 .pointerTaps(bmp, picture, { latest.value }, { readOnly }) { send.value(it) })
             if (watch.status.value == "stopped") Text("The browser stopped. It restarts when you open this page again.",
                 style = Type.caption, color = c.dim, modifier = Modifier.align(Alignment.BottomCenter)
@@ -287,7 +288,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
 
 /** Where a point on the picture is on the page, in its CSS pixels (as the pane works it out: the frame letterboxed in
  * the picture, then the page's own size over the frame's); null outside the frame. */
-private fun css(p: Offset, bmp: ImageBitmap, picture: IntSize, state: JSONObject?): Pair<Double, Double>? {
+private fun css(p: Offset, bmp: ImageBitmap, picture: IntSize, state: Msg.WatchState?): Pair<Double, Double>? {
     val fw = bmp.width.toDouble()
     val fh = bmp.height.toDouble()
     val s = minOf(picture.width / fw, picture.height / fh)
@@ -296,14 +297,14 @@ private fun css(p: Offset, bmp: ImageBitmap, picture: IntSize, state: JSONObject
     val fx = (p.x - ox) / s
     val fy = (p.y - oy) / s
     if (fx < 0 || fy < 0 || fx > fw || fy > fh) return null
-    val view = state?.optJSONArray("view")
-    val vw = view?.optDouble(0, 0.0)?.takeIf { it > 0 } ?: fw
-    val vh = view?.optDouble(1, 0.0)?.takeIf { it > 0 } ?: fh
+    val view = state?.view
+    val vw = view?.getOrNull(0)?.toDouble()?.takeIf { it > 0 } ?: fw
+    val vh = view?.getOrNull(1)?.toDouble()?.takeIf { it > 0 } ?: fh
     return Math.round(fx * vw / fw * 10) / 10.0 to Math.round(fy * vh / fh * 10) / 10.0
 }
 
 /** A tap clicks (twice, a double click; held, the right button), a drag scrolls the page (sent every 50 ms). */
-private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: () -> JSONObject?, readOnly: () -> Boolean,
+private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: () -> Msg.WatchState?, readOnly: () -> Boolean,
                                  call: (JSONObject) -> Unit): Modifier = this
     .pointerInput(bmp.width, bmp.height, picture) {
         fun click(p: Offset, press: Int, button: String) {
@@ -333,8 +334,8 @@ private fun Modifier.pointerTaps(bmp: ImageBitmap, picture: IntSize, state: () -
         }
         detectDragGestures(onDragStart = {
             at = if (readOnly()) null else css(it, bmp, picture, state())
-            val view = state()?.optJSONArray("view") // (the page's pixels a picture's pixel is)
-            k = (view?.optDouble(0, 0.0)?.takeIf { w -> w > 0 } ?: fw) / fw /
+            val view = state()?.view // (the page's pixels a picture's pixel is)
+            k = (view?.getOrNull(0)?.toDouble()?.takeIf { w -> w > 0 } ?: fw) / fw /
                 minOf(picture.width / fw, picture.height / bmp.height.toDouble())
         },
             onDragEnd = { flush(); at = null }, onDragCancel = { at = null }) { change, d ->

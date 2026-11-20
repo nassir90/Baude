@@ -61,13 +61,13 @@ fun program(model: String?): String = when {
 fun models(hostId: String): List<ModelChoice> {
     val info = Mesh.conn(hostId)?.info ?: return emptyList()
     val out = LinkedHashMap<String, ModelChoice>()
-    for (m in info.optJSONObject("init")?.optJSONArray("models").list()) {
+    for (m in info.init?.optJSONArray("models").list()) {
         val v = m.optString("value")
         if (v.isBlank() || v == "default") continue
         val efforts = if (m.optBoolean("supportsEffort")) m.optJSONArray("supportedEffortLevels").strings() else emptyList()
         out[v] = ModelChoice(v, m.optString("displayName").ifBlank { v }, efforts, m.optString("resolvedModel").ifBlank { null })
     }
-    for (m in info.optJSONArray("models").list()) {
+    for (m in info.models.orEmpty()) {
         val v = m.optString("value")
         if (v.isBlank() || v == "default" || v in out) continue
         val efforts = m.optJSONArray("supportedEffortLevels").strings()
@@ -80,7 +80,7 @@ fun models(hostId: String): List<ModelChoice> {
 fun JSONObject.str(k: String): String? = if (isNull(k)) null else optString(k).ifBlank { null }
 
 /** The model a host's claude runs when none's said: its "default"'s (what Baude selects for it). */
-fun defaultModel(hostId: String): String? = Mesh.conn(hostId)?.info?.optJSONObject("init")?.optJSONArray("models").list()
+fun defaultModel(hostId: String): String? = Mesh.conn(hostId)?.info?.init?.optJSONArray("models").list()
     .firstOrNull { it.optString("value") == "default" }?.str("resolvedModel")
 
 /** The one of choices that's model (by its value, or what it resolves to). */
@@ -96,8 +96,9 @@ fun family(m: ModelChoice): String {
 }
 
 /** A copy of a model somewhere in the mesh, as Baude's provider picker lists it (provider_choices): its value as a
- * chat on this host runs it, the host it's on, its provider there, and what it says of itself. */
-data class Copy(val value: String, val host: String, val provider: String, val m: JSONObject)
+ * chat on this host runs it, the host it's on, its provider there, what it says of itself, and the provider it's run
+ * by here (pid: providers.provider_of's). */
+data class Copy(val value: String, val host: String, val provider: String, val m: Msg.ProviderModel, val pid: String?)
 
 /** The provider a value names (providers.provider_of): apple, mlx, ollama, openai/<endpoint>, agent/<member>/…;
  * null for Claude's. */
@@ -114,8 +115,8 @@ private fun hasRuntime(pid: String?) = pid != null && pid != "apple" && !(pid.st
 
 /** What it's served as, any case (providers.kind), or null. */
 private fun kindOf(c: Copy): String? {
-    if (!hasRuntime(c.m.optString("provider").ifBlank { null } ?: providerOf(c.value))) return null
-    return (c.m.str("resolvedModel") ?: c.m.str("id"))?.lowercase()
+    if (!hasRuntime(c.pid?.ifBlank { null } ?: providerOf(c.value))) return null
+    return c.m.id?.ifBlank { null }?.lowercase()
 }
 
 /** Whether two copies are the same model (providers.same): what they're served as (else their names), their version
@@ -124,9 +125,11 @@ fun sameModel(a: Copy, b: Copy): Boolean {
     val ka = kindOf(a)
     val kb = kindOf(b)
     if (ka != null && kb != null) { if (ka != kb) return false }
-    else if ((a.m.str("displayName") ?: a.value).lowercase() != (b.m.str("displayName") ?: b.value).lowercase()) return false
-    fun differ(k: String) = a.m.has(k) && b.m.has(k) && !a.m.isNull(k) && !b.m.isNull(k) && a.m.opt(k).toString() != b.m.opt(k).toString()
-    return !(differ("version") || differ("digest") || differ("window") && !(a.m.has("digest") || b.m.has("digest")))
+    else if ((a.m.displayName?.ifBlank { null } ?: a.value).lowercase() !=
+        (b.m.displayName?.ifBlank { null } ?: b.value).lowercase()) return false
+    fun differ(x: Any?, y: Any?) = x != null && y != null && x.toString() != y.toString()
+    return !(differ(a.m.version, b.m.version) || differ(a.m.digest, b.m.digest) ||
+        differ(a.m.window, b.m.window) && !(a.m.digest != null || b.m.digest != null))
 }
 
 private fun slug(p: String): String {
@@ -143,24 +146,22 @@ fun copies(hostId: String): List<Copy> {
     val info = Mesh.conn(hostId)?.info ?: return emptyList()
     val out = ArrayList<Copy>()
     val here = Mesh.label(hostId)
-    for (p in info.optJSONArray("providers").list()) for (m in p.optJSONArray("models").list()) {
-        val v = m.str("value") ?: continue
-        out.add(Copy(v, here, p.str("name") ?: p.optString("id"), JSONObject(m.toString()).put("provider", providerOf(v))))
+    for (p in info.providers.orEmpty()) for (m in p.models.orEmpty()) {
+        val v = m.value?.ifBlank { null } ?: continue
+        out.add(Copy(v, here, p.name?.ifBlank { null } ?: p.id.orEmpty(), m, providerOf(v)))
     }
-    val me = info.str("id")
-    for (member in info.optJSONObject("mesh")?.optJSONArray("members").list()) {
-        val id = member.str("id") ?: continue
+    val me = info.id?.ifBlank { null }
+    for (member in info.mesh?.members.orEmpty()) {
+        val id = member.id?.ifBlank { null } ?: continue
         if (id == me) continue
-        val name = member.str("name") ?: id.take(8)
-        for (p in member.optJSONArray("providers").list()) for (m in p.optJSONArray("models").list()) {
-            val inner = m.str("id") ?: m.str("value") ?: continue
-            val (pid, v) = if (p.optBoolean("http")) {
-                val ep = "openai/mesh-${id.lowercase().replace(Regex("[^a-z0-9]"), "").take(8)}-${slug(p.optString("id"))}"
+        val name = member.name?.ifBlank { null } ?: id.take(8)
+        for (p in member.providers.orEmpty()) for (m in p.models.orEmpty()) {
+            val inner = m.id?.ifBlank { null } ?: m.value?.ifBlank { null } ?: continue
+            val (pid, v) = if (p.http == true) {
+                val ep = "openai/mesh-${id.lowercase().replace(Regex("[^a-z0-9]"), "").take(8)}-${slug(p.id.orEmpty())}"
                 ep to "$ep/$inner"
-            } else "agent/$id/${p.optString("id")}" to "agent/$id/${m.optString("value")}"
-            val d = JSONObject(m.toString()).put("provider", pid)
-            if (!d.has("id") && m.has("resolvedModel")) d.put("id", m.optString("resolvedModel"))
-            out.add(Copy(v, name, p.str("name") ?: p.optString("id"), d))
+            } else "agent/$id/${p.id.orEmpty()}" to "agent/$id/${m.value.orEmpty()}"
+            out.add(Copy(v, name, p.name?.ifBlank { null } ?: p.id.orEmpty(), m, pid))
         }
     }
     return out
@@ -189,10 +190,10 @@ object Moves {
         listening = true
         Mesh.listeners.add { at, msg ->
             when (msg.optString("op")) {
-                Op.TURN_ENDED -> waiting.remove("$at/${msg.optString("session")}")?.let { (v, go) -> go(v) }
+                Op.TURN_ENDED -> waiting.remove("$at/${Msg.TurnEnded.from(msg).session.orEmpty()}")?.let { (v, go) -> go(v) }
                 "connected" -> for (k in waiting.keys.filter { it.startsWith("$at/") }) { // (its turn may have ended
                     val s = Mesh.session(at, k.substringAfter("/"))                    // while it was away)
-                    if (s == null || s.optString("state") !in setOf("working", "waiting")) waiting.remove(k)?.let { (v, go) -> go(v) }
+                    if (s == null || s.state.orEmpty() !in setOf("working", "waiting")) waiting.remove(k)?.let { (v, go) -> go(v) }
                 }
             }
         }
@@ -208,9 +209,10 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
     var heard: ((String, JSONObject) -> Unit)? = null
     var done = false
     heard = { at, msg ->
-        val r = msg.optJSONObject("msg")?.optJSONObject("response")
-        if (at == hostId && msg.optString("op") == Op.CLAUDE && msg.optString("session") == sid &&
-            msg.optJSONObject("msg")?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
+        val said = if (msg.optString("op") == Op.CLAUDE) Msg.Claude.from(msg) else null
+        val r = said?.msg?.optJSONObject("response")
+        if (at == hostId && said != null && said.session.orEmpty() == sid &&
+            said.msg?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
             done = true
             then(if (r.optString("subtype") == "error") r.optString("error").ifBlank { "it said no" } else null)
@@ -225,7 +227,7 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
     Mesh.ask(hostId, Msg.Input(session = sid, msg = msg).json()) { r ->
         if (r.optString("op") == Op.ERROR && Mesh.listeners.remove(heard)) {
             done = true
-            then(r.optString("error"))
+            then(Msg.Error.from(r).said.orEmpty())
         }
     }
 }
@@ -239,7 +241,13 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
     Mesh.tick.value
     val s = Mesh.session(hostId, sid) ?: return
     val asked = remember(hostId, sid) { mutableStateMapOf<String, String>() } // (what's been picked, till it's listed)
-    val model = asked["model"] ?: s.str("model")
+    fun listed(k: String) = when (k) { // (what its host lists of it)
+        "model" -> s.model
+        "effort" -> s.effort
+        "mode" -> s.mode
+        else -> null
+    }?.ifBlank { null }
+    val model = asked["model"] ?: listed("model")
     val choices = models(hostId)
     val now = chosen(choices, model ?: defaultModel(hostId))
     val prog = program(now?.value ?: model)
@@ -252,8 +260,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
             Picker(face, if (copies.size > 1) "Where the chat's model runs" else "Where the chat's model runs (the only one that has it)",
                 copies.map { "${it.host} / ${it.provider}" to it.value }, model, enabled = copies.size > 1) { v ->
                 Moves.cancel(hostId, sid)
-                if (v == s.str("model")) { asked.remove("model"); return@Picker } // (the one it's on: no move)
-                if (s.optString("state") in setOf("working", "waiting")) { // (at a turn: moved once it's over)
+                if (v == listed("model")) { asked.remove("model"); return@Picker } // (the one it's on: no move)
+                if (s.state.orEmpty() in setOf("working", "waiting")) { // (at a turn: moved once it's over)
                     asked["model"] = v
                     Moves.later(hostId, sid, v) { value ->
                         Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, models(hostId), HashMap(), said, open) }
@@ -265,7 +273,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
             pickModel(hostId, sid, s, v, choices, asked, said, open)
         }
         val efforts = now?.efforts.orEmpty()
-        val effort = asked["effort"] ?: s.str("effort")
+        val effort = asked["effort"] ?: listed("effort")
         if (efforts.isEmpty()) Picker("Effort", "${now?.name ?: "This model"} has no effort setting", emptyList(), null,
             enabled = false) {}
         else Picker(EFFORT_LABELS[effort] ?: "Effort", "Thinking effort", efforts.map { (EFFORT_LABELS[it] ?: it) to it },
@@ -279,7 +287,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         if (prog == "claude" || prog == "codex" || offers(hostId, "set_permission_mode")) { // (a host that keeps
             // claude's modes whatever the program: a phone's agents)
             val modes = if (prog == "codex") CODEX_MODES else MODES
-            val mode = asked["mode"] ?: s.str("mode") ?: "default"
+            val mode = asked["mode"] ?: listed("mode") ?: "default"
             Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, "Permission mode", modes.map { it.second to it.first },
                 mode) { v ->
                 val was = modes.firstOrNull { it.first == mode }?.second ?: mode
@@ -294,20 +302,19 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         }
     }
     // (what's listed now is what was picked: no longer held here)
-    androidx.compose.runtime.SideEffect { for (k in asked.keys.toList()) if (s.str(k) == asked[k]) asked.remove(k) }
+    androidx.compose.runtime.SideEffect { for (k in asked.keys.toList()) if (listed(k) == asked[k]) asked.remove(k) }
 }
 
-private fun pickModel(hostId: String, sid: String, s: JSONObject, v: String, choices: List<ModelChoice>,
+private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, choices: List<ModelChoice>,
                       asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit) {
-    val was = s.str("model") ?: defaultModel(hostId)
+    val was = s.model?.ifBlank { null } ?: defaultModel(hostId)
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
-        val msg = Msg.Start(prompt = "", cwd = s.optString("cwd").ifBlank { "~" }, model = v,
-            mode = if (program(v) == "codex") "default" else "auto", draft = true).json()
-        if (!s.isNull("group")) msg.put("group", s.optString("group"))
+        val msg = Msg.Start(prompt = "", cwd = s.cwd.orEmpty().ifBlank { "~" }, model = v,
+            mode = if (program(v) == "codex") "default" else "auto", draft = true, group = s.group).json()
         Mesh.ask(hostId, msg) { r ->
-            val id = r.optJSONObject("session")?.optString("id")
+            val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) open(hostId, id)
-            else said("Couldn't start a chat with it: " + r.optString("error"))
+            else said("Couldn't start a chat with it: " + Msg.Error.from(r).said.orEmpty())
         }
         return
     }

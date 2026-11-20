@@ -74,7 +74,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     val sid = chat.sid
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     val session = Mesh.session(at, sid)
-    val working = session?.optString("state") == "working" || chat.thinking.value
+    val working = session?.state == "working" || chat.thinking.value
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -115,11 +115,11 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
             if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
             items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
-                Asked(chat, ask, alwaysOffered(session?.optString("model"), at),
-                    if (session?.optJSONObject("bot") != null) name else "Claude") // (a Bot's question: its name's)
+                Asked(chat, ask, alwaysOffered(session?.let { it.model.orEmpty() }, at),
+                    if (session?.bot != null) name else "Claude") // (a Bot's question: its name's)
             }
-            val held = session?.optJSONArray("held").list().filter { it.optString("id") !in chat.holding }
-            items(held, key = { "held:" + it.optString("id") }) { h -> Held(chat, h, working) }
+            val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
+            items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
             if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -270,16 +270,16 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
 }
 
 /** Who a message is from, as its bubble's head says it (wire.sender_name): "Ada, a Bot on lab-mac". */
-fun senderName(s: org.json.JSONObject): String {
-    val name = s.optString("name")
-    val who = when (s.optString("kind")) {
+fun senderName(s: Msg.Sender): String {
+    val name = s.name.orEmpty()
+    val who = when (s.kind.orEmpty()) {
         "bot" -> "${name.ifBlank { "a Bot" }}, a Bot"
         "chat" -> if (name.isBlank()) "a chat" else "“$name”"
         "subagent" -> if (name.isBlank()) "a subagent" else "subagent “$name”"
         else -> name.ifBlank { "a host" }
     }
-    val where = s.optString("host_name")
-    return who + if (where.isNotBlank() && s.optString("kind") != "host") " on $where" else ""
+    val where = s.hostName.orEmpty()
+    return who + if (where.isNotBlank() && s.kind.orEmpty() != "host") " on $where" else ""
 }
 
 /** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender
@@ -289,7 +289,7 @@ private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</bau
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top. */
 @Composable
-fun Said(line: Line, from: org.json.JSONObject? = null) {
+fun Said(line: Line, from: Msg.Sender? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -306,16 +306,16 @@ fun Said(line: Line, from: org.json.JSONObject? = null) {
 /** A message its host holds for the chat (a subagent's answer after its host restarted), as Baude's queue box shows
  * one: grey, from whom at its top, ✕ to drop it and ↑ to send it to the agent (once no turn's going). */
 @Composable
-private fun Held(chat: Chat, h: org.json.JSONObject, working: Boolean) {
+private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        IconButton(Icons.Filled.Close, "Delete this held message") { Mesh.held(chat, h.optString("id"), false) }
+        IconButton(Icons.Filled.Close, "Delete this held message") { Mesh.held(chat, h.id.orEmpty(), false) }
         IconButton(Icons.Filled.ArrowUpward, if (working) "It can be sent once this turn's over" else "Send it to the agent",
-            enabled = !working) { Mesh.held(chat, h.optString("id"), true) }
+            enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-            Text("from " + (h.optJSONObject("sender")?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
-            Text(h.optString("text").trim(), style = Type.body, color = c.dim)
+            Text("from " + (h.sender?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
+            Text(h.text.orEmpty().trim(), style = Type.body, color = c.dim)
         }
     }
 }
@@ -475,8 +475,8 @@ private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
     return null
 }
 
-private const val MAX_EDGE = 1568        // (baude.MAX_IMAGE_EDGE)
-private const val MAX_BYTES = 3_750_000  // (baude.MAX_IMAGE_BYTES)
+private const val MAX_EDGE = WireConstants.IMAGE_EDGE_MAX
+private const val MAX_BYTES = WireConstants.IMAGE_BYTES_MAX
 private const val MAX_FILE = 20L * 1024 * 1024
 
 // ----------------------------------------------------------------------------------------------------- hosts --
@@ -578,16 +578,16 @@ fun HostsScreen(back: () -> Unit) {
 private fun Members() {
     val c = LocalBaude.current
     Mesh.tick.value // (a connection's state changed: drawn again)
-    val members = Mesh.members.values.sortedWith(compareBy({ it.optInt("hops", 99) }, { it.optString("name").lowercase() }))
+    val members = Mesh.members.values.sortedWith(compareBy({ it.first.hops?.toInt() ?: 99 }, { it.first.name.orEmpty().lowercase() }))
     if (members.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("Mesh", style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)) {
-            members.forEachIndexed { i, m ->
-                val id = m.optString("id")
+            members.forEachIndexed { i, (m, via) ->
+                val id = m.id.orEmpty()
+                val route = via?.ifBlank { null }
                 val conn = Mesh.conn("mesh:$id")
-                val route = m.optString("route").ifBlank { null }
-                val through = if (m.isNull("through")) null else m.optString("through").ifBlank { null }
+                val through = m.through?.ifBlank { null }
                 val path = listOfNotNull(route, through).joinToString(" and ")
                 val (state, colour) = when {
                     conn?.state == "up" -> "Connected" to c.success
@@ -598,8 +598,8 @@ private fun Members() {
                 if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 12.dp).heightIn(min = 1.dp).background(c.rule))
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(m.optString("name").ifBlank { m.optString("host") }, style = Type.bold, color = c.fg)
-                        val where = m.optString("host").ifBlank { null }
+                        Text(m.name.orEmpty().ifBlank { m.host.orEmpty() }, style = Type.bold, color = c.fg)
+                        val where = m.host?.ifBlank { null }
                         Text(listOfNotNull(where, if (path.isNotEmpty()) "through $path" else null).joinToString(" · "),
                             style = Type.caption, color = c.dim)
                         Text(state, style = Type.caption, color = colour)

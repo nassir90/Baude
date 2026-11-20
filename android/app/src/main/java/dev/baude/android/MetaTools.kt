@@ -226,7 +226,8 @@ object MetaTools {
     }
 
     /** An action of Meta's undone or done again from its row (Undo, Redo). */
-    fun button(a: Action, undo: Boolean) = apply(a, undo) { e -> if (e != null) Meta.chat.said.value = "Couldn't: $e" }
+    fun button(a: Action, undo: Boolean) = apply(a, undo) { e ->
+        if (e != null) Meta.chat.said.value = "Couldn't ${if (undo) "undo" else "redo"} ${a.said}: $e" }
 
     // ---- the app's own changes, each checked with its host where it's the host's
 
@@ -353,7 +354,7 @@ object MetaTools {
                 setting(n, v)?.let { return no(it) }
                 Meta.under(Line("rows", JSONObject().put("setting", n).toString()))
                 if (from == settingValue(n)) return ok("It's $v already.")
-                val a = act("$n: $from → $v", "setting", JSONObject().put("name", n).put("from", from).put("to", v))
+                val a = act("${if (n == "sidebar_group") "Group by" else "Hosts shown"}: $from → $v", "setting", JSONObject().put("name", n).put("from", from).put("to", v))
                 ok("$n is $v now (action ${a.id}).")
             }
             "show" -> show(args, ok, no)
@@ -438,7 +439,8 @@ object MetaTools {
                 for ((h, s) in found) if (groupOf(h, s) != to) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
                 if (keys.length() == 0) return ok("They're in ${to.ifEmpty { "no group" }} already.")
                 val made = to.isNotEmpty() && to !in groupNames()
-                val a = act("Moved ${keys.length()} chat${if (keys.length() != 1) "s" else ""} to ${to.ifEmpty { "no group" }}",
+                val a = act("Moved ${found.filter { (h, s) -> groupOf(h, s) != to }.let { m -> if (m.size == 1) "“${title(m[0].second)}”"
+                    else "${m.size} chats" }} to ${if (to.isEmpty()) "no group" else "group $to"}",
                     "move", JSONObject().put("keys", keys).put("to", to).put("made", made))
                 apply(a, false) { ok("Moved (action ${a.id}).") }
             }
@@ -464,7 +466,7 @@ object MetaTools {
                 val given = args.optJSONArray("groups").strings().map { if (it == "No group") "" else it }
                 val unknown = given.filter { it.isNotEmpty() && it !in groupNames() }
                 if (unknown.isNotEmpty()) return no("No group ${unknown.joinToString(", ") { "'$it'" }}: app_index groups lists them.")
-                val a = act("Showing " + (if (given.isEmpty()) "all groups" else given.joinToString(", ") { it.ifEmpty { "No group" } }),
+                val a = act("Listed " + (if (given.isEmpty()) "every group" else given.joinToString(", ") { it.ifEmpty { "No group" } }),
                     "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)))
                 apply(a, false) { ok("Shown (action ${a.id}).") }
             }
@@ -479,7 +481,8 @@ object MetaTools {
                     val went = pairs.filter { (h, sid) -> failed.none { it.startsWith((Mesh.session(h, sid)?.let(::title) ?: sid.take(8)) + ":") } }
                     if (went.isEmpty()) return@archive no("Couldn't: ${failed.joinToString("; ")}")
                     val a = act((if (op == "archive") "Archived " else "Unarchived ") +
-                        went.joinToString(", ") { (h, sid) -> Mesh.session(h, sid)?.let(::title) ?: sid.take(8) }, "archive",
+                        (if (went.size == 1) went[0].let { (h, sid) -> "“${Mesh.session(h, sid)?.let(::title) ?: sid.take(8)}”" }
+                        else "${went.size} chats"), "archive",
                         JSONObject().put("op", op).put("chats", JSONArray(went.map { JSONArray(listOf(it.first, it.second)) })))
                     ok("${op.replaceFirstChar(Char::uppercase)}d (action ${a.id})." +
                         if (failed.isNotEmpty()) " Not ${op}d: ${failed.joinToString("; ")}." else "")

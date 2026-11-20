@@ -120,7 +120,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             })
         if (takes(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
-        if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
+        if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") "Looking for ${Mesh.label(at)} on the network…"
+            else "Can't connect to ${Mesh.label(at)} at the moment" + (conn?.why?.let { ": $it" } ?: ""))
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress

@@ -223,7 +223,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             IconButton(Icons.AutoMirrored.Filled.ArrowForward, "Forward", enabled = on && now?.forward == true) {
                 call(JSONObject().put("op", "navigate").put("url", "forward")) }
             val loading = now?.loading == true
-            IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, if (loading) "Stop" else "Reload", enabled = on) {
+            IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, "Reload", enabled = on) {
                 call(JSONObject().put("op", "navigate").put("url", "reload")) }
             Address(now?.url.orEmpty(), on, Modifier.weight(1f)) { call(JSONObject().put("op", "navigate").put("url", it)) }
             IconButton(Icons.Filled.Add, "New tab", enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
@@ -403,7 +403,8 @@ private fun PromptCard(p: JSONObject, answer: (Boolean, String?) -> Unit) {
     var text by remember(p.optString("id")) { mutableStateOf(p.optString("default")) }
     Column(Modifier.fillMaxWidth().padding(6.dp).card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(when (kind) {
-            "sign_in" -> "${p.optString("host").ifBlank { "A site" }} asks to sign in (“${p.optString("realm")}”)"
+            "sign_in" -> "${p.optString("host").ifBlank { "A site" }} asks to sign in" +
+                p.optString("realm").let { if (it.isNotBlank()) " (“$it”)" else "" }
             "files" -> "The page asks for files to upload"
             else -> p.optString("message")
         }, style = Type.body, color = c.fg)

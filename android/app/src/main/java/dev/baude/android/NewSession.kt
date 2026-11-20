@@ -71,7 +71,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
                 opened(h, id)
                 done()
-            } else error = Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" }
+            } else error = "${Mesh.label(h)} didn't start it: " + Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" }
         }
     }
     AlertDialog(
@@ -100,7 +100,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                     }
                 }
                 FormRow("With") { StartPickers(at, model, effort, mode) { m, e, md -> model = m; effort = e; mode = md } }
-                error?.let { Text("Couldn't start it: $it", style = Type.caption, color = c.destructive) }
+                error?.let { Text(it, style = Type.caption, color = c.destructive) }
             }
         },
         confirmButton = { Button(if (busy) "Starting…" else "Start", suggested = at != null && !busy) { if (!busy) start() } },

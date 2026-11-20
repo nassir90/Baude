@@ -295,7 +295,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 control(hostId, sid, JSONObject().put("subtype", "set_permission_mode").put("mode", v)) { e ->
                     if (e != null) {
                         asked.remove("mode")
-                        said("Couldn't switch to ${modes.firstOrNull { it.first == v }?.second ?: v}: $e (still $was)")
+                        said("couldn't switch to ${modes.firstOrNull { it.first == v }?.second ?: v}: $e (still $was)")
                     }
                 }
             }
@@ -314,7 +314,7 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
         Mesh.ask(hostId, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) open(hostId, id)
-            else said("Couldn't start a chat with it: " + Msg.Error.from(r).said.orEmpty())
+            else said("${Mesh.label(hostId)} didn't start it: " + Msg.Error.from(r).said.orEmpty())
         }
         return
     }

@@ -126,7 +126,8 @@ fun describe(a: Subagent): String {
     val status = a.status.value
     return listOfNotNull(a.kind.ifBlank { null }, status.takeIf { it == "failed" || it == "killed" },
         u?.optInt("tool_uses", 0)?.takeIf { it > 0 }?.let { "$it tool use" + if (it == 1) "" else "s" },
-        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { "%,d tokens".format(it) },
+        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { n -> (if (n >= 1_000_000) "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
+            else if (n >= 1000) "%.1fk".format(n / 1000.0).replace(".0k", "k") else "$n") + " tokens" },
         u?.optLong("duration_ms", 0)?.takeIf { it > 0 }?.let { "%.1fs".format(it / 1000.0) },
         a.activity.value.takeIf { status == "running" }).joinToString(" · ")
 }

@@ -256,7 +256,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         })
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = hosts)
-        for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)}: ${conn.why ?: "no answer"}", onClick = hosts)
+        for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)} at the moment${conn.why?.let { ": $it" }.orEmpty()}", onClick = hosts)
         // the top: New session and the host it's on, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -324,7 +324,7 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
         }
         if (plus != null) Box(Modifier.size(24.dp).alpha(0.75f).clip(RoundedCornerShape(6.dp)).clickable(onClick = plus),
             contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Add, "New session in ${sec.full}", tint = c.fg, modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Add, "New session in ${sec.full}${sec.hostId?.let { ", on " + Mesh.label(it) }.orEmpty()}", tint = c.fg, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -435,7 +435,7 @@ private fun ViewMenu() {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(Icons.Filled.MoreVert, "View") { open = true }
+        IconButton(Icons.Filled.MoreVert, "Group by, and which groups are listed") { open = true }
         Popover(open, { open = false }) {
             Heading("Group by")
             MenuChoice("Folder", HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }

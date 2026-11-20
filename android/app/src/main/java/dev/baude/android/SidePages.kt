@@ -140,7 +140,7 @@ fun SideQuestionsPage(chat: Chat) {
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") != Op.STARTED || id == null) {
                 q.status.value = "error"
-                q.thread.add(Line("error", "The side question couldn't be asked: " + Msg.Error.from(r).said.orEmpty()))
+                q.thread.add(Line("error", "the side question couldn't be asked: " + Msg.Error.from(r).said.orEmpty()))
                 return@ask
             }
             q.sid = id
@@ -273,7 +273,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
             if (r.optString("op") == Op.FILE && f.error.isNullOrBlank()) {
                 data = Base64.getDecoder().decode(f.data.orEmpty())
                 cut = f.truncated == true || (f.size?.toLong() ?: 0L) > (data?.size ?: 0)
-            } else why = said(r, f.error).ifBlank { "Couldn't read it" }
+            } else why = said(r, f.error).ifBlank { "not text to read here" }
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -287,12 +287,12 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val d = data
             when {
-                why != null -> Empty(why!!)
+                why != null -> Empty("$path on ${Mesh.label(hostId)}: $why")
                 d == null -> Empty("Reading it…")
                 path.substringAfterLast('.').lowercase() in PICTURES -> BitmapFactory.decodeByteArray(d, 0, d.size)?.let {
                     Image(it.asImageBitmap(), path, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
                 } ?: Empty("Not a picture this phone can read")
-                d.take(8192).contains(0.toByte()) -> Empty("${path.substringAfterLast('/')}: not text to read here")
+                d.take(8192).contains(0.toByte()) -> Empty("$path on ${Mesh.label(hostId)}: not text to read here")
                 else -> Text(String(d, Charsets.UTF_8), style = Type.mono, color = c.fg, modifier = Modifier.fillMaxSize()
                     .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(12.dp))
             }
@@ -333,7 +333,7 @@ fun GitPage(hostId: String, sid: String) {
         }
         when {
             why != null -> StatusPage(Icons.Filled.Schedule, "Git", why)
-            log == null -> Empty("Reading it…")
+            log == null -> Empty("Reading the history…")
             else -> Scrolled {
                 val b = log!!.branch
                 b?.name?.ifBlank { null }?.let { name ->
@@ -348,8 +348,7 @@ fun GitPage(hostId: String, sid: String) {
                     Text("Tracks $up: $how", style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 12.dp))
                 }
                 BoxedList(commits.toList(), "No commits") { m ->
-                    ActionRow(m.subject.orEmpty(), listOf(m.author.orEmpty(), stamped(m.at?.toLong() ?: 0L),
-                        m.sha.orEmpty().take(7)).joinToString(" · ") + m.refs.orEmpty().let {
+                    ActionRow(m.subject.orEmpty(), "${ago(m.at?.toLong() ?: 0L)} · ${m.author.orEmpty()}" + m.refs.orEmpty().let {
                         if (it.isEmpty()) "" else " · " + it.joinToString(", ") }, onClick = { commit = m.sha.orEmpty() })
                 }
                 if (log!!.more == true) Text("Show more", style = Type.body, color = c.accent, modifier = Modifier
@@ -359,7 +358,19 @@ fun GitPage(hostId: String, sid: String) {
     }
 }
 
-private fun stamped(at: Long) = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.ENGLISH).format(Date(at * 1000))
+private fun stamped(at: Long): String {
+    val d = Date(at * 1000)
+    val day = SimpleDateFormat("d", Locale.ENGLISH).format(d).toInt()
+    val suffix = if (day % 100 in 10..20) "th" else when (day % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
+    return SimpleDateFormat("HH:mm EEE ", Locale.ENGLISH).format(d) + "$day$suffix " + SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).format(d)
+}
+
+private fun ago(at: Long): String {
+    val secs = maxOf(0L, System.currentTimeMillis() / 1000 - at)
+    for ((unit, n) in listOf("y" to 365 * 86400L, "mo" to 30 * 86400L, "w" to 7 * 86400L, "d" to 86400L, "h" to 3600L, "m" to 60L))
+        if (secs >= n) return "${secs / n}$unit ago"
+    return "just now"
+}
 
 @Composable
 private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Unit) {
@@ -385,7 +396,7 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
         BackHandler { diff = null }
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(p, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text("$p in ${sha.take(9)}", style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 IconButton(Icons.AutoMirrored.Filled.ArrowBack, "The commit") { diff = null }
             }
             Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
@@ -421,14 +432,14 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                 val msg = k.message.orEmpty()
                 Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(msg.lines().first(), style = Type.bold, color = c.fg)
-                    Text("${k.author.orEmpty()} · ${stamped(k.at?.toLong() ?: 0L)} · ${k.sha.orEmpty()}", style = Type.caption, color = c.dim)
+                    Text("${k.author.orEmpty()} · ${stamped(k.at?.toLong() ?: 0L)} · ${k.sha.orEmpty().take(9)}", style = Type.caption, color = c.dim)
                     if (k.committer.orEmpty() != k.author.orEmpty()) Text("Committed by ${k.committer.orEmpty()}",
                         style = Type.caption, color = c.dim)
                 }
                 val files = k.files.let { a -> (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONArray(it) } }
                 val added = files.sumOf { if (it.isNull(1)) 0 else it.optInt(1) }
                 val removed = files.sumOf { if (it.isNull(2)) 0 else it.optInt(2) }
-                Text("${files.size} file${if (files.size != 1) "s" else ""}  +$added −$removed", style = Type.caption,
+                Text("${files.size} file${if (files.size != 1) "s" else ""}  +${"%,d".format(Locale.ENGLISH, added)} −${"%,d".format(Locale.ENGLISH, removed)}", style = Type.caption,
                     color = c.dim, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
                 BoxedList(files, "") { f ->
                     ActionRow(f.optString(0), if (f.isNull(1)) "binary" else "+${f.optInt(1)} −${f.optInt(2)}",
@@ -437,7 +448,8 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                 val rest = msg.lines().drop(1).joinToString("\n").trim()
                 if (rest.isNotEmpty()) Text(rest, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 12.dp))
                 val on = k.branches.orEmpty()
-                Text(if (on.isEmpty()) "On no branch (rewritten, or only in the reflog)" else "On ${on.joinToString(", ")}",
+                Text(if (on.isEmpty()) "On no branch (rewritten, or only in the reflog)" else "On ${on.take(8).joinToString(", ")}" +
+                    (if (on.size > 8) " and ${on.size - 8} more" else ""),
                     style = Type.caption, color = c.dim, modifier = Modifier.padding(12.dp))
             }
         }
@@ -486,8 +498,9 @@ fun SignalPage(hostId: String, sid: String) {
                     "No names yet: the files, commits, env vars and routes in Claude's replies show up here.")
                 fun n(st: String) = refs.count { it.status == st }
                 Scrolled {
-                    Text(listOf("${n("resolved")} linked", "${n("ambiguous")} with several matches", "${n("pending")} looking up",
-                        "${n("not_found")} not found", "${n("stale")} stale").joinToString(" · ") +
+                    Text(listOf("resolved" to "linked", "ambiguous" to "with several matches", "pending" to "looking up",
+                        "not_found" to "not found", "stale" to "stale").filter { n(it.first) > 0 }
+                        .joinToString(" · ") { "${n(it.first)} ${it.second}" } +
                         (g.glossary?.ifBlank { null }?.let { "\nGlossary: $it" } ?: ""), style = Type.caption, color = c.dim,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     val f = filter.trim().lowercase()

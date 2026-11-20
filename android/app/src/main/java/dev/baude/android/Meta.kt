@@ -303,7 +303,7 @@ object Meta {
                         }
                         "result" -> {
                             c.thinking.value = false
-                            if (m.optBoolean("is_error")) c.lines.add(Line("error", m.optString("result").ifBlank { "Meta couldn't finish" }))
+                            if (m.optBoolean("is_error")) c.lines.add(Line("error", m.optString("result").ifBlank { "claude reported an error" }))
                             shownNow()
                         }
                     }
@@ -438,7 +438,7 @@ fun MetaRows(text: String) {
             when {
                 why != null -> Text(why!!, style = Type.caption, color = c.dim)
                 log == null -> Text("Reading it…", style = Type.caption, color = c.dim)
-                else -> boxed(log!!.map { m -> { ActionRow(m.subject.orEmpty(), java.text.SimpleDateFormat("d MMM",
+                else -> boxed(log!!.map { m -> { ActionRow(m.subject.orEmpty(), java.text.SimpleDateFormat("d MMMM yyyy, HH:mm",
                     java.util.Locale.ENGLISH).format(java.util.Date((m.at?.toLong() ?: 0L) * 1000)) + " · " + m.sha.orEmpty().take(7)) } })
             }
         }
@@ -455,14 +455,14 @@ fun MetaRows(text: String) {
         if (asking) {
             val h = o.optString("host")
             val sid = o.optString("sid")
-            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: "(untitled)"
+            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: "this session"
             androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
-                title = { Text("Move “$title” to Trash?") },
-                text = { Text("Its transcript goes to ${Mesh.label(h)}'s trash. It can't be undone here.") },
+                title = { Text("Move “$title” to the trash?") },
+                text = { Text("Its transcript will be moved to the trash on ${Mesh.label(h)}, where you can restore it.") },
                 confirmButton = { Button("Move to Trash", destructive = true) {
                     asking = false
                     Mesh.ask(h, Msg.Delete(session = sid).json()) { r ->
-                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "Couldn't: " + Msg.Error.from(r).said.orEmpty()
+                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "${Mesh.label(h)} didn't delete it: " + Msg.Error.from(r).said.orEmpty()
                     }
                 } },
                 dismissButton = { Button("Cancel") { asking = false } }, containerColor = c.dialog)
@@ -470,7 +470,7 @@ fun MetaRows(text: String) {
     }
     when (o.optString("setting")) {
         "sidebar_group" -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Group the home screen by", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+            Text("Group by", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
             Picker(if (HomePrefs.by.value == "date") "Date" else "Folder", "Group by",
                 listOf("Folder" to "folder", "Date" to "date"), HomePrefs.by.value) { HomePrefs.by.value = it; HomePrefs.save() }
         }
@@ -491,7 +491,7 @@ fun MetaAction(id: String) {
     val c = LocalBaude.current
     val a = MetaTools.actions.firstOrNull { it.id == id } ?: return
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
+        Text(if (a.undone.value) a.said + " · undone" else a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
         if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, "Redo") { MetaTools.button(a, undo = false) }
         else IconButton(Icons.AutoMirrored.Filled.Undo, "Undo") { MetaTools.button(a, undo = true) }
     }

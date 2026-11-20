@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         MeshService.keep(this)
+        Update.start(this) // (a newer build on the Baude site: downloaded and offered, Update at the home screen's foot)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)
         else {
@@ -65,9 +66,14 @@ class MainActivity : ComponentActivity() {
         opened(intent)
     }
 
-    /** Opened from a Bot's notification or shortcut: its chat. Shared to from another app: to a Bot (its shortcut in
-     * the share sheet), its chat with what's shared in it; to Baude, the home screen to choose the chat. */
+    /** Opened from a Bot's notification or shortcut: its chat; from A new version is ready's Update: the install.
+     * Shared to from another app: to a Bot (its shortcut in the share sheet), its chat with what's shared in it; to
+     * Baude, the home screen to choose the chat. */
     private fun opened(intent: Intent?) {
+        if (intent?.getBooleanExtra("update", false) == true) {
+            intent.removeExtra("update")
+            Update.install(this)
+        }
         intent?.let(Shares::from)?.let { (shared, to) ->
             setIntent(Intent(this, MainActivity::class.java)) // (made again, as it's turned: not shared again)
             Shares.pending.value = shared
@@ -127,6 +133,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Mesh.onScreen(true)
+        Update.resumed(this)
     }
 
     override fun onStop() {

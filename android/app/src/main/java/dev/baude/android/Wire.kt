@@ -18,7 +18,6 @@ import kotlin.concurrent.thread
 const val PING_MS = WireConstants.PING_S * 1000L     // (each end says something at least this often)
 const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the other end's taken for gone)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
-const val MIN_VERSION = 8     // (wire's version 8: Bots)
 const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
 /** msg as it goes, as wire.py's Channel.send has it: its nulls left out where its fields can't be null
  * (WireCheck.unnulled). One the wire's schema hasn't (an op, a field: WireCheck.problem) is said in the log and not
@@ -289,10 +288,6 @@ open class Connection(
                 when {
                     reply.optString("op") != Op.HELLO -> {
                         said = Msg.Error.from(reply).said ?: "the host said no"
-                        end()
-                    }
-                    !offers(server, "bot", MIN_VERSION) -> {
-                        said = "this host's Baude is too old for Bots: update it"
                         end()
                     }
                     else -> {

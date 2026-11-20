@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A link straight to a member learned of through others (mesh's Found).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The member's id."
+    },
+    "name": {
+      "type": ["string", "null"],
+      "description": "Its name."
+    },
+    "state": {
+      "enum": ["waiting", "connecting", "linked", "dropped"],
+      "description": "How it is."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "What's wrong."
+    }
+  },
+  "additionalProperties": false
+}

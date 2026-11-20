@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Who a message to a session is from, if not its user, filled in by the host from what it knows itself (wire.clean_sender: words, cut short).",
+  "properties": {
+    "kind": {
+      "enum": ["bot", "chat", "subagent", "host"],
+      "description": "What it is."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its host's id."
+    },
+    "host_name": {
+      "type": "string",
+      "description": "Its host's name."
+    },
+    "session": {
+      "type": "string",
+      "description": "Its session's id, on its host."
+    }
+  },
+  "required": ["kind"],
+  "additionalProperties": false
+}

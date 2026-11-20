@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The host's sessions, now and on every change, and ping; turn_ended as each of its sessions' turns ends.",
+  "properties": {
+    "op": {
+      "const": "subscribe",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "archived": {
+      "type": "boolean",
+      "description": "Those archived listed too, and their turns' ends (default: not)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

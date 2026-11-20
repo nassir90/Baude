@@ -1,0 +1,4 @@
+{
+  "description": "An image attached to a message, at most, in bytes (5 MB once base64-encoded).",
+  "const": 3750000
+}

@@ -6903,7 +6903,7 @@ class RecordChat(meta.MetaChat):
             for k, reply in out["replies"].items():
                 if reply.get("op") != "notes" or reply.get("error"):
                     return {"error": f"{remote_name(remotes[k])}'s {book(plural=True).lower()} weren't listed: "
-                                     f"{reply.get('error') or 'no answer'}"}
+                                     f"{baudelib.client.wire.said(reply) or 'no answer'}"}
                 if k not in store.remote_base or k in store.loading:
                     books = [notes.shared(b) for b in reply.get("notebooks") or ()
                              if isinstance(b, dict) and isinstance(b.get("id"), str) and isinstance(b.get("pages"), dict)]
@@ -8183,8 +8183,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         show_host_state); and the one picked, by the name it had, while it isn't known."""
         out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
         for r in sorted(network().remotes() if _NETWORK else (), key=lambda r: remote_name(r).lower()):
-            info = r.info or {}  # (one that says it keeps no notebooks: a phone's; one not heard from yet, listed)
-            if info.get("phone") or isinstance(info.get("ops"), list) and "notes" not in info["ops"]:
+            if not baudelib.client.wire.takes(r.info, "notes"):  # (a phone's keeps none; one not heard from yet: listed)
                 continue
             if (key := host_key(r)) not in seen:
                 seen.add(key)
@@ -8479,10 +8478,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 return
             if reply.get("op") != "notes" or reply.get("error"):
                 store.loading.discard(key)
-                old = (r.info.get("version") or 1) < 6
                 self.toast(f"{remote_name(r)}'s {book(plural=True).lower()} weren't listed: " +
-                           ("its daemon is older than this Record" if old else
-                            baudelib.client.wire.said(reply) or "no answer"))
+                           (baudelib.client.wire.said(reply) or "no answer"))
                 return
             books = [b for b in reply.get("notebooks") or () if isinstance(b, dict) and isinstance(b.get("id"), str)
                      and isinstance(b.get("pages"), dict)]
@@ -8519,7 +8516,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.sends[key] -= 1
             if reply.get("op") != "notes" or reply.get("error"):
                 if store.unsent.get(key) is None:
-                    self.toast(f"{remote_name(r)} didn't save the change: {reply.get('error') or 'no answer'}")
+                    self.toast(f"{remote_name(r)} didn't save the change: {baudelib.client.wire.said(reply) or 'no answer'}")
                 store.failed(key, changes)
                 store.unsent[key] = self.sent[key]
                 self.list_again.discard(key)  # (listed again as it comes back, or the window does: not at once)

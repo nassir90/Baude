@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What its agent is running: a Bash or PowerShell call (its subagents' too) from the call to its result (one waiting on its permission ask isn't running yet), or a background task but a subagent from its start to its notification.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The call's tool_use_id, or the task's task_id."
+    },
+    "what": {
+      "type": "string",
+      "description": "What it runs, 80 characters at most."
+    },
+    "since": {
+      "type": "number",
+      "description": "When it started, epoch seconds."
+    },
+    "background": {
+      "type": "boolean",
+      "description": "Run in the background."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

@@ -1,0 +1,4 @@
+{
+  "description": "A watched browser's frames' JPEG quality (emission_frame).",
+  "const": 72
+}

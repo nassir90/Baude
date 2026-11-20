@@ -1,0 +1,4 @@
+{
+  "description": "Silent this long, in seconds, the other end's taken for gone.",
+  "const": 16
+}

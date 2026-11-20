@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author, email, at, committer, message, files, more_files, branches}; diff {sha, path, text, truncated}.",
+  "properties": {
+    "op": {
+      "const": "git",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was read."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    },
+    "top": {
+      "type": "string",
+      "description": "log: the checkout's top folder."
+    },
+    "branch": {
+      "$ref": "Branch.json",
+      "description": "log: its branch."
+    },
+    "commits": {
+      "type": "array",
+      "items": {
+        "$ref": "Commit.json"
+      },
+      "description": "log: the commits."
+    },
+    "skip": {
+      "type": "integer",
+      "description": "log: after how many."
+    },
+    "more": {
+      "type": "boolean",
+      "description": "log: there are more."
+    },
+    "sha": {
+      "type": "string",
+      "description": "card, diff: the commit."
+    },
+    "parents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "card: its parents."
+    },
+    "author": {
+      "type": "string",
+      "description": "card: its author."
+    },
+    "email": {
+      "type": "string",
+      "description": "card: their email."
+    },
+    "at": {
+      "type": "integer",
+      "description": "card: when, epoch seconds."
+    },
+    "committer": {
+      "type": "string",
+      "description": "card: its committer."
+    },
+    "message": {
+      "type": "string",
+      "description": "card: its message."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {}
+      },
+      "description": "card: [path, lines added, removed] (null for a binary file's)."
+    },
+    "more_files": {
+      "type": "boolean",
+      "description": "card: more files than listed."
+    },
+    "branches": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "card: the branches it's on."
+    },
+    "path": {
+      "type": ["string", "null"],
+      "description": "diff: the file."
+    },
+    "text": {
+      "type": "string",
+      "description": "diff: the diff."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "diff: cut short."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

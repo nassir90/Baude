@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Tools allowed whenever a session's agent asks for them, a head attached or not (kept in memory).",
+  "properties": {
+    "op": {
+      "const": "always_allow",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "These in place of any there were."
+    },
+    "add": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "These added to them."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

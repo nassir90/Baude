@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session as a host lists it.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "A UUID the host made as it started it (claude's --session-id: what it's resumed by)."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Its title: given, its agent's, or its prompt's start."
+    },
+    "cwd": {
+      "type": ["string", "null"],
+      "description": "The folder its agent runs in."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "Its model."
+    },
+    "effort": {
+      "type": ["string", "null"],
+      "description": "Its effort."
+    },
+    "mode": {
+      "type": ["string", "null"],
+      "description": "Its permission mode."
+    },
+    "group": {
+      "type": ["string", "null"],
+      "description": "Its group."
+    },
+    "created": {
+      "type": ["number", "null"],
+      "description": "When it was made, epoch seconds."
+    },
+    "said": {
+      "type": ["number", "null"],
+      "description": "When something was last said in it, epoch seconds."
+    },
+    "updated": {
+      "type": ["number", "null"],
+      "description": "Its transcript's mtime."
+    },
+    "size": {
+      "type": "integer",
+      "description": "Its transcript's size."
+    },
+    "state": {
+      "enum": ["working", "waiting", "idle", "stopped"],
+      "description": "working: at a turn; waiting: asking permission; idle: its agent running, between turns; stopped: no agent running."
+    },
+    "prompts": {
+      "type": "integer",
+      "description": "How many prompts it's had."
+    },
+    "cli_id": {
+      "type": ["string", "null"],
+      "description": "The id claude has for it where that's another (a fork's: its transcript's named so)."
+    },
+    "transcript": {
+      "type": ["string", "null"],
+      "description": "Where its transcript is on its host's machine (what's on the same machine reads it there rather than fetching a copy)."
+    },
+    "archived": {
+      "type": "boolean",
+      "description": "Archived."
+    },
+    "draft": {
+      "type": "boolean",
+      "description": "A new chat not written in yet (a head leaves it out of its lists)."
+    },
+    "written": {
+      "type": ["integer", "null"],
+      "description": "Its transcript's size as its own agent last left it (more since, with it stopped: another program's writing to it)."
+    },
+    "subagents": {
+      "type": "number",
+      "description": "The mtime of its subagents' newest file (0 for none: what a client's copy is checked against)."
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "$ref": "Command.json"
+      },
+      "description": "What its agent is running; none once its agent's gone."
+    },
+    "cut": {
+      "type": ["number", "null"],
+      "description": "When the host process stopped its agent at a turn or asking (shutting down, a quit, a restart), so a head can offer to carry it on; null once a user message is sent to it."
+    },
+    "bot": {
+      "anyOf": [
+        {
+          "$ref": "BotListing.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A Bot's; null for a chat."
+    },
+    "acting": {
+      "type": "boolean",
+      "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."
+    },
+    "on_phone": {
+      "type": "boolean",
+      "description": "A Bot's browser is on a phone now."
+    },
+    "fork_from": {
+      "type": ["string", "null"],
+      "description": "The session it was forked from."
+    },
+    "spawned_by": {
+      "type": ["string", "null"],
+      "description": "The chat whose mesh tools started it (start's spawned_by)."
+    },
+    "start_key": {
+      "type": ["string", "null"],
+      "description": "Its start's start_key, if it was given one."
+    },
+    "held": {
+      "type": "array",
+      "items": {
+        "$ref": "HeldMessage.json"
+      },
+      "description": "Messages held for it, oldest first."
+    },
+    "senders": {
+      "type": "integer",
+      "description": "Its sender store's revision (0 for none): what a head's copy is checked against."
+    },
+    "mesh_tools": {
+      "type": "boolean",
+      "description": "Its agent has the mesh's tools (a Bot's always)."
+    },
+    "always_allow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The tools allowed whenever it asks for them, sorted."
+    },
+    "asks": {
+      "type": "array",
+      "items": {
+        "$ref": "Ask.json"
+      },
+      "description": "What it's asking, not answered yet."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

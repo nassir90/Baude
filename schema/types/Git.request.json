@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session's folder's git, read only (nothing fetched): log (the host's own checkout's too, for a changelog), card (sha), diff (sha, path?).",
+  "properties": {
+    "op": {
+      "const": "git",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The folder."
+    },
+    "what": {
+      "enum": ["log", "card", "diff"],
+      "description": "What to read."
+    },
+    "rev": {
+      "type": "string",
+      "description": "log: from where (default HEAD)."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "log: how many."
+    },
+    "skip": {
+      "type": "integer",
+      "description": "log: after how many."
+    },
+    "sha": {
+      "type": "string",
+      "description": "card, diff: the commit."
+    },
+    "path": {
+      "type": "string",
+      "description": "diff: one file's only."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

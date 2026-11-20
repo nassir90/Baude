@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "deactivate's answer.",
+  "properties": {
+    "op": {
+      "const": "deactivated",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "any": {
+      "type": "boolean",
+      "description": "There was one."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

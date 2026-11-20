@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Its sessions (newest first; a side question's never), and what it is: subscribe's answer, then again on every change.",
+  "properties": {
+    "op": {
+      "const": "sessions",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "Session.json"
+      },
+      "description": "Its sessions."
+    },
+    "server": {
+      "$ref": "Info.json",
+      "description": "What it is."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

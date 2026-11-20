@@ -94,7 +94,7 @@ class Stream:
                 got = self.remote.call({"op": "emission", "bot": self.bot, "call": {"op": "tabs", "from_pane": True}},
                                        timeout=90)
                 if got.get("op") == "error":  # (started by its host, as the Bot's tools would start it)
-                    raise OSError(got.get("error") or "its Emission didn't start")
+                    raise OSError(wire.said(got) or "its Emission didn't start")
         self.sock = sock
         sock.settimeout(None)
         self.say({"op": "watch", "shm": True, "max_w": self.size[0], "max_h": self.size[1]})

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session gone: its agent stopped and waited for, its transcript and the folder beside it (its subagents'), pi's own copy of it, and a Bot's folder moved to the trash; then it's gone from the list. One whose files can't be moved stays: error, saying why.",
+  "properties": {
+    "op": {
+      "const": "delete",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

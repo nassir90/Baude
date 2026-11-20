@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a session's subagents' files, from where the client's copy is.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "size": {
+      "type": "integer",
+      "description": "Its size."
+    },
+    "mtime": {
+      "type": ["integer", "null"],
+      "description": "Its mtime (ns)."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Where data starts."
+    },
+    "next": {
+      "type": "integer",
+      "description": "Where the next read starts."
+    },
+    "data": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "What's new of it, in whole lines (a meta.json whole)."
+    }
+  },
+  "additionalProperties": false
+}

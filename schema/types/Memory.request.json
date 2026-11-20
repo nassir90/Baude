@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's memory (the file its agent keeps it in, on the host), after writing text if it's given: refused (error, with the memory as the Bot left it) if the Bot's written it since base_mtime.",
+  "properties": {
+    "op": {
+      "const": "memory",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "text": {
+      "type": "string",
+      "description": "What to write."
+    },
+    "seen": {
+      "type": "string",
+      "description": "What the user's accepted of it."
+    },
+    "base_mtime": {
+      "type": ["number", "null"],
+      "description": "The mtime the text was written against, as memory gave it."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

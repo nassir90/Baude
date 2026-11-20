@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's memory.",
+  "properties": {
+    "op": {
+      "const": "memory",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "text": {
+      "type": "string",
+      "description": "Its text."
+    },
+    "seen": {
+      "type": ["string", "null"],
+      "description": "What the user's accepted of it."
+    },
+    "mtime": {
+      "type": ["number", "null"],
+      "description": "Its mtime (ns; a phone's, seconds)."
+    },
+    "path": {
+      "type": "string",
+      "description": "Where it is, on the host."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

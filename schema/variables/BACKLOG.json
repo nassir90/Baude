@@ -1,0 +1,4 @@
+{
+  "description": "A model's files' messages waiting to go out, on a link or a connection, before more are read.",
+  "const": 32
+}

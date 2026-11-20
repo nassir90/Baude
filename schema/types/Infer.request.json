@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An HTTP request to one of this machine's model providers (an OpenAI-compatible server's: path after its base_url), its answer as it comes.",
+  "properties": {
+    "op": {
+      "const": "infer",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "provider": {
+      "type": "string",
+      "description": "The provider's id."
+    },
+    "method": {
+      "type": "string",
+      "description": "Its method."
+    },
+    "path": {
+      "type": "string",
+      "description": "Its path."
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Its headers."
+    },
+    "body": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "Its body."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

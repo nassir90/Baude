@@ -406,7 +406,7 @@ class BotMemory(Gtk.Box):
             return self._send(asked, sid, remote, {**said, "text": base["text"], "theirs": said["text"]}, ours, seen,
                               tries - 1)
         if reply.get("op") == "error":
-            widgets.toast(self, f"Couldn't save: {reply.get('error') or 'no reason given'}")
+            widgets.toast(self, f"Couldn't save: {wire.said(reply) or 'no reason given'}")
             if mine:
                 self.dirty = True  # (still to save: with the next change, or read)
             self.after.pop(asked, None)

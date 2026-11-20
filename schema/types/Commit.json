@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A commit, as git's log has it.",
+  "properties": {
+    "sha": {
+      "type": "string",
+      "description": "Its sha."
+    },
+    "parents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Its parents."
+    },
+    "author": {
+      "type": "string",
+      "description": "Its author."
+    },
+    "email": {
+      "type": "string",
+      "description": "Their email."
+    },
+    "at": {
+      "type": "integer",
+      "description": "When, epoch seconds."
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Branches and tags at it."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Its first line."
+    }
+  },
+  "additionalProperties": false
+}

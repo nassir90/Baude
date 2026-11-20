@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The mesh as a host sees it (mesh.Mesh.view).",
+  "properties": {
+    "members": {
+      "type": "array",
+      "items": {
+        "$ref": "Member.json"
+      },
+      "description": "The members it reaches."
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "OutLink.json"
+      },
+      "description": "The links made from here."
+    },
+    "proxy": {
+      "anyOf": [
+        {
+          "$ref": "Proxy.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its Proxy: null till a member has a provider."
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The ids of members deactivated here."
+    },
+    "found": {
+      "type": "array",
+      "items": {
+        "$ref": "FoundLink.json"
+      },
+      "description": "Links straight to members learned of through others."
+    },
+    "gone": {
+      "type": "array",
+      "items": {
+        "$ref": "Gone.json"
+      },
+      "description": "Members reached lately, not now (not one deactivated here)."
+    }
+  },
+  "additionalProperties": false
+}

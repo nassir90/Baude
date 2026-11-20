@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A model of this machine's, run here by its program (apple-claude, pi-claude) as an agent for a chat elsewhere (agentproxy), its tools there.",
+  "properties": {
+    "op": {
+      "const": "agent",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "model": {
+      "type": "string",
+      "description": "Its model here."
+    },
+    "mode": {
+      "type": ["string", "null"],
+      "description": "Its permission mode."
+    },
+    "effort": {
+      "type": ["string", "null"],
+      "description": "Its effort."
+    },
+    "resume": {
+      "type": ["string", "null"],
+      "description": "The session it resumes."
+    },
+    "system_prompt": {
+      "type": ["string", "null"],
+      "description": "Its system prompt."
+    },
+    "persist": {
+      "type": "boolean",
+      "description": "Its session's kept."
+    },
+    "append_system_prompt": {
+      "type": ["string", "null"],
+      "description": "More for its system prompt (a Bot's: who it is, its memory)."
+    },
+    "servers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Its MCP servers, run on the caller's side."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The chat's folder, on the caller's side."
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": {},
+      "description": "pi's session's files, for pi to take it up from."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

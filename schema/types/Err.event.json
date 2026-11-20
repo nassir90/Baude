@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What an agent's program says, on stderr.",
+  "properties": {
+    "op": {
+      "const": "err",
+      "description": "What it is."
+    },
+    "line": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

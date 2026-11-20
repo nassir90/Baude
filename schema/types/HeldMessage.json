@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A message held for a session: one its host had for it while nobody was there to say whether it should go (a subagent's answer after a restart, say).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id, as held takes it."
+    },
+    "text": {
+      "type": "string",
+      "description": "What it says."
+    },
+    "sender": {
+      "anyOf": [
+        {
+          "$ref": "Sender.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Who it's from."
+    },
+    "at": {
+      "type": ["number", "null"],
+      "description": "When it was held, epoch seconds."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of Record's notebooks, as another machine's Record is given it.",
+  "properties": {
+    "id": {
+      "type": ["string", "null"],
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "pages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Its pages."
+    }
+  },
+  "additionalProperties": false
+}

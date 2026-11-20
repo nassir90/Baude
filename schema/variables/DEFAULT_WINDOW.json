@@ -1,0 +1,4 @@
+{
+  "description": "A model's context window, in tokens, where its server or settings don't say one.",
+  "const": 32768
+}

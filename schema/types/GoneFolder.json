@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session's folder gone and not made again.",
+  "properties": {
+    "why": {
+      "type": "string",
+      "description": "Why."
+    },
+    "folder": {
+      "type": ["string", "null"],
+      "description": "Where to carry on instead; null for nowhere to say."
+    }
+  },
+  "additionalProperties": false
+}

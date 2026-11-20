@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A line for an MCP server, or from it.",
+  "properties": {
+    "op": {
+      "const": "mcp",
+      "description": "What it is."
+    },
+    "conn": {
+      "type": "integer",
+      "description": "Its relay's number."
+    },
+    "line": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

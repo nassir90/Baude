@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a host is, as its hello says (and sessions carries).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "group": {
+      "type": "string",
+      "description": "Its default group."
+    },
+    "version": {
+      "type": "integer",
+      "description": "The wire version it speaks."
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Every model it can run: {value, displayName}, a Codex model's as its catalogue has it."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its machine's host name."
+    },
+    "home": {
+      "type": "string",
+      "description": "Its user's home folder."
+    },
+    "pid": {
+      "type": "integer",
+      "description": "Its process's id."
+    },
+    "checkout": {
+      "type": ["string", "null"],
+      "description": "Where its code is (a head here run from elsewhere is told so)."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Its sessions' groups."
+    },
+    "init": {
+      "type": ["object", "null"],
+      "description": "What a session's program last said to initialize, with every model it can run in it."
+    },
+    "commit": {
+      "type": ["string", "null"],
+      "description": "The git commit its code was as it started (null: not a checkout)."
+    },
+    "update": {
+      "anyOf": [
+        {
+          "$ref": "Update.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its own updater's newer version, if it has one ready."
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "$ref": "Provider.json"
+      },
+      "description": "This machine's model providers (with base_url)."
+    },
+    "mesh": {
+      "$ref": "MeshView.json",
+      "description": "The members it reaches and the links it's made."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Record's notebooks here, as written last (notes.stamp: \"\" for none)."
+    },
+    "phone": {
+      "type": "boolean",
+      "description": "A phone's host."
+    },
+    "ops": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model)."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

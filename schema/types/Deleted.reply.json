@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "delete's answer (and an event to those attached: nothing to carry on).",
+  "properties": {
+    "op": {
+      "const": "deleted",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "trashed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What was moved to the trash."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

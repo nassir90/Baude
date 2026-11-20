@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The names Signal's glossary has for a session's folder, read as they are; nothing looked up or written.",
+  "properties": {
+    "op": {
+      "const": "signal_names",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The folder."
+    },
+    "session": {
+      "type": "string",
+      "description": "The chat's own mentions only."
+    },
+    "cli_id": {
+      "type": "string",
+      "description": "Its id there, if it's another."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

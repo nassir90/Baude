@@ -58,9 +58,9 @@ import kotlinx.coroutines.launch
 data class Page(val key: String, val title: String, val icon: ImageVector)
 
 /** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and routines only while it's a Bot;
- * each only where its host takes what it asks of it (offers). */
+ * each only where its host takes what it asks of it (takes). */
 fun pages(bot: Boolean, hostId: String): List<Page> {
-    fun has(op: String) = offers(hostId, op)
+    fun has(op: String) = takes(hostId, op)
     return listOfNotNull(
         Page("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
         Page("meta", "Meta", Icons.Filled.Build),
@@ -118,7 +118,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 Menu(listOf("Send Feedback…" to feedback))
             })
-        if (offers(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
+        if (takes(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },

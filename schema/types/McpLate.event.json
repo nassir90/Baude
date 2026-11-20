@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A call the head answered after it was failed (its connection was gone), as it did run.",
+  "properties": {
+    "op": {
+      "const": "mcp_late",
+      "description": "What it is."
+    },
+    "conn": {
+      "type": "integer",
+      "description": "Its relay's number."
+    },
+    "line": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

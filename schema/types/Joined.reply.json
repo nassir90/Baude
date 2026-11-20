@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "join's answer.",
+  "properties": {
+    "op": {
+      "const": "joined",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "host": {
+      "$ref": "HostHello.json",
+      "description": "Who this is."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

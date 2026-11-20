@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Whole lines of a session's transcript.",
+  "properties": {
+    "op": {
+      "const": "transcript",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "From here."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "This much at most."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

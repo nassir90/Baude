@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Somewhere wire.reach can go: this machine's host process, one listening on another socket, one over ssh, or a member of the mesh through this machine's.",
+  "properties": {
+    "via": {
+      "enum": ["local", "unix", "ssh", "mesh"],
+      "description": "How it's reached."
+    },
+    "path": {
+      "type": "string",
+      "description": "unix: its socket; mesh: the host process it's reached through."
+    },
+    "dest": {
+      "type": "string",
+      "description": "ssh: where (an alias in ~/.ssh/config, a host, user@host)."
+    },
+    "command": {
+      "type": "string",
+      "description": "ssh: the host process there (default baude_headless.py, on its PATH)."
+    },
+    "strict": {
+      "type": "boolean",
+      "description": "ssh: its key must be known already."
+    },
+    "host": {
+      "type": "string",
+      "description": "mesh: the member's id."
+    }
+  },
+  "required": ["via"],
+  "additionalProperties": false
+}

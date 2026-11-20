@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "feedback's answer: filed.",
+  "properties": {
+    "op": {
+      "const": "feedback_filed",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "url": {
+      "type": "string",
+      "description": "The issue."
+    },
+    "number": {
+      "type": ["integer", "null"],
+      "description": "Its number."
+    },
+    "repo": {
+      "type": "string",
+      "description": "Where."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

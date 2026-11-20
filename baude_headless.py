@@ -204,7 +204,7 @@ def ask(args, msg):
     reply = ch.reply()
     ch.close()
     if not reply or reply.get("op") == "error":
-        sys.exit(f"baude-headless: {(reply or {}).get('error') or 'no answer'}")
+        sys.exit(f"baude-headless: {wire.said(reply) or 'no answer'}")
     return reply
 
 

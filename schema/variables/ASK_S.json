@@ -1,0 +1,4 @@
+{
+  "description": "A subagent asking a permission no one's there to give (a mesh tool's start's ask_timeout): refused after this long, in seconds.",
+  "const": 60
+}

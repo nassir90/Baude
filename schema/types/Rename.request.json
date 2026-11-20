@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session renamed (by its agent if it's running; else as it would).",
+  "properties": {
+    "op": {
+      "const": "rename",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

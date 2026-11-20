@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session made a Bot, or its name or picture changed; bot null, a chat again (its memory and picture kept). Its agent's told who it is from its next start.",
+  "properties": {
+    "op": {
+      "const": "bot",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "bot": {
+      "anyOf": [
+        {
+          "$ref": "BotFields.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Bot."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

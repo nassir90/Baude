@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's browser tool's request, carried to the phone showing it.",
+  "properties": {
+    "op": {
+      "const": "emission_call",
+      "description": "What it is."
+    },
+    "id": {
+      "type": "string",
+      "description": "Its id: the answer's."
+    },
+    "bot": {
+      "$ref": "BotRef.json",
+      "description": "The Bot."
+    },
+    "call": {
+      "type": "object",
+      "description": "The request."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

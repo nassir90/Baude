@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A tab of a Bot's browser.",
+  "properties": {
+    "tab": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "url": {
+      "type": "string",
+      "description": "Its address."
+    },
+    "loading": {
+      "type": "boolean",
+      "description": "Loading."
+    },
+    "selected": {
+      "type": "boolean",
+      "description": "In front."
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "What it's waiting on an answer to."
+    }
+  },
+  "additionalProperties": false
+}

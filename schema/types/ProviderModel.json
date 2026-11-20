@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A model a provider has, as the mesh is told of it (mesh._model).",
+  "properties": {
+    "value": {
+      "type": "string",
+      "description": "What it's run as."
+    },
+    "displayName": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "id": {
+      "type": "string",
+      "description": "Its provider's id for it."
+    },
+    "tools": {
+      "type": "boolean",
+      "description": "It takes tools."
+    },
+    "thinking": {
+      "type": "boolean",
+      "description": "It thinks."
+    },
+    "window": {
+      "type": "integer",
+      "description": "Its context window."
+    },
+    "version": {
+      "type": "string",
+      "description": "Its version."
+    },
+    "digest": {
+      "type": "string",
+      "description": "Its digest."
+    },
+    "input": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What it takes in."
+    }
+  },
+  "required": ["value"],
+  "additionalProperties": false
+}

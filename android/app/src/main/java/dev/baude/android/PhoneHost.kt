@@ -55,7 +55,7 @@ class PhoneSession(val meta: JSONObject) {
  * which is what the heads read) and phone/agents (each one's folder, the only files its tools reach). */
 object PhoneHost {
     /** The ops it takes, and the control requests its agents take that a program's mightn't (hello's ops:
-     * wire.speaks). */
+     * wire.takes). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "ephemeral", "control", "set_permission_mode", "set_model")

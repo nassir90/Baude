@@ -304,12 +304,15 @@ androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeTokens, BaudeTokens::outputDir) }
 }
 
-/** schema/wire.schema.json, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names,
- * WireConstants (the wire's version with them), Msg's classes, one for each message and entity, built with their fields
- * and made JSON (json) or read from it (from), and WireCheck, what's sent and what a host's asked looked at as
- * wire.py's check and refusal do. The schema itself goes in the app as a resource, for WireCheck's types. */
+/** schema/types and schema/variables, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names,
+ * WireConstants (the variables, the wire's version among them), Msg's classes, one for each message and entity (each
+ * a file of schema/types, named for it: Name.json, or Name.kind.json for a message), built with their fields and made
+ * JSON (json) or read from it (from), and WireCheck, what's sent and what a host's asked looked at as wire.py's check
+ * and refusal do. The types themselves go in the app as a resource (wire-types.json, by name), for WireCheck's types. */
 abstract class WireSchema : DefaultTask() {
-    @get:InputFile abstract val schema: RegularFileProperty
+    @get:InputDirectory abstract val typesDir: DirectoryProperty
+    @get:InputDirectory abstract val variablesDir: DirectoryProperty
+    @get:InputDirectory abstract val usesDir: DirectoryProperty // (the app's code: each constant it uses is there)
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
     @get:OutputDirectory abstract val resourcesDir: DirectoryProperty
 
@@ -331,8 +334,8 @@ abstract class WireSchema : DefaultTask() {
 
     private fun upper(key: String) = key.replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").replace(".", "_").uppercase()
 
-    private fun ref(p: Map<String, Any?>): String? = (p["\$ref"] as String?)?.substringAfterLast("/")
-        ?: (p["anyOf"] as List<*>?)?.firstNotNullOfOrNull { (map(it)["\$ref"] as String?)?.substringAfterLast("/") }
+    private fun ref(p: Map<String, Any?>): String? = (p["\$ref"] as String?)?.removeSuffix(".json")
+        ?: (p["anyOf"] as List<*>?)?.firstNotNullOfOrNull { (map(it)["\$ref"] as String?)?.removeSuffix(".json") }
 
     private fun types(p: Map<String, Any?>): List<String> = when (val t = p["type"]) {
         is String -> listOf(t)
@@ -360,7 +363,7 @@ abstract class WireSchema : DefaultTask() {
             return Triple("JSONArray", { it }, "o.optJSONArray(\"$key\")")
         }
         val values = p["additionalProperties"]
-        if (t == listOf("object") && values is Map<*, *> && p["x-open"] != true) { // (a map of entities, or of strings)
+        if (t == listOf("object") && values is Map<*, *>) { // (a map of entities, or of strings)
             val vr = ref(map(values))
             if (vr != null) return Triple("Map<String, $vr>", { "JSONObject($it.mapValues { e -> e.value.json() })" },
                 "o.optJSONObject(\"$key\")?.let { m -> m.keys().asSequence()" +
@@ -380,9 +383,9 @@ abstract class WireSchema : DefaultTask() {
     private fun doc(text: Any?, indent: String) = if (text == null) "" else
         "$indent/** ${(text as String).replace("*/", "*&#47;")} */\n"
 
-    private fun fail(what: String): Nothing = throw GradleException("wire.schema.json: $what")
+    private fun fail(what: String): Nothing = throw GradleException(what)
 
-    /** f, made of def (or constant) n: what goes wrong in it said with n's name. */
+    /** f, made of the file n (a type's or a variable's): what goes wrong in it said with n's name. */
     private fun <T> about(n: String, f: () -> T): T = try {
         f()
     } catch (e: GradleException) {
@@ -391,61 +394,105 @@ abstract class WireSchema : DefaultTask() {
         fail("$n: $e")
     }
 
-    /** A key twice in one of the JSON text's objects, and where (its path), if there's one: JsonSlurper keeps the last
-     * one, where wire.py's loader refuses the file. */
-    private fun twice(text: String): String? {
+    /** What's wrong with a JSON text that JsonSlurper lets by, where wire.py's loader (Python's json) refuses it, if
+     * anything: a key twice in one object, and where (its path; JsonSlurper keeps the last one), a text cut short or
+     * with more after its end, a } or ] that closes nothing or the other, a comma before one. */
+    private fun lax(text: String): String? {
         class At(val keys: HashSet<String>?, var key: String? = null) // (an object's keys so far, and its last; null: an array)
         val at = ArrayList<At>()
         var i = 0
+        var last = ' ' // (the last character that isn't white space)
+        var done = false // (the top's closed)
         while (i < text.length) {
-            when (text[i]) {
+            val ch = text[i]
+            if (done && !ch.isWhitespace()) return "more after its end"
+            when (ch) {
                 '{' -> at.add(At(HashSet()))
                 '[' -> at.add(At(null))
-                '}', ']' -> at.removeAt(at.size - 1)
+                '}', ']' -> {
+                    val open = at.removeLastOrNull() ?: return "a $ch that closes nothing"
+                    if ((open.keys != null) != (ch == '}')) return "a $ch that closes a ${if (ch == '}') '[' else '{'}"
+                    if (last == ',') return "a comma before a $ch"
+                    done = at.isEmpty()
+                }
                 '"' -> {
                     val start = i
                     i++
-                    while (text[i] != '"') i += if (text[i] == '\\') 2 else 1
+                    while (i < text.length && text[i] != '"') i += if (text[i] == '\\') 2 else 1
+                    if (i >= text.length) return "a string that isn't closed"
                     var j = i + 1
                     while (j < text.length && text[j].isWhitespace()) j++
                     val here = at.lastOrNull()
                     if (j < text.length && text[j] == ':' && here?.keys != null) {
                         val k = (groovy.json.JsonSlurper().parseText("[" + text.substring(start, i + 1) + "]") as List<*>)[0] as String
                         if (!here.keys.add(k))
-                            return "'$k' at " + at.dropLast(1).mapNotNull { it.key }.joinToString("/").ifEmpty { "the top" }
+                            return "a key twice in one object: '$k' at " +
+                                at.dropLast(1).mapNotNull { it.key }.joinToString("/").ifEmpty { "the top" }
                         here.key = k
                     }
                 }
             }
+            if (!ch.isWhitespace()) last = ch
             i++
         }
-        return null
+        return if (at.isNotEmpty()) "cut short: a ${if (at.last().keys != null) '{' else '['} that isn't closed" else null
+    }
+
+    /** Each file of dir (schema/<folder>), by its name: (its kind, as its file's name says it, or null; its JSON; its
+     * path). Others (a README, an editor's backup) are passed over. Fails, naming the file, for a folder in it, one not
+     * named Name.json or Name.kind.json, or JSON that can't be read (lax's too). */
+    private fun load(dir: File, folder: String): Map<String, Triple<String?, Any?, String>> {
+        val out = LinkedHashMap<String, Triple<String?, Any?, String>>()
+        for (f in dir.listFiles()!!.filter { !it.name.startsWith(".") }.sortedBy { it.name }) {
+            val path = "schema/$folder/${f.name}"
+            if (f.isDirectory) fail("$path: a folder, not a JSON file")
+            if (!f.name.endsWith(".json")) continue
+            val m = Regex("([A-Za-z_][A-Za-z0-9_]*)(?:\\.([a-z]+))?\\.json").matchEntire(f.name)
+                ?: fail("$path: not named Name.json or Name.kind.json")
+            val name = m.groupValues[1]
+            out[name]?.let { fail("$path: ${it.third} is $name too") }
+            val text = f.readText()
+            about(path) { lax(text) }?.let { fail("$path: $it") }
+            val json = about(path) { plain(groovy.json.JsonSlurper().parseText(text)) }
+            out[name] = Triple(m.groupValues[2].ifEmpty { null }, json, path)
+        }
+        return out
     }
 
     @Suppress("UNCHECKED_CAST")
     @TaskAction
     fun write() {
-        val text = schema.get().asFile.readText()
-        twice(text)?.let { fail("a key twice in one object: $it") }
-        val s = map(plain(groovy.json.JsonSlurper().parseText(text)))
-        val defs = map(s["\$defs"]).mapValues { map(it.value) }
-        val messages = (s["oneOf"] as? List<*> ?: fail("no oneOf")).map {
-            val r = map(it)["\$ref"] as? String ?: fail("oneOf: $it isn't a \$ref")
-            r.substringAfterLast("/").also { n -> if (n !in defs) fail("oneOf: no def $n") }
+        val loaded = load(typesDir.get().asFile, "types")
+        for ((_, d, path) in loaded.values) { // (an object, each of its properties an object)
+            val p = if (d is Map<*, *>) d["properties"] ?: emptyMap<String, Any?>() else null
+            if (p !is Map<*, *> || p.values.any { it !is Map<*, *> })
+                fail("$path: not a type (an object, each of its properties an object)")
         }
+        val files = loaded.mapValues { (_, f) -> Triple(f.first, map(f.second), f.third) }
+        val vars = load(variablesDir.get().asFile, "variables").mapValues { (_, f) ->
+            val c = (f.second as? Map<*, *>)?.get("const")
+            if (f.first != null || c !is Number) fail("${f.third}: not a variable (Name.json, an object whose const is a number)")
+            Triple(f.first, map(f.second), f.third)
+        }
+        if ("VERSION" !in vars) fail("schema/variables/VERSION.json: not there") // (the wire's, as a host's hello says it)
+        for (src in usesDir.get().asFile.walk().filter { it.extension == "kt" }) // (each constant the app uses there)
+            for (u in Regex("WireConstants\\.([A-Za-z_][A-Za-z0-9_]*)").findAll(src.readText()).map { it.groupValues[1] })
+                if (u !in vars) fail("schema/variables/$u.json: not there (${src.name} uses WireConstants.$u)")
+        val kinds = listOf("request", "reply", "event", "frame") // (what a message is, as its file's name says)
+        val defs = files.mapValues { it.value.second }
+        val kind = files.filterValues { it.first != null }.mapValues { it.value.first!! }
+        val messages = kind.keys.toList()
         fun props(d: Map<String, Any?>) = map(d["properties"]).mapValues { map(it.value) }
         fun op(d: Map<String, Any?>) = props(d)["op"]?.get("const") as String
-        for ((n, d) in defs) { // (every line in oneOf with its op and kind, every def with an op a line, every $ref a def)
+        for ((k, d, path) in files.values) { // (a message with a kind and an op, an entity without, every $ref a type)
             val o = props(d)["op"]?.get("const")
-            if (n in messages) {
-                if (o !is String) fail("$n: in oneOf, but no op const (properties.op.const)")
-                if (d["x-op"] != o) fail("$n: x-op isn't its op const, '$o'")
-                if (d["x-kind"] !in setOf("request", "reply", "event", "frame", "both"))
-                    fail("$n: x-kind ${d["x-kind"] ?: "missing"}, not request, reply, event, frame or both")
-            } else if (o != null || "x-op" in d) fail("$n: an op ('${o ?: d["x-op"]}'), but not in oneOf")
+            if (k != null && k !in kinds) fail("$path: $k isn't one of ${kinds.joinToString()}")
+            if (k != null && o !is String) fail("$path: a message with no op const")
+            if (k == null && "op" in props(d)) fail("$path: an op, but no kind in its name (Name.request.json, ...)")
             fun refs(v: Any?): Unit = when (v) {
                 is Map<*, *> -> {
-                    (v["\$ref"] as? String)?.let { r -> if (r.substringAfterLast("/") !in defs) fail("$n: no def $r") }
+                    if ("\$ref" in v) (v["\$ref"] as? String).let { r ->
+                        if (r == null || !r.endsWith(".json") || r.removeSuffix(".json") !in defs) fail("$path: no type ${v["\$ref"]}") }
                     v.values.forEach { refs(it) }
                 }
                 is List<*> -> v.forEach { refs(it) }
@@ -454,26 +501,22 @@ abstract class WireSchema : DefaultTask() {
             refs(d)
         }
 
-        val version = (s["x-version"] as? Number ?: fail("no x-version")).toInt()
-
         val out = StringBuilder()
         out.append("package dev.baude.android\n\nimport org.json.JSONArray\nimport org.json.JSONObject\n\n")
-        out.append("// Made from schema/wire.schema.json as the app's built (android/app/build.gradle.kts's WireSchema).\n\n")
+        out.append("// Made from schema/types and schema/variables as the app's built (build.gradle.kts's WireSchema).\n\n")
         out.append("/** The wire's ops. */\nobject Op {\n")
         for (o in messages.map { op(defs[it]!!) }.distinct()) out.append("    const val ${upper(o)} = \"$o\"\n")
         out.append("}\n\n")
-        out.append("/** The protocol's constants, and the wire's version (as a host's hello says it). */\nobject WireConstants {\n")
-        out.append("    const val VERSION = $version\n")
-        for ((k, c) in map(s["x-constants"])) about(k) {
-            val v = map(c)["value"] as? Number ?: fail("$k: its value isn't a number")
-            out.append(doc("${map(c)["description"]} (${map(c)["unit"]})", "    "))
+        out.append("/** The protocol's constants (schema/variables), the wire's version among them. */\nobject WireConstants {\n")
+        for ((k, f) in vars) about(f.third) {
+            val v = f.second["const"] as Number
+            out.append(doc(f.second["description"], "    "))
             out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
         }
         out.append("}\n\n")
         // (WireCheck: what wire.check does, a field or op the schema hasn't, in what's sent; entities looked into)
         fun closed(n: String) = defs[n]?.get("additionalProperties") == false
         fun nested(p: Map<String, Any?>): String? {
-            if (p["x-open"] == true) return null
             ref(p)?.let { r -> return if ("array" in types(p) || !closed(r)) null else r }
             if ("array" in types(p)) return ref(map(p["items"]))?.takeIf { closed(it) }
             val values = p["additionalProperties"]
@@ -485,7 +528,7 @@ abstract class WireSchema : DefaultTask() {
         out.append("/** What of a message isn't the schema's (an op, a field: wire.check's): what's sent is checked by it. */\n")
         out.append("object WireCheck {\n    private class Shape(val fields: Set<String>, val inner: Map<String, String>)\n\n")
         out.append("    private val ENTITIES = mapOf(\n")
-        for ((n, d) in defs) if (n !in messages && closed(n)) about(n) {
+        for ((n, d) in defs) if (n !in messages && closed(n)) about(files.getValue(n).third) {
             val inner = props(d).mapNotNull { (f, p) -> nested(p)?.let { f to it } }.toMap()
             out.append("        \"$n\" to ${shape(props(d).keys, inner)},\n")
         }
@@ -499,22 +542,22 @@ abstract class WireSchema : DefaultTask() {
             out.append("        \"$o\" to ${shape(fields, inner)},\n")
         }
         out.append("    )\n\n")
-        val requests = messages.filter { defs[it]!!["x-kind"] in setOf("request", "both") }
+        val requests = messages.filter { kind[it] == "request" }
         fun nullable(p: Map<String, Any?>) = p["type"] == "null" || (p["type"] as? List<*>)?.contains("null") == true ||
             (p["anyOf"] as? List<*>)?.any { map(it)["type"] == "null" } == true
         out.append("    /** The ops a host takes. */\n")
         out.append("    val TAKEN = setOf(${requests.map { op(defs[it]!!) }.distinct().joinToString { "\"$it\"" }})\n")
-        out.append("    private val LINES = mapOf( // (an op's lines: each def's name, and its x-kind)\n")
+        out.append("    private val LINES = mapOf( // (an op's messages: each one's name, and its kind)\n")
         for (o in messages.map { op(defs[it]!!) }.distinct())
             out.append("        \"$o\" to listOf(${messages.filter { op(defs[it]!!) == o }.joinToString {
-                "\"$it\" to \"${defs[it]!!["x-kind"]}\"" }}),\n")
+                "\"$it\" to \"${kind[it]}\"" }}),\n")
         out.append("    )\n    private val NULLABLE = mapOf( // (an op's fields that may be null, in any of its lines)\n")
         for (o in messages.map { op(defs[it]!!) }.distinct()) {
             val fields = messages.filter { op(defs[it]!!) == o }
                 .flatMap { n -> props(defs[n]!!).filterValues { nullable(it) }.keys }.distinct()
             if (fields.isNotEmpty()) out.append("        \"$o\" to setOf(${fields.joinToString { "\"$it\"" }}),\n")
         }
-        out.append("    )\n    private val REQUEST = setOf(\"request\", \"both\")\n\n")
+        out.append("    )\n    private val REQUEST = setOf(\"request\")\n\n")
         out.append("""    fun problem(msg: JSONObject): String? {
         val op = msg.optString("op")
         val shape = OPS[op] ?: return "no op '${'$'}op' in the schema"
@@ -568,10 +611,9 @@ abstract class WireSchema : DefaultTask() {
         return refused(if (op !in takes) UNSUPPORTED else INVALID, msg.opt("req"), bad)
     }
 
-    private val schema: JSONObject by lazy {
-        JSONObject(WireCheck::class.java.getResourceAsStream("/wire.schema.json")!!.bufferedReader().use { it.readText() })
+    private val defs: JSONObject by lazy { // (each message and entity, by its name: schema/types)
+        JSONObject(WireCheck::class.java.getResourceAsStream("/wire-types.json")!!.bufferedReader().use { it.readText() })
     }
-    private val defs: JSONObject by lazy { schema.getJSONObject("\${'$'}defs") }
 
     /** What of a request isn't as its op's request lines have it, types too; null if one of them fits. */
     fun invalid(msg: JSONObject): String? =
@@ -596,7 +638,7 @@ abstract class WireSchema : DefaultTask() {
 
     private fun valid(s: JSONObject, v: Any?, at: String, out: MutableList<String>) {
         val ref = s.optString("\${'$'}ref")
-        if (ref.isNotEmpty()) return valid(defs.getJSONObject(ref.substringAfterLast('/')), v, at, out)
+        if (ref.isNotEmpty()) return valid(defs.getJSONObject(ref.removeSuffix(".json")), v, at, out)
         s.optJSONArray("anyOf")?.let { a ->
             if ((0 until a.length()).none { ArrayList<String>().also { t -> valid(a.getJSONObject(it), v, at, t) }.isEmpty() })
                 out.add(at + ": " + v.toString().take(60) + " is none of what it may be")
@@ -619,7 +661,6 @@ abstract class WireSchema : DefaultTask() {
                 return
             }
         }
-        if (s.optBoolean("x-open")) return
         if (v is JSONObject) {
             val props = s.optJSONObject("properties")
             if (props != null) {
@@ -653,7 +694,7 @@ abstract class WireSchema : DefaultTask() {
         out.append("private fun JSONObject.wireStr(key: String): String? = if (isNull(key)) null else optString(key)\n\n")
         out.append("/** The wire's messages and the entities in them: each built with the fields it's given (those left null aren't " +
             "sent), json() as it goes, from() as it came (a field it doesn't have left out). */\nobject Msg {\n")
-        for ((name, d) in defs) about(name) {
+        for ((name, d) in defs) about(files.getValue(name).third) {
             val fields = props(d).filterKeys { it != "op" }
             out.append(doc(d["description"], "    "))
             out.append("    class $name(\n")
@@ -677,12 +718,14 @@ abstract class WireSchema : DefaultTask() {
         dir.mkdirs()
         dir.resolve("WireSchema.kt").writeText(out.toString())
         resourcesDir.get().asFile.mkdirs()
-        schema.get().asFile.copyTo(resourcesDir.get().asFile.resolve("wire.schema.json"), overwrite = true)
+        resourcesDir.get().asFile.resolve("wire-types.json").writeText(groovy.json.JsonOutput.toJson(defs))
     }
 }
 
 val wireSchema = tasks.register<WireSchema>("wireSchema") {
-    schema.set(rootProject.layout.projectDirectory.file("../schema/wire.schema.json"))
+    typesDir.set(rootProject.layout.projectDirectory.dir("../schema/types"))
+    variablesDir.set(rootProject.layout.projectDirectory.dir("../schema/variables"))
+    usesDir.set(layout.projectDirectory.dir("src/main/java"))
     outputDir.set(layout.buildDirectory.dir("generated/wireSchema"))
     resourcesDir.set(layout.buildDirectory.dir("generated/wireSchemaResources"))
 }

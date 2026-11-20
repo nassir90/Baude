@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "This connection attached to a session.",
+  "properties": {
+    "op": {
+      "const": "attach",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "live": {
+      "type": "boolean",
+      "description": "claude, exited and deleted as they come."
+    },
+    "answers": {
+      "type": "boolean",
+      "description": "(default true; kept for the connection, its last attach's or start's) false for a head that won't answer what the session asks: it isn't counted as there to answer."
+    },
+    "app_tools": {
+      "type": "boolean",
+      "description": "The session's app_tools (start's) carried to this connection from now."
+    },
+    "always_allow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tools added to those allowed whenever it asks."
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "As start's."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

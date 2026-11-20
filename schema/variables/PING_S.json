@@ -1,0 +1,4 @@
+{
+  "description": "A connection's ends each say something at least this often (ping), in seconds.",
+  "const": 5
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot, as a session lists it.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "since": {
+      "type": ["number", "null"],
+      "description": "When it was made a Bot, epoch seconds."
+    },
+    "picture": {
+      "type": ["number", "null"],
+      "description": "Its picture's mtime; null for none."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

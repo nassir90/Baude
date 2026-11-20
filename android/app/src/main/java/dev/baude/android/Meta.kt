@@ -200,10 +200,6 @@ object Meta {
     fun send(text: String) {
         val h = host.value ?: return
         val c = chat
-        if (!offers(h, "app_tools")) {
-            c.said.value = tooOld(h, "run Meta for a phone")
-            return
-        }
         val before = earlier()
         val ran = if (late.isEmpty()) "" else "(While the phone was away, these calls of yours did run here after all, " +
             "though you were told they failed; they're done, so don't do them again:\n" + late.joinToString("\n") { "- $it" } + ")\n\n"

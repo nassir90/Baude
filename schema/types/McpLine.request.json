@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A line for a relayed MCP server, or from it.",
+  "properties": {
+    "op": {
+      "const": "mcp_line",
+      "description": "What it is."
+    },
+    "line": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An MCP server's gone, on either side.",
+  "properties": {
+    "op": {
+      "const": "mcp_close",
+      "description": "What it is."
+    },
+    "conn": {
+      "type": "integer",
+      "description": "Its relay's number."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

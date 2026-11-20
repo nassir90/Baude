@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a Bot's tools did with the mouse, numbered (seq starts again from 1 with each Emission).",
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "description": "Its number."
+    },
+    "kind": {
+      "enum": ["hover", "click", "drag", "scroll"],
+      "description": "What it was."
+    },
+    "x": {
+      "type": "number",
+      "description": "Where, in CSS pixels."
+    },
+    "y": {
+      "type": "number",
+      "description": "Where, in CSS pixels."
+    },
+    "path": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "description": "A drag's path from there, 40 points at most."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Clicks, more than one."
+    },
+    "dx": {
+      "type": "number",
+      "description": "A scroll's."
+    },
+    "dy": {
+      "type": "number",
+      "description": "A scroll's."
+    }
+  },
+  "required": ["seq"],
+  "additionalProperties": false
+}

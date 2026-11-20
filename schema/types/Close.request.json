@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A tunnel closed, from either end; or (agent) the program's stdin closed.",
+  "properties": {
+    "op": {
+      "const": "close",
+      "description": "What it is."
+    },
+    "t": {
+      "type": "integer",
+      "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "r": {
+      "type": "integer",
+      "description": "The tunnel, by the number of the end that opened it (the other end's)."
+    },
+    "error": {
+      "type": "string",
+      "description": "Why."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

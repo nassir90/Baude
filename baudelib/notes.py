@@ -212,13 +212,13 @@ def apply(notebooks, changes):
         if c.get("name") is not None:
             t["name"] = c["name"]
         pages = t.setdefault("pages", {})
-        was, said = c.get("was") or {}, "was" in c  # (said: a sender that says what it had; an older one doesn't)
+        was = c.get("was") or {}  # (what the sender had of each page)
         for name, text in (c.get("pages") or {}).items():
             here = pages.get(name)
             if text is None:
-                if not (said and name in was and here is not None and here != was[name]):  # (changed here: kept)
+                if not (name in was and here is not None and here != was[name]):  # (changed here: kept)
                     pages.pop(name, None)
-            elif said and here is not None and here != was.get(name, here if name in was else ""):
+            elif here is not None and here != was.get(name, here if name in was else ""):
                 pages[name] = merge3(was.get(name, ""), here, text)  # (what's here kept where it was changed)
             else:
                 pages[name] = text
@@ -227,8 +227,8 @@ def apply(notebooks, changes):
 
 
 def _hand_over(changes):
-    """The changes given to the Record running here, which applies them (record.App's notes): "notes" if it did, None
-    if none's running, "old" if it's one from before it took them."""
+    """The changes given to the Record running here, which applies them (record.App's notes): True if it did, False if
+    it said otherwise, None if none's running."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
             c.settimeout(5)
@@ -237,7 +237,7 @@ def _hand_over(changes):
             said = c.recv(16)
     except OSError:
         return None
-    return "notes" if said == b"notes\n" else "old"
+    return said == b"notes\n"
 
 
 BACKUP_EVERY, BACKUPS = 600, 50  # (as record.Store's: a copy at most every 10 minutes, the last 50 kept)
@@ -269,10 +269,9 @@ def write(changes):
     if not changes:
         return {"done": []}
     handed = _hand_over(changes)
-    if handed == "notes":
-        return {"done": [c["id"] for c in changes], "by": "record"}
-    if handed == "old":
-        return {"error": "the Record running there is older and can't take changes: restart it"}
+    if handed is not None:
+        return {"done": [c["id"] for c in changes], "by": "record"} if handed else \
+            {"error": "the Record running there didn't take the changes"}
     with _LOCK:
         path = records_path()
         try:

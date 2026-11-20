@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A name Signal's glossary has.",
+  "properties": {
+    "surface": {
+      "type": "string",
+      "description": "As it's written."
+    },
+    "kind": {
+      "type": "string",
+      "description": "What it names."
+    },
+    "canonical": {
+      "type": ["string", "null"],
+      "description": "What it is."
+    },
+    "status": {
+      "type": "string",
+      "description": "Its status."
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "description": "What's said of it."
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Where it's mentioned: {role, path, line, note, rev}."
+    }
+  },
+  "additionalProperties": false
+}

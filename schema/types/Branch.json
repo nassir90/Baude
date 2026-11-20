@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A checkout's branch.",
+  "properties": {
+    "name": {
+      "type": ["string", "null"],
+      "description": "Its name."
+    },
+    "upstream": {
+      "type": ["string", "null"],
+      "description": "What it tracks."
+    },
+    "ahead": {
+      "type": "integer",
+      "description": "Commits ahead of it."
+    },
+    "behind": {
+      "type": "integer",
+      "description": "Commits behind it."
+    }
+  },
+  "additionalProperties": false
+}

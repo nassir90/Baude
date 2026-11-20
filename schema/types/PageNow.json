@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The tab in front, as it is now.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "url": {
+      "type": "string",
+      "description": "Its address."
+    },
+    "progress": {
+      "type": "number",
+      "description": "How far it's loaded, 0 to 1."
+    },
+    "loading": {
+      "type": "boolean",
+      "description": "Loading."
+    },
+    "back": {
+      "type": "boolean",
+      "description": "It can go back."
+    },
+    "forward": {
+      "type": "boolean",
+      "description": "It can go forward."
+    }
+  },
+  "additionalProperties": false
+}

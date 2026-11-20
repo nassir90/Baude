@@ -131,15 +131,15 @@ def entries():
 
 def kind(m):
     """What a model's served as, whatever its case (gpt-oss:20B on one host is gpt-oss:20b on another): its repo or its
-    name to its server; None for one with no runtime (Apple's), or one a host doesn't say it of (an older one)."""
+    name to its server; None for one with no runtime (Apple's), or one a host doesn't say it of."""
     served = m.get("resolvedModel") or m.get("id") if has_runtime(m.get("provider") or provider_of(m["value"])) else None
     return served.casefold() if isinstance(served, str) and served else None
 
 
 def same(a, b):
     """Whether two models are the same one, on two hosts or served two ways: what they're served as (kind; where
-    either doesn't say, their names, in any case), and their version and digest (Ollama's) where both say one: one a
-    host doesn't say (an older one) isn't a difference. Their windows count where both say one and neither has a
+    either doesn't say, their names, in any case), and their version and digest (Ollama's) where both say one: one
+    only one says isn't a difference. Their windows count where both say one and neither has a
     digest: an Ollama model's is the one it's loaded with now, which changes as it's loaded; its digest says what it is."""
     ka, kb = kind(a), kind(b)
     if ka and kb:

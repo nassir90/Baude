@@ -1,0 +1,4 @@
+{
+  "description": "A tunnel's passed through at most this many hosts (open's ttl).",
+  "const": 16
+}

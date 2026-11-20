@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's browser here watched (Baude's Browser pane): one a connection.",
+  "properties": {
+    "op": {
+      "const": "emission_watch",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+      "$ref": "BotRef.json",
+      "description": "The Bot."
+    },
+    "max_w": {
+      "type": "integer",
+      "description": "The pane's width."
+    },
+    "max_h": {
+      "type": "integer",
+      "description": "The pane's height."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

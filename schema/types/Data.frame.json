@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A wire message in a tunnel, passed on as it came.",
+  "properties": {
+    "op": {
+      "const": "data",
+      "description": "What it is."
+    },
+    "t": {
+      "type": "integer",
+      "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "r": {
+      "type": "integer",
+      "description": "The tunnel, by the number of the end that opened it (the other end's)."
+    },
+    "msg": {
+      "type": "object",
+      "description": "The message."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

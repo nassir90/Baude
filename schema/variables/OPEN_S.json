@@ -1,0 +1,4 @@
+{
+  "description": "A member of the mesh, reached through it: its tunnel has this long to open, in seconds.",
+  "const": 20
+}

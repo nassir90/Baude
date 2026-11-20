@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "emission_watch's answer, as it goes: a frame of the page in front, or its state as it changes.",
+  "properties": {
+    "op": {
+      "const": "emission_frame",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "frame": {
+      "type": "integer",
+      "description": "Its number (ack it)."
+    },
+    "w": {
+      "type": "integer",
+      "description": "Its width."
+    },
+    "h": {
+      "type": "integer",
+      "description": "Its height."
+    },
+    "jpeg": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "The frame."
+    },
+    "stride": {
+      "type": "integer",
+      "description": "Its rows' length in bytes, in shared memory (shm)."
+    },
+    "shm": {
+      "type": "string",
+      "description": "The shared memory it's in (a pane on Emission's own machine), not jpeg."
+    },
+    "view": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "integer"
+      },
+      "description": "The page's size, in CSS pixels."
+    },
+    "error": {
+      "type": "string",
+      "description": "Emission said no: why."
+    },
+    "state": {
+      "$ref": "WatchState.json",
+      "description": "The browser's state."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

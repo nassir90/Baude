@@ -249,7 +249,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
     var starting by remember { mutableStateOf<Pair<String?, String?>?>(null) } // (New session: its host and folder)
     val more = remember { mutableStateListOf<String>() } // (sections shown whole this run: Show N more)
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Baude", end = {
+        Bar("Baude", left = true, end = {
             IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
             Menu(listOf(Wording.Window.settings to settings, Wording.Fixes.sendFeedback to feedback))

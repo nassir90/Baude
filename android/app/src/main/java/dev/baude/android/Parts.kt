@@ -73,10 +73,11 @@ fun StatusDot(state: String, asking: Boolean) {
     Box(Modifier.size(Gap.dot).alpha(pulse).clip(CircleShape).background(colour))
 }
 
-/** A bar as Adw.HeaderBar is: 46 tall, the frame's colour, its title in the middle. */
+/** A bar as Adw.HeaderBar is: 46 tall, the frame's colour, its title in the middle (at the start: left, as the app's
+ * own name on its home screen is, with no window's buttons beside it). */
 @Composable
 fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@Composable RowScope.() -> Unit)? = null,
-        subtitle: String? = null, lead: (@Composable () -> Unit)? = null) {
+        subtitle: String? = null, lead: (@Composable () -> Unit)? = null, left: Boolean = false) {
     val c = LocalBaude.current
     Row(
         Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp),
@@ -84,12 +85,12 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
     ) {
         if (start != null) start()
         Row(Modifier.weight(1f).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (lead == null) Arrangement.Center else Arrangement.Start) {
+            horizontalArrangement = if (lead == null && !left) Arrangement.Center else Arrangement.Start) {
             if (lead != null) {
                 lead()
                 Spacer(Modifier.width(Gap.avatarGap))
             }
-            Column(horizontalAlignment = if (lead == null) Alignment.CenterHorizontally else Alignment.Start) {
+            Column(horizontalAlignment = if (lead == null && !left) Alignment.CenterHorizontally else Alignment.Start) {
                 Text(title, style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (subtitle != null) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)

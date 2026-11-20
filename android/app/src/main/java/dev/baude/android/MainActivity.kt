@@ -65,10 +65,7 @@ class MainActivity : ComponentActivity() {
 
     /** Opened from a Bot's notification: its chat; from A new version is ready's Update: the install. */
     private fun opened(intent: Intent?) {
-        if (intent?.getBooleanExtra("update", false) == true) {
-            intent.removeExtra("update")
-            Update.install(this)
-        }
+        Update.opened(this, intent)
         val host = intent?.getStringExtra("host") ?: return
         val session = intent.getStringExtra("session") ?: return
         go(listOf("chat", host, session))

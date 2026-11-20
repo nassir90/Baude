@@ -4,15 +4,39 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-/** git in the checkout the app's built from: what it printed, or null (not a checkout, no git). */
+/** git in the checkout the app's built from (the folder above android/): what it printed, or null (it failed). */
 fun git(vararg args: String): String? = try {
-    providers.exec {
-        commandLine("git", "-C", rootDir.path, *args)
+    val run = providers.exec {
+        commandLine("git", "-C", rootDir.parentFile.path, *args)
         isIgnoreExitValue = true
-    }.standardOutput.asText.get().trim().ifEmpty { null }
+    }
+    if (run.result.get().exitValue == 0) run.standardOutput.asText.get().trim() else null
 } catch (e: Exception) {
     null
 }
+
+/** What goes into the APK (android/, emission.py's scripts, schema/'s tokens and types): its commits count. */
+val APP_PATHS = arrayOf("android", "emission.py", "schema")
+
+/** The build's version, as Baude's Version is the commit it runs: (versionCode, versionName). versionCode is how many
+ * commits (not merges) have changed what goes into the APK, so each build of main that changes it installs over the
+ * one before (Update.kt; build_shots.py publishes it only if it's above the live one's), and one that doesn't keeps
+ * its number; versionName is the short hash, "-dirty" if those files have changes not committed (never published).
+ * Outside a full git checkout the build fails, unless it's given one: -PbaudeVersionCode=N. */
+fun version(): Pair<Int, String> {
+    (findProperty("baudeVersionCode") as String?)?.let { return it.toInt() to "$it-local" }
+    fun fail(why: String): Nothing = throw GradleException(
+        "versionCode comes from git, and $why: build in a full checkout of Baude, or pass -PbaudeVersionCode=N")
+    val top = git("rev-parse", "--show-toplevel") ?: fail("there's no git checkout at ${rootDir.parentFile}")
+    if (File(top).canonicalFile != rootDir.parentFile.canonicalFile) fail("${rootDir.parentFile} isn't a checkout's top")
+    if (git("rev-parse", "--is-shallow-repository") != "false") fail("this checkout is shallow")
+    val count = git("rev-list", "--count", "--no-merges", "--full-history", "HEAD", "--", *APP_PATHS)?.toIntOrNull()
+        ?: fail("git rev-list failed")
+    val hash = git("rev-parse", "--short", "HEAD") ?: fail("git rev-parse failed")
+    val dirty = git("status", "--porcelain", "--", *APP_PATHS) ?: fail("git status failed")
+    return count to (if (dirty.isEmpty()) hash else "$hash-dirty")
+}
+val (appVersionCode, appVersionName) = version()
 
 android {
     namespace = "dev.baude.android"
@@ -22,10 +46,8 @@ android {
         applicationId = "dev.baude.android"
         minSdk = 26
         targetSdk = 35
-        // (the build's commit, as Baude's Version is: versionCode how many commits it has, so each build of main's
-        // installs over the one before it (Update.kt), and versionName its short hash)
-        versionCode = git("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 1
-        versionName = git("rev-parse", "--short", "HEAD") ?: "0.1.0"
+        versionCode = appVersionCode // (version(): from git)
+        versionName = appVersionName
     }
 
     buildTypes {

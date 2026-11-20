@@ -8480,7 +8480,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 store.loading.discard(key)
                 old = (r.info.get("version") or 1) < 6
                 self.toast(f"{remote_name(r)}'s {book(plural=True).lower()} weren't listed: " +
-                           ("its daemon is older than this Record" if old else str(reply.get("error") or "no answer")))
+                           ("its daemon is older than this Record" if old else
+                            baudelib.client.wire.said(reply) or "no answer"))
                 return
             books = [b for b in reply.get("notebooks") or () if isinstance(b, dict) and isinstance(b.get("id"), str)
                      and isinstance(b.get("pages"), dict)]

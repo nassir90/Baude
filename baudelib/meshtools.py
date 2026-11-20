@@ -153,7 +153,7 @@ class Mesh:
             while (r := ch.reply()) is not None:
                 if r.get("req") == 1:
                     if r.get("op") == "error":
-                        raise ValueError(r.get("error"))
+                        raise ValueError(wire.said(r))
                     return r
             raise OSError("the host went before it answered")
         finally:
@@ -191,7 +191,7 @@ class Mesh:
             ch.send({"op": "attach", "session": session, "live": True, "answers": False, "req": 1})
             got = ch.reply()
             if not got or got.get("op") != "attached":
-                raise ValueError((got or {}).get("error") or "the host didn't answer")
+                raise ValueError(wire.said(got) or "the host didn't answer")
             ch.keep_alive()
             busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
             offset = self.request(where, {"op": "transcript", "session": session, "offset": 0, "limit": 1})["size"] \
@@ -276,7 +276,7 @@ class Mesh:
                         return {"session": session, "answer": None, "exited": msg.get("code"), "said_so_far": cut(said)}
                     if req is not None and msg.get("req") == req["req"]:  # (what was sent: taken, or not)
                         if msg.get("op") == "error":
-                            raise ValueError(msg.get("error") or "the host didn't take it")
+                            raise ValueError(wire.said(msg) or "the host didn't take it")
                         req = None
                         if not wait:
                             return {"session": session, "sent": True}
@@ -332,8 +332,9 @@ class Mesh:
             return False
         try:
             self.request(self.local, {"op": "waits_on", "session": self.me, "done": done, "on": {
-                "host": host, "session": session, "kind": kind, "text": text, "offset": offset, "title": title,
-                "until": time.time() + end - time.monotonic()}}, timeout=10)
+                "host": host, "session": session, "kind": kind, "text": text, "offset": offset,
+                **({"title": title} if title is not None else {}), "until": time.time() + end - time.monotonic()}},
+                timeout=10)
             return True
         except (OSError, ValueError):  # (a host before waits_on keeps none: a restart of it ends the wait)
             return False
@@ -394,7 +395,7 @@ class Mesh:
                                        title=params["title"]), **named}
             ch.close()
             if r is not None and "host process is stopping" not in (r.get("error") or ""):
-                raise ValueError(r.get("error") or "the host didn't take it")
+                raise ValueError(wire.said(r) or "the host didn't take it")
             dropped |= r is None  # (gone before it answered: started there, or not)
             if time.monotonic() + AGAIN_S > end:
                 raise OSError(f"its host went as the subagent was started, and wasn't back within {BACK_S} s")

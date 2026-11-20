@@ -5,19 +5,21 @@ What may be said is schema/wire.schema.json's (JSON Schema, draft 2020-12), read
 (its op, its fields, what each is), the entities in them (a session, a host's info, the mesh's records), the
 protocol's constants and its version (VERSION). The Android app's build makes Kotlin of the same file. Its reference,
 as this module's help shows it below, is made from it (docs()); defs has a class for each of its messages and entities
-(Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Every message sent goes
-through it: one with an op or a field it doesn't have isn't sent, and an error goes for its request in its place (as
-for one that isn't JSON), said on stderr; a message passed on (a tunnel's) goes as it came. A request a host takes is
-looked at too (refusal): an op it doesn't take is answered "unsupported operation", fields that aren't as the schema
-has them "invalid data type", each an error with a code of its own (UNSUPPORTED, INVALID), the same from every host,
-the phone's too. $BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what
+(Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Python's own senders write
+dicts, as before: every message sent goes through the schema all the same (Channel.send). A field given as None that
+its op doesn't let be null is left out; one with an op or a field the schema doesn't have isn't sent (a request of this
+end's own is refused here, as if the other end had; an answer goes as that refusal; a listing or a turn's end is only
+said on stderr); a message passed on (a tunnel's) goes as it came. A request a host takes is looked at too (refusal):
+an op it doesn't take is answered "unsupported operation", fields that aren't as the schema has them "invalid data
+type", each an error with a code of its own (UNSUPPORTED, INVALID) and what was wrong (detail), the same from every
+host, the phone's too. $BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what
 doesn't fit.
 
 A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
 request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
 those watching it are told so by its claude's message {type: "_note", text}.
 
-Senders (version 18). A message passed to a session from another than its user (input's as, a held message sent, a
+Senders. A message passed to a session from another than its user (input's as, a held message sent, a
 subagent's task) has a uuid its program keeps: Claude Code's as its transcript record's, pi's on its session entry
 (pi-claude's /baude-uuid), the host's own transcript's for the others (Server.keep). Its host keeps who it's from,
 by that uuid, beside the session (its state folder's senders/<session>.json), and heads draw a message as from
@@ -25,8 +27,8 @@ another only if it's there, never from its text: the tag said_by puts at the hea
 The store goes as its session's transcript goes: copied to a fork, trashed with it, and what a revert drops (its
 message and those after it) gone from it too.
 
-A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
-on the same machine reads it there rather than fetching a copy.
+A session listed says where its transcript is on its host's machine ("transcript": a path, or None), to every head:
+one on the same machine reads it there rather than fetching a copy.
 
 Where a server is: a host process (baude_headless.py) listens on a Unix socket only (socket_path(), in a folder that's
 its user's alone: that folder is all the say there is in who may use it), with no port on the network. What's on the
@@ -49,6 +51,7 @@ connects to any of them:
     {"via": "mesh", "host": ID, "path"?}            member ID of the mesh this machine's host process is in (or the
                                                     one listening at path), through it: relay
 """
+import collections
 import dataclasses
 import json
 import keyword
@@ -84,10 +87,29 @@ def _load(path):
 
 SCHEMA = _load(SCHEMA_PATH)
 DEFS = SCHEMA["$defs"]
-MESSAGES = [ref["$ref"].rsplit("/", 1)[1] for ref in SCHEMA["oneOf"]]  # (the defs that are lines, in order)
-OPS = {}  # (an op: the defs of its lines, a request's and its answer's, say)
-for _name in MESSAGES:
-    OPS.setdefault(DEFS[_name]["properties"]["op"]["const"], []).append(_name)
+
+
+def _lines():
+    """The defs that are lines, in order, and each op's: SchemaError, naming the def, for one oneOf names that isn't
+    there, or a line without an op const or an x-kind."""
+    names, ops = [], {}
+    for ref in SCHEMA["oneOf"]:
+        name = ref.get("$ref", "").rsplit("/", 1)[-1]
+        if name not in DEFS:
+            raise SchemaError(f"oneOf's {ref.get('$ref')!r}: no such def")
+        op = DEFS[name].get("properties", {}).get("op", {}).get("const")
+        if not isinstance(op, str):
+            raise SchemaError(f"{name}: a line with no op const")
+        if DEFS[name].get("x-kind") not in ("request", "reply", "event", "frame", "both"):
+            raise SchemaError(f"{name}: a line with no x-kind (request, reply, event, frame or both)")
+        if DEFS[name].get("x-op") != op:
+            raise SchemaError(f"{name}: its x-op isn't its op const")
+        names.append(name)
+        ops.setdefault(op, []).append(name)
+    return names, ops
+
+
+MESSAGES, OPS = _lines()  # (the defs that are lines, in order; an op: its lines, a request's and its answer's, say)
 
 
 def _ref(schema):
@@ -103,11 +125,11 @@ def _ref(schema):
 def _check_schema():
     """Every def a line or an entity, every $ref one of them (a key twice in one object: _load's)."""
     for name, d in DEFS.items():
-        if name in MESSAGES and "x-op" not in d or name not in MESSAGES and "x-op" in d:
-            raise SchemaError(f"{name} is a line but not in oneOf, or the other way round")
-    for ref in re.findall(r'"\$ref": "#/\$defs/([^"]+)"', json.dumps(DEFS)):
-        if ref not in DEFS:
-            raise SchemaError(f"no def {ref}")
+        if name not in MESSAGES and ("x-op" in d or "op" in d.get("properties", {})):
+            raise SchemaError(f"{name}: a line (it has an op) that oneOf doesn't name")
+        for ref in re.findall(r'"\$ref": "#/\$defs/([^"]+)"', json.dumps(d)):
+            if ref not in DEFS:
+                raise SchemaError(f"{name}: no def {ref}")
 
 
 _check_schema()
@@ -200,12 +222,15 @@ class _Defs:
     """Each def's class (defs.Session), made the first time it's asked for: all of them at once would add some 25 ms
     to every import."""
 
+    _lock = threading.Lock()
+
     def __getattr__(self, name):
         if name not in DEFS:
             raise AttributeError(f"no def {name} in the schema")
-        cls = _make_class(name, DEFS[name])
-        setattr(self, name, cls)
-        return cls
+        with self._lock:  # (two threads asking at once: one class, made once)
+            if name not in self.__dict__:
+                setattr(self, name, _make_class(name, DEFS[name]))
+            return self.__dict__[name]
 
     def __dir__(self):
         return list(DEFS)
@@ -302,6 +327,7 @@ def _op_checker(op, names):
 
 _CHECKS = {op: _op_checker(op, names) for op, names in OPS.items()}
 _said = set()
+SAID_MOST = 1000
 
 
 def check(msg):
@@ -335,9 +361,34 @@ def problems(msg, kinds=None):
 TAKEN = frozenset(DEFS[n]["x-op"] for n in MESSAGES if DEFS[n]["x-kind"] in ("request", "both"))  # (a host's ops)
 
 
-def refused(code, req=None):
-    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host."""
-    return {"op": "error", "req": req, "error": SAID[code], "code": code}
+def refused(code, req=None, detail=None):
+    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+    and what was wrong (detail)."""
+    return {"op": "error", "req": req, "error": SAID[code], "code": code, **({"detail": detail} if detail else {})}
+
+
+def said(reply):
+    """An error reply as a person reads it: its error, and its detail if it has one."""
+    reply = reply or {}
+    return ": ".join(str(x) for x in (reply.get("error"), reply.get("detail")) if x)
+
+
+def _nullable(p):
+    t = p.get("type")
+    return "type" not in p and "anyOf" not in p and "$ref" not in p and "const" not in p and "enum" not in p or \
+        isinstance(t, list) and "null" in t or any(x.get("type") == "null" for x in p.get("anyOf") or ())
+
+
+NULLABLE = {op: frozenset(f for n in names for f, p in DEFS[n]["properties"].items() if _nullable(p))
+            for op, names in OPS.items()}  # (an op's fields that may be null, in any of its lines)
+
+
+def unnulled(msg):
+    """msg without the fields given as None that its op doesn't let be null: left out, as not given."""
+    if isinstance(msg, dict) and None in msg.values():
+        keep = NULLABLE.get(msg.get("op"), frozenset())
+        return {k: v for k, v in msg.items() if v is not None or k in keep}
+    return msg
 
 
 def refusal(msg, takes=TAKEN):
@@ -346,11 +397,12 @@ def refusal(msg, takes=TAKEN):
     None for one it takes as it is. What's wrong, said on stderr."""
     req = msg.get("req") if isinstance(msg, dict) else None
     if not isinstance(msg, dict) or msg.get("op") not in takes:
-        _say(f"refused: no op {msg.get('op') if isinstance(msg, dict) else None!r} here")
-        return refused(UNSUPPORTED, req)
+        why = f"no op {msg.get('op') if isinstance(msg, dict) else None!r} here"
+        _say(f"refused: {why}")
+        return refused(UNSUPPORTED, req, why)
     if bad := problems(msg, ("request", "both")):
         _say(f"refused: {bad[0]}")
-        return refused(INVALID, req)
+        return refused(INVALID, req, bad[0])
     return None
 
 
@@ -397,8 +449,10 @@ def _validate(schema, value, where, out):
 
 
 def _say(what):
+    """What's wrong, on stderr: each once (the first SAID_MOST of them; after that, all of them)."""
     if what not in _said:
-        _said.add(what)
+        if len(_said) < SAID_MOST:
+            _said.add(what)
         print(f"wire: {what}", file=sys.stderr, flush=True)
 
 
@@ -426,7 +480,9 @@ def docs():
     lines = ["", "The wire's reference (schema/wire.schema.json):", ""]
     for name in MESSAGES:
         d = DEFS[name]
-        lines.append(f"    {d['x-op']} ({d['x-kind']}): {d.get('description', '')}")
+        answers = [DEFS[r["$ref"].rsplit("/", 1)[1]]["x-op"] for r in d.get("x-reply") or ()]
+        to = f" -> {', '.join(dict.fromkeys(answers))}" if answers else ""
+        lines.append(f"    {d['x-op']} ({d['x-kind']}{to}): {d.get('description', '')}")
         lines += fields(d, "        ")
     lines += ["", "Entities:"]
     for name, d in DEFS.items():
@@ -438,7 +494,8 @@ def docs():
     return "\n".join(lines) + "\n"
 
 
-__doc__ += docs()
+if __doc__ is not None:  # (none under python -OO)
+    __doc__ += docs()
 
 
 def encode(msg):
@@ -452,6 +509,8 @@ class Channel:
         self.rfile, self.wfile, self.sock = rfile, wfile, sock
         self.lock = threading.Lock()
         self.closed = False
+        self.serving = False  # (a host's, to a head: what it sends are answers, never requests of its own)
+        self.inbox = collections.deque()  # (answers made here, read before what comes: a request refused as it went)
 
     @classmethod
     def over(cls, sock):
@@ -460,15 +519,25 @@ class Channel:
         return cls(sock.makefile("rb"), sock.makefile("wb"), sock)
 
     def send(self, msg, passed=False):
-        """False once the other end's gone. A message the schema hasn't (its op, a field: check) goes as INVALID's
-        error, one that can't be written as JSON as an error, for its request. passed: one passed on as it came (a
-        tunnel's), not looked at."""
+        """False once the other end's gone. Fields given as None that its op doesn't let be null are left out
+        (unnulled). One the schema hasn't (its op, a field: check) isn't sent: a request of this end's own is answered
+        here, refused(INVALID), as if the other end had (read gives it); an answer goes as that refusal, for its
+        request; one with no request (a listing, a turn's end) is only said on stderr. One that can't be written as
+        JSON goes as an error, for its request. passed: one passed on as it came (a tunnel's), not looked at."""
         if isinstance(msg, Def):
             msg = msg.to_wire()
         if not passed:
+            msg = unnulled(msg)
             if (bad := check(msg)) is not None:
                 _say(f"not sent: {bad}")
-                msg = refused(INVALID, msg.get("req") if isinstance(msg, dict) else None)
+                req = msg.get("req") if isinstance(msg, dict) else None
+                if req is None:
+                    return not self.closed
+                if not self.serving and (not isinstance(msg, dict) or msg.get("op") in TAKEN or
+                                         msg.get("op") not in OPS):
+                    self.inbox.append(refused(INVALID, req, bad))
+                    return not self.closed
+                msg = refused(INVALID, req, bad)
             elif STRICT:
                 for p in problems(msg):
                     _say(f"sent: {p}")
@@ -488,8 +557,10 @@ class Channel:
                 return False
 
     def read(self):
-        """The next message, or None at the end (closed, or a line that isn't one)."""
+        """The next message (an answer made here first: inbox), or None at the end (closed, or a line that isn't one)."""
         while True:
+            if self.inbox:
+                return self.inbox.popleft()
             try:
                 line = self.rfile.readline()
             except (OSError, ValueError):

@@ -116,7 +116,7 @@ class Stream:
         ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
             if msg.get("op") == "error":
-                raise OSError(msg.get("error") or "its host said no")
+                raise OSError(wire.said(msg) or "its host said no")
             if msg.get("op") == "emission_watch_end":
                 return
             if msg.get("op") == "emission_frame":
@@ -224,7 +224,7 @@ class Asks:
                         got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
                 if got is None:
                     r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
-                    got = r.get("result") if r.get("op") == "emission" else {"error": r.get("error") or "no answer"}
+                    got = r.get("result") if r.get("op") == "emission" else {"error": wire.said(r) or "no answer"}
             except (OSError, ValueError) as e:
                 got = {"error": str(e)}
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)

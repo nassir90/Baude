@@ -2177,10 +2177,10 @@
     },
     "mtime": {
      "type": [
-      "integer",
+      "number",
       "null"
      ],
-     "description": "memory's refusal: its mtime (ns)."
+     "description": "memory's refusal: its mtime (ns; a phone's, seconds)."
     },
     "path": {
      "type": "string",
@@ -3838,10 +3838,10 @@
     },
     "base_mtime": {
      "type": [
-      "integer",
+      "number",
       "null"
      ],
-     "description": "The mtime (ns) the text was written against."
+     "description": "The mtime the text was written against, as memory gave it."
     }
    },
    "required": [
@@ -3889,10 +3889,10 @@
     },
     "mtime": {
      "type": [
-      "integer",
+      "number",
       "null"
      ],
-     "description": "Its mtime (ns)."
+     "description": "Its mtime (ns; a phone's, seconds)."
     },
     "path": {
      "type": "string",

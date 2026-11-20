@@ -6690,8 +6690,8 @@ LAUNCHER = MacLauncher() if sys.platform == "darwin" else FreedesktopLauncher()
 # as a path so Claude can open it with its own tools.
 
 API_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-MAX_IMAGE_EDGE = 1568           # larger images are downscaled by the API anyway
-MAX_IMAGE_BYTES = 3_750_000     # 5 MB once base64-encoded
+MAX_IMAGE_EDGE = baudelib.wire.CONSTANTS["IMAGE_EDGE_MAX"]  # larger images are downscaled by the API anyway
+MAX_IMAGE_BYTES = baudelib.wire.CONSTANTS["IMAGE_BYTES_MAX"]  # 5 MB once base64-encoded
 MAX_PDF_BYTES = 32_000_000
 
 
@@ -9277,7 +9277,8 @@ class SessionSidebar(Gtk.Box):
         r = info["remote"]
 
         def done(reply):
-            if reply.get("op") == "error" and str(reply.get("error") or "").startswith("unknown op"):
+            if reply.get("op") == "error" and (reply.get("code") == baudelib.wire.UNSUPPORTED or
+                                               str(reply.get("error") or "").startswith("unknown op")):
                 # (an older host process, without them: archived, or deleted, here only, as Baude did before)
                 if op == "delete":
                     self.hide_remote(info)
@@ -9288,7 +9289,7 @@ class SessionSidebar(Gtk.Box):
                     self.fill()
                 return
             if reply.get("op") == "error":
-                toast(self, f"{remote_name(r)} didn't {op} it: {reply.get('error')}")
+                toast(self, f"{remote_name(r)} didn't {op} it: {baudelib.wire.said(reply)}")
                 return
             if op == "delete":
                 r.sessions.pop(info["id"], None)
@@ -14673,7 +14674,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if reply.get("op") == "started":
                 r.sessions[sid] = reply["session"]
                 return self.start_remote_proc()
-            self.missing_reason = reply.get("error") or "no answer"
+            self.missing_reason = baudelib.wire.said(reply) or "no answer"
         r.sessions.pop(sid, None)  # (as its host has it: listed again, it's there again)
         self.missing_session = sid
         self.update_status()

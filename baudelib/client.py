@@ -863,7 +863,7 @@ class RemoteProc(claude.ClaudeProc):
         reply = self.ch.reply()
         if not reply or reply.get("op") != "attached":
             self.ch.close()
-            raise (Refused if reply else OSError)((reply or {}).get("error") or "the server didn't answer")
+            raise (Refused if reply else OSError)(wire.said(reply) or "the server didn't answer")
         self.ch.sock.settimeout(wire.SILENT_S)  # (the server pings: silence this long, and it's gone)
         self.ch.keep_alive()
         self.listing = reply.get("session") or {}
@@ -885,7 +885,7 @@ class RemoteProc(claude.ClaudeProc):
                 self.code = "deleted"
                 break
             elif op == "error":  # (what was sent went nowhere: said, and the turn's over; plain, as the server put it;
-                said = msg.get("error") if msg.get("plain") else f"the server: {msg.get('error')}"  # gone: a folder's)
+                said = msg.get("error") if msg.get("plain") else f"the server: {wire.said(msg)}"  # gone: a folder's)
                 self.dispatch(lambda e=said, g=msg.get("gone"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": e, **({"gone": g} if g else {})}))
         self.ch.close()
@@ -903,7 +903,7 @@ class RemoteProc(claude.ClaudeProc):
         """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says
         of it comes here as it's said: done(answer) with the host's answer (op held, or error, why), on the main
         loop."""
-        req = f"held-{next(self.req_ids)}"
+        req = next(self.req_ids)
         self.answering[req] = done
         if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
             self.answering.pop(req, None)

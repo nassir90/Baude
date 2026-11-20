@@ -27,14 +27,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from baudelib import models as modelslib
+from baudelib import models as modelslib, wire
 from baudelib.selfupdate import settings_path
 
 OLLAMA_PORT = 11434
 MAX_AGE = 15  # (seconds what's found is kept before it's looked for again)
 TIMEOUT = 2.0  # (a server's answer to a look: a server on this machine answers at once, or isn't there)
 WAIT = 4.0  # (what found(wait=True) waits for a look, the first time)
-DEFAULT_WINDOW = 32768  # (an OpenAI-compatible server's context window, till it or settings.json say)
+DEFAULT_WINDOW = wire.CONSTANTS["DEFAULT_WINDOW"]  # (an OpenAI-compatible server's context window, till it or settings.json say)
 # Ollama's own context window where nothing sets one (OLLAMA_CONTEXT_LENGTH, the Ollama app's slider, a model's
 # num_ctx): 4k on a machine with less than 24 GB for models. A loaded model's (its /api/ps) is what it has
 OLLAMA_WINDOW = 4096

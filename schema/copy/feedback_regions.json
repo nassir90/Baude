@@ -1,0 +1,9 @@
+{
+  "description": "Feedback's Mark regions dialog, over a screen capture: drag over what you mean.",
+  "messages": {
+    "title": "Mark regions",
+    "hint_repo": "Drag over what you mean · those words go in the note's GitHub issue on {$repo} · right-click a region to remove it",
+    "hint_issue": "Drag over what you mean · those words go in the note's GitHub issue · right-click a region to remove it",
+    "hint_note": "Drag over what you mean · those words stay with the note · right-click a region to remove it"
+  }
+}

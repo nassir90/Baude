@@ -1,0 +1,11 @@
+{
+  "description": "Settings rows Baude and Record both have: notifications, accent colour and code font.",
+  "messages": {
+    "notifications": "Notifications",
+    "notifications_subtitle": "When a reply finishes, or asks you something, while you're elsewhere",
+    "accent_colour": "Accent Colour",
+    "code_font": "Code Font",
+    "restart": "Restart",
+    "code_font_next_start": "{$font} from {$app}'s next start"
+  }
+}

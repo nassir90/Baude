@@ -17,6 +17,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
+from baudelib import wording  # noqa: E402
 from fixes import gh, gh_path, code_repo, known_submit_issue_target, submit_issue_target  # noqa: E402,F401
 import pointers  # noqa: E402
 from widgets import (  # noqa: E402,F401
@@ -388,24 +389,23 @@ def region_hint():
     """What marking regions says: where their words go, whatever gh says just now (a note's filed when it can be:
     keep_filing), to the repository feedback goes to, as far as that's known without asking gh. None: nowhere to file it."""
     repo = known_submit_issue_target()
-    return "Drag over what you mean · those words " + \
-        (f"go in the note's GitHub issue on {repo}" if repo else "go in the note's GitHub issue" if code_repo() else
-         "stay with the note") + " · right-click a region to remove it"
+    return wording.say("feedback_regions.hint_repo", repo=repo) if repo else \
+        wording.say("feedback_regions.hint_issue") if code_repo() else wording.say("feedback_regions.hint_note")
 
 
 class RegionEditor(Adw.Dialog):
     """A capture, large: drag to mark a region, right-click a region to remove it, Done (or Esc) when that's all."""
 
     def __init__(self, capture, on_change=None):
-        super().__init__(title="Mark regions", content_width=1100, content_height=760)
+        super().__init__(title=wording.say("feedback_regions.title"), content_width=1100, content_height=760)
         self.capture, self.on_change = capture, on_change
         self.drag = None
         tv = Adw.ToolbarView()
         header = Adw.HeaderBar(show_end_title_buttons=False, show_start_title_buttons=False)
-        clear = Gtk.Button(label="Clear")
+        clear = Gtk.Button(label=wording.say("common.clear"))
         clear.connect("clicked", lambda *_: (self.capture.regions.clear(), self.changed()))
         header.pack_start(clear)
-        self.done_btn = Gtk.Button(label="Done")
+        self.done_btn = Gtk.Button(label=wording.say("common.done"))
         self.done_btn.add_css_class("suggested-action")
         self.done_btn.connect("clicked", lambda *_: self.close())
         header.pack_end(self.done_btn)
@@ -606,7 +606,7 @@ def claim_note(folder):
     try:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except OSError:
-        raise NoteBusy("Another window is filing this") from None
+        raise NoteBusy(wording.say("feedback.filing_elsewhere")) from None
 
 
 def file_issue(folder, repo, again=False):
@@ -628,7 +628,7 @@ def found_issue(folder, repo):
     ok, out = gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search", f'"{mark}" in:body',
                  "--json", "number,url,body")
     if not ok:
-        raise RuntimeError(out or "gh issue list failed")
+        raise RuntimeError(out or wording.say("host_errors.gh_list_failed"))
     last = f"{_SENT_FROM} `{mark}`"
     return next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().rsplit("\n", 1)[-1].strip() == last), None)
 
@@ -657,7 +657,7 @@ def _file_claimed(folder, repo, again):
                  "--body-file", "-", body=issue_body(md, folder))
     url = next((l for l in out.splitlines() if l.startswith("https://")), None) if ok else None
     if url is None:
-        raise RuntimeError(out or "gh issue create failed")
+        raise RuntimeError(out or wording.say("host_errors.gh_create_failed"))
     m = re.search(r"/issues/(\d+)", url)
     return _keep_issue(folder, url, int(m.group(1)) if m else None, repo)
 
@@ -714,12 +714,14 @@ def file_soon(win, folder, repo):
     """The note filed on repo off the main loop, a toast in win saying it was (Open issue), or why not."""
     def done(url, error):
         if url:
-            toast = Adw.Toast(title=f"Filed as an issue on {repo}", button_label="Open issue", timeout=8)
+            toast = Adw.Toast(title=wording.say("feedback.filed", repo=repo),
+                              button_label=wording.say("feedback.open_issue"), timeout=8)
             toast.connect("button-clicked", lambda *_: Gtk.UriLauncher(uri=url).launch(win, None, None))
         else:
             why = (error or "").splitlines()
-            toast = Adw.Toast(title=html.escape(f"Saved, and it'll be filed on {repo} when it can be"
-                                                + (f": {why[0][:100]}" if why else ""), quote=False), timeout=10)
+            said = wording.say("feedback.not_filed_why", repo=repo, why=why[0][:100]) if why else \
+                wording.say("feedback.not_filed", repo=repo)
+            toast = Adw.Toast(title=html.escape(said, quote=False), timeout=10)
         if getattr(win, "toasts", None) is not None:
             win.toasts.add_toast(toast)
         return False
@@ -758,14 +760,14 @@ class FeedbackDialog(Adw.Dialog):
     its thumbnail over the box as an attachment is over the chat's."""
 
     def __init__(self, win, draft):
-        super().__init__(title="Feedback", content_width=560)
+        super().__init__(title=wording.say("feedback.title"), content_width=560)
         self.win, self.draft = win, draft
         tv = Adw.ToolbarView()
         header = Adw.HeaderBar(show_end_title_buttons=False, show_start_title_buttons=False)
-        cancel = Gtk.Button(label="Cancel")
+        cancel = Gtk.Button(label=wording.say("common.cancel"))
         cancel.connect("clicked", lambda *_: self.discard())
         header.pack_start(cancel)
-        self.save_btn = Gtk.Button(label="Save")
+        self.save_btn = Gtk.Button(label=wording.say("common.save"))
         self.save_btn.add_css_class("suggested-action")
         self.save_btn.connect("clicked", lambda *_: self.save())
         header.pack_end(self.save_btn)
@@ -790,8 +792,8 @@ class FeedbackDialog(Adw.Dialog):
         self.box.add_css_class("composer-box")
         self.box.set_overflow(Gtk.Overflow.HIDDEN)
         self.add_btn = Gtk.Button(icon_name="list-add-symbolic",
-                                  tooltip_text="Capture what's open now" if win.capture_cover() else
-                                  "Add a screen capture: go to it, then press Capture")
+                                  tooltip_text=wording.say("feedback.capture_open") if win.capture_cover() else
+                                  wording.say("feedback.add_capture"))
         self.add_btn.add_css_class("flat")
         self.add_btn.connect("clicked", lambda *_: self.win.start_feedback_capture(self))
         actions = Gtk.Box(halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=10, margin_bottom=10)
@@ -838,17 +840,17 @@ class FeedbackDialog(Adw.Dialog):
                            load=lambda scale, cap=cap: scaled_texture(cap.png, 160, scale))
         over = Gtk.Overlay(child=pic)
         over.add_overlay(ThumbRegions(cap))
-        btn = pointers.magnifier(Gtk.Button(child=over, tooltip_text="Mark regions on this capture"))
+        btn = pointers.magnifier(Gtk.Button(child=over, tooltip_text=wording.say("feedback.mark_capture")))
         btn.add_css_class("feedback-thumb")
         btn.connect("clicked", lambda *_: self.mark(cap))
         box.set_child(btn)
         n = len(cap.regions)
-        tag = Gtk.Label(label=f"{n} region{'s' if n != 1 else ''}" if n else "click to mark regions",
+        tag = Gtk.Label(label=wording.say("feedback.regions", n=n) if n else wording.say("feedback.click_to_mark"),
                         halign=Gtk.Align.START, valign=Gtk.Align.END, margin_start=6, margin_bottom=6)
         tag.add_css_class("osd")
         tag.add_css_class("feedback-tag")
         box.add_overlay(tag)
-        remove = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Remove this capture",
+        remove = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("feedback.remove_capture"),
                             halign=Gtk.Align.END, valign=Gtk.Align.START, margin_end=4, margin_top=4)
         remove.add_css_class("osd")
         remove.add_css_class("circular")
@@ -878,8 +880,8 @@ class FeedbackDialog(Adw.Dialog):
         folder = save_feedback(self.draft, self.win.get_native().get_renderer(), self.win)
         self.win.feedback_draft = None
         self.close()
-        toast = Adw.Toast(title="Feedback saved" + (", filing it…" if self.repo else ""), button_label="Open folder",
-                          timeout=6)
+        toast = Adw.Toast(title=wording.say("feedback.saved_filing") if self.repo else wording.say("feedback.saved"),
+                          button_label=wording.say("feedback.open_folder"), timeout=6)
         toast.connect("button-clicked", lambda *_: Gtk.FileLauncher.new(Gio.File.new_for_path(folder))
                       .launch(self.win, None, None))
         self.win.toasts.add_toast(toast)
@@ -1001,14 +1003,14 @@ class FeedbackHost:
         keep_filing()
         bar = Gtk.ActionBar()
         bar.add_css_class("capture-bar")
-        msg = Gtk.Label(label="Feedback: go to what you want to show, then capture it", xalign=0,
+        msg = Gtk.Label(label=wording.say("feedback.capture_bar"), xalign=0,
                         ellipsize=Pango.EllipsizeMode.END)
         bar.pack_start(Gtk.Image(icon_name="camera-photo-symbolic"))
         bar.pack_start(msg)
-        shoot = Gtk.Button(label="Capture")
+        shoot = Gtk.Button(label=wording.say("feedback.capture"))
         shoot.add_css_class("suggested-action")
         shoot.connect("clicked", lambda *_: self.take_feedback_capture())
-        back = Gtk.Button(label="Cancel")
+        back = Gtk.Button(label=wording.say("common.cancel"))
         back.connect("clicked", lambda *_: self.end_feedback_capture())
         bar.pack_end(shoot)
         bar.pack_end(back)

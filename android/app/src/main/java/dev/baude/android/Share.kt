@@ -275,6 +275,6 @@ fun ShareBanner(cancel: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically) {
         Text("Choose a Bot or session to send this to", style = Type.caption, color = c.fg.copy(alpha = c.fg.alpha * 0.75f),
             modifier = Modifier.weight(1f).padding(vertical = 8.dp))
-        IconButton(Icons.Filled.Close, "Cancel", onClick = cancel)
+        IconButton(Icons.Filled.Close, Wording.Common.cancel, onClick = cancel)
     }
 }

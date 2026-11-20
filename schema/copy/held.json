@@ -1,0 +1,7 @@
+{
+  "description": "A message a chat's host held, not sent, as it restarted: its buttons in the chat.",
+  "messages": {
+    "delete": "Delete this held message",
+    "send": "Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it"
+  }
+}

@@ -62,18 +62,18 @@ data class Page(val key: String, val title: String, val icon: ImageVector)
 fun pages(bot: Boolean, hostId: String): List<Page> {
     fun has(op: String) = takes(hostId, op)
     return listOfNotNull(
-        Page("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
+        Page("chat", Wording.Chats.chat, Icons.AutoMirrored.Filled.Chat),
         Page("meta", "Meta", Icons.Filled.Build),
-        if (bot && has("memory")) Page("memory", "Memory", Icons.Filled.EditNote) else null,
-        if (bot && has("emission_watch")) Page("browser", "Browser", Icons.Filled.Web) else null,
-        if (bot && has("routines")) Page("routines", "Routines", Icons.Filled.Alarm) else null,
-        Page("agents", "Subagents", Icons.Filled.Groups),
-        Page("processes", "Processes", Icons.Filled.Terminal),
-        if (has("ephemeral")) Page("btw", "Side questions", Icons.Filled.QuestionAnswer) else null,
-        Page("artifacts", "Artifacts", Icons.Filled.Language),
-        if (has("list_dir")) Page("files", "Files", Icons.Filled.Folder) else null,
-        if (has("git")) Page("git", "Git", Icons.Filled.AccountTree) else null,
-        if (has("signal_names")) Page("signal", "Signal", Icons.Filled.Link) else null,
+        if (bot && has("memory")) Page("memory", Wording.BotMemory.title, Icons.Filled.EditNote) else null,
+        if (bot && has("emission_watch")) Page("browser", Wording.BotBrowser.title, Icons.Filled.Web) else null,
+        if (bot && has("routines")) Page("routines", Wording.Routines.title, Icons.Filled.Alarm) else null,
+        Page("agents", Wording.SidePanel.subagents, Icons.Filled.Groups),
+        Page("processes", Wording.SidePanel.processes, Icons.Filled.Terminal),
+        if (has("ephemeral")) Page("btw", Wording.SidePanel.sideQuestions, Icons.Filled.QuestionAnswer) else null,
+        Page("artifacts", Wording.SidePanel.artifacts, Icons.Filled.Language),
+        if (has("list_dir")) Page("files", Wording.Lookup.files, Icons.Filled.Folder) else null,
+        if (has("git")) Page("git", Wording.Git.title, Icons.Filled.AccountTree) else null,
+        if (has("signal_names")) Page("signal", Wording.SidePanel.signal, Icons.Filled.Link) else null,
     )
 }
 
@@ -90,7 +90,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val s = Mesh.session(at, sid)
     val bot = s?.bot
     val contact = s?.let { Contact(at, it) }
-    val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null } ?: "(untitled)"
+    val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null } ?: Wording.Common.untitled
     val all = pages(bot != null, at)
     var shown by rememberSaveable(hostId, sid) { mutableStateOf("chat") }
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
@@ -112,16 +112,16 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
+        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
-                Menu(listOf("Send Feedback…" to feedback))
+                Menu(listOf(Wording.Fixes.sendFeedback to feedback))
             })
         if (takes(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
-        if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") "Looking for ${Mesh.label(at)} on the network…"
-            else "Can't connect to ${Mesh.label(at)} at the moment" + (conn?.why?.let { ": $it" } ?: ""))
+        if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") Wording.Hosts.looking(host = Mesh.label(at))
+            else conn?.why?.let { Wording.Hosts.downBecause(host = Mesh.label(at), why = it) } ?: Wording.Hosts.down(host = Mesh.label(at)))
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress

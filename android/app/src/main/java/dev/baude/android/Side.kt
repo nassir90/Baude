@@ -113,10 +113,17 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Icons.Filled.CheckCircle, "Done", tint = c.success, modifier = Modifier.size(16.dp))
+        "completed" -> Icon(Icons.Filled.CheckCircle, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
         "interrupted" -> Icon(Icons.Filled.RemoveCircleOutline, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
         else -> Icon(Icons.Filled.Cancel, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
     }
+}
+
+/** A count of tokens as widgets.fmt_tokens says it: 950, 12.3k, 1M. */
+fun fmtTokens(n: Int): String {
+    fun one(x: Double) = String.format(java.util.Locale.ROOT, "%.1f", x).removeSuffix(".0")
+    return if (n >= 1_000_000) Wording.Tokens.millions(n = one(n / 1_000_000.0))
+        else if (n >= 1000) Wording.Tokens.thousands(n = one(n / 1000.0)) else "$n"
 }
 
 /** A subagent's line under its title, as Baude's describe(): its kind, how it ended if it went wrong, what it's
@@ -125,10 +132,10 @@ fun describe(a: Subagent): String {
     val u = a.usage.value
     val status = a.status.value
     return listOfNotNull(a.kind.ifBlank { null }, status.takeIf { it == "failed" || it == "killed" },
-        u?.optInt("tool_uses", 0)?.takeIf { it > 0 }?.let { "$it tool use" + if (it == 1) "" else "s" },
-        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { n -> (if (n >= 1_000_000) "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
-            else if (n >= 1000) "%.1fk".format(n / 1000.0).replace(".0k", "k") else "$n") + " tokens" },
-        u?.optLong("duration_ms", 0)?.takeIf { it > 0 }?.let { "%.1fs".format(it / 1000.0) },
+        u?.optInt("tool_uses", 0)?.takeIf { it > 0 }?.let { Wording.SidePanel.toolUses(n = it) },
+        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { n -> Wording.SidePanel.tokens(n = fmtTokens(n)) },
+        u?.optLong("duration_ms", 0)?.takeIf { it > 0 }?.let {
+            Wording.Time.seconds(seconds = String.format(java.util.Locale.ROOT, "%.1f", it / 1000.0)) },
         a.activity.value.takeIf { status == "running" }).joinToString(" · ")
 }
 
@@ -140,7 +147,7 @@ fun SubagentsPage(chat: Chat) {
     val a = shown
     if (a == null) {
         Scrolled {
-            BoxedList(chat.agents.toList(), "No subagents yet") { agent ->
+            BoxedList(chat.agents.toList(), Wording.SidePanel.noSubagents) { agent ->
                 ActionRow(agent.description, describe(agent), onClick = { shown = agent }, prefix = { AgentStatus(agent.status.value) },
                     suffix = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = LocalBaude.current.dim) })
             }
@@ -196,7 +203,7 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
                 val d = describe(a)
                 if (d.isNotBlank()) Text(d, style = Type.caption, color = c.dim)
             }
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "All subagents", onClick = back)
+            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.SidePanel.allSubagents, onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val shown = if (lines.isEmpty() && a.prompt.isNotBlank()) listOf(Line("you", a.prompt)) else lines.toList()
@@ -224,13 +231,13 @@ fun ProcessesPage(hostId: String, sid: String) {
     val commands = Mesh.session(hostId, sid)?.commands.orEmpty()
     var said by remember { mutableStateOf<String?>(null) }
     Scrolled {
-        BoxedList(commands, "No background processes") { cmd ->
+        BoxedList(commands, Wording.SidePanel.noProcesses) { cmd ->
             val since = cmd.since?.toDouble() ?: 0.0
             val sub = listOfNotNull(if (cmd.background == true) "In the background" else null,
                 if (since > 0) "since " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
                     .format(java.util.Date((since * 1000).toLong())) else null).joinToString(" · ")
             ActionRow(cmd.what.orEmpty().lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
-                if (takes(hostId, "control")) IconButton(Icons.Filled.Stop, "Stop this process") {
+                if (takes(hostId, "control")) IconButton(Icons.Filled.Stop, Wording.SidePanel.stopProcess) {
                     control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.id.orEmpty())) { e ->
                         if (e != null) said = "Couldn't stop it: $e"
                     }
@@ -270,15 +277,16 @@ fun ArtifactsPage(chat: Chat) {
         Toast.makeText(ctx, "No browser to open it in", Toast.LENGTH_SHORT).show()
     }
     Scrolled {
-        BoxedList(chat.artifacts.toList(), "No artifacts yet") { a ->
-            ActionRow(a.title, a.url.removePrefix("https://") + (a.version?.let { " · v$it" } ?: ""), onClick = { open(a.url) },
+        BoxedList(chat.artifacts.toList(), Wording.SidePanel.noArtifacts) { a ->
+            ActionRow(a.title, a.url.removePrefix("https://").let { link ->
+                a.version?.let { Wording.Artifacts.linkVersion(link = link, version = it) } ?: link }, onClick = { open(a.url) },
                 prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp)) },
                 suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button("Open") { open(a.url) }
-                        IconButton(Icons.Filled.ContentCopy, "Copy link") {
+                        Button(Wording.Common.open) { open(a.url) }
+                        IconButton(Icons.Filled.ContentCopy, Wording.Artifacts.copyLink) {
                             ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Artifact", a.url))
-                            Toast.makeText(ctx, "Link copied", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, Wording.Tabs.linkCopied, Toast.LENGTH_SHORT).show()
                         }
                     }
                 })

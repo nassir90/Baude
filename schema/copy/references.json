@@ -1,0 +1,14 @@
+{
+  "description": "Names linked in a reply (Signal's references, pull request pills, artifacts): their tooltips and labels.",
+  "messages": {
+    "claude_artifact": "Claude artifact",
+    "proposed": "Proposed, not written yet",
+    "external": "An outside tool or product",
+    "elsewhere": "Somewhere else (another checkout, branch or machine)",
+    "not_in_code": "Not in the code",
+    "pr_draft": "Draft",
+    "pr_changes_requested": "Changes requested",
+    "pr_merged": "Merged",
+    "pr_closed_unmerged": "Closed without being merged"
+  }
+}

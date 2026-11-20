@@ -132,7 +132,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 ) {
                     Text(f.name, style = Type.caption, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 140.dp))
-                    IconButton(Icons.Filled.Close, "Remove") { files.remove(f) }
+                    IconButton(Icons.Filled.Close, Wording.Common.remove) { files.remove(f) }
                 }
             }
             Row(verticalAlignment = Alignment.Bottom) {
@@ -143,7 +143,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
                 }
                 val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
-                IconButton(Icons.Filled.ArrowUpward, "Send", enabled = ready, tint = if (ready) c.accentFg else c.fg,
+                IconButton(Icons.Filled.ArrowUpward, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
                     chat.send(text, files.toList())
                     text = ""
@@ -184,23 +184,23 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
     val questions = ask.input.optJSONArray("questions")
     Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (ask.tool == "AskUserQuestion" && questions != null) {
-            Text("$name has a question", style = Type.bold, color = c.fg)
+            Text(Wording.Asks.hasQuestion(name = name), style = Type.bold, color = c.fg)
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
             return@Column
         }
-        Text("Allow ${toolTitle(ask.tool)}?", style = Type.bold, color = c.fg)
+        Text(Wording.Asks.allowTool(tool = toolTitle(ask.tool)), style = Type.bold, color = c.fg)
         val shown = shownInput(ask.input)
         if (shown.isNotBlank()) Text(shown, style = Type.mono, color = c.fg, maxLines = 14, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
                 .padding(horizontal = 8.dp, vertical = 6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button("Allow", suggested = true) { Mesh.answer(chat, ask, allow = true) }
+            Button(Wording.Common.allow, suggested = true) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
-            if (alwaysOffered && ask.tool != "ExitPlanMode") Button("Always allow ${toolDisplay(ask.tool).first}") {
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolDisplay(ask.tool).first)) {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }
-            Button("Deny", destructive = true) { Mesh.answer(chat, ask, allow = false) }
+            Button(Wording.Common.deny, destructive = true) { Mesh.answer(chat, ask, allow = false) }
         }
         val always = Mesh.alwaysAllowed(chat)
         if (always.isNotEmpty()) Text("Always allowed in this chat: " + always.sorted().joinToString(", ") {
@@ -248,17 +248,17 @@ private fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObjec
                     if (!multi) other[i] = null
                 }
             }
-            Choice(other[i] != null, multi, "Other", "") {
+            Choice(other[i] != null, multi, Wording.Common.other, "") {
                 other[i] = if (other[i] != null) null else ""
                 if (!multi && other[i] != null) picked[i] = emptySet()
             }
-            other[i]?.let { Field(it, { v -> other[i] = v }, "Your own answer") }
+            other[i]?.let { Field(it, { v -> other[i] = v }, Wording.Asks.ownAnswer) }
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         val ready = qs.indices.all { picked[it].isNotEmpty() || !other[it].isNullOrBlank() }
-        Button("Answer", suggested = ready) { if (ready) answer(answers()) }
-        Button("Skip", onClick = skip)
+        Button(Wording.Asks.answer, suggested = ready) { if (ready) answer(answers()) }
+        Button(Wording.Asks.skip, onClick = skip)
     }
 }
 
@@ -293,13 +293,14 @@ fun senderName(s: Msg.StoredSender): String = senderName(s.kind, s.name, s.hostN
 private fun senderName(kind: String?, name0: String?, hostName: String?): String {
     val name = name0.orEmpty()
     val who = when (kind.orEmpty()) {
-        "bot" -> "${name.ifBlank { "a Bot" }}, a Bot"
-        "chat" -> if (name.isBlank()) "a chat" else "“$name”"
-        "subagent" -> if (name.isBlank()) "a subagent" else "subagent “$name”"
-        else -> name.ifBlank { "a host" }
+        "bot" -> if (name.isBlank()) Wording.Senders.botUnnamed else Wording.Senders.bot(name = name)
+        "chat" -> if (name.isBlank()) Wording.Senders.chatUnnamed else Wording.Senders.chat(name = name)
+        "subagent" -> if (name.isBlank()) Wording.Senders.subagentUnnamed else Wording.Senders.subagent(name = name)
+        "host" -> name.ifBlank { Wording.Senders.hostUnnamed }
+        else -> name.ifBlank { Wording.Senders.another } // (a kind of a newer host's: by its name)
     }
     val where = hostName.orEmpty()
-    return who + if (where.isNotBlank() && kind.orEmpty() != "host") " on $where" else ""
+    return if (where.isNotBlank() && kind.orEmpty() != "host") Wording.Senders.on(who = who, where = where) else who
 }
 
 /** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender
@@ -316,7 +317,7 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                Text("from " + senderName(from), style = Type.caption, color = c.dim)
+                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
                 SelectionContainer {
                     val shown = from.shown
                     if (shown != null) Prose(SAID_BY.replace(shown, "").trim(), codeBg = c.inside)
@@ -335,13 +336,12 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
 private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        IconButton(Icons.Filled.Close, "Delete this held message") { Mesh.held(chat, h.id.orEmpty(), false) }
-        IconButton(Icons.Filled.ArrowUpward, if (working) "It can be sent once this turn's over"
-            else "Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it",
+        IconButton(Icons.Filled.Close, Wording.Held.delete) { Mesh.held(chat, h.id.orEmpty(), false) }
+        IconButton(Icons.Filled.ArrowUpward, if (working) Wording.HeldSend.afterTurn else Wording.Held.send,
             enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-            Text("from " + (h.sender?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
+            Text(Wording.Common.fromWho(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption, color = c.dim)
             Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
         }
     }
@@ -366,7 +366,7 @@ private fun Waiting(u: Unsent, up: Boolean) {
                 if (u.text.isNotBlank()) Text(u.text, style = Type.body, color = c.dim)
             }
             Text(when {
-                failed -> "Not sent: " + (u.why.value ?: "its host said no")
+                failed -> Wording.HeldSend.notSent(why = u.why.value ?: Wording.BotBrowser.hostSaidNo)
                 u.state.value == "sending" || up -> "Sending…"
                 else -> "It's sent once this chat's host is there"
             }, style = Type.caption, color = if (failed) c.destructive else c.dim, modifier = Modifier.padding(top = 2.dp, end = 4.dp))
@@ -545,9 +545,9 @@ fun HostsScreen(back: () -> Unit) {
     var removing by remember { mutableStateOf<Host?>(null) }
     var renewing by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
+        Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
             end = {
-                IconButton(Icons.Filled.Add, "Add Host…") { adding = true }
+                IconButton(Icons.Filled.Add, Wording.Sidebar.addHost) { adding = true }
                 if (Mesh.key.value != null) Menu(listOf("New Key…" to { renewing = true }))
             })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
@@ -559,7 +559,7 @@ fun HostsScreen(back: () -> Unit) {
                 val error = Mesh.keyError.value
                 if (key == null && error != null) {
                     Text(error, style = Type.body, color = c.destructive)
-                    Button("Try Again", suggested = true) { Mesh.readKey() }
+                    Button(Wording.Common.tryAgain, suggested = true) { Mesh.readKey() }
                 } else if (key == null) {
                     Text("Make a key for this phone, then put it in each host's ~/.ssh/authorized_keys.",
                         style = Type.body, color = c.dim)
@@ -571,7 +571,7 @@ fun HostsScreen(back: () -> Unit) {
                         Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
                     }
-                    Button("Copy", suggested = true) {
+                    Button(Wording.Common.copy, suggested = true) {
                         ctx.getSystemService(ClipboardManager::class.java)
                             .setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
                         Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
@@ -586,11 +586,12 @@ fun HostsScreen(back: () -> Unit) {
                 val conn = Mesh.conn(h.id)
                 val (state, colour) = when (conn?.state) {
                     "up" -> "Connected" to c.success
-                    "connecting" -> "Looking for ${h.label} on the network…" to c.dim
+                    "connecting" -> Wording.Hosts.looking(host = h.label) to c.dim
                     "key" -> (if (conn.shown?.changed == true) "Its key changed, so it isn't connected: tap to see it"
                               else "Its key isn't trusted yet: tap to check it") to
                         (if (conn.shown?.changed == true) c.destructive else c.warning)
-                    "down" -> "Can't connect to ${h.label} at the moment${conn.why?.let { ": $it" }.orEmpty()}" to c.destructive
+                    "down" -> (conn.why?.let { Wording.Hosts.downBecause(host = h.label, why = it) } ?: Wording.Hosts.down(host = h.label)) to
+                        c.destructive
                     else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
                 }
                 Row(
@@ -606,7 +607,7 @@ fun HostsScreen(back: () -> Unit) {
                         Text(h.dest, style = Type.caption, color = c.dim)
                         Text(state, style = Type.caption, color = colour)
                     }
-                    IconButton(Icons.Filled.Delete, "Remove") { removing = h }
+                    IconButton(Icons.Filled.Delete, Wording.Common.remove) { removing = h }
                 }
             }
             Members()
@@ -616,13 +617,13 @@ fun HostsScreen(back: () -> Unit) {
     removing?.let { h ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
             text = { Text("Its sessions aren't listed here any more. Nothing on the host changes.") },
-            confirmButton = { Button("Remove", destructive = true) { Mesh.removeHost(h); removing = null } },
-            dismissButton = { Button("Cancel") { removing = null } }, containerColor = c.dialog)
+            confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.removeHost(h); removing = null } },
+            dismissButton = { Button(Wording.Common.cancel) { removing = null } }, containerColor = c.dialog)
     }
     if (renewing) AlertDialog(onDismissRequest = { renewing = false }, title = { Text("Make a new key?") },
         text = { Text("Hosts that have the current key need the new one in their authorized_keys.") },
         confirmButton = { Button("Make Key", destructive = true) { Mesh.makeKey(); renewing = false } },
-        dismissButton = { Button("Cancel") { renewing = false } }, containerColor = c.dialog)
+        dismissButton = { Button(Wording.Common.cancel) { renewing = false } }, containerColor = c.dialog)
 }
 
 /** The members of your hosts' mesh: each reached through a host of yours that's up (the one that reaches it in fewest
@@ -642,18 +643,20 @@ private fun Members() {
                 val conn = Mesh.conn("mesh:$id")
                 val through = m.through?.ifBlank { null }
                 val path = listOfNotNull(route, through).joinToString(" and ")
+                val named = m.name.orEmpty().ifBlank { m.host.orEmpty() }
                 val (state, colour) = when {
                     conn?.state == "up" -> "Connected" to c.success
                     conn?.listed == false -> "Not in reach now" to c.dim
-                    conn?.state == "down" -> "Can't connect to ${m.name.orEmpty().ifBlank { m.host.orEmpty() }} at the moment${conn.why?.let { ": $it" }.orEmpty()}" to c.destructive
-                    else -> "Looking for ${m.name.orEmpty().ifBlank { m.host.orEmpty() }} on the network…" to c.dim
+                    conn?.state == "down" -> (conn.why?.let { Wording.Hosts.downBecause(host = named, why = it) }
+                        ?: Wording.Hosts.down(host = named)) to c.destructive
+                    else -> Wording.Hosts.looking(host = named) to c.dim
                 }
                 if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 12.dp).heightIn(min = 1.dp).background(c.rule))
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(m.name.orEmpty().ifBlank { m.host.orEmpty() }, style = Type.bold, color = c.fg)
                         val where = m.host?.ifBlank { null }
-                        Text(listOfNotNull(where, if (path.isNotEmpty()) "through $path" else null).joinToString(" · "),
+                        Text(listOfNotNull(where, if (path.isNotEmpty()) Wording.Sidebar.through(via = path) else null).joinToString(" · "),
                             style = Type.caption, color = c.dim)
                         Text(state, style = Type.caption, color = colour)
                     }
@@ -725,17 +728,17 @@ fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.
     val host = Host.parse(dest, name, command)
     AlertDialog(
         onDismissRequest = done,
-        title = { Text("Add a host") },
+        title = { Text(Wording.NewSession.addHost) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Field(dest, { dest = it }, "user@host (or user@host:port)")
                 Field(name, { name = it }, "Name (optional)")
-                Field(command, { command = it }, "baude_headless.py, on its PATH")
+                Field(command, { command = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
                 Text("Over Tailscale, use the host's Tailscale name or address.", style = Type.caption, color = c.dim)
             }
         },
-        confirmButton = { Button("Add", suggested = true) { if (host != null) { Mesh.addHost(host); added(); done() } } },
-        dismissButton = { Button("Cancel", onClick = done) },
+        confirmButton = { Button(Wording.Common.add, suggested = true) { if (host != null) { Mesh.addHost(host); added(); done() } } },
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = c.dialog,
     )
 }

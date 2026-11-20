@@ -12,6 +12,8 @@ import subprocess
 import sys
 import threading
 
+from baudelib import wording
+
 # what a claude started from inside another one inherits (from a Claude Desktop or terminal session) and must not:
 # claude_env leaves it out (fixes.py's claude runs too)
 HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID",
@@ -33,12 +35,14 @@ HOST_SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION
 MODELS = [("opus", "Opus"), ("fable", "Fable"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
 
 
-MODES = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"),
-         ("auto", "Auto"), ("dontAsk", "Don't ask"), ("bypassPermissions", "Bypass permissions")]
+MODES = [("default", wording.say("mode_effort.manual")), ("acceptEdits", wording.say("mode_effort.accept_edits")),
+         ("plan", wording.say("mode_effort.plan")), ("auto", wording.say("mode_effort.auto")),
+         ("dontAsk", wording.say("mode_effort.dont_ask")), ("bypassPermissions", wording.say("mode_effort.bypass"))]
 
 
-EFFORT_LABELS = {"off": "No thinking", "low": "Low effort", "medium": "Medium effort", "high": "High effort",
-                 "xhigh": "Extra-high effort", "max": "Max effort"}
+EFFORT_LABELS = {"off": wording.say("mode_effort.effort_off"), "low": wording.say("mode_effort.effort_low"),
+                 "medium": wording.say("mode_effort.effort_medium"), "high": wording.say("mode_effort.effort_high"),
+                 "xhigh": wording.say("mode_effort.effort_xhigh"), "max": wording.say("mode_effort.effort_max")}
 
 
 MACOS_DESKTOP_CLAUDE = "~/Library/Application Support/Claude/claude-code"

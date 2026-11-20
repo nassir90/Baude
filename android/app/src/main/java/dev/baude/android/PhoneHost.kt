@@ -385,7 +385,7 @@ object PhoneHost {
         val ephemeral = r.ephemeral == true
         val model = r.model.orEmpty()
         val src = r.forkFrom.orEmpty().takeIf(::isId)?.let { f ->
-            session(f) ?: return reply(Op.ERROR, arrayOf("error" to "no conversation here to fork: $f"))
+            session(f) ?: return reply(Op.ERROR, arrayOf("error" to Wording.HostErrors.noForkSource(session = f)))
         }
         val served = (if (model.isNotBlank()) Inference.of(model)
             else src?.meta?.optJSONObject("infer")?.let { Served.of(it) } ?: Inference.found().firstOrNull())
@@ -950,9 +950,9 @@ object PhoneHost {
     private fun readFile(msg: JSONObject): Array<Pair<String, Any?>> {
         val r = Msg.ReadFile.from(msg)
         val path = r.path.orEmpty()
-        val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return arrayOf("path" to path, "error" to "not an absolute path")
+        val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return arrayOf("path" to path, "error" to Wording.HostErrors.notAbsolute)
         val inside = synchronized(lock) { sessions.values.any { f.path.startsWith(it.folder.canonicalPath + File.separator) } }
-        if (!inside) return arrayOf("path" to path, "error" to "not in one of its sessions' folders")
+        if (!inside) return arrayOf("path" to path, "error" to Wording.HostErrors.notInSessionFolder)
         if (!f.isFile) return arrayOf("path" to path, "error" to "No such file")
         val limit = (r.limit?.toInt() ?: FILE_LIMIT).coerceIn(1, FILE_LIMIT)
         val data = f.inputStream().use { it.readNBytes(limit + 1) }
@@ -966,7 +966,7 @@ object PhoneHost {
         val ok = dir != null && synchronized(lock) {
             sessions.values.any { dir == it.folder.canonicalFile || dir.path.startsWith(it.folder.canonicalPath + File.separator) }
         }
-        if (!ok) return arrayOf("path" to path, "entries" to JSONArray(), "error" to "not in one of its sessions' folders")
+        if (!ok) return arrayOf("path" to path, "entries" to JSONArray(), "error" to Wording.HostErrors.notInSessionFolder)
         val all = dir!!.listFiles().orEmpty().filter { it.name != ".git" }
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
         val entries = JSONArray(all.take(DIR_LIMIT).map { f ->
@@ -980,12 +980,12 @@ object PhoneHost {
     private fun catalogue(cwd: String): Array<Pair<String, Any?>> {
         val dir = File(cwd).takeIf { cwd.startsWith("/") }?.canonicalFile
         val ok = dir != null && synchronized(lock) { sessions.values.any { it.folder.canonicalFile == dir } }
-        if (!ok) return arrayOf("cwd" to cwd, "items" to JSONArray(), "error" to "not one of its sessions' folders")
+        if (!ok) return arrayOf("cwd" to cwd, "items" to JSONArray(), "error" to Wording.HostErrors.notSessionFolder)
         val items = JSONArray()
         for (f in dir!!.walkTopDown().filter { it.isFile }.take(CATALOGUE_LIMIT)) {
             val rel = f.relativeTo(dir).path
             items.put(JSONObject().put("surface", rel).put("canonical", "").put("faint", false).put("icon", "file")
-                .put("what", "File").put("summary", rel).put("kind", "file").put("line", JSONObject.NULL).put("path", f.path)
+                .put("what", Wording.Lookup.file).put("summary", rel).put("kind", "file").put("line", JSONObject.NULL).put("path", f.path)
                 .put("entry", JSONObject().put("kind", "file").put("sources", JSONArray().put(JSONArray().put("File").put(rel)))))
         }
         return arrayOf("cwd" to cwd, "items" to items, "busy" to false)

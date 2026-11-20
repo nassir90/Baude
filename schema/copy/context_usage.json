@@ -1,0 +1,12 @@
+{
+  "description": "How much of its model's context window a chat has used: the context bar, its tooltip, and Context Exhausted over the box.",
+  "messages": {
+    "tooltip": "Context window usage",
+    "label": "context",
+    "used_no_limit": "context: {$used}",
+    "unknown_no_limit": "context —",
+    "usage_percent": "Context window usage: {$percent}\n{$categories}",
+    "window_known": "Context window usage\nThe model's window: {$total :number} tokens\nWhat's used is said once its session starts",
+    "exhausted": "Context Exhausted"
+  }
+}

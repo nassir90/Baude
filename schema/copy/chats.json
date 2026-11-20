@@ -1,0 +1,8 @@
+{
+  "description": "A chat as it's listed in name completion, chat lists and the left bar: its kind, and its folder when it has none.",
+  "messages": {
+    "chat": "Chat",
+    "no_folder": "no folder",
+    "no_folder_desktop": "No folder (Claude Desktop)"
+  }
+}

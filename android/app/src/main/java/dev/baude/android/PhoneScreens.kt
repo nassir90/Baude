@@ -62,7 +62,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
         if (uri != null) kotlin.concurrent.thread(name = "picture", isDaemon = true) { picture(ctx, uri)?.let { setPicture(s, it) } }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("This phone", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
+        Bar("This phone", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
             end = { IconButton(Icons.Filled.Add, "New Agent", onClick = make) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -104,7 +104,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                             Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
-                        IconButton(Icons.Filled.Delete, "Move to Trash…") { deleting = s }
+                        IconButton(Icons.Filled.Delete, Wording.Trash.moveDots) { deleting = s }
                     }
                 }
             }
@@ -157,17 +157,17 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
         }
     }
     deleting?.let { s ->
-        val name = s.bot?.name?.ifBlank { null } ?: "this agent"
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Move “$name” to the trash?") },
+        val name = s.bot?.name?.ifBlank { null } ?: Wording.Trash.thisSession
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text(Wording.Trash.heading(title = name)) },
             text = { Text("Its transcript, its memory and the files in its folder will be moved to this phone's trash, " +
                 "where you can restore it.") },
             confirmButton = {
-                Button("Move to Trash", destructive = true) {
+                Button(Wording.Trash.move, destructive = true) {
                     Mesh.conn("phone")?.request(Msg.Delete(session = s.id.orEmpty()).json()) {}
                     deleting = null
                 }
             },
-            dismissButton = { Button("Cancel") { deleting = null } }, containerColor = c.dialog)
+            dismissButton = { Button(Wording.Common.cancel) { deleting = null } }, containerColor = c.dialog)
     }
 }
 
@@ -206,7 +206,7 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
     val models = Inference.found()
     if (model == null || models.none { it.value == model }) model = models.firstOrNull()?.value
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar("New Agent", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) })
+        Bar("New Agent", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Panel {

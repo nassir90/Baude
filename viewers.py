@@ -12,6 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+from baudelib import wording  # noqa: E402
 from codeview import CODE_LIMIT, CodePage, CodeView, FilesPage, find_in_focus, in_code  # noqa: E402
 from gitview import GitPage  # noqa: E402
 from kubeview import KubeView  # noqa: E402
@@ -50,11 +51,12 @@ class ViewerHost:
         of its own, show_code), Files and Git."""
         self.stack, self.tool_cards = stack, {}
         self.files_page, self.git_page = FilesPage(self), GitPage(self)
-        pages = [(self.files_page, "files", "Files", "folder-symbolic"),
-                 (self.git_page, "git", "Git", themed_icon("vcs-branch-symbolic", "media-playlist-shuffle-symbolic"))]
+        pages = [(self.files_page, "files", wording.say("lookup.files"), "folder-symbolic"),
+                 (self.git_page, "git", wording.say("git.title"),
+                  themed_icon("vcs-branch-symbolic", "media-playlist-shuffle-symbolic"))]
         if code:
             self.code_page = CodePage(self)
-            pages.insert(0, (self.code_page, "code", "Code",
+            pages.insert(0, (self.code_page, "code", wording.say("meta.code"),
                              themed_icon("text-x-script-symbolic", "text-x-generic-symbolic")))
         for page, name, title, icon in pages:
             stack.add_titled_with_icon(page, name, title, icon)
@@ -200,8 +202,8 @@ class ViewerWindow(Adw.Window, ViewerHost):
         head = Adw.HeaderBar()
         self.add_viewer_pages(Adw.ViewStack())
         head.set_title_widget(Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE))
-        for icon, tip, fn in (("k8s", "Kubernetes: your clusters' objects", lambda: self.kube.open()),
-                              ("db", "Databases: the running ones' tables, as a diagram", lambda: self.schema.open())):
+        for icon, tip, fn in (("k8s", wording.say("kube.viewer_tip"), lambda: self.kube.open()),
+                              ("db", wording.say("databases.viewer_tip"), lambda: self.schema.open())):
             btn = Gtk.Button(child=RefIcon(icon), tooltip_text=tip)
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())

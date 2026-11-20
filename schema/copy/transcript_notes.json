@@ -1,0 +1,7 @@
+{
+  "description": "Fallback titles of what a chat's transcript has besides messages (a background task's notification, a CI event), as the chats show them.",
+  "messages": {
+    "task_finished": "A background task finished",
+    "ci_event": "A CI event"
+  }
+}

@@ -225,7 +225,7 @@ object PhoneLink {
             }
             main.post {
                 val joined = link?.peer != null
-                why.value = said ?: if (joined) "the link to ${conn.host?.label ?: "its host"} dropped" else why.value
+                why.value = said ?: if (joined) Wording.HostStatus.linkDropped(host = conn.host?.label ?: "its host") else why.value
                 val n = if (joined) 0 else (fails[conn.id] ?: 0) + 1
                 fails[conn.id] = n
                 val wait = RETRY_MS[minOf(n, RETRY_MS.size - 1)]
@@ -254,14 +254,14 @@ object PhoneLink {
             val error = try {
                 end.ready.get(OPEN_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             } catch (_: Exception) {
-                "it didn't answer"
+                Wording.HostStatus.noAnswer
             }
             if (error != null) return null
             link.wire.send(Msg.Data(t = n, msg = checked(asked) ?: asked).json())
             return try {
                 end.reply.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
             } catch (_: Exception) {
-                Msg.Error(error = "it didn't answer").json()
+                Msg.Error(error = Wording.HostStatus.noAnswer).json()
             }
         } finally {
             if (link.outs.remove(n) != null) link.wire.send(Msg.Close(t = n).json())
@@ -281,8 +281,8 @@ object PhoneLink {
             ready.complete(null)
         }
         override fun closed(error: String?) {
-            ready.complete(error ?: "the tunnel was closed")
-            reply.complete(Msg.Error(error = error ?: "the tunnel was closed").json())
+            ready.complete(error ?: Wording.HostStatus.tunnelClosed)
+            reply.complete(Msg.Error(error = error ?: Wording.HostStatus.tunnelClosed).json())
         }
     }
 
@@ -385,13 +385,13 @@ object PhoneLink {
             when (f.optString("op")) {
                 Op.HELLO -> wire.send(Msg.Join(req = 1, host = hello()).json())
                 Op.JOINED -> {
-                    link.peer = Msg.Joined.from(f).host?.id?.takeIf(::isId) ?: throw Exception("the host gave no id")
+                    link.peer = Msg.Joined.from(f).host?.id?.takeIf(::isId) ?: throw Exception(Wording.HostStatus.noId)
                     publish()
                     val known = records.values.map { it.first } // (what the other links reach: this one told)
                     if (known.isNotEmpty()) wire.send(Msg.MeshFrame(records = known).json())
                     shown()
                 }
-                Op.ERROR -> throw Exception(Msg.Error.from(f).said ?: "the host said no")
+                Op.ERROR -> throw Exception(Msg.Error.from(f).said ?: Wording.BotBrowser.hostSaidNo)
             }
         }
     }
@@ -404,7 +404,7 @@ object PhoneLink {
         val still = reachable() // (what another link reaches: kept, and passed on by it from now on)
         records.entries.removeAll { it.value.second === link && it.key !in still }
         for ((id, v) in records.entries.toList()) if (v.second === link) route(id)?.let { records[id] = v.first to it }
-        for (e in link.ins.values + link.outs.values) e.closed("the phone's link to ${link.conn.host?.label ?: "a host"} dropped")
+        for (e in link.ins.values + link.outs.values) e.closed(Wording.HostStatus.linkDropped(host = link.conn.host?.label ?: "a host"))
         link.ins.clear()
         link.outs.clear()
         publish()
@@ -457,7 +457,7 @@ object PhoneLink {
                 val ahead = route(to)?.takeIf { it !== link }
                 val ttl = o.ttl?.toInt() ?: 0
                 if (ahead == null || ttl <= 1) {
-                    link.wire.send(Msg.Close(r = t, error = "${PhoneHost.name} has no way to it").json())
+                    link.wire.send(Msg.Close(r = t, error = Wording.HostStatus.noWay(host = PhoneHost.name, to = nameOf(to))).json())
                     return
                 }
                 val n = ahead.next.getAndIncrement()

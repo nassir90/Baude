@@ -1,0 +1,8 @@
+{
+  "description": "The Update button at the foot of a sidebar while a new version waits to be restarted onto, and its tooltip.",
+  "messages": {
+    "update": "Update",
+    "waiting_for": "Waiting for:\n{$waits}",
+    "ready": "A new version is ready"
+  }
+}

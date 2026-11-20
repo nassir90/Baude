@@ -1,0 +1,18 @@
+{
+  "description": "The permission modes and thinking efforts a chat can be set to, as the pickers in the chat's header (Baude's, Meta's and the Android app's) name them.",
+  "messages": {
+    "manual": "Manual",
+    "accept_edits": "Accept edits",
+    "plan": "Plan",
+    "auto": "Auto",
+    "dont_ask": "Don't ask",
+    "bypass": "Bypass permissions",
+    "codex_bypass": "Bypass Permissions",
+    "effort_off": "No thinking",
+    "effort_low": "Low effort",
+    "effort_medium": "Medium effort",
+    "effort_high": "High effort",
+    "effort_xhigh": "Extra-high effort",
+    "effort_max": "Max effort"
+  }
+}

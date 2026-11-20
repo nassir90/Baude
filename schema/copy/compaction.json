@@ -1,0 +1,17 @@
+{
+  "description": "Where Claude Code compacted a conversation, in a chat: the marker's line while it runs, once done or failed, its tooltip and the summary's heading.",
+  "messages": {
+    "compacted": "Conversation compacted",
+    "compacted_auto": "Conversation compacted automatically",
+    "compacted_manual": "Conversation compacted (/compact)",
+    "tokens_before": "{$pre} tokens of context",
+    "tokens_before_after": "{$pre} tokens of context → {$post}",
+    "tooltip": "Claude Code summarised the conversation so far, to free its context window: the summary stands in for what came before",
+    "running": "Compacting the conversation",
+    "running_written": "Compacting the conversation · {$written :number} characters of summary written",
+    "unfinished": "Compaction didn't finish",
+    "failed": "Compaction failed",
+    "failed_because": "Compaction failed: {$error}",
+    "summary": "Summary of the earlier conversation"
+  }
+}

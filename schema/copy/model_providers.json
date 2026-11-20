@@ -1,0 +1,18 @@
+{
+  "description": "What's wrong with where a model would run (a provider, an endpoint, what MLX or pi needs), as the model pickers and Settings → Models say it.",
+  "messages": {
+    "pi_missing": "pi isn't installed (it goes in {$folder})",
+    "mlx_vlm_missing": "mlx-vlm isn't installed (uv tool install mlx-vlm)",
+    "mlx_vlm_missing_lm": "mlx-vlm isn't installed (uv tool install mlx-vlm); mlx-lm is, but MLX's models run on mlx-vlm's server",
+    "not_running": "isn't running at {$url}",
+    "not_answering": "isn't answering at {$url}",
+    "said": "at {$url} said: {$why}",
+    "not_openai": "at {$url} didn't list models as OpenAI's API does",
+    "apple_not_built": "apple-claude isn't built",
+    "ollama_lacks": "Ollama doesn't have {$name}",
+    "ollama_unreachable": "Ollama {$why}",
+    "only_embeds": "{$name} only embeds: there's nothing to talk to",
+    "no_endpoint": "there's no endpoint {$endpoint} in settings.json",
+    "codex_unsupported": "Codex can't use {$model} with a ChatGPT account. Choose another model."
+  }
+}

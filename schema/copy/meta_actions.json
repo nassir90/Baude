@@ -1,0 +1,18 @@
+{
+  "description": "The actions Meta takes, as the line under its reply (and a changed row's tooltip) says each, and what's said as they're undone or done again.",
+  "messages": {
+    "by_meta": "Meta: {$action}",
+    "by_meta_note": "Meta: {$action} ({$note})",
+    "highlighted": "highlighted",
+    "undone": "{$action} · undone",
+    "was": "Was {$value}",
+    "set_undone": "Set to {$value}, undone",
+    "setting_changed": "{$setting}: {$before} → {$after}",
+    "renamed": "Renamed “{$before}” to “{$after}”",
+    "renamed_note": "renamed",
+    "added_mlx": "MLX: added {$model}",
+    "added_server": "Server: added {$name}",
+    "couldnt_undo": "Couldn't undo {$failed}",
+    "couldnt_redo": "Couldn't redo {$action}: {$why}"
+  }
+}

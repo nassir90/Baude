@@ -1,0 +1,16 @@
+{
+  "description": "Notes in a chat whose model runs on another host (an agent run through the mesh): what went wrong getting it there and back.",
+  "messages": {
+    "pi_too_big": "pi's session is too big to carry to the host that runs this model, or couldn't be read",
+    "unreachable": "couldn't reach the host that runs this model ({$host}): {$why}",
+    "didnt_run": "{$host} didn't run it: {$why}",
+    "no_answer": "no answer",
+    "pi_not_kept": "pi's session couldn't be kept on this host as it was written",
+    "connection_gone": "the connection to the host that runs this model is gone",
+    "chat_tools": "this chat's tools ({$names})",
+    "server_tools": "{$name}'s tools",
+    "tools_missing": "{$tools} didn't reach {$host}, which runs this model: it can't use them in this conversation, and may make up what they'd return",
+    "tools_not_started": "couldn't start the {$name} tools here: {$why}",
+    "pi_not_written": "pi's session couldn't be written here"
+  }
+}

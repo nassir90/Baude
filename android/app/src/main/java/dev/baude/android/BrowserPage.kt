@@ -85,7 +85,7 @@ class Watch(private val hostId: String, private val bot: Msg.BotRef) {
                     maxH = size.height.coerceAtLeast(200)).json())
             } else if (c.state == "down" && status.value == "watching") {
                 status.value = "failed"
-                why.value = "Can't connect to the browser."
+                why.value = Wording.BotBrowser.cantConnect
             }
         }
     }
@@ -152,15 +152,10 @@ private class Calls(val hostId: String, val bot: Msg.BotRef, val failed: (String
             val error = if (r.optString("op") == Op.ERROR) Msg.Error.from(r).error.orEmpty()
             else Msg.EmissionReply.from(r).result?.optString("error")?.ifBlank { null }
             if (error != null) failed(if (error in setOf("the server isn't there", "the server's gone", "not connected"))
-                "Can't connect to the browser." else "Couldn't ${DOING[c.optString("op")] ?: "do that"}.")
+                Wording.BotBrowser.cantConnect else c.optString("op").let {
+                    if (it == "resize") "Couldn't resize the page." else Wording.BotBrowser.couldntDo(op = it) })
             next()
         }
-    }
-
-    companion object {
-        val DOING = mapOf("click" to "click", "close_tab" to "close the tab", "drag" to "drag", "hover" to "hover",
-            "key" to "press the key", "navigate" to "open the page", "new_tab" to "open a tab", "scroll" to "scroll",
-            "select_tab" to "switch tabs", "type" to "type", "answer_prompt" to "answer", "resize" to "resize the page")
     }
 }
 
@@ -218,18 +213,18 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             val on = !readOnly && !phoned && watch.status.value == "watching"
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", enabled = on && (now == null || now.back == true)) {
+            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, enabled = on && (now == null || now.back == true)) {
                 call(JSONObject().put("op", "navigate").put("url", "back")) }
-            IconButton(Icons.AutoMirrored.Filled.ArrowForward, "Forward", enabled = on && now?.forward == true) {
+            IconButton(Icons.AutoMirrored.Filled.ArrowForward, Wording.Browser.forward, enabled = on && now?.forward == true) {
                 call(JSONObject().put("op", "navigate").put("url", "forward")) }
             val loading = now?.loading == true
-            IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, "Reload", enabled = on) {
+            IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, Wording.Browser.reload, enabled = on) {
                 call(JSONObject().put("op", "navigate").put("url", "reload")) }
             Address(now?.url.orEmpty(), on, Modifier.weight(1f)) { call(JSONObject().put("op", "navigate").put("url", it)) }
-            IconButton(Icons.Filled.Add, "New tab", enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
+            IconButton(Icons.Filled.Add, Wording.Browser.newTab, enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
             IconButton(Icons.Filled.Keyboard, "Type into the page", enabled = on,
                 background = if (typing) c.fg.copy(alpha = 0.10f) else null) { typing = !typing }
-            IconButton(if (readOnly) Icons.Filled.Lock else Icons.Filled.LockOpen, "Read-only",
+            IconButton(if (readOnly) Icons.Filled.Lock else Icons.Filled.LockOpen, Wording.BotBrowser.readOnly,
                 background = if (readOnly) c.fg.copy(alpha = 0.10f) else null) {
                 readOnly = !readOnly
                 prefs.edit().putBoolean("ro:$sid", readOnly).apply()
@@ -243,11 +238,11 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
                 val picked = id == tab
                 Row(Modifier.clip(RoundedCornerShape(8.dp)).background(if (picked) c.fg.copy(alpha = 0.10f) else c.frame)
                     .border(1.dp, c.rule, RoundedCornerShape(8.dp)), verticalAlignment = Alignment.CenterVertically) {
-                    val label = t.title.orEmpty().ifBlank { t.url.orEmpty() }.ifBlank { "New tab" }
+                    val label = t.title.orEmpty().ifBlank { t.url.orEmpty() }.ifBlank { Wording.Browser.newTab }
                     Text(if (label.length > 28) label.take(27) + "…" else label, style = Type.caption, color = c.fg, maxLines = 1,
                         modifier = Modifier.clickable { call(JSONObject().put("op", "select_tab").put("tab", id)) }
                             .padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp).widthIn(max = 180.dp))
-                    IconButton(Icons.Filled.Close, "Close tab") { call(JSONObject().put("op", "close_tab").put("tab", id)) }
+                    IconButton(Icons.Filled.Close, Wording.BotBrowser.closeTab) { call(JSONObject().put("op", "close_tab").put("tab", id)) }
                 }
             }
         }
@@ -262,15 +257,15 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             .padding(if (acting) 2.dp else 1.dp).onSizeChanged { picture = it }) {
             val bmp = watch.frame.value
             if (phoned) {
-                StatusPage(Icons.Filled.Web, "On a phone", "${name.ifBlank { "The Bot" }}'s browser is on a phone now, " +
-                    "and shown there. It's back here once the phone closes it.")
+                StatusPage(Icons.Filled.Web, Wording.BotBrowser.onPhoneTitle,
+                    Wording.BotBrowser.onPhone(bot = name.ifBlank { Wording.BotBrowser.theBot }))
                 return@Box
             }
             if (bmp == null) {
                 when (watch.status.value) {
-                    "failed" -> StatusPage(Icons.Filled.Web, "Couldn't open the browser", watch.why.value)
-                    "stopped" -> StatusPage(Icons.Filled.Web, "The browser stopped", "It restarts when you open this page again.")
-                    else -> StatusPage(Icons.Filled.Web, if (here) "Connecting…" else "No pages open")
+                    "failed" -> StatusPage(Icons.Filled.Web, Wording.BotBrowser.couldntOpen, watch.why.value)
+                    "stopped" -> StatusPage(Icons.Filled.Web, Wording.BotBrowser.stopped, Wording.BotBrowser.restartsOnOpen)
+                    else -> StatusPage(Icons.Filled.Web, if (here) Wording.BotBrowser.connecting else Wording.BotBrowser.noPages)
                 }
                 return@Box
             }
@@ -278,7 +273,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             val send = androidx.compose.runtime.rememberUpdatedState<(JSONObject) -> Unit> { call(it) }
             Image(bmp, now?.let { it.title.orEmpty() }, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
                 .pointerTaps(bmp, picture, { latest.value }, { readOnly }) { send.value(it) })
-            if (watch.status.value == "stopped") Text("The browser stopped. It restarts when you open this page again.",
+            if (watch.status.value == "stopped") Text(Wording.BotBrowser.stoppedAgain(again = Wording.BotBrowser.restartsOnOpen),
                 style = Type.caption, color = c.dim, modifier = Modifier.align(Alignment.BottomCenter)
                     .background(c.inside).padding(start = 8.dp, end = 8.dp, bottom = 4.dp))
         }
@@ -355,7 +350,7 @@ private fun Address(url: String, enabled: Boolean, modifier: Modifier, go: (Stri
     LaunchedEffect(url, focused) { if (!focused) text = url }
     Box(modifier.widthIn(min = 74.dp).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
         .padding(horizontal = 8.dp, vertical = 7.dp)) {
-        if (text.isEmpty()) Text("Search or type an address", style = Type.body, color = c.dim, maxLines = 1,
+        if (text.isEmpty()) Text(Wording.Browser.address, style = Type.body, color = c.dim, maxLines = 1,
             overflow = TextOverflow.Ellipsis)
         BasicTextField(text, { text = it }, enabled = enabled, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -403,15 +398,16 @@ private fun PromptCard(p: JSONObject, answer: (Boolean, String?) -> Unit) {
     var text by remember(p.optString("id")) { mutableStateOf(p.optString("default")) }
     Column(Modifier.fillMaxWidth().padding(6.dp).card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(when (kind) {
-            "sign_in" -> "${p.optString("host").ifBlank { "A site" }} asks to sign in" +
-                p.optString("realm").let { if (it.isNotBlank()) " (“$it”)" else "" }
-            "files" -> "The page asks for files to upload"
+            "sign_in" -> p.optString("host").ifBlank { Wording.Browser.aSite }.let { host ->
+                p.optString("realm").let { if (it.isNotBlank()) Wording.Browser.signInRealm(host = host, realm = it)
+                    else Wording.Browser.signIn(host = host) } }
+            "files" -> Wording.BotBrowser.asksForFiles
             else -> p.optString("message")
         }, style = Type.body, color = c.fg)
         if (kind == "prompt") Field(text, { text = it }, "")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (kind != "alert") Button("Cancel") { answer(false, null) }
-            if (kind != "files") Button("OK", suggested = true) { answer(true, if (kind == "prompt") text else null) }
+            if (kind != "alert") Button(Wording.Common.cancel) { answer(false, null) }
+            if (kind != "files") Button(Wording.Common.ok, suggested = true) { answer(true, if (kind == "prompt") text else null) }
         }
     }
 }

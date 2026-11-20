@@ -1,0 +1,16 @@
+{
+  "description": "What Meta did to chats and groups: the action lines under its reply, and its buttons.",
+  "messages": {
+    "chats": "{$n} chats",
+    "group_named": "group {$name}",
+    "no_group": "no group",
+    "moved": "Moved {$chats} to {$where}",
+    "made_group": "Made group {$name}",
+    "renamed_group": "Renamed group {$old} to {$new}",
+    "deleted_group": "Deleted group {$name}",
+    "listed": "Listed {$names}",
+    "listed_every": "Listed every {$what}",
+    "archived": "Archived {$chats}",
+    "unarchived": "Unarchived {$chats}"
+  }
+}

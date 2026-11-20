@@ -1,0 +1,16 @@
+{
+  "description": "What Claude asks: a tool's permission card, and AskUserQuestion's form.",
+  "messages": {
+    "own_answer": "Your own answer",
+    "answer": "Answer",
+    "skip": "Skip",
+    "waiting": "Waiting for your answer",
+    "waiting_for_tool": "Waiting for your answer: {$tool}",
+    "a_tool": "a tool",
+    "has_question": "{$name} has a question",
+    "has_question_for_you": "{$name} has a question for you",
+    "allow_tool": "Allow {$tool}?",
+    "always_allow": "Always allow {$tool}",
+    "not_always_allowed": "{$tool} isn't always allowed: {$why}"
+  }
+}

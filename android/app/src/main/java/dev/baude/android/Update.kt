@@ -81,7 +81,7 @@ object Update {
         val before = app.getSharedPreferences("update", Context.MODE_PRIVATE).getLong("ran", 0L)
         if (before !in 1 until now) return null
         val n = now - before
-        return "Baude updated: $n new commit${if (n != 1L) "s" else ""}"
+        return Wording.Updates.updatedCommits(app = "Baude", n = n)
     }
 
     /** The feed looked at (off the main thread), unless it was less than CHECK_MS ago (force: whatever it was);
@@ -179,7 +179,7 @@ object Update {
             ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
         }
-        notify(ctx.applicationContext, updated(ctx.applicationContext) ?: "Baude updated", offer = false)
+        notify(ctx.applicationContext, updated(ctx.applicationContext) ?: Wording.Updates.updated(app = "Baude"), offer = false)
     }
 
     private fun allowed(app: Context) = Build.VERSION.SDK_INT < 26 || app.packageManager.canRequestPackageInstalls()
@@ -287,7 +287,7 @@ object Update {
             if (wanted) {
                 wanted = false
                 if (Mesh.shown) install(app)
-            } else if (fresh && !Mesh.shown) notify(app, "A new version is ready", offer = true)
+            } else if (fresh && !Mesh.shown) notify(app, Wording.UpdateBar.ready, offer = true)
         }
     }
 
@@ -309,7 +309,7 @@ object Update {
             .setContentIntent(open)
             .setAutoCancel(true)
             .setSilent(offer)
-            .apply { if (offer) addAction(0, "Update", update) }
+            .apply { if (offer) addAction(0, Wording.UpdateBar.update, update) }
             .build()
         try {
             NotificationManagerCompat.from(app).notify(NOTE, n)

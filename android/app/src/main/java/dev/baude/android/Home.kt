@@ -188,7 +188,6 @@ fun sections(query: String): List<Section> {
     for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true) archived else live, seen)
     for ((h, s) in found) if (key(h, s) in kept && key(h, s) !in seen) // (in a loop of parents: in its own place)
         flat(h, s, 0, if (s.archived == true) archived else live, seen)
-    val several = shown.count { !Mesh.sessions[it].isNullOrEmpty() } > 1
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
         val r = ArrayList<MutableList<Item>>()
@@ -203,27 +202,27 @@ fun sections(query: String): List<Section> {
         }
         for ((n, group) in days.toSortedMap()) {
             val label = when (n) {
-                0L -> "Today"
-                1L -> "Yesterday"
-                7L -> "Older"
+                0L -> Wording.Sidebar.today
+                1L -> Wording.Sidebar.yesterday
+                7L -> Wording.Sidebar.older
                 else -> today.minusDays(n).format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH))
             }
             out.add(Section(if (n == 7L) "date:older" else "date:$n", label, null, null, group.flatten()))
         }
     } else {
         val (bots, chats) = runs(live).partition { it[0].bot != null }
-        if (bots.isNotEmpty()) out.add(Section("bots", "Bots", null, null, bots.sortedByDescending { said(it[0].s) }.flatten()))
+        if (bots.isNotEmpty()) out.add(Section("bots", Wording.Common.bots, null, null, bots.sortedByDescending { said(it[0].s) }.flatten()))
         val folders = chats.groupBy { it[0].hostId to it[0].s.cwd.orEmpty() }
         for ((key, group) in folders.entries.sortedByDescending { e -> e.value.maxOf { said(it[0].s) } }) {
             val (hostId, cwd) = key
-            val name = if (cwd.isEmpty()) "Unknown folder" else shortPath(hostId, cwd).trimEnd('/').substringAfterLast('/')
+            val name = if (cwd.isEmpty()) Wording.Sidebar.unknownFolder else shortPath(hostId, cwd).trimEnd('/').substringAfterLast('/')
                 .ifBlank { "/" }
-            val label = if (several) "$name on ${Mesh.label(hostId)}" else name
-            out.add(Section("remote:$hostId:$cwd", label, hostId, cwd, group.flatten(),
-                full = shortPath(hostId, cwd) + " on " + Mesh.label(hostId)))
+            out.add(Section("remote:$hostId:$cwd", Wording.Sidebar.folderOnHost(folder = name, host = Mesh.label(hostId)),
+                hostId, cwd, group.flatten(),
+                full = Wording.Sidebar.folderOnHost(folder = shortPath(hostId, cwd), host = Mesh.label(hostId))))
         }
     }
-    if (archived.isNotEmpty()) out.add(Section("archived", "Archived", null, null, archived))
+    if (archived.isNotEmpty()) out.add(Section("archived", Wording.Sidebar.archived, null, null, archived))
     return out
 }
 
@@ -253,23 +252,24 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         Bar("Baude", end = {
             IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
-            Menu(listOf("Send Feedback…" to feedback))
+            Menu(listOf(Wording.Fixes.sendFeedback to feedback))
         })
         note()
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = hosts)
-        for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)} at the moment${conn.why?.let { ": $it" }.orEmpty()}", onClick = hosts)
+        for (conn in down) GreyBanner(conn.why?.let { Wording.Hosts.downBecause(host = Mesh.label(conn.id), why = it) }
+            ?: Wording.Hosts.down(host = Mesh.label(conn.id)), onClick = hosts)
         // the top: New session and the host it's on, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SidebarAction(Icons.AutoMirrored.Filled.NoteAdd, "New session", Modifier.weight(1f)) {
+                SidebarAction(Icons.AutoMirrored.Filled.NoteAdd, Wording.Sidebar.newSession, Modifier.weight(1f)) {
                     starting = (HomePrefs.host.value.takeIf { it != "all" }) to null
                 }
                 HostPick()
             }
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SearchField(query, { query = it }, "Search sessions", Modifier.weight(1f))
+                SearchField(query, { query = it }, Wording.Sidebar.search, Modifier.weight(1f))
                 ViewMenu()
             }
         }
@@ -300,7 +300,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
                     else SessionRow(item) { open(item.hostId, item.id) }
                 }
                 if (tops > cap) item(key = "m:" + sec.key) { // (every row it hides counted, nested ones too)
-                    Text("Show ${sec.rows.size - rows.size} more", style = Type.body, color = c.dim,
+                    Text(Wording.Meta.showMore(n = sec.rows.size - rows.size), style = Type.body, color = c.dim,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { more.add(sec.key) }
                             .padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
                 }
@@ -322,7 +322,7 @@ private fun UpdateBar() {
         if (Update.state.value == "downloading")
             androidx.compose.material3.LinearProgressIndicator({ Update.progress.value }, Modifier.fillMaxWidth(),
                 color = c.accentBg, trackColor = c.rule)
-        Text("Update", style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+        Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
     }
 }
@@ -339,12 +339,14 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
                 modifier = Modifier.alpha(0.6f).weight(1f, fill = false))
             Box(Modifier.size(20.dp).alpha(if (folded) 0.75f else 0.4f), contentAlignment = Alignment.Center) {
                 Icon(if (folded) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
-                    if (folded) "Expand" else "Collapse", tint = c.fg, modifier = Modifier.size(16.dp))
+                    if (folded) Wording.Common.expand else Wording.Common.collapse, tint = c.fg, modifier = Modifier.size(16.dp))
             }
         }
         if (plus != null) Box(Modifier.size(24.dp).alpha(0.75f).clip(RoundedCornerShape(6.dp)).clickable(onClick = plus),
             contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Add, "New session in ${sec.full}${sec.hostId?.let { ", on " + Mesh.label(it) }.orEmpty()}", tint = c.fg, modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Add, sec.hostId?.let {
+                Wording.Sidebar.newSessionInOn(folder = shortPath(it, sec.folder.orEmpty()), host = Mesh.label(it))
+            } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -358,7 +360,7 @@ private fun SessionRow(item: Item, onClick: () -> Unit) {
         .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
         .clickable(onClick = onClick).padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val title = s.title?.ifBlank { null } ?: "(untitled)"
+        val title = s.title?.ifBlank { null } ?: Wording.Common.untitled
         val bot = item.bot?.name?.ifBlank { null }
         Text(bot ?: title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f))
@@ -394,7 +396,7 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
 private fun HeldTag(s: Msg.Session) {
     val c = LocalBaude.current
     if (s.held.isNullOrEmpty()) return
-    Text("held", style = Type.caption, color = c.dim, modifier = Modifier.clip(RoundedCornerShape(4.dp))
+    Text(Wording.Sidebar.held, style = Type.caption, color = c.dim, modifier = Modifier.clip(RoundedCornerShape(4.dp))
         .background(c.raised).padding(horizontal = 5.dp))
 }
 
@@ -455,20 +457,20 @@ private fun ViewMenu() {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(Icons.Filled.MoreVert, "Group by, and which groups are listed") { open = true }
+        IconButton(Icons.Filled.MoreVert, Wording.Sidebar.groupByTip) { open = true }
         Popover(open, { open = false }) {
-            Heading("Group by")
-            MenuChoice("Folder", HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
-            MenuChoice("Date", HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
+            Heading(Wording.Sidebar.groupBy)
+            MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
+            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
             val names = MetaTools.groupNames()
             if (names.isNotEmpty()) {
                 HorizontalDivider(color = c.rule)
-                Heading("Groups")
-                for (g in listOf("") + names) MenuChoice(g.ifEmpty { "No group" }, g in HomePrefs.groups) {
+                Heading(Wording.Sidebar.groups)
+                for (g in listOf("") + names) MenuChoice(g.ifEmpty { Wording.Sidebar.noGroup }, g in HomePrefs.groups) {
                     if (g in HomePrefs.groups) HomePrefs.groups.remove(g) else HomePrefs.groups.add(g)
                     HomePrefs.save()
                 }
-                if (HomePrefs.groups.isNotEmpty()) DropdownMenuItem({ Text("Show All", style = Type.body, color = c.fg) },
+                if (HomePrefs.groups.isNotEmpty()) DropdownMenuItem({ Text(Wording.Sidebar.showAll, style = Type.body, color = c.fg) },
                     { HomePrefs.groups.clear(); HomePrefs.save() })
             }
         }
@@ -502,7 +504,7 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, onClick: () 
 fun Menu(items: List<Pair<String, () -> Unit>>) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(Icons.Filled.MoreVert, "Menu") { open = true }
+        IconButton(Icons.Filled.MoreVert, Wording.ChatHeader.menu) { open = true }
         Popover(open, { open = false }) {
             for ((label, go) in items) MenuChoice(label, false) { open = false; go() }
         }

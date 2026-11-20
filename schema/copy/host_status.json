@@ -1,0 +1,25 @@
+{
+  "description": "What a host (a host process, a mesh member) is doing or why it can't be reached, as Baude's banners, its hosts list and the menu bar say it.",
+  "messages": {
+    "stopping": "{$host} stopping…",
+    "restarting": "{$host} restarting…",
+    "stopping_left": ".input {$total :number} .match $total one {{{$host} stopping — {$left :number} of {$total} process to stop}} * {{{$host} stopping — {$left :number} of {$total} processes to stop}}",
+    "restarting_left": ".input {$total :number} .match $total one {{{$host} restarting — {$left :number} of {$total} process to stop}} * {{{$host} restarting — {$left :number} of {$total} processes to stop}}",
+    "stopping_all_stopped": "{$host} stopping — every process stopped",
+    "restarting_all_stopped": "{$host} restarting — every process stopped",
+    "no_id": "it gave no id Baude can use",
+    "server_said": "the server: {$why}",
+    "connection_dropped": "the connection to its host dropped",
+    "host_absent": "its host isn't there",
+    "tunnel_closed": "the tunnel was closed",
+    "this_host": "that's this host",
+    "another_host": "another host, {$host}, is there",
+    "no_answer": "it didn't answer",
+    "link_dropped": "the link to {$host} dropped",
+    "no_way": "{$host} has no way to {$to}",
+    "no_such_host": "no such host",
+    "deactivated_here": "{$host} is deactivated here",
+    "not_in_mesh": "{$host} isn't in the mesh now",
+    "none_started": "no host process here, and none could be started (see {$log})"
+  }
+}

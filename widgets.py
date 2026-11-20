@@ -4265,12 +4265,8 @@ def _dispose_tree(widget):
         if w is not widget and w.get_parent() is not None:
             continue  # (a part its parent still holds: it goes with it)
         controllers = w.observe_controllers()
-        # (not a tab view's: they're libadwaita's own, which its dispose takes out itself, and complains of not finding)
-        for ctl in [controllers.get_item(i) for i in range(controllers.get_n_items())
-                    if not isinstance(w, Adw.TabView)]:
+        for ctl in [controllers.get_item(i) for i in range(controllers.get_n_items())]:
             w.remove_controller(ctl)  # (a click's handler is the controller's: dispose leaves those till the end)
-        if isinstance(w, Gtk.MenuButton):  # (its dispose frees what makes its menu, set_create_popup_func's, each
-            w.set_create_popup_func(None)   # time it's run: the second, as it's freed, freed it again, and crashed)
         if isinstance(w, Gtk.Picture):  # (a picture's dispose lets go of its paintable but keeps pointing at it: the
             Gtk.Picture.set_paintable(w, None)  # second, as it's freed, let go of it again, and crashed)
         w.run_dispose()

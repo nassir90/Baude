@@ -953,8 +953,6 @@ class MacWeb:
         """body (an async function's) run in the page (page: in its own world, where its scripts are; else in
         Emission's, apart from them, the same DOM): done(its result as JSON text, None) or (None, what went wrong)."""
         send = macos.objc_send
-        if not self.view:  # (its tab closed meanwhile: a message to nothing would never call back)
-            return done(None, "its tab's closed")
         if page:
             world = send(b"WKContentWorld", b"pageWorld")
         else:
@@ -979,8 +977,6 @@ class MacWeb:
     def snapshot(self, done):
         """The page as it's shown: done(PNG bytes, None) or (None, why not)."""
         send = macos.objc_send
-        if not self.view:
-            return done(None, "its tab's closed")
 
         def got(image, error):
             try:
@@ -1294,7 +1290,6 @@ class BotPointer:
     IDLE_S, FADE_S, APPEAR_S = 6.0, 0.35, 0.15  # (nothing done this long: the pointer faded out, in this long; in, this)
     GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = 0.35, 0.8, 0.5
     BEHIND = 6  # (more than this many steps waiting: glides quicker, so it isn't left behind)
-    MOST = 64  # (steps kept waiting: play)
 
     def __init__(self):
         self.at, self.steps, self.step, self.step_t = None, [], None, 0.0
@@ -1337,16 +1332,6 @@ class BotPointer:
                 self.steps += [("tap", None, 1.0)] * max(1, min(3, int(ev.get("count") or 1)))
             elif kind == "scroll":
                 self.steps.append(("hint", (ev.get("dx") or 0, ev.get("dy") or 0), 1.0))
-        if len(self.steps) > self.MOST:  # (not being drawn, a hosted page out of sight: steps are only taken as it's
-            # looked at, and a Bot at work behind a hidden Browser page left every one it made, to be played from
-            # the first when the page was shown; the oldest are skipped, the pointer where they'd have left it)
-            skipped, self.steps = self.steps[:-self.MOST], self.steps[-self.MOST:]
-            for kind, what, _t in skipped:
-                if kind == "glide":
-                    self.at = what
-                elif kind == "press":
-                    self.pressed = bool(what)
-            self.step = None
         self.seen = self.moved = time.monotonic()
 
     def set_acting(self, on):
@@ -2100,8 +2085,6 @@ class GtkWeb:
 
     def run_js(self, body, done, page=False):
         """As MacWeb's: body run in the page's own world (page) or Emission's; done(JSON text, None) or (None, why)."""
-        if self.view is None:
-            return done(None, "its tab's closed")
         code = f"return JSON.stringify(await (async () => {{ {body}\n}})() ?? null);"
 
         def finished(view, result):
@@ -2115,8 +2098,6 @@ class GtkWeb:
 
     def snapshot(self, done):
         WebKit = self.WebKit
-        if self.view is None:
-            return done(None, "its tab's closed")
 
         def got(view, result):
             try:
@@ -2248,24 +2229,8 @@ class GtkWeb:
         return None  # (WebKitGTK's own: already Safari's kind)
 
     def close(self):
-        """Its tab's closed: the page gone, its process with it. try_close alone only asks the page (its unload
-        handlers) and says it closed: the view lived on, held by its own signals' handlers, which lead back to it
-        through this (PyGObject frees no widget so held), and with it its web process, its Tab and its place: a tab
-        closed gave nothing back. Disposed once the main loop's idle (what closes it may be its own signal)."""
-        view, self.view = self.view, None
-        if view is None:
-            return
-        self.views.pop(view, None)
-        self.popup = self.closed = None
-        view.try_close()
-
-        def gone():
-            view.terminate_web_process()
-            if (parent := view.get_parent()) is not None:
-                parent.remove(view)
-            view.run_dispose()
-            return False
-        GLib.idle_add(gone)
+        self.views.pop(self.view, None)
+        self.view.try_close()
 
 
 def engine():
@@ -2494,33 +2459,6 @@ class Window(Adw.ApplicationWindow):
         ProfileSocket.listen(pid, self.handle)
         return True
 
-    def memory(self):
-        """What this process holds, for a look at what its work leaves behind: its Python objects, the widgets, tabs
-        and page engines among them (alive, shown or not), the pages WebKit has, and the processes those run in."""
-        import gc
-        gc.collect()
-        things = gc.get_objects()
-        engines = [o for o in things if isinstance(o, (MacWeb, GtkWeb))]
-        pointers = [o for o in things if isinstance(o, BotPointer)]
-        if sys.platform == "darwin":
-            pids = {macos.objc_send(v, b"_webProcessIdentifier", ret=ctypes.c_int) for v in MacWeb.views}
-        else:
-            pids = set()
-            for name in os.listdir("/proc"):
-                try:
-                    with open(f"/proc/{name}/stat") as f:
-                        if name.isdigit() and int(f.read().rsplit(")", 1)[1].split()[1]) == os.getpid():
-                            pids.add(int(name))
-                except (OSError, ValueError, IndexError):
-                    pass
-        return {"pid": os.getpid(), "web_pids": sorted(p for p in pids if p and p > 0), "objects": len(things),
-                "widgets": sum(isinstance(o, Gtk.Widget) for o in things),
-                "tab_objects": sum(isinstance(o, Tab) for o in things), "engines": len(engines),
-                "tabs": len(self.tabs), "views": len(MacWeb.views) + len(GtkWeb.views),
-                "blocks": len(Blocks.live), "blocks_kept": len(Blocks.kept), "queue": len(self.control.queue),
-                "pointer_steps": sum(len(getattr(p, "steps", ())) for p in pointers),
-                "downloads": len(self.downloads), "threads": threading.active_count()}
-
     def handle(self, pid, msg, answer, conn=None):
         """A request at pid's socket: pages handed over (open), what this is (info), go (quit), or a Bot's tools'
         (Control's), for pid's profile (this window moved to it if it's elsewhere)."""
@@ -2536,8 +2474,6 @@ class Window(Adw.ApplicationWindow):
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
                            "tabs": len(self.tabs), "idle_s": idle_s})
-        if op == "memory":  # (tests/bench_emission.py's: what this process holds now, counted after a collection)
-            return answer(self.memory())
         if op == "phone_note":  # (its browser was on a phone till now: what the Bot's next request is told, in place
             said = str(msg.get("note") or "")  # of what a phone said before; "": that taken out)
             if pid != self.profile_id:
@@ -3101,8 +3037,6 @@ class Window(Adw.ApplicationWindow):
                 except Exception:  # (its page gone with it: nothing more to tell)
                     sys.excepthook(*sys.exc_info())
             tab.web.close()
-            self.control.scales.pop(tab.id, None)  # (what the Bot's tools kept of it: closed by hand, too)
-            self.control.reads.pop(tab.id, None)
         view.close_page_finish(page, True)
         if not self.tabs and not self.switching:
             if self.hosted:  # (in Baude, its last tab closed: a blank one in its place, as close_tab leaves)
@@ -3488,7 +3422,6 @@ class Control:
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
     TYPE_GAP_MS = 12  # (between characters typed: xdotool type's own pace)
     LOAD_S = 30  # (a page's load waited for this long at most)
-    JS_S = 120  # (a script's end waited for this long at most: past what a Bot's tools wait for an answer)
     SHOT_MAX = 1024  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
     ZOOM_MAX = 1568  # (a zoom's longest side: what a model sees whole)
     NEAR = 1  # (read_page: what's shown, and this many screens above and below it)
@@ -3499,7 +3432,6 @@ class Control:
         self.scales = {}  # (each tab's last screenshot's pixels to the page's: by tab id)
         self.reads = {}  # (each tab's last read_page: what was asked and a hash of what it gave, by tab id)
         self.queue = []  # (input waiting its turn: (op, msg, answer), the first being done)
-        self.doing = None  # (the one of them begun: next_input)
 
     # (tabs)
 
@@ -3553,17 +3485,7 @@ class Control:
             except ValueError:
                 value = text
             (then or (lambda v: answer({"result": v})))(value)
-        finish = once(guarded(done, answer))
-        # (a script that never settles, a promise nothing resolves: said so once whoever asked has stopped waiting,
-        # where its request, its connection and, of input, every request queued behind it were kept for good)
-        timer = [GLib.timeout_add_seconds(self.JS_S, lambda: (
-            timer.clear(), finish(None, f"the script hadn't finished after {self.JS_S} s"))[1] and False)]
-
-        def ended(text, why):
-            if timer:
-                GLib.source_remove(timer.pop())
-            finish(text, why)
-        t.web.run_js(body if page else PAGE_JS + body, ended, page=page)
+        t.web.run_js(body if page else PAGE_JS + body, guarded(done, answer), page=page)
 
     INPUT = {"click", "drag", "hover", "type", "key", "scroll", "form_input", "navigate", "new_tab", "close_tab",
              "select_tab", "answer_prompt", "resize"}  # (what changes the page: done in the order it came)
@@ -3579,11 +3501,8 @@ class Control:
             self.next_input()
 
     def next_input(self):
-        """The first of what's waiting done (the next once it's answered, whatever the answer), once: asked again
-        while it's being done (its turn come by the last one's answer, and the request after that one here before the
-        idle moment that answer left: run), it was done twice, a tab opened or a click made two times over."""
-        while self.queue and self.queue[0] is not self.doing:
-            self.doing = self.queue[0]
+        """The first of what's waiting done (the next once it's answered, whatever the answer)."""
+        while self.queue:
             fn, msg, answer = self.queue[0]
 
             def done(reply, answer=answer):

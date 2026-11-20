@@ -62,6 +62,7 @@ object PhoneHost {
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
+    private val TAKES = OPS.toSet() - CONTROLS
     lateinit var ctx: Context
     @Volatile var id = ""
     @Volatile var name = "Phone"
@@ -149,8 +150,8 @@ object PhoneHost {
         private val next = AtomicInteger(1)
         private val head = object : Head() {
             override fun send(sent: JSONObject) {
-                val msg = checked(sent)
-                val req = msg.optInt("req", -1)
+                val msg = checked(sent, answer = true) ?: return
+                val req = (msg.opt("req") as? Number)?.toInt() ?: -1
                 if (msg.optString("op") == Op.SESSIONS) msg.optJSONObject("server")?.let { info = it }
                 val call = if (req < 0) null else waiting.remove(req)
                 if (call != null) call(msg) else hear(this@Local, msg)
@@ -169,14 +170,15 @@ object PhoneHost {
         }
 
         override fun send(msg: JSONObject): Boolean {
-            take(head, checked(msg))
+            checked(msg)?.let { take(head, it) }
             return true
         }
 
         override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
             val req = next.getAndIncrement()
+            ownRefusal(msg.put("req", req))?.let { return then(it) }
             waiting[req] = then
-            send(msg.put("req", req))
+            send(msg)
         }
     }
 
@@ -225,14 +227,14 @@ object PhoneHost {
         fun reply(kind: String, vararg kv: Pair<String, Any?>) {
             val o = JSONObject().put("op", kind)
             if (req != null) o.put("req", req)
-            for ((k, v) in kv) o.put(k, v ?: JSONObject.NULL)
+            for ((k, v) in kv) if (v != null) o.put(k, v) // (one that may be null: given as JSONObject.NULL)
             head.send(o)
         }
         synchronized(lock) { heads.add(head) }
         if (op == Op.PING) return
-        // (an op it doesn't take, or fields not as the wire's schema has them: its two refusals, as any host's)
-        (if (op !in OPS || op in CONTROLS) WireCheck.refused(WireCheck.UNSUPPORTED, req) else WireCheck.refusal(msg))
-            ?.let { return head.send(it) }
+        // (an op it doesn't take, or fields not as the wire's schema has them: its two refusals, as any host's; looked
+        // at as it is on the wire, this app's own head's too)
+        WireCheck.refusal(JSONObject(msg.toString()), TAKES)?.let { return head.send(it) }
         when (op) {
             Op.HELLO -> return reply(Op.HELLO, "server" to info())
             Op.SUBSCRIBE -> {
@@ -331,7 +333,7 @@ object PhoneHost {
                             val pic = picture(s)
                             val data = if (bot.isNull("picture")) "" else bot.optString("picture")
                             if (data.isEmpty()) pic.delete()
-                            else Base64.getDecoder().decode(data).takeIf { it.size <= PICTURE_MAX }?.let { pic.writeBytes(it) }
+                            else Base64.getDecoder().decode(data).takeIf { it.size <= WireConstants.BOT_PICTURE_MAX }?.let { pic.writeBytes(it) }
                         }
                     }
                     save(s)
@@ -340,12 +342,12 @@ object PhoneHost {
                 reply(Op.BOT_SET, "session" to listing(s))
             }
             Op.BOT_PICTURE -> reply(Op.BOT_PICTURE, "session" to s.id, "picture" to
-                picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) })
+                (picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) } ?: JSONObject.NULL))
             Op.MEMORY -> {
                 val file = File(s.folder, MEMORY)
                 if (msg.has("text")) live(s) { file.writeText(msg.optString("text")) }
                 reply(Op.MEMORY, "session" to s.id, "text" to (if (file.exists()) file.readText() else ""),
-                    "path" to MEMORY, "mtime" to if (file.exists()) file.lastModified() / 1000.0 else null)
+                    "path" to MEMORY, "mtime" to if (file.exists()) file.lastModified() / 1000.0 else JSONObject.NULL)
             }
         }
     }
@@ -764,7 +766,7 @@ object PhoneHost {
         .put("host", name).put("home", if (::root.isInitialized) File(root, "agents").path else "")
         .put("pid", android.os.Process.myPid()).put("groups", JSONArray().put(name)).put("init", JSONObject.NULL)
         .put("commit", JSONObject.NULL).put("update", JSONObject.NULL).put("providers", JSONArray())
-        .put("notes", JSONObject.NULL).put("phone", true)
+        .put("phone", true)
         .put("mesh", JSONObject().put("members", JSONArray()).put("links", JSONArray()).put("proxy", JSONObject.NULL)
             .put("inactive", JSONArray()).put("found", JSONArray()).put("gone", JSONArray()))
 
@@ -1021,7 +1023,6 @@ object PhoneHost {
     private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
     private const val CATALOGUE_LIMIT = 5000
     private const val DIR_LIMIT = 2000 // (hostfiles.DIR_LIMIT)
-    private const val PICTURE_MAX = 2 shl 20 // (server.BOT_PICTURE_MAX)
     private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)
     const val MEMORY = "memory.md" // (a Bot's memory, in its own folder: its file tools edit it)
 }

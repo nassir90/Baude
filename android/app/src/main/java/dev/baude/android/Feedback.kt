@@ -123,8 +123,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         targetWhy = null
         val h = host ?: return@LaunchedEffect
         Mesh.ask(h, Msg.Feedback(check = true).json()) { r ->
-            if (r.optString("op") == Op.FEEDBACK_TARGET) target = r.optString("repo")
-            else targetWhy = said(h, r.optString("error"))
+            if (r.optString("op") == Op.FEEDBACK_TARGET) target = Msg.FeedbackTarget.from(r).repo.orEmpty()
+            else targetWhy = said(h, Msg.Error.from(r))
         }
     }
     val full = context + listOf("phone: Baude for Android ${version(ctx)} on Android ${Build.VERSION.RELEASE} (${Build.MODEL})")
@@ -136,9 +136,9 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         Outbox.send(id, h) { r ->
             sending = false
             if (r.optString("op") == Op.FEEDBACK_FILED) {
-                Toast.makeText(ctx, "Filed as an issue on ${r.optString("repo")}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, "Filed as an issue on ${Msg.FeedbackFiled.from(r).repo.orEmpty()}", Toast.LENGTH_LONG).show()
                 back()
-            } else failed = said(h, r.optString("error"))
+            } else failed = said(h, Msg.Error.from(r))
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
@@ -188,10 +188,12 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     }
 }
 
-/** Why a host couldn't file, as you'd say it (an older host's Baude doesn't know the op). */
-private fun said(host: String, error: String): String =
-    if (error.startsWith("unknown op")) "${Mesh.label(host)}'s Baude can't file feedback for a phone: update it"
-    else error.ifBlank { "it said no" }
+/** Why a host couldn't file, as you'd say it (an older host's Baude doesn't take the op: its refusal's code says so,
+ * or, from one older still, its error). */
+private fun said(host: String, e: Msg.Error): String =
+    if (e.code == WireCheck.UNSUPPORTED || e.code == null && e.error.orEmpty().startsWith("unknown op"))
+        "${Mesh.label(host)}'s Baude can't file feedback for a phone: update it"
+    else e.said?.ifBlank { null } ?: "it said no"
 
 private fun version(ctx: Context): String = try {
     ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"

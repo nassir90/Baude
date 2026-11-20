@@ -475,8 +475,8 @@ private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
     return null
 }
 
-private const val MAX_EDGE = 1568        // (baude.MAX_IMAGE_EDGE)
-private const val MAX_BYTES = 3_750_000  // (baude.MAX_IMAGE_BYTES)
+private const val MAX_EDGE = WireConstants.IMAGE_EDGE_MAX
+private const val MAX_BYTES = WireConstants.IMAGE_BYTES_MAX
 private const val MAX_FILE = 20L * 1024 * 1024
 
 // ----------------------------------------------------------------------------------------------------- hosts --

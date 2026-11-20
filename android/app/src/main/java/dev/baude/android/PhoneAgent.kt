@@ -28,7 +28,7 @@ data class Served(val member: String, val memberName: String, val provider: Stri
         fun of(o: JSONObject) = Served(o.optString("member"), o.optString("member_name"), o.optString("provider"),
             o.optString("provider_name"), o.optString("model"), o.optString("display"), o.optInt("window", WINDOW))
 
-        const val WINDOW = 32768 // (providers.DEFAULT_WINDOW: a model's context, where its host says none)
+        const val WINDOW = WireConstants.DEFAULT_WINDOW // (a model's context, where its host says none)
     }
 }
 

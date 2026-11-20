@@ -134,6 +134,7 @@ object Mesh {
         if (started) return
         started = true
         app = ctx.applicationContext
+        WireStrict.look(app)
         readKey()
         hosts.addAll(HostStore.load(app))
         channel()

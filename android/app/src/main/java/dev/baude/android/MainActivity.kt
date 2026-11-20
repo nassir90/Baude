@@ -88,9 +88,9 @@ class MainActivity : ComponentActivity() {
     private fun feedbackContext(now: List<String>): List<String> {
         if (now.size < 3) return listOf("Home screen")
         val s = Mesh.session(now[1], now[2])
-        return listOfNotNull("Chat: " + (s?.optJSONObject("bot")?.optString("name")?.let { "Bot $it" }
-            ?: s?.str("title") ?: "(untitled)"),
-            "session: ${now[2]}", s?.optString("cwd")?.ifBlank { null }?.let { "folder: $it" }, "host: ${Mesh.label(now[1])}")
+        return listOfNotNull("Chat: " + (s?.bot?.let { "Bot ${it.name.orEmpty()}" }
+            ?: s?.title?.ifBlank { null } ?: "(untitled)"),
+            "session: ${now[2]}", s?.cwd?.ifBlank { null }?.let { "folder: $it" }, "host: ${Mesh.label(now[1])}")
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

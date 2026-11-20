@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+from baudelib import wire  # noqa: E402
 from baudelib.client import UNREACHED  # noqa: E402
 
 PAGE = "Memory"
@@ -304,7 +305,7 @@ class BotMemory(Gtk.Box):
         if asked != self.asked:
             return
         if reply.get("op") == "error":
-            return self.reached(False, reply.get("error") or "no reason given")
+            return self.reached(False, wire.said(reply) or "no reason given")
         if self.dirty or self.saving is not None or self.sending:
             self.again = True  # (written in since it was asked for: that's saved, then it's read again)
             return

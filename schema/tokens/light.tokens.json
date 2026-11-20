@@ -1,0 +1,57 @@
+{
+  "$description": "Baude's light colours: Baude, Record and Emission's GTK CSS's, and the Android app's.",
+  "libadwaita": {
+    "$type": "color",
+    "$description": "libadwaita's named colours, as GTK resolves them in its light style (the status colours, which libadwaita makes in Oklab, held to sRGB's range). Each token's name is libadwaita's: Baude's CSS names the colour (@sidebar_bg_color), and GTK resolves it; the Android app draws in these.",
+    "sidebar_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.9216, 0.9216, 0.9294], "hex": "#ebebed"}},
+    "view_bg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "window_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.9804, 0.9804, 0.9843], "hex": "#fafafb"}},
+    "window_fg_color": {"$value": {"colorSpace": "srgb", "components": [0, 0, 0.0235], "alpha": 0.8, "hex": "#000006"}},
+    "view_fg_color": {"$value": {"colorSpace": "srgb", "components": [0, 0, 0.0235], "alpha": 0.8, "hex": "#000006"}},
+    "borders": {"$value": {"colorSpace": "srgb", "components": [0, 0, 0.0235], "alpha": 0.12, "hex": "#000006"}},
+    "card_bg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "accent_bg_color": {"$value": "{accent.blue}"},
+    "accent_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "accent_color": {"$value": {"colorSpace": "srgb", "components": [0.0157, 0.3804, 0.7451], "hex": "#0461be"}},
+    "destructive_color": {"$value": {"colorSpace": "srgb", "components": [0.7647, 0, 0], "hex": "#c30000"}},
+    "error_color": {"$value": {"colorSpace": "srgb", "components": [0.7647, 0, 0], "hex": "#c30000"}},
+    "warning_color": {"$value": {"colorSpace": "srgb", "components": [0.5647, 0.3294, 0], "hex": "#905400"}},
+    "success_color": {"$value": {"colorSpace": "srgb", "components": [0, 0.4863, 0.2392], "hex": "#007c3d"}},
+    "dialog_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.9804, 0.9804, 0.9843], "hex": "#fafafb"}}
+  },
+  "baude": {
+    "$type": "color",
+    "rule": {
+      "$description": "Every edge: the inside's, a card's, a table's. GTK's CSS makes it as $extensions has it.",
+      "$value": {"colorSpace": "srgb", "components": [0, 0, 0.0235], "alpha": 0.108, "hex": "#000006"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.borders}, 0.9)"}
+    },
+    "raised": {
+      "$description": "What's raised inside the inside: a code block, a table's head.",
+      "$value": {"colorSpace": "srgb", "components": [0, 0, 0.0235], "alpha": 0.048, "hex": "#000006"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.view_fg_color}, 0.06)"}
+    }
+  },
+  "diff": {
+    "$type": "color",
+    "$description": "A diff's: what's taken out (red) and what's put in (green).",
+    "removed": {
+      "$description": "Taken out: the phone's diff's lines, and its Bot's changes' (behind them, at 0.18); Baude's Git page's counts of lines (the light theme's, light and dark).",
+      "$value": {"colorSpace": "srgb", "components": [0.7529, 0.1098, 0.1569], "hex": "#c01c28"}
+    },
+    "added": {
+      "$description": "Put in: as the red is.",
+      "$value": {"colorSpace": "srgb", "components": [0.149, 0.6353, 0.4118], "hex": "#26a269"}
+    },
+    "removed-line": {
+      "$description": "A line taken out, behind it, in Baude's diff (.diff-del). GTK's CSS makes it as $extensions has it.",
+      "$value": {"colorSpace": "srgb", "components": [0.7647, 0, 0], "alpha": 0.16, "hex": "#c30000"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.error_color}, 0.16)"}
+    },
+    "added-line": {
+      "$description": "A line put in (.diff-add).",
+      "$value": {"colorSpace": "srgb", "components": [0, 0.4863, 0.2392], "alpha": 0.18, "hex": "#007c3d"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.success_color}, 0.18)"}
+    }
+  }
+}

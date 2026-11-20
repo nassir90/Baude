@@ -260,7 +260,8 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             val scale = min(1.0, SHOT_MAX / max(w, h))
             val pw = max(1, (w * scale).roundToInt())
             val ph = max(1, (h * scale).roundToInt())
-            val image = jpeg(Input.picture(t.web, 0f, 0f, t.web.width.toFloat(), t.web.height.toFloat(), pw, ph), 82)
+            val image = jpeg(Input.picture(t.web, 0f, 0f, t.web.width.toFloat(), t.web.height.toFloat(), pw, ph),
+                WireConstants.SHOT_QUALITY)
             scales[t.id] = scale
             answer(describe(t).put("image", image).put("mime", "image/jpeg").put("width", pw).put("height", ph)
                 .put("note", "x and y for click, scroll and zoom are this picture's pixels"))
@@ -291,7 +292,9 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             val fit = min(1.0, ZOOM_MAX / max(pw, ph))
             val ow = max(1, (pw * fit).roundToInt())
             val oh = max(1, (ph * fit).roundToInt())
-            answer(describe(t).put("image", jpeg(Input.picture(t.web, px.toFloat(), py.toFloat(), pw.toFloat(), ph.toFloat(), ow, oh), 90))
+            val image = jpeg(Input.picture(t.web, px.toFloat(), py.toFloat(), pw.toFloat(), ph.toFloat(), ow, oh),
+                WireConstants.ZOOM_QUALITY)
+            answer(describe(t).put("image", image)
                 .put("mime", "image/jpeg").put("width", ow).put("height", oh)
                 .put("region", JSONArray(r.map { it.roundToInt() }))
                 .put("note", "x and y for click and scroll are still the screenshot's pixels"))
@@ -638,8 +641,9 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         const val SETTLE_MS = 100L  // (the last one typed: taken in by the page before its field's read back)
         const val LOAD_S = 30.0     // (a page's load waited for this long at most)
         const val JS_S = 80.0       // (a script's answer waited for this long at most: the host waits 85 s)
-        const val SHOT_MAX = 1024.0 // (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
-        const val ZOOM_MAX = 1568.0 // (a zoom's longest side: what a model sees whole)
+        const val SHOT_MAX = WireConstants.SHOT_MAX.toDouble() // (a screenshot's longest side: about XGA's, as computer
+        // use has it; zoom for more)
+        const val ZOOM_MAX = WireConstants.ZOOM_MAX.toDouble() // (a zoom's longest side: what a model sees whole)
         const val NEAR = 1          // (read_page: what's shown, and this many screens above and below it)
         const val CAME_LINES = 30   // (a scroll's answer: at most this much of what came into view)
         const val CAME_CHARS = 1500

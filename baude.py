@@ -65,6 +65,7 @@ import baudelib.hosts  # noqa: E402  (this machine's host process, started when 
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
 from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
+from baudelib import tokens  # noqa: E402  (Baude's measures: schema/tokens, the Android app's too)
 from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
 )
@@ -6689,8 +6690,8 @@ LAUNCHER = MacLauncher() if sys.platform == "darwin" else FreedesktopLauncher()
 # as a path so Claude can open it with its own tools.
 
 API_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-MAX_IMAGE_EDGE = 1568           # larger images are downscaled by the API anyway
-MAX_IMAGE_BYTES = 3_750_000     # 5 MB once base64-encoded
+MAX_IMAGE_EDGE = baudelib.wire.CONSTANTS["IMAGE_EDGE_MAX"]  # larger images are downscaled by the API anyway
+MAX_IMAGE_BYTES = baudelib.wire.CONSTANTS["IMAGE_BYTES_MAX"]  # 5 MB once base64-encoded
 MAX_PDF_BYTES = 32_000_000
 
 
@@ -8888,8 +8889,8 @@ class SessionSidebar(Gtk.Box):
                     lambda: self.win.ask_remote_start(server=r, folder=folder)) if r.state == "alive" else None
         box = widgets.group_header(short_group_label(key, label), collapsed, lambda: self.toggle_folder(key), plus,
                                    tooltip=label, current=is_here)
-        box.set_margin_top(6)
-        box.set_margin_start(4)
+        box.set_margin_top(tokens.px("gap.header-top"))
+        box.set_margin_start(tokens.px("gap.header-start"))
         row = Gtk.ListBoxRow(child=box, activatable=False, selectable=False)
         row.folder, row.key = folder, key
         return row
@@ -8908,10 +8909,10 @@ class SessionSidebar(Gtk.Box):
     def bot_row(self, info):
         """A Bot: twice a chat's height, its picture (its initials till it has one), its name and, under it, what it's
         on; a dot as a chat's. What's under it (its threads) is nested as forks are."""
-        box = Gtk.Box(spacing=8, margin_start=4, margin_end=4)
+        box = Gtk.Box(spacing=tokens.px("gap.avatar-gap"), margin_start=4, margin_end=4)
         bot = info.get("bot") or {}
         name = bot.get("name") or "Bot"
-        avatar = Adw.Avatar(size=32, text=name, show_initials=True, valign=Gtk.Align.CENTER)
+        avatar = Adw.Avatar(size=tokens.px("gap.avatar"), text=name, show_initials=True, valign=Gtk.Align.CENTER)
         bot_picture(info, lambda tex: tex is not None and avatar.set_custom_image(tex))
         box.append(widgets.shaded_picture(avatar))
         words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
@@ -9276,7 +9277,8 @@ class SessionSidebar(Gtk.Box):
         r = info["remote"]
 
         def done(reply):
-            if reply.get("op") == "error" and str(reply.get("error") or "").startswith("unknown op"):
+            if reply.get("op") == "error" and (reply.get("code") == baudelib.wire.UNSUPPORTED or
+                                               str(reply.get("error") or "").startswith("unknown op")):
                 # (an older host process, without them: archived, or deleted, here only, as Baude did before)
                 if op == "delete":
                     self.hide_remote(info)
@@ -9287,7 +9289,7 @@ class SessionSidebar(Gtk.Box):
                     self.fill()
                 return
             if reply.get("op") == "error":
-                toast(self, f"{remote_name(r)} didn't {op} it: {reply.get('error')}")
+                toast(self, f"{remote_name(r)} didn't {op} it: {baudelib.wire.said(reply)}")
                 return
             if op == "delete":
                 r.sessions.pop(info["id"], None)
@@ -13114,12 +13116,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.add_action(restart)
 
         # transcript
+        chat_h, chat_v = tokens.px("gap.chat-h"), tokens.px("gap.chat-v")
         self.transcript = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
-                                  margin_top=12, margin_bottom=12, margin_start=16, margin_end=16)
+                                  margin_top=chat_v, margin_bottom=chat_v, margin_start=chat_h, margin_end=chat_h)
         self.transcript.add_css_class("zoomable")
         # (messages written while the agent works, not sent yet, under the conversation: queue_message)
         self.queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, visible=False,
-                                 margin_bottom=12, margin_start=16, margin_end=16)
+                                 margin_bottom=chat_v, margin_start=chat_h, margin_end=chat_h)
         self.queue_box.add_css_class("zoomable")
         self.queued, self.queue_upto = [], None  # (QueuedTurns, oldest first; the last to send once the turn's ended)
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -14671,7 +14674,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if reply.get("op") == "started":
                 r.sessions[sid] = reply["session"]
                 return self.start_remote_proc()
-            self.missing_reason = reply.get("error") or "no answer"
+            self.missing_reason = baudelib.wire.said(reply) or "no answer"
         r.sessions.pop(sid, None)  # (as its host has it: listed again, it's there again)
         self.missing_session = sid
         self.update_status()

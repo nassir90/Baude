@@ -47,6 +47,7 @@ from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: 
 import pointers  # noqa: E402
 import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
 from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
+from baudelib import tokens  # noqa: E402  (the measures and colours below: schema/tokens, the Android app's too)
 
 
 # the sizes for what's drawn here: the text's, and an icon's in px (16 at 1.0); Baude's Settings → Size sets them
@@ -5677,7 +5678,8 @@ class PaneSlide(SideSlide):
             self.host.set_position(round(self.open_value()))
 
 
-INSIDE_GAP = 6  # (the inside, set this far into the frame: from the panes beside it and the window's edge)
+INSIDE_GAP = tokens.px("gap.inside")  # (the inside, set this far into the frame: from the panes beside it and the
+# window's edge)
 
 
 def inside(widget, start=True, end=True, under_bar=False):
@@ -5696,7 +5698,8 @@ def inside(widget, start=True, end=True, under_bar=False):
 
 
 RIDE_GROW = 2  # (px each side drawn of what rides in ExpandStack's square: an outline drawn just outside it)
-EXPAND_MS = 260  # (a list's row opened into its page, and closed back into it: ExpandStack. 0: at once)
+EXPAND_MS = tokens.ms("motion.expand")  # (a list's row opened into its page, and closed back into it: ExpandStack. 0:
+# at once)
 
 
 def _lerp(a, b, p):
@@ -8455,8 +8458,9 @@ def empty_label(text):
 
 
 # Baude's stylesheet: the chat's, and the viewers' (kubeview, schemaview, gitview, codeview), so wherever they run
-# (Record's viewers.ViewerWindow too) they look as they do in Baude. Its classes are its own: none is Record's.
-CSS = """
+# (Record's viewers.ViewerWindow too) they look as they do in Baude. Its classes are its own: none is Record's. Its
+# {tokens} are schema/tokens' (tokens.css).
+CSS = tokens.css("""
 .update-bar button { font-weight: normal; }  /* (the text's own colour: white on a dark sidebar, as its rows are) */
 .cut-note { margin-top: 2px; }
 .cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
@@ -8464,10 +8468,10 @@ CSS = """
    right: one colour, no lines between them), the inside where it's read and written (a box set into the frame),
    one rule for every edge (the inside's, a card's, a table's), and one fill for what's raised inside it (a code
    block, a table's head, a bubble). libadwaita's own colours, so light and dark and the accent follow. */
-@define-color baude_frame @sidebar_bg_color;
-@define-color baude_inside @view_bg_color;
-@define-color baude_rule alpha(@borders, 0.9);
-@define-color baude_raised alpha(@view_fg_color, 0.06);
+@define-color baude_frame {baude.frame};
+@define-color baude_inside {baude.inside};
+@define-color baude_rule {baude.rule};
+@define-color baude_raised {baude.raised};
 .baude-frame { background-color: @baude_frame; box-shadow: none; }
 /* (square; its edge a border, inside it: a ring outside it was clipped where it meets the bar above) */
 .baude-inside { background-color: @baude_inside; border: 1px solid @baude_rule; }
@@ -8479,7 +8483,7 @@ tabbar tabbox > tabboxchild:focus-visible, tabbar tabbox > tabboxchild:focus-wit
 tabgrid > tabgridchild:focus:focus-visible .card, .navigation-sidebar > row:focus-visible:focus-within,
 entry:focus-within, spinbutton:focus-within, spinbutton.vertical > text:focus-within,
 row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none; }
-.user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: 12px; padding: 8px 12px; }
+.user-bubble { background: alpha(@accent_bg_color, 0.15); border-radius: {radius.bubble}; padding: {gap.bubble-v} {gap.bubble-h}; }
 .revert-turn { min-width: 24px; min-height: 24px; padding: 0; color: alpha(@view_fg_color, 0.6); }  /* (beside a
    message of yours, on hover: small, and the grey of the chat's notes, .sysnote's) */
 .queue-arrow { font-weight: bold; font-size: 13px; }
@@ -8488,7 +8492,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .user-bubble.sender-bubble { background: alpha(@view_fg_color, 0.07); }  /* (a message from another than you:
    grey, as a queued one is, not your accent: SenderTurn; held, grey words too: HeldTurn) */
 .sender-from { font-size: 0.85em; color: alpha(@view_fg_color, 0.6); }
-.tool-card { border: 1px solid @baude_rule; border-radius: 8px; padding: 6px 10px; }
+.tool-card { border: 1px solid @baude_rule; border-radius: {radius.card}; padding: {gap.card-v} {gap.card-h}; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }
 .tool-card.asking { border-color: @warning_color; }  /* (waiting for you to allow it: the approval's colour) */
@@ -8499,29 +8503,29 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .mesh-card.error > .tool-card { border-color: @error_color; }
 .mesh-card.asking > .tool-card { border-color: @warning_color; }
 .mesh-card.flash > .tool-card { background: alpha(@accent_bg_color, 0.12); transition: background 400ms; }
-.mesh-card .mesh-head { padding: 7px 10px; border-radius: 7px; }
+.mesh-card .mesh-head { padding: 7px {gap.card-h}; border-radius: 7px; }
 .mesh-card .mesh-head.openable:hover { background: alpha(currentColor, 0.05); }
-.mesh-card .mesh-answer { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
+.mesh-card .mesh-answer { background: @baude_raised; border-radius: {radius.bubble}; padding: {gap.bubble-v} {gap.bubble-h}; }
 /* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */
-.perm-card { border: 1px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
+.perm-card { border: 1px solid @warning_color; border-radius: {radius.card}; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
-.mono { font-family: monospace; font-size: 0.9em; }
+.mono { font-family: monospace; font-size: {font.mono-scale}em; }
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
-.sysnote { font-size: 0.85em; opacity: 0.6; }
+.sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
-.composer-actions button { min-width: 34px; min-height: 34px; padding: 0; }
-.attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }
+.composer-actions button { min-width: {gap.composer-button}; min-height: {gap.composer-button}; padding: 0; }
+.attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
 .file-thumb { border-radius: 3px; }
 .attach-chip.image { background: none; padding: 0; }
-.codeblock { background: @baude_raised; border-radius: 6px; }
-.kube-error-fix { background: @baude_raised; border-radius: 6px; padding: 2px 2px 2px 10px; }
+.codeblock { background: @baude_raised; border-radius: {radius.code}; }
+.kube-error-fix { background: @baude_raised; border-radius: {radius.code}; padding: 2px 2px 2px 10px; }
 .codeblock .code-scroll > viewport > label, .codeblock .code-scroll > label { padding: 6px 8px; }
 .codeblock .code-scroll box { padding: 6px 0; }
 /* the tag and copy button sit over the code's first line: give them the block's own colour (opaque, feathered in
    from the left) so a long line runs under them instead of through them */
-.codeblock .code-corner { padding: 3px 4px 3px 18px; border-radius: 0 6px 0 0;
+.codeblock .code-corner { padding: 3px 4px 3px 18px; border-radius: 0 {radius.code} 0 0;
   background-image: linear-gradient(to right, alpha(mix(@baude_inside, @view_fg_color, 0.06), 0),
                                     mix(@baude_inside, @view_fg_color, 0.06) 14px); }
 /* a block on the side panel is on the frame (a side question's); in an open row of its list (Processes), on the
@@ -8552,8 +8556,8 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .codeblock .code-copy { min-height: 22px; min-width: 22px; padding: 0; }
 /* secondary icons share one fade: a fainter stroke reads as a thinner one */
 .soft-icon, .codeblock .code-copy, .sidebar-plus { opacity: 0.75; }
-.diff-del { background: alpha(@error_color, 0.16); padding: 0 8px; }
-.diff-add { background: alpha(@success_color, 0.18); padding: 0 8px; }
+.diff-del { background: {diff.removed-line}; padding: 0 8px; }
+.diff-add { background: {diff.added-line}; padding: 0 8px; }
 .diff-ctx { padding: 0 8px; }
 .md-marker { opacity: 0.7; font-weight: bold; }
 .md-h1 { font-size: 1.44em; }
@@ -8565,14 +8569,14 @@ levelbar block.filled { background-color: @accent_bg_color; }
 levelbar block.ctx-mid { background-color: @warning_color; }
 levelbar block.ctx-high { background-color: @error_color; }
 levelbar.context-meter trough, levelbar.context-meter block { min-height: 16px; border-radius: 4px; }
-.session-row { padding: 6px 4px; }
+.session-row { padding: {gap.sidebar-row-v} {gap.sidebar-row-h}; }
 /* a compact list: rows 28px apart instead of libadwaita's 38 */
 .session-sidebar list.navigation-sidebar > row { min-height: 26px; padding-top: 1px; padding-bottom: 1px;
   margin-top: 1px; margin-bottom: 0; }
 .session-sidebar list.navigation-sidebar > row:first-child > box.sidebar-header { margin-top: 0; }
 /* a Bot: twice a chat's height, its picture and its name (baude's SessionSidebar.bot_row) */
-.session-sidebar list.navigation-sidebar > row.bot-row { min-height: 52px; }
-.session-sidebar .bot-name { font-weight: 600; }
+.session-sidebar list.navigation-sidebar > row.bot-row { min-height: {gap.bot-row}; }
+.session-sidebar .bot-name { font-weight: {font.semibold}; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
 dropdown.choice > button, menubutton.choice > button { font-weight: normal; }
 /* the top bar's pickers (provider, model, effort, mode): each list's rows the same height, a palette's as a menu's */
@@ -8585,7 +8589,7 @@ dropdown.choice popover listview > row, menubutton.choice popover modelbutton, .
    greyed, as there's nothing to choose */
 .one-provider { opacity: 0.55; }
 banner label.heading { font-weight: normal; }
-.session-sidebar .sidebar-folder { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
+.session-sidebar .sidebar-folder { font-size: {font.small}em; font-weight: {font.bold}; opacity: 0.6; }
 /* the Files page's tree: on the frame, as compact as the sessions list (a list view is a .view, which a GTK theme fills
    with its views' white, edge to edge of the panel and the window) */
 listview.file-tree { background: none; }
@@ -8607,7 +8611,7 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .fix-round.failed { border-color: @error_color; }
 .fix-shot { border: 1px solid @baude_rule; }
 .capture-bar { padding: 4px 6px; }
-.tool-card.flash { background: alpha(@accent_bg_color, 0.12); border-radius: 8px; transition: background 400ms; }
+.tool-card.flash { background: alpha(@accent_bg_color, 0.12); border-radius: {radius.card}; transition: background 400ms; }
 .status-dot.working { color: alpha(@view_fg_color, 0.55); }
 .status-dot.waiting { color: #e5a50a; }
 .status-dot.done { color: #3584e4; }
@@ -8642,7 +8646,7 @@ paned.main-split > separator { min-width: 1px; background: @baude_frame; box-sha
 /* where it's dragged from, GTK's 6px either side of the rule: on the inside's edge, not that gap short of it */
 paned.main-split.inside-after > separator { margin-left: 6px; margin-right: -6px; }
 paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6px; }
-.composer-box { border-radius: 12px; box-shadow: 0 0 0 1px @baude_rule; }
+.composer-box { border-radius: {radius.composer}; box-shadow: 0 0 0 1px @baude_rule; }
 .composer-head { background-color: @view_bg_color; }  /* (as the text under it is: Composer.head) */
 .composer-box:disabled { opacity: 0.55; }
 .ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
@@ -8719,9 +8723,9 @@ list.filter-list > row:focus-visible { outline-offset: -2px; }
 /* code on the inside's background, as the chat and the notes are, its line numbers' column too; its page's bar on the
    frame's, as the window's bars are */
 .baude-inside .code-view, .baude-inside .code-view > border { background: none; }
-.code-view { font-family: monospace; font-size: 0.9em; }
+.code-view { font-family: monospace; font-size: {font.mono-scale}em; }
 .code-view text { background: transparent; }
-.code-gutter { font-family: monospace; font-size: 0.9em; }
+.code-gutter { font-family: monospace; font-size: {font.mono-scale}em; }
 .code-bar { background-color: @baude_frame; box-shadow: inset 0 -1px @baude_rule; padding: 3px 8px 3px 10px; }
 .code-member { padding: 1px 6px; min-height: 22px; font-family: monospace; font-size: 0.85em; font-weight: normal; }
 .code-member.current { background: alpha(@accent_bg_color, 0.18); }
@@ -8751,7 +8755,7 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .schema-rows { background: @baude_inside; }  /* (opaque: nothing of the diagram shows through) */
 .schema-status { background: alpha(@baude_inside, 0.85); border-radius: 6px; padding: 3px 8px; font-size: 0.85em; }
 .ref-now { font-size: 0.9em; }
-"""
+""")
 
 
 def tree_line(x, top, mid, end):
@@ -9620,9 +9624,7 @@ def apply_scales(display, also=()):
 # The accent (Settings → Accent Colour), Baude's and Record's, the one setting: one of libadwaita's, or the system's.
 # The CSS follows it (@accent_bg_color, the system's otherwise, and what libadwaita makes of it: --accent-bg-color,
 # @accent_color); what's drawn here asks accent_rgba and accent_text_rgba.
-ACCENTS = {"blue": Adw.AccentColor.BLUE, "teal": Adw.AccentColor.TEAL, "green": Adw.AccentColor.GREEN,
-           "yellow": Adw.AccentColor.YELLOW, "orange": Adw.AccentColor.ORANGE, "red": Adw.AccentColor.RED,
-           "pink": Adw.AccentColor.PINK, "purple": Adw.AccentColor.PURPLE, "slate": Adw.AccentColor.SLATE}
+ACCENTS = {name: getattr(Adw.AccentColor, name.upper()) for name in tokens.names("accent")}
 _accent = {"name": None, "provider": None, "css": None}  # (the one picked, None for the system's, and its CSS)
 
 
@@ -10187,7 +10189,7 @@ class Ticker:
     a CSS animation or an Adw.Spinner draws 60 a second, so one working session's dot, or one long-running command,
     took a sixth of a core. In a window you aren't looking at they hold still."""
 
-    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, 0.9, 0.25, 0.6
+    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, tokens.seconds("motion.pulse"), 0.25, 0.6
     # (held, not weakly: a widget Python keeps no wrapper of, Signal's button's icon, lost its own at once; let go of
     # as each is unmapped, which taking it out of the window does, and taken back as it's mapped again)
     pulsing, spinning, source, interval, start = set(), set(), None, 0, 0.0

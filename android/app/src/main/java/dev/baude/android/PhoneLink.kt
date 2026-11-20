@@ -36,7 +36,7 @@ class WireLine(private val input: InputStream, private val output: OutputStream,
         private set
 
     fun send(o: JSONObject) {
-        if (!closed) queue.put((o.toString() + "\n").toByteArray(Charsets.UTF_8))
+        if (!closed) checked(o)?.let { queue.put((it.toString() + "\n").toByteArray(Charsets.UTF_8)) }
     }
 
     fun shut() {
@@ -67,7 +67,7 @@ class WireLine(private val input: InputStream, private val output: OutputStream,
             try {
                 while (!closed) {
                     Thread.sleep(PING_MS)
-                    send(JSONObject().put("op", "ping"))
+                    send(Msg.Ping().json())
                     pinged()
                     if (SystemClock.elapsedRealtime() - heard > SILENT_MS) shut()
                 }
@@ -83,7 +83,8 @@ class WireLine(private val input: InputStream, private val output: OutputStream,
                 } catch (_: Exception) {
                     continue // (not a line of the host process's: a shell's greeting, say)
                 }
-                if (o.optString("op") != "ping") take(o)
+                WireStrict.check("read", o)
+                if (o.optString("op") != Op.PING) take(o)
             }
         } catch (_: IOException) {
         } finally {
@@ -119,7 +120,7 @@ class WireLine(private val input: InputStream, private val output: OutputStream,
 
     companion object {
         const val MAX_LINE = 48 shl 20 // (a host's longest: a transcript's whole lines, base64'd)
-        const val BACKLOG = 32 // (mesh.BACKLOG: messages waiting to go out on a link before more are passed to it)
+        const val BACKLOG = WireConstants.BACKLOG // (mesh.BACKLOG: messages waiting to go out on a link before more are passed to it)
         private const val NL: Byte = 10
     }
 }
@@ -139,7 +140,7 @@ object PhoneLink {
     val why = mutableStateOf<String?>(null) // (why a link isn't, last time)
     private val main = Handler(Looper.getMainLooper())
     private val links = ConcurrentHashMap<String, Link>() // (a host's connection id: the link made over its ssh)
-    private val records = ConcurrentHashMap<String, Pair<JSONObject, Link>>() // (a member: its record, the link it came by
+    private val records = ConcurrentHashMap<String, Pair<Msg.Record, Link>>() // (a member: its record, the link it came by
     // first; where a tunnel to it goes is route's)
     private val fails = HashMap<String, Int>()
     private val nextTry = HashMap<String, Long>() // (a host whose link failed: not tried again before this)
@@ -164,8 +165,13 @@ object PhoneLink {
     }
 
     private class Tunnel(val link: Link, val t: Int, override val origin: String?, override val sender: JSONObject?) : Head(), End {
-        override fun send(msg: JSONObject) = link.wire.send(JSONObject().put("op", "data").put("r", t).put("msg", msg))
-        override fun deliver(msg: JSONObject) = PhoneHost.take(this, msg)
+        override fun send(msg: JSONObject) {
+            checked(msg, answer = true)?.let { link.wire.send(Msg.Data(r = t, msg = it).json()) }
+        }
+        override fun deliver(msg: JSONObject) {
+            WireStrict.check("read", msg)
+            PhoneHost.take(this, msg)
+        }
         override fun closed(error: String?) = PhoneHost.take(this, null)
     }
 
@@ -175,12 +181,12 @@ object PhoneLink {
         private fun frame(o: JSONObject) = link.wire.send(o.put(if (out) "t" else "r", n))
         override fun deliver(msg: JSONObject) {
             link.wire.room()
-            frame(JSONObject().put("op", "data").put("msg", msg))
+            frame(Msg.Data(msg = msg).json())
         }
-        override fun opened() = frame(JSONObject().put("op", "opened"))
+        override fun opened() = frame(Msg.Opened().json())
         override fun closed(error: String?) {
             (if (out) link.outs else link.ins).remove(n)
-            frame(JSONObject().put("op", "close").apply { if (error != null) put("error", error) })
+            frame(Msg.Close(error = error).json())
         }
     }
 
@@ -192,7 +198,7 @@ object PhoneLink {
         val reached = reachable()
         val now = SystemClock.elapsedRealtime()
         val conn = Mesh.hosts.firstNotNullOfOrNull { h -> // (one that refused, or failed, lately: past it, to the next)
-            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.info?.optString("id") !in reached &&
+            Mesh.conn(h.id)?.takeIf { it.state == "up" && !links.containsKey(it.id) && it.info?.id !in reached &&
                 (nextTry[it.id] ?: 0L) <= now }
         } ?: return
         pending.add(conn.id)
@@ -233,30 +239,32 @@ object PhoneLink {
 
     /** One request to a member's host process on a tunnel of its own, opened from here as from sender (a chat of
      * this phone's: what's sent through it is from that chat, as the far host stamps it: wire.py's Senders): its reply,
-     * or an error one if there's no way to it (no link of the phone's reaches it), or it didn't answer. */
-    fun request(to: String, sender: JSONObject?, msg: JSONObject, ms: Long = 30_000): JSONObject {
-        fun no(why: String) = JSONObject().put("op", "error").put("error", why).put("unreached", true)
-        val link = route(to) ?: return no("no link of this phone's reaches it")
+     * or an error one if it didn't answer; null if there's no way to it (no link of the phone's reaches it, or its
+     * tunnel didn't open). */
+    fun request(to: String, sender: JSONObject?, msg: JSONObject, ms: Long = 30_000): JSONObject? {
+        val asked = JSONObject(msg.toString()).put("req", 1)
+        ownRefusal(asked)?.let { return it }
+        val link = route(to) ?: return null
         val n = link.next.getAndIncrement()
         val end = Asking()
         link.outs[n] = end
-        link.wire.send(JSONObject().put("op", "open").put("t", n).put("to", to).put("ttl", TTL).put("from", PhoneHost.id)
-            .apply { if (sender != null) put("sender", sender) })
+        link.wire.send(Msg.Open(t = n, to = to, ttl = WireConstants.TTL, from = PhoneHost.id,
+            sender = sender?.let { Msg.Sender.from(it) }).json())
         try {
             val error = try {
                 end.ready.get(OPEN_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             } catch (_: Exception) {
                 "it didn't answer"
             }
-            if (error != null) return no(error)
-            link.wire.send(JSONObject().put("op", "data").put("t", n).put("msg", JSONObject(msg.toString()).put("req", 1)))
+            if (error != null) return null
+            link.wire.send(Msg.Data(t = n, msg = checked(asked) ?: asked).json())
             return try {
                 end.reply.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
             } catch (_: Exception) {
-                JSONObject().put("op", "error").put("error", "it didn't answer")
+                Msg.Error(error = "it didn't answer").json()
             }
         } finally {
-            if (link.outs.remove(n) != null) link.wire.send(JSONObject().put("op", "close").put("t", n))
+            if (link.outs.remove(n) != null) link.wire.send(Msg.Close(t = n).json())
         }
     }
 
@@ -266,22 +274,21 @@ object PhoneLink {
         val ready = java.util.concurrent.CompletableFuture<String?>()
         val reply = java.util.concurrent.CompletableFuture<JSONObject>()
         override fun deliver(msg: JSONObject) {
-            if (msg.optString("op") != "ping") reply.complete(msg)
+            WireStrict.check("read", msg)
+            if (msg.optString("op") != Op.PING) reply.complete(msg)
         }
         override fun opened() {
             ready.complete(null)
         }
         override fun closed(error: String?) {
             ready.complete(error ?: "the tunnel was closed")
-            reply.complete(JSONObject().put("op", "error").put("error", error ?: "the tunnel was closed"))
+            reply.complete(Msg.Error(error = error ?: "the tunnel was closed").json())
         }
     }
 
-    private const val TTL = 16 // (mesh.TTL: hosts a tunnel's passed through at most)
-
     /** A member's name, as its record says it (its id's first 8 if there's none). */
-    fun nameOf(member: String): String = records[member]?.first?.optJSONObject("info")?.optString("name")?.ifBlank { null }
-        ?: Mesh.states.values.toList().firstOrNull { it.info?.optString("id") == member }?.info?.optString("name")?.ifBlank { null }
+    fun nameOf(member: String): String = records[member]?.first?.info?.name?.ifBlank { null }
+        ?: Mesh.states.values.toList().firstNotNullOfOrNull { c -> c.info?.takeIf { it.id == member } }?.name?.ifBlank { null }
         ?: member.take(8)
 
     /** The members its links reach now, as a host process works it out (mesh.Mesh.reroute): breadth first from the
@@ -291,7 +298,7 @@ object PhoneLink {
 
     /** The members reached from a host (not back through this phone), each by how many links away. */
     private fun hops(from: String): Map<String, Int> {
-        fun listed(u: String) = records[u]?.first?.optJSONArray("links")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        fun listed(u: String) = records[u]?.first?.links.orEmpty()
         val seen = hashMapOf(from to 0)
         var frontier = listOf(from)
         var n = 0
@@ -314,38 +321,77 @@ object PhoneLink {
         if (up.isNotEmpty()) why.value = null
     }
 
-    private fun hello(): JSONObject = JSONObject().put("id", PhoneHost.id).put("name", PhoneHost.name)
-        .put("group", PhoneHost.name).put("host", PhoneHost.name).put("dial", false)
+    private fun hello() = Msg.HostHello(id = PhoneHost.id, name = PhoneHost.name, group = PhoneHost.name,
+        host = PhoneHost.name, dial = false)
 
     /** Its record, as the mesh has a member's: who it is, its providers (none: it serves no models), its links. */
-    private fun record(): JSONObject = JSONObject().put("id", PhoneHost.id).put("seq", seq)
-        .put("info", hello().put("providers", JSONArray()))
-        .put("links", JSONArray(links.values.mapNotNull { it.peer }.distinct().sorted()))
+    private fun record() = Msg.Record(id = PhoneHost.id, seq = seq, info = Msg.MemberInfo(id = PhoneHost.id,
+        name = PhoneHost.name, group = PhoneHost.name, host = PhoneHost.name, dial = false, providers = emptyList()),
+        links = links.values.mapNotNull { it.peer }.distinct().sorted())
 
     /** Its record, anew (its links changed), to every link. */
     private fun publish() = synchronized(this) { // (its seq and what's sent with it: one telling at a time, in order)
         seq = maxOf(seq + 1, System.currentTimeMillis() * 1_000_000)
         val mine = record()
-        for (l in links.values) if (l.peer != null) l.wire.send(JSONObject().put("op", "mesh").put("records", JSONArray().put(mine)))
+        for (l in links.values) if (l.peer != null) l.wire.send(Msg.MeshFrame(records = listOf(mine)).json())
     }
+
+    private fun Number?.whole(): Long? = (this as? Int)?.toLong() ?: this as? Long
+
+    /** A member's record as it came, if it's one, cut to size (mesh._record): {id, seq, info, links}, info a host's
+     * hello (_hello_of) with its providers as the mesh is told of them (published). */
+    private fun cut(o: JSONObject): Msg.Record? {
+        val r = Msg.Record.from(o)
+        val id = r.id?.takeIf(::isId) ?: return null
+        val seq = (o.opt("seq") as? Number).whole() ?: return null
+        val raw = o.optJSONObject("info") ?: return null
+        val i = Msg.MemberInfo.from(raw)
+        if (i.id != id) return null
+        fun text(k: String, max: Int) = (raw.opt(k) as? String)?.take(max)
+        val providers = raw.optJSONArray("providers")?.let { a ->
+            (0 until minOf(a.length(), 32)).mapNotNull { a.optJSONObject(it) }.filter { isProvider(it.opt("id")) }.map { p ->
+                val m = Msg.Provider.from(p)
+                Msg.Provider(id = m.id, kind = (m.kind?.ifEmpty { null } ?: "openai").take(32),
+                    name = (m.name?.ifEmpty { null } ?: m.id!!).take(64), http = p.opt("http") == true,
+                    models = p.optJSONArray("models")?.let { ms ->
+                        (0 until minOf(ms.length(), 200)).mapNotNull { ms.optJSONObject(it) }.mapNotNull { model(it) } }.orEmpty())
+            }
+        }.orEmpty()
+        val info = Msg.MemberInfo(id = id, name = (text("name", 64)?.ifEmpty { null } ?: id.take(8)),
+            group = text("group", 64).orEmpty(), host = text("host", 255).orEmpty(), version = (i.version.whole() ?: 0L),
+            bonjour = text("bonjour", 255), dial = if (raw.opt("dial") == false) false else null, providers = providers)
+        return Msg.Record(id = id, seq = seq, info = info, links = (r.links.orEmpty().take(256).filter(::isId).toSortedSet().toList()))
+    }
+
+    /** A model as the mesh is told of it (mesh._model). */
+    private fun model(o: JSONObject): Msg.ProviderModel? {
+        val v = o.opt("value") as? String ?: return null
+        return Msg.ProviderModel(value = v.take(200), displayName = ((o.opt("displayName") as? String)?.ifEmpty { null } ?: v).take(200),
+            id = (o.opt("id") as? String)?.take(200), tools = o.opt("tools") as? Boolean, thinking = o.opt("thinking") as? Boolean,
+            window = (o.opt("window") as? Number).whole(), version = (o.opt("version") as? String)?.take(32), digest = (o.opt("digest") as? String)?.take(80),
+            input = o.optJSONArray("input")?.let { a -> (0 until minOf(a.length(), 8)).mapNotNull { a.opt(it) as? String }.map { it.take(32) } })
+    }
+
+    private fun isProvider(v: Any?) = v is String && !v.contains("..") &&
+        Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?").matches(v)
 
     /** One link, till it drops. */
     private fun run(link: Link) {
         val wire = link.wire
-        wire.send(JSONObject().put("op", "hello").put("client", "baude-android").put("req", 0))
+        wire.send(Msg.Hello(client = "baude-android", req = 0).json())
         // (a head through a tunnel hears from the phone at least as often as its link's pinged)
-        wire.run(pinged = { for (e in link.ins.values) if (e is Tunnel) e.send(JSONObject().put("op", "ping")) }) { f ->
+        wire.run(pinged = { for (e in link.ins.values) if (e is Tunnel) e.send(Msg.Ping().json()) }) { f ->
             if (link.peer != null) return@run frame(link, f)
             when (f.optString("op")) {
-                "hello" -> wire.send(JSONObject().put("op", "join").put("host", hello()).put("req", 1))
-                "joined" -> {
-                    link.peer = f.optJSONObject("host")?.optString("id")?.takeIf(::isId) ?: throw Exception("the host gave no id")
+                Op.HELLO -> wire.send(Msg.Join(req = 1, host = hello()).json())
+                Op.JOINED -> {
+                    link.peer = Msg.Joined.from(f).host?.id?.takeIf(::isId) ?: throw Exception("the host gave no id")
                     publish()
                     val known = records.values.map { it.first } // (what the other links reach: this one told)
-                    if (known.isNotEmpty()) wire.send(JSONObject().put("op", "mesh").put("records", JSONArray(known)))
+                    if (known.isNotEmpty()) wire.send(Msg.MeshFrame(records = known).json())
                     shown()
                 }
-                "error" -> throw Exception(f.optString("error", "the host said no"))
+                Op.ERROR -> throw Exception(Msg.Error.from(f).said ?: "the host said no")
             }
         }
     }
@@ -367,67 +413,69 @@ object PhoneLink {
     /** A frame on a link (mesh.py's): records, a tunnel opened to here or through here, a tunnel's message or end. */
     private fun frame(link: Link, f: JSONObject) {
         when (f.optString("op")) {
-            "mesh" -> {
-                val new = JSONArray()
-                for (r in f.optJSONArray("records").list()) {
-                    val id = r.optString("id").takeIf(::isId) ?: continue
+            Op.MESH -> {
+                val new = ArrayList<Msg.Record>()
+                val came = f.optJSONArray("records")
+                for (r in (0 until (came?.length() ?: 0)).mapNotNull { came!!.optJSONObject(it)?.let(::cut) }) {
+                    val id = r.id!!
+                    val at = r.seq!!.toLong()
                     if (id == PhoneHost.id) { // (this phone's own, from before a restart: its record told anew, newer)
                         synchronized(this) {
-                            if (r.optLong("seq") > seq) {
-                                seq = r.optLong("seq")
+                            if (at > seq) {
+                                seq = at
                                 publish()
                             }
                         }
                         continue
                     }
                     val have = records[id]
-                    if (have == null || r.optLong("seq") > have.first.optLong("seq")) {
+                    if (have == null || at > have.first.seq!!.toLong()) {
                         records[id] = r to (have?.second?.takeIf { links.containsValue(it) } ?: link) // (the link it
                         // came by first: not passed back on it)
-                        new.put(r)
+                        new.add(r)
                     }
                 }
-                if (new.length() > 0) for (l in links.values) if (l !== link && l.peer != null) // (passed on: not back)
-                    l.wire.send(JSONObject().put("op", "mesh").put("records", new))
+                if (new.isNotEmpty()) for (l in links.values) if (l !== link && l.peer != null) // (passed on: not back)
+                    l.wire.send(Msg.MeshFrame(records = new).json())
                 if (!link.told) { // (what this host reaches known now: another mesh's host linked to, if there's one)
                     link.told = true
                     main.post { look() }
                 }
             }
-            "open" -> {
-                val t = f.optInt("t", -1).takeIf { it >= 0 } ?: return
+            Op.OPEN -> {
+                val o = Msg.Open.from(f)
+                val t = o.t?.toInt()?.takeIf { it >= 0 } ?: return
                 link.ins.remove(t)?.closed(null) // (a number used again: the tunnel that had it is gone)
-                val to = f.optString("to")
+                val to = o.to.orEmpty()
+                // (who what's sent through it is from: the member it came from, and the chat its relay named)
+                val sender = o.sender?.let { PhoneHost.cleanSender(it.json()) }
                 if (to == PhoneHost.id) {
-                    // (who what's sent through it is from: the member it came from, and the chat its relay named)
-                    link.ins[t] = Tunnel(link, t, f.optString("from").takeIf(::isId),
-                        f.optJSONObject("sender")?.let { PhoneHost.cleanSender(it) })
-                    link.wire.send(JSONObject().put("op", "opened").put("r", t))
+                    link.ins[t] = Tunnel(link, t, o.from?.takeIf(::isId), sender)
+                    link.wire.send(Msg.Opened(r = t).json())
                     return
                 }
                 val ahead = route(to)?.takeIf { it !== link }
-                val ttl = f.optInt("ttl", 0)
+                val ttl = o.ttl?.toInt() ?: 0
                 if (ahead == null || ttl <= 1) {
-                    link.wire.send(JSONObject().put("op", "close").put("r", t).put("error", "${PhoneHost.name} has no way to it"))
+                    link.wire.send(Msg.Close(r = t, error = "${PhoneHost.name} has no way to it").json())
                     return
                 }
                 val n = ahead.next.getAndIncrement()
                 link.ins[t] = Passed(ahead, true, n)
                 ahead.outs[n] = Passed(link, false, t)
-                ahead.wire.send(JSONObject().put("op", "open").put("t", n).put("to", to).put("ttl", ttl - 1)
-                    .apply {
-                        f.optString("from").takeIf(::isId)?.let { put("from", it) }
-                        f.optJSONObject("sender")?.let { put("sender", it) }
-                    })
+                ahead.wire.send(Msg.Open(t = n, to = to, ttl = ttl - 1, from = o.from?.takeIf(::isId),
+                    sender = sender?.let { Msg.Sender.from(it) }).json())
             }
-            "opened" -> link.outs[f.optInt("r", -1)]?.opened()
-            "data" -> {
-                val end = if (f.has("t")) link.ins[f.optInt("t")] else link.outs[f.optInt("r", -1)]
-                f.optJSONObject("msg")?.let { end?.deliver(it) }
+            Op.OPENED -> link.outs[Msg.Opened.from(f).r?.toInt() ?: -1]?.opened()
+            Op.DATA -> {
+                val d = Msg.Data.from(f)
+                val end = if (d.t != null) link.ins[d.t.toInt()] else link.outs[d.r?.toInt() ?: -1]
+                d.msg?.let { end?.deliver(it) }
             }
-            "close" -> {
-                val end = if (f.has("t")) link.ins.remove(f.optInt("t")) else link.outs.remove(f.optInt("r", -1))
-                end?.closed(if (f.isNull("error")) null else f.optString("error"))
+            Op.CLOSE -> {
+                val c = Msg.Close.from(f)
+                val end = if (c.t != null) link.ins.remove(c.t.toInt()) else link.outs.remove(c.r?.toInt() ?: -1)
+                end?.closed(c.error)
             }
         }
     }

@@ -69,6 +69,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside this file)
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+from baudelib import tokens  # noqa: E402  (its measures, Baude's: schema/tokens)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
 from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification, transcript_model  # noqa: E402  (a background task's ending, as said;
@@ -1529,8 +1530,8 @@ entry.diary-title { background: none; }
 entry.diary-title, entry.diary-title:focus-within { outline: none; box-shadow: none; padding-left: 0; padding-right: 0; }
 """
 
-CSS = EDITOR_CSS + """
-.reader-user { background: @baude_raised; border-radius: 12px; padding: 8px 12px; }
+CSS = EDITOR_CSS + tokens.css("""
+.reader-user { background: @baude_raised; border-radius: {radius.bubble}; padding: {gap.bubble-v} {gap.bubble-h}; }
 .reader-assistant { padding: 4px 2px; }
 .reader-assistant label.prose { font-size: 1.02em; }
 .pending-bar { background: alpha(@success_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }
@@ -1549,7 +1550,7 @@ paned.notes-split > separator { background: none; background-image: none; box-sh
 .ref-card contents { padding: 6px 8px; }  /* (a name's card, just under the pointer: Window.ref_card) */
 .page-placeholder { font-style: italic; }
 .unknown-chip { padding: 2px 10px; border-radius: 99px; font-size: 0.9em; }
-"""
+""")
 
 # The zoom's sizes, a class for each (Window.apply_zoom). A class changes only what has it and what's in it; loading a
 # style sheet anew, as this was, styles every widget of every window and tab afresh, with all of libadwaita's rules.
@@ -8480,7 +8481,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 store.loading.discard(key)
                 old = (r.info.get("version") or 1) < 6
                 self.toast(f"{remote_name(r)}'s {book(plural=True).lower()} weren't listed: " +
-                           ("its daemon is older than this Record" if old else str(reply.get("error") or "no answer")))
+                           ("its daemon is older than this Record" if old else
+                            baudelib.client.wire.said(reply) or "no answer"))
                 return
             books = [b for b in reply.get("notebooks") or () if isinstance(b, dict) and isinstance(b.get("id"), str)
                      and isinstance(b.get("pages"), dict)]

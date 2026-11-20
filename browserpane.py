@@ -116,7 +116,7 @@ class Stream:
         ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
             if msg.get("op") == "error":
-                raise OSError(msg.get("error") or "its host said no")
+                raise OSError(wire.said(msg) or "its host said no")
             if msg.get("op") == "emission_watch_end":
                 return
             if msg.get("op") == "emission_frame":
@@ -228,7 +228,7 @@ class Asks:
                         got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
                 if got is None:
                     r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
-                    got = r.get("result") if r.get("op") == "emission" else {"error": r.get("error") or "no answer"}
+                    got = r.get("result") if r.get("op") == "emission" else {"error": wire.said(r) or "no answer"}
             except (OSError, ValueError) as e:
                 got = {"error": str(e)}
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
@@ -745,8 +745,8 @@ class Presence(Gtk.Widget):
         for x, y, dx, dy, k, ha in look["hints"]:
             (ux, uy), (cx, cy) = emission.hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
             lines = self.path(emission.chevrons(cx, cy, ux, uy))
-            snapshot.append_stroke(lines, stroke(5), self.rgba(white, ha * a))
-            snapshot.append_stroke(lines, stroke(2.8), self.rgba(rgb, ha * a))
+            snapshot.append_stroke(lines, stroke(emission.HINT_HALO), self.rgba(white, ha * a))
+            snapshot.append_stroke(lines, stroke(emission.HINT_EDGE), self.rgba(rgb, ha * a))
         if look["x"] is not None and a > 0:
             tx, ty = ox + look["x"] * sx, oy + look["y"] * sy
             dx, dy = emission.ARROW_SHADOW

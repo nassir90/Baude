@@ -31,8 +31,10 @@ from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hos
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
 DRAFT_S = 30  # (a new chat never written in, nobody attached this long: gone)
-EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
-GRACE_MOST = 24 * 3600  # (start's grace: an ephemeral session waits at most this long for its head to come back)
+FRAME_KEYS = frozenset(wire.DEFS["EmissionFrame"]["properties"]) - {"op", "req"}  # (what a watched Emission says)
+EPHEMERAL_S = wire.CONSTANTS["EPHEMERAL_S"]  # (a side question whose head's gone: gone this soon)
+GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral session waits at most this long for its head
+# to come back)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20
@@ -402,7 +404,7 @@ def turn_acting(msg, was, streamed=False):
     return False if "text" in kinds else was
 
 
-BOT_PICTURE_MAX = 2 << 20  # (bytes: a Bot's picture, as sent)
+BOT_PICTURE_MAX = wire.CONSTANTS["BOT_PICTURE_MAX"]  # (bytes: a Bot's picture, as sent)
 BOT_MEMORY_TOLD = 32 << 10  # (bytes of a Bot's memory put in what its agent's told: an argument, of 128 KiB at most on
 # Linux; the rest it reads in the file)
 
@@ -953,6 +955,7 @@ class Server:
         through it is from, as that member said: Conn's)."""
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
+        ch.serving = True
         conn = Conn(ch, origin, sender)
         with self.lock:
             self.conns.add(conn)
@@ -960,7 +963,12 @@ class Server:
         try:
             for msg in ch:
                 if msg.get("op") in ("join", "relay") and not self.stopped.is_set():  # (another host's link to
-                    with self.lock:  # here, or a tunnel through the mesh: the connection's the mesh's from now on)
+                    # here, or a tunnel through the mesh: the connection's the mesh's from now on; one whose fields
+                    # aren't as the schema has them refused, as any request is)
+                    if (refused := wire.refusal(msg)) is not None:
+                        conn.send(refused)
+                        continue
+                    with self.lock:
                         self.conns.discard(conn)
                     conn.close()
                     (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
@@ -1022,7 +1030,9 @@ class Server:
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
                     try:
-                        conn.send({"op": "emission_frame", "req": req, **json.loads(line)})
+                        said = json.loads(line)  # (Emission's line: what of it the schema's frame has)
+                        conn.send({"op": "emission_frame", "req": req,
+                                   **{k: v for k, v in said.items() if k in FRAME_KEYS}})
                     except ValueError:
                         continue
         except OSError:
@@ -1107,6 +1117,8 @@ class Server:
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
         if op == "ping":
             return None
+        if (refused := wire.refusal(msg)) is not None:  # (an op no host takes, or fields not as the schema has them)
+            return conn.send(refused)
         if self.stopped.is_set():  # (going: nothing more started, nothing more sent to a claude it's stopping)
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
@@ -1405,7 +1417,8 @@ class Server:
                 if "refused" in mem:
                     return reply("error", error=mem.pop("refused"), session=s.id, **mem)
                 return reply("memory", session=s.id, **mem)
-        return reply("error", error=f"unknown op {op!r}")
+        self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
+        return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
 
     def run_routine(self, s, r, schedule=True):
         """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for

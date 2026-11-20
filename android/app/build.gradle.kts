@@ -490,7 +490,7 @@ abstract class WireSchema : DefaultTask() {
             out.append("        \"$n\" to ${shape(props(d).keys, inner)},\n")
         }
         out.append("    )\n\n    private val OPS = mapOf(\n")
-        for (o in messages.map { op(defs[it]!!) }.distinct()) {
+        for (o in messages.map { op(defs[it]!!) }.distinct()) about(messages.filter { op(defs[it]!!) == o }.joinToString()) {
             val lines = messages.filter { op(defs[it]!!) == o }.map { props(defs[it]!!) }
             val fields = lines.flatMap { it.keys }.toSet()
             val inner = fields.mapNotNull { f ->
@@ -510,8 +510,8 @@ abstract class WireSchema : DefaultTask() {
                 "\"$it\" to \"${defs[it]!!["x-kind"]}\"" }}),\n")
         out.append("    )\n    private val NULLABLE = mapOf( // (an op's fields that may be null, in any of its lines)\n")
         for (o in messages.map { op(defs[it]!!) }.distinct()) {
-            val fields = messages.filter { op(defs[it]!!) == o }.flatMap { n -> props(defs[n]!!).filterValues { nullable(it) }.keys }
-                .distinct()
+            val fields = messages.filter { op(defs[it]!!) == o }
+                .flatMap { n -> props(defs[n]!!).filterValues { nullable(it) }.keys }.distinct()
             if (fields.isNotEmpty()) out.append("        \"$o\" to setOf(${fields.joinToString { "\"$it\"" }}),\n")
         }
         out.append("    )\n    private val REQUEST = setOf(\"request\", \"both\")\n\n")

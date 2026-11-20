@@ -2122,7 +2122,7 @@
   },
   "Error": {
    "type": "object",
-   "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): those two say nothing more, the same from every host.",
+   "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): the same from every host, what was wrong in detail.",
    "x-op": "error",
    "x-kind": "reply",
    "properties": {
@@ -2147,6 +2147,10 @@
       "invalid_data_type"
      ],
      "description": "One of the schema's own refusals."
+    },
+    "detail": {
+     "type": "string",
+     "description": "A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is."
     },
     "plain": {
      "type": "boolean",

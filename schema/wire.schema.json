@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/nassir90/Baude/schema/wire.schema.json",
  "title": "Baude's wire",
- "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). x-version: the wire's version, as a host's hello says it. baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
+ "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply, x-reply its answers (or an error); reply; event, a host's unasked; frame, on a mesh link; both, either way). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). x-version: the wire's version, as a host's hello says it. baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
  "x-version": 18,
  "x-constants": {
   "PING_S": {
@@ -34,6 +34,31 @@
    "value": 600,
    "unit": "s",
    "description": "A provider has this long to answer infer."
+  },
+  "TTL": {
+   "value": 16,
+   "unit": "hosts",
+   "description": "A tunnel's passed through at most this many hosts (open's ttl)."
+  },
+  "BOT_PICTURE_MAX": {
+   "value": 2097152,
+   "unit": "bytes",
+   "description": "A Bot's picture, as bot sends it, at most."
+  },
+  "IMAGE_EDGE_MAX": {
+   "value": 1568,
+   "unit": "px",
+   "description": "An image attached to a message: its longest side, larger ones scaled down."
+  },
+  "IMAGE_BYTES_MAX": {
+   "value": 3750000,
+   "unit": "bytes",
+   "description": "An image attached to a message, at most (5 MB once base64-encoded)."
+  },
+  "DEFAULT_WINDOW": {
+   "value": 32768,
+   "unit": "tokens",
+   "description": "A model's context window, where its server or settings don't say one."
   },
   "BACKLOG": {
    "value": 32,
@@ -462,6 +487,10 @@
      "description": "The tool it asks to use."
     },
     "input": {
+     "type": [
+      "object",
+      "null"
+     ],
      "description": "The tool's input (long strings in it cut short).",
      "x-open": true
     }
@@ -776,8 +805,11 @@
      "description": "The session it was forked from."
     },
     "spawned_by": {
-     "description": "Who started it (a chat's mesh tools: start's spawned_by).",
-     "x-open": true
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The chat whose mesh tools started it (start's spawned_by)."
     },
     "start_key": {
      "type": [
@@ -1390,8 +1422,8 @@
      "description": "The members it reaches and the links it's made."
     },
     "notes": {
-     "description": "Record's notebooks here, as written last (notes.stamp).",
-     "x-open": true
+     "type": "string",
+     "description": "Record's notebooks here, as written last (notes.stamp: \"\" for none)."
     },
     "phone": {
      "type": "boolean",
@@ -1592,6 +1624,10 @@
      "description": "Its size."
     },
     "mtime": {
+     "type": [
+      "integer",
+      "null"
+     ],
      "description": "Its mtime (ns)."
     },
     "offset": {
@@ -1716,6 +1752,10 @@
      "description": "What it names."
     },
     "canonical": {
+     "type": [
+      "string",
+      "null"
+     ],
      "description": "What it is."
     },
     "status": {
@@ -1723,6 +1763,10 @@
      "description": "Its status."
     },
     "summary": {
+     "type": [
+      "string",
+      "null"
+     ],
      "description": "What's said of it."
     },
     "locations": {
@@ -1892,8 +1936,8 @@
      "description": "Its profile."
     },
     "agent": {
-     "description": "The Bot it's for.",
-     "x-open": true
+     "type": "boolean",
+     "description": "A Bot's (its tools drive it)."
     },
     "view": {
      "type": [
@@ -2026,7 +2070,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/HelloReply"
+    }
+   ]
   },
   "HelloReply": {
    "type": "object",
@@ -2123,6 +2172,10 @@
      "description": "memory's refusal: what the user's accepted of it."
     },
     "mtime": {
+     "type": [
+      "integer",
+      "null"
+     ],
      "description": "memory's refusal: its mtime (ns)."
     },
     "path": {
@@ -2161,7 +2214,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Sessions"
+    }
+   ]
   },
   "Sessions": {
    "type": "object",
@@ -2212,19 +2270,35 @@
      "description": "The session's id."
     },
     "result": {
-     "description": "Its result.",
-     "x-open": true
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its result."
     },
     "is_error": {
+     "type": "boolean",
      "description": "It ended in an error."
     },
     "cost": {
+     "type": [
+      "number",
+      "null"
+     ],
      "description": "Its cost, USD."
     },
     "turns": {
+     "type": [
+      "integer",
+      "null"
+     ],
      "description": "Its turns."
     },
     "duration_ms": {
+     "type": [
+      "number",
+      "null"
+     ],
      "description": "How long it took."
     }
    },
@@ -2263,7 +2337,15 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Quitting"
+    },
+    {
+     "$ref": "#/$defs/Busy"
+    }
+   ]
   },
   "Quitting": {
    "type": "object",
@@ -2422,8 +2504,8 @@
      "description": "As attach's."
     },
     "spawned_by": {
-     "description": "Who started it (a chat's mesh tools).",
-     "x-open": true
+     "type": "string",
+     "description": "The id of the chat here whose mesh tools start it."
     },
     "system": {
      "type": "string",
@@ -2511,7 +2593,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Started"
+    }
+   ]
   },
   "Started": {
    "type": "object",
@@ -2596,7 +2683,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Attached"
+    }
+   ]
   },
   "Attached": {
    "type": "object",
@@ -2789,7 +2881,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Accepted"
+    }
+   ]
   },
   "Accepted": {
    "type": "object",
@@ -2854,7 +2951,12 @@
     "session",
     "id"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/HeldReply"
+    }
+   ]
   },
   "HeldReply": {
    "type": "object",
@@ -2910,7 +3012,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/SendersReply"
+    }
+   ]
   },
   "SendersReply": {
    "type": "object",
@@ -2981,7 +3088,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Stopped"
+    }
+   ]
   },
   "Stopped": {
    "type": "object",
@@ -3041,7 +3153,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/CwdSet"
+    }
+   ]
   },
   "CwdSet": {
    "type": "object",
@@ -3108,14 +3225,19 @@
      "items": {
       "type": "string"
      },
-     "description": "These added to them (before 15, tools replaced them)."
+     "description": "These added to them."
     }
    },
    "required": [
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Allowed"
+    }
+   ]
   },
   "Allowed": {
    "type": "object",
@@ -3178,7 +3300,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Archived"
+    }
+   ]
   },
   "Unarchive": {
    "type": "object",
@@ -3206,7 +3333,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Unarchived"
+    }
+   ]
   },
   "Archived": {
    "type": "object",
@@ -3290,7 +3422,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Deleted"
+    }
+   ]
   },
   "Transcript": {
    "type": "object",
@@ -3326,7 +3463,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/TranscriptReply"
+    }
+   ]
   },
   "TranscriptReply": {
    "type": "object",
@@ -3411,7 +3553,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/SubagentsReply"
+    }
+   ]
   },
   "SubagentsReply": {
    "type": "object",
@@ -3482,7 +3629,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Renamed"
+    }
+   ]
   },
   "Renamed": {
    "type": "object",
@@ -3548,7 +3700,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/BotSetReply"
+    }
+   ]
   },
   "BotSetReply": {
    "type": "object",
@@ -3603,7 +3760,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/BotPictureReply"
+    }
+   ]
   },
   "BotPictureReply": {
    "type": "object",
@@ -3671,14 +3833,23 @@
      "description": "What the user's accepted of it."
     },
     "base_mtime": {
-     "description": "The mtime the text was written against."
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The mtime (ns) the text was written against."
     }
    },
    "required": [
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/MemoryReply"
+    }
+   ]
   },
   "MemoryReply": {
    "type": "object",
@@ -3713,6 +3884,10 @@
      "description": "What the user's accepted of it."
     },
     "mtime": {
+     "type": [
+      "integer",
+      "null"
+     ],
      "description": "Its mtime (ns)."
     },
     "path": {
@@ -3756,7 +3931,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/MeshToolsSet"
+    }
+   ]
   },
   "MeshToolsSet": {
    "type": "object",
@@ -3787,7 +3967,7 @@
   },
   "WaitsOnOp": {
    "type": "object",
-   "description": "A session's agent waits on another chat's answer, or (done) no longer. Kept with the session (not listed) while its turn goes on: if the host stops meanwhile, it follows the wait once it's started again, and what the wait would have given is held for the session (version 18; 13: sent as its user's message).",
+   "description": "A session's agent waits on another chat's answer, or (done) no longer. Kept with the session (not listed) while its turn goes on: if the host stops meanwhile, it follows the wait once it's started again, and what the wait would have given is held for the session.",
    "x-op": "waits_on",
    "x-kind": "request",
    "properties": {
@@ -3819,7 +3999,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/WaitsOnReply"
+    }
+   ]
   },
   "WaitsOnReply": {
    "type": "object",
@@ -3884,7 +4069,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/RoutinesReply"
+    }
+   ]
   },
   "RoutinesReply": {
    "type": "object",
@@ -3955,7 +4145,12 @@
     "op",
     "session"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/RoutinesReply"
+    }
+   ]
   },
   "ReadFile": {
    "type": "object",
@@ -3986,7 +4181,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/File"
+    }
+   ]
   },
   "File": {
    "type": "object",
@@ -4057,7 +4257,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Dir"
+    }
+   ]
   },
   "Dir": {
    "type": "object",
@@ -4154,7 +4359,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/GitReply"
+    }
+   ]
   },
   "GitReply": {
    "type": "object",
@@ -4308,7 +4518,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/SignalNamesReply"
+    }
+   ]
   },
   "SignalNamesReply": {
    "type": "object",
@@ -4391,7 +4606,15 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/FeedbackFiled"
+    },
+    {
+     "$ref": "#/$defs/FeedbackTarget"
+    }
+   ]
   },
   "FeedbackFiled": {
    "type": "object",
@@ -4487,7 +4710,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/CatalogueReply"
+    }
+   ]
   },
   "CatalogueReply": {
    "type": "object",
@@ -4507,6 +4735,10 @@
      "description": "The request's number, the client's pick: its answers carry it back."
     },
     "cwd": {
+     "type": [
+      "string",
+      "null"
+     ],
      "description": "The folder asked for."
     },
     "items": {
@@ -4571,7 +4803,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/NotesReply"
+    }
+   ]
   },
   "NotesReply": {
    "type": "object",
@@ -4650,7 +4887,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Linking"
+    }
+   ]
   },
   "Linking": {
    "type": "object",
@@ -4670,6 +4912,7 @@
      "description": "The request's number, the client's pick: its answers carry it back."
     },
     "where": {
+     "$ref": "#/$defs/Where",
      "description": "Where."
     }
    },
@@ -4707,7 +4950,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Unlinked"
+    }
+   ]
   },
   "Unlinked": {
    "type": "object",
@@ -4765,7 +5013,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Deactivated"
+    }
+   ]
   },
   "Activate": {
    "type": "object",
@@ -4796,7 +5049,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Activated"
+    }
+   ]
   },
   "Deactivated": {
    "type": "object",
@@ -4881,7 +5139,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Joined"
+    }
+   ]
   },
   "Joined": {
    "type": "object",
@@ -4939,7 +5202,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Relayed"
+    }
+   ]
   },
   "Relayed": {
    "type": "object",
@@ -4959,6 +5227,7 @@
      "description": "The request's number, the client's pick: its answers carry it back."
     },
     "to": {
+     "type": "string",
      "description": "The member's id."
     }
    },
@@ -5152,7 +5421,18 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/InferHead"
+    },
+    {
+     "$ref": "#/$defs/InferData"
+    },
+    {
+     "$ref": "#/$defs/InferEnd"
+    }
+   ]
   },
   "Files": {
    "type": "object",
@@ -5190,7 +5470,18 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/InferHead"
+    },
+    {
+     "$ref": "#/$defs/InferData"
+    },
+    {
+     "$ref": "#/$defs/InferEnd"
+    }
+   ]
   },
   "InferHead": {
    "type": "object",
@@ -5360,7 +5651,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/AgentStarted"
+    }
+   ]
   },
   "AgentStarted": {
    "type": "object",
@@ -5639,7 +5935,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/Relaying"
+    }
+   ]
   },
   "Relaying": {
    "type": "object",
@@ -5714,7 +6015,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/EmissionReply"
+    }
+   ]
   },
   "EmissionReply": {
    "type": "object",
@@ -5777,7 +6083,18 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/EmissionWatching"
+    },
+    {
+     "$ref": "#/$defs/EmissionFrame"
+    },
+    {
+     "$ref": "#/$defs/EmissionWatchEnd"
+    }
+   ]
   },
   "EmissionWatching": {
    "type": "object",
@@ -5835,6 +6152,28 @@
      "type": "string",
      "contentEncoding": "base64",
      "description": "The frame."
+    },
+    "stride": {
+     "type": "integer",
+     "description": "Its rows' length in bytes, in shared memory (shm)."
+    },
+    "shm": {
+     "type": "string",
+     "description": "The shared memory it's in (a pane on Emission's own machine), not jpeg."
+    },
+    "view": {
+     "type": [
+      "array",
+      "null"
+     ],
+     "items": {
+      "type": "integer"
+     },
+     "description": "The page's size, in CSS pixels."
+    },
+    "error": {
+     "type": "string",
+     "description": "Emission said no: why."
     },
     "state": {
      "$ref": "#/$defs/WatchState",
@@ -5936,7 +6275,12 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false
+   "additionalProperties": false,
+   "x-reply": [
+    {
+     "$ref": "#/$defs/EmissionServing"
+    }
+   ]
   },
   "EmissionServing": {
    "type": "object",

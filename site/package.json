@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:apk": "cd ../android && ./gradlew assembleDebug",
     "build:shots": "python3 build_shots.py",
     "dev": "npm run build:shots && cf dev",
-    "build": "npm run build:shots && cf build",
-    "deploy": "npm run build:shots && cf deploy"
+    "build": "npm run build:apk && npm run build:shots && cf build",
+    "deploy": "npm run build:apk && npm run build:shots && cf deploy"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "beta",

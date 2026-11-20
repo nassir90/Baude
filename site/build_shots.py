@@ -3,11 +3,13 @@
 
 Takes the screenshot matrix (../screenshots/, made by tests/screenshots.py or tests/screenshots.sh),
 converts the scenes listed below to WebP in both themes (full size, and a smaller one for the grid),
-makes the square card for mpts.ie/apps, and writes index.html from page.html with the grid filled in.
+makes the square card for mpts.ie/apps, writes index.html from page.html with the grid filled in, and puts the Android
+app beside it (baude-android.apk, from android/: npm run build:apk builds it).
 Needs Pillow.
 """
 import html
 import os
+import shutil
 import sys
 
 try:
@@ -17,6 +19,7 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MATRIX = os.path.join(HERE, "..", "screenshots")
+APK = os.path.join(HERE, "..", "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
 OUT = os.path.join(HERE, "public", "apps", "baude")
 THEMES = ("light", "dark")
 GRID_WIDTH = 760  # the grid's image width: two columns on a 1040px page, sharp on 2x screens
@@ -78,6 +81,9 @@ def main():
         page = f.read().replace("<!-- SHOTS -->", "\n".join(items))
     with open(os.path.join(OUT, "index.html"), "w") as f:
         f.write(page)
+    if not os.path.exists(APK):
+        sys.exit(f"missing {os.path.normpath(APK)}: run npm run build:apk first")
+    shutil.copyfile(APK, os.path.join(OUT, "baude-android.apk"))
     total = sum(os.path.getsize(os.path.join(shots, n)) for n in os.listdir(shots))
     print(f"{len(SHOTS)} screenshots in two themes ({total / 1e6:.1f} MB) -> {os.path.relpath(OUT, HERE)}")
 

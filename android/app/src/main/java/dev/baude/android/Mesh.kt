@@ -73,6 +73,7 @@ class Chat(hostId: String, sid: String) {
     var hostId by mutableStateOf(hostId)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
+    val draft = mutableStateOf<String?>(null) // (text for the box: shared from another app, or not sent)
     val preparing = mutableStateOf(0)         // (picked, still being read)
     val ends = HashMap<String, Int>()         // (a record's uuid: how many lines were shown up to its end)
     val busy = mutableStateOf(false)
@@ -204,6 +205,7 @@ object Mesh {
         moved.values.removeAll { it == host.id }
         meshed()
         if (hosts.isEmpty()) app.stopService(Intent(app, MeshService::class.java))
+        Shares.look()
     }
 
     fun connect(host: Host) {
@@ -299,6 +301,7 @@ object Mesh {
         sessions.remove(c.id)
         members.remove(c.id.removePrefix("mesh:"))
         tick.value++
+        Shares.look()
     }
 
     /** Hosts whose key you've said not to trust ("host id fingerprint"), this run: not asked again till you tap one. */
@@ -378,6 +381,7 @@ object Mesh {
                     val now = listing.sessions.orEmpty()
                     val before = sessions[c.id]
                     sessions[c.id] = now
+                    Shares.look() // (its Bots, in the share sheet)
                     listing.server?.let { // (its mesh as it is now)
                         c.info = it
                         if (c.place is Place.Direct) meshed()
@@ -526,7 +530,10 @@ object Mesh {
             }
             val bytes = Base64.getDecoder().decode(data)
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() ?: return@request
-            main.post { pictures[c.pictureKey] = bmp }
+            main.post {
+                pictures[c.pictureKey] = bmp
+                Shares.look()
+            }
         }
     }
 
@@ -723,8 +730,10 @@ object Mesh {
         if (c == null) {
             chat.busy.value = false
             chat.said.value = "It can't be sent while this chat's host isn't there"
+            unsent(chat, text, files)
             return
         }
+        Shares.used(chat)
         kotlin.concurrent.thread(name = "send", isDaemon = true) { build(chat, c, text, files) }
     }
 
@@ -745,6 +754,12 @@ object Mesh {
                 else read(chat)
             }
         }
+    }
+
+    /** A message that wasn't sent put back in the box, to send again once it can be. */
+    private fun unsent(chat: Chat, text: String, files: List<Picked>) {
+        if (text.isNotBlank()) chat.draft.value = listOfNotNull(text, chat.draft.value).joinToString("\n")
+        chat.files.addAll(0, files)
     }
 
     /** The message made (base64 and all, off the main thread) and sent. */
@@ -772,7 +787,10 @@ object Mesh {
         c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
             main.post {
                 chat.busy.value = false
-                if (r.optString("op") == Op.ERROR) chat.said.value = "Couldn't send: " + Msg.Error.from(r).said.orEmpty()
+                if (r.optString("op") == Op.ERROR) {
+                    chat.said.value = "Couldn't send: " + Msg.Error.from(r).said.orEmpty()
+                    unsent(chat, text, files)
+                }
                 read(chat)
             }
         }

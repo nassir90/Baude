@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,22 +80,12 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
-        chat.preparing.value += uris.size
-        kotlin.concurrent.thread(name = "pick", isDaemon = true) { // (read, and pictures made small, off the main thread)
-            for (uri in uris) {
-                val (picked, why) = try {
-                    read(ctx, uri)
-                } catch (e: Throwable) { // (too big to hold, say: said, not a crash)
-                    null to "That file couldn't be read"
-                }
-                main.post {
-                    chat.preparing.value -= 1
-                    if (picked != null) files.add(picked)
-                    if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        take(ctx, chat, uris)
+    }
+    LaunchedEffect(chat, chat.draft.value) { // (shared from another app, or not sent: after what's written)
+        val shared = chat.draft.value ?: return@LaunchedEffect
+        text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
+        chat.draft.value = null
     }
     val list = rememberLazyListState()
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
@@ -132,7 +123,8 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
                 .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
         ) {
-            if (files.isNotEmpty()) Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (files.isNotEmpty()) Row(Modifier.padding(bottom = 6.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (f in files.toList()) Row(
                     Modifier.clip(RoundedCornerShape(8.dp)).background(c.raised).padding(start = 8.dp, end = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -156,6 +148,27 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                     text = ""
                     files.clear()
                 }
+            }
+        }
+    }
+}
+
+/** Files picked (or shared from another app) attached to the chat's message: read, and pictures made small, off the
+ * main thread; why one can't be, said. */
+fun take(ctx: Context, chat: Chat, uris: List<Uri>) {
+    val main = android.os.Handler(android.os.Looper.getMainLooper())
+    chat.preparing.value += uris.size
+    kotlin.concurrent.thread(name = "pick", isDaemon = true) { // (read, and pictures made small, off the main thread)
+        for (uri in uris) {
+            val (picked, why) = try {
+                read(ctx, uri)
+            } catch (e: Throwable) { // (too big to hold, say: said, not a crash)
+                null to "That file couldn't be read"
+            }
+            main.post {
+                chat.preparing.value -= 1
+                if (picked != null) chat.files.add(picked)
+                if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show()
             }
         }
     }

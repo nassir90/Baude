@@ -663,6 +663,7 @@ class Signal(Names):
         self.transcript = None  # the chat it reads, and what's in it (main loop; follow)
         self._chat, self._checkouts, self._evidence_soon = None, None, None  # (_chat: a SignalChat)
         self._chats = {}  # (the chats read here lately, by transcript, the last followed last: follow)
+        self._shown = {}  # (window -> the transcript it last followed: shown)
         self._evidence_from = None  # (the first reply whose evidence may have changed since it went to the worker)
         self.chat_events, self.chat_texts, self.chat_replies, self.chat_evidence = [], [], [], []
         # per reply: what a name in it points at ((message, surface) -> decision; main loop), and the replies
@@ -783,19 +784,22 @@ class Signal(Names):
             self.jobs.put(("git", names, None))
 
     FOLLOW_MS = 8  # how long a chat just opened is read at a time, between frames (_follow_some)
-    CHATS = 4  # the chats kept read (_chats): windows of one repository share its Signal, each following its own
+    CHATS = 4  # the most chats kept read (_chats): windows of one repository share its Signal, each following its own
 
-    def follow(self, transcript):
-        """The chat shown (its transcript): what's new in it is read (what Claude saw, as evidence), and the reader
+    def follow(self, transcript, win=None):
+        """The chat shown (its transcript; win: the window showing it): what's new in it is read (what Claude saw, as evidence), and the reader
         reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
         decisions carry from reply to reply as they're drawn. This runs for each line another program appends to the
         chat: only what was appended is read (SignalChat). A chat just opened is read FOLLOW_MS at a time between
         frames, once it's still (_follow_some), to the same lists: read at once as it opened, an 85 MB chat and its
-        subagents' (96 MB more) held its first frame up 0.9 s. The last few chats followed are kept (CHATS), each
-        read on from where it was: windows sharing this Signal each follow theirs as it grows, and one being read
-        isn't started again when another's grows."""
+        subagents' (96 MB more) held its first frame up 0.9 s. The chats its windows show are kept (shown; CHATS at
+        most), each read on from where it was: windows sharing this Signal each follow theirs as it grows, and one
+        being read isn't started again when another's grows. One no window shows any more goes: a chat switched away
+        from left its events, texts and evidence here (some MB of a long one) till four more had been opened."""
         if transcript:
             self.transcript = transcript
+            if win is not None:
+                self._shown[win] = transcript
         if not self.transcript or not os.path.exists(self.transcript):
             return
         if self._chat is None or self._chat.path != self.transcript:
@@ -805,8 +809,11 @@ class Signal(Names):
                 chat.behind = True
                 GLib.idle_add(self._follow_some, chat, None, priority=GLib.PRIORITY_LOW)
             self._chats[self.transcript] = chat
+            shown = self.shown()
+            for path in [p for p in self._chats if p != self.transcript and p not in shown]:
+                self._chats.pop(path)  # (its reading stops: _follow_some)
             while len(self._chats) > self.CHATS:
-                self._chats.pop(next(iter(self._chats)))  # (its reading stops: _follow_some)
+                self._chats.pop(next(iter(self._chats)))
             self._chat, self._evidence_from = chat, None
             if chat.behind:  # (another chat's lists go: this one's as far as it's read, all of them once it is)
                 self._chat_read(chat, None, True)
@@ -815,6 +822,13 @@ class Signal(Names):
                 self._chat_read(chat, 1, True)
         elif not self._chat.behind:  # (else what's new is read with the rest)
             self._chat_read(self._chat, self._chat.read())
+
+    def shown(self):
+        """The transcripts of the chats its windows show now: what each last followed (follow's win), of the windows
+        that still listen to it."""
+        wins = {getattr(listener, "__self__", None) for listener in self.listeners}
+        self._shown = {w: path for w, path in self._shown.items() if w in wins}
+        return set(self._shown.values())
 
     def _follow_some(self, chat, first):
         """FOLLOW_MS of reading a chat just opened (follow), then on in the next idle moment; or on once the chats
@@ -861,10 +875,10 @@ class Signal(Names):
         if self.agent is not None:
             self.agent.restart_chat(None)
 
-    def steer(self, transcript):
+    def steer(self, transcript, win=None):
         """The chat a window that runs it shows: read that one (or none, for a chat with no transcript yet)."""
         if transcript:
-            self.follow(transcript)
+            self.follow(transcript, win)
         else:
             self.forget_chat()
 
@@ -16890,9 +16904,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.signal.question_listeners.append(self.ask_ref)
             self.use_links()
             if on and self.signal.runners <= {self}:
-                self.signal.steer(self.ref_transcript())  # (a new chat with no transcript: none, not the chat before)
+                self.signal.steer(self.ref_transcript(), self)  # (a new chat with no transcript: none, not the chat before)
             elif on or self.signal.halted:  # (a chat that doesn't run it never steers one another window runs)
-                self.signal.follow(self.ref_transcript())
+                self.signal.follow(self.ref_transcript(), self)
             for view in self.assistant_views():
                 self.queue_refs(view.text)
             if self.history and not self.history.todo:  # the replies further up, not drawn yet (or, while the start of
@@ -16900,7 +16914,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         elif widgets.SIGNAL is old:
             widgets.SIGNAL = None
         if old is not None and was_on and (old is not self.signal or not on) and old.runners:
-            old.steer(next(iter(old.runners)).ref_transcript())  # (another window's chat runs it: its reader reads that)
+            old.steer((runner := next(iter(old.runners))).ref_transcript(), runner)  # (another window's chat runs it: its reader reads that)
         for view in self.assistant_views():
             view.relink()
         self.panel.signal_page.changed()
@@ -17022,7 +17036,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         elif not ref.runners and not ref.halted:
             ref.links_only()  # (another window shows its links; none runs it now)
         elif ran and ref.runners:
-            ref.steer(next(iter(ref.runners)).ref_transcript())  # (its reader reads the chat that runs it now)
+            ref.steer((runner := next(iter(ref.runners))).ref_transcript(), runner)  # (its reader reads the chat that runs it now)
         if widgets.SIGNAL is ref:
             widgets.SIGNAL = None
 
@@ -17048,7 +17062,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if self.signal is not None:
                 self.set_signal(save=False)
         if self.signal is not None and (self.signal_run.get_active() or self.signal.halted):
-            self.signal.follow(transcript)  # (a chat that doesn't run it never steers one another window runs)
+            self.signal.follow(transcript, self)  # (a chat that doesn't run it never steers one another window runs)
         self.panel.git_page.chat_changed()
 
     def ask_ref(self, topic, detail):
@@ -17988,7 +18002,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     # under the view first, the next ahead of the reader while the chat's still. One far from the view is never drawn.
     PX_PER_ITEM = 100  # (an item's height, till some are drawn: about the average of long chats)
     FILL_NEAR = 3.0  # screens: a chunk this near the view is drawn even while it's scrolled
-    FILL_AHEAD = 8.0  # screens: and one this near while it's still, once it's scrolled up from its end
+    FILL_AHEAD = 20.0  # screens: and one this near while it's still (a hard fling's length: it meets what's drawn)
     FILL_BUDGET, FILL_BUDGET_STILL = 0.003, 0.008  # s of making items a frame: while the chat's scrolled, still
     FILL_AFTER_MS = 600  # (after opening: an earlier chunk near the view is drawn from then on)
 
@@ -18210,8 +18224,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def next_fill(self, moving):
         """The chunk to draw on now: the one nearest the view within FILL_NEAR screens (a thumb dragged into a part not
-        drawn yet: what's under the view first), or, while the chat's still and scrolled up from its end, within
-        FILL_AHEAD (ahead of the reader); None for none now. The rest stay places in the file: drawn ahead whatever
+        drawn yet: what's under the view first), or, while the chat's still, within FILL_AHEAD (ahead of the
+        reader); None for none now. The rest stay places in the file: drawn ahead whatever
         their distance, a long chat left open was all drawn within the minute, and held all its widgets."""
         top, page = self.view_top()
         if top is None:
@@ -18224,7 +18238,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         near = [(self.slot_away(job.slot, top, page), i, job) for i, job in enumerate(self.fill_jobs)]
         near += [(self.slot_away(slot, top, page), len(near) + i, slot) for i, slot in enumerate(self.chunk_slots or ())]
         still = not moving and not self.busy
-        reach = self.FILL_AHEAD if still and not self.stick_bottom else self.FILL_NEAR
+        reach = self.FILL_AHEAD if still else self.FILL_NEAR
         near = [n for n in near if n[0] < reach * page]
         if near:
             what = min(near, key=lambda n: (n[0], n[1]))[2]

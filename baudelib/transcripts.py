@@ -830,6 +830,26 @@ class HistoryIndex:
             del self.starts[last[0]:], self.sums[last[0]:], self.replies[last[0]:]
         return places
 
+    def holds(self, begin, end, word, test):
+        """Whether test(item) holds for one of items begin..end of those not drawn yet (numbered as take's are), which
+        stay undrawn: what a chunk would draw, looked in (BaudeWindow.find_beyond). Only lines with word (bytes,
+        lower case; b"": every line) in them as they're written are parsed. False too if a line isn't the one
+        indexed."""
+        try:
+            with open(self.path, "rb") as f:
+                for i in range(begin, min(end, len(self.starts))):
+                    f.seek(self.starts[i])
+                    raw = f.readline()
+                    if _line_sum(raw) != self.sums[i]:
+                        return False
+                    if word in raw.lower() and \
+                            (item := history_item(raw.decode("utf-8", "replace"), first=self.first)) is not None and \
+                            test(item):
+                        return True
+        except OSError:
+            pass
+        return False
+
     def item_at(self, place):
         """The item a line take gave the place of, parsed; None if it isn't the line indexed (rewritten since)."""
         start, line_sum = place

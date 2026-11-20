@@ -664,6 +664,7 @@ class Signal(Names):
         self.transcript = None  # the chat it reads, and what's in it (main loop; follow)
         self._chat, self._checkouts, self._evidence_soon = None, None, None  # (_chat: a SignalChat)
         self._chats = {}  # (the chats read here lately, by transcript, the last followed last: follow)
+        self._shown = {}  # (window -> the transcript it last followed: shown)
         self._evidence_from = None  # (the first reply whose evidence may have changed since it went to the worker)
         self.chat_events, self.chat_texts, self.chat_replies, self.chat_evidence = [], [], [], []
         # per reply: what a name in it points at ((message, surface) -> decision; main loop), and the replies
@@ -784,19 +785,22 @@ class Signal(Names):
             self.jobs.put(("git", names, None))
 
     FOLLOW_MS = 8  # how long a chat just opened is read at a time, between frames (_follow_some)
-    CHATS = 4  # the chats kept read (_chats): windows of one repository share its Signal, each following its own
+    CHATS = 4  # the most chats kept read (_chats): windows of one repository share its Signal, each following its own
 
-    def follow(self, transcript):
-        """The chat shown (its transcript): what's new in it is read (what Claude saw, as evidence), and the reader
-        reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
+    def follow(self, transcript, win=None):
+        """The chat shown (its transcript; win: the window showing it): what's new in it is read (what Claude saw, as
+        evidence), and the reader reads it, from the start or on from where it was (main loop). Not running, it's only read, so the reader's
         decisions carry from reply to reply as they're drawn. This runs for each line another program appends to the
         chat: only what was appended is read (SignalChat). A chat just opened is read FOLLOW_MS at a time between
         frames, once it's still (_follow_some), to the same lists: read at once as it opened, an 85 MB chat and its
-        subagents' (96 MB more) held its first frame up 0.9 s. The last few chats followed are kept (CHATS), each
-        read on from where it was: windows sharing this Signal each follow theirs as it grows, and one being read
-        isn't started again when another's grows."""
+        subagents' (96 MB more) held its first frame up 0.9 s. The chats its windows show are kept (shown; CHATS at
+        most), each read on from where it was: windows sharing this Signal each follow theirs as it grows, and one
+        being read isn't started again when another's grows. One no window shows any more goes, its events, texts and
+        evidence with it (some MB of a long one)."""
         if transcript:
             self.transcript = transcript
+            if win is not None:
+                self._shown[win] = transcript
         if not self.transcript or not os.path.exists(self.transcript):
             return
         if self._chat is None or self._chat.path != self.transcript:
@@ -806,8 +810,11 @@ class Signal(Names):
                 chat.behind = True
                 GLib.idle_add(self._follow_some, chat, None, priority=GLib.PRIORITY_LOW)
             self._chats[self.transcript] = chat
+            shown = self.shown()
+            for path in [p for p in self._chats if p != self.transcript and p not in shown]:
+                self._chats.pop(path)  # (its reading stops: _follow_some)
             while len(self._chats) > self.CHATS:
-                self._chats.pop(next(iter(self._chats)))  # (its reading stops: _follow_some)
+                self._chats.pop(next(iter(self._chats)))
             self._chat, self._evidence_from = chat, None
             if chat.behind:  # (another chat's lists go: this one's as far as it's read, all of them once it is)
                 self._chat_read(chat, None, True)
@@ -816,6 +823,13 @@ class Signal(Names):
                 self._chat_read(chat, 1, True)
         elif not self._chat.behind:  # (else what's new is read with the rest)
             self._chat_read(self._chat, self._chat.read())
+
+    def shown(self):
+        """The transcripts of the chats its windows show now: what each last followed (follow's win), of the windows
+        that still listen to it."""
+        wins = {getattr(listener, "__self__", None) for listener in self.listeners}
+        self._shown = {w: path for w, path in self._shown.items() if w in wins}
+        return set(self._shown.values())
 
     def _follow_some(self, chat, first):
         """FOLLOW_MS of reading a chat just opened (follow), then on in the next idle moment; or on once the chats
@@ -862,10 +876,10 @@ class Signal(Names):
         if self.agent is not None:
             self.agent.restart_chat(None)
 
-    def steer(self, transcript):
+    def steer(self, transcript, win=None):
         """The chat a window that runs it shows: read that one (or none, for a chat with no transcript yet)."""
         if transcript:
-            self.follow(transcript)
+            self.follow(transcript, win)
         else:
             self.forget_chat()
 
@@ -13138,6 +13152,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
         self.moved_at, self.still_timer, self.cull_at = 0.0, None, None
         self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
+        self.fill_held, self.looked_in = None, (None, set())  # (load_history; find_beyond)
         self.fill_sweeping, self.above_changed, self.place_at = False, False, None
 
         # composer (widgets.Composer: Record's too)
@@ -13216,6 +13231,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                             self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
         self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        self.chat_find.undrawn, self.chat_find.beyond = self.find_undrawn, self.find_beyond
+        self.chat_find.drawn = lambda: None if self.history is None else (
+            self.history.shown, sum(len(job.items) + len(job.hidden) for job in self.fill_jobs))
         root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
@@ -13728,7 +13746,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             # where a click without a move between lands come back with the next frame)
             self.transcript.queue_allocate()
         if self.chunk_slots or self.fill_jobs:
-            self.plan_fill()  # (the rest of the history drawn on, now it's still)
+            self.plan_fill()  # (what's near the view of its history drawn on, now it's still)
 
     def chat_moving(self):
         """Scrolled by the reader, and not still since (chat_still): what's drawn ahead waits for that."""
@@ -13820,6 +13838,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if at == self.cull_at:
             return
         self.cull_at = at
+        if self.chunk_slots or self.fill_jobs:
+            # (the view's somewhere else now it's laid out: a chunk near it is drawn. on_scrolled asks as the view
+            # moves, before the frame's layout, when it's still where it was: this asks after it)
+            self.plan_fill()
         going, slot = set(), hist.get_first_child()
         while slot is not None:
             ok, b = slot.compute_bounds(self.transcript)
@@ -14966,8 +14988,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.ref_surfaces.clear()
         self.reply_views.clear()
         self.orphan_results.clear()  # (results whose calls the chat before never drew: output, images and all)
-        self.history, self.chunk_slots = None, None
+        self.history, self.chunk_slots, self.looked_in = None, None, (None, set())
         self.drop_fills()
+        self.chat_find.close()  # (its matches are the chat before's labels: not kept, nor looked for in the next)
         self.panel.reset()
         self.update_tasks_indicator()
 
@@ -16858,9 +16881,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.signal.question_listeners.append(self.ask_ref)
             self.use_links()
             if on and self.signal.runners <= {self}:
-                self.signal.steer(self.ref_transcript())  # (a new chat with no transcript: none, not the chat before)
+                self.signal.steer(self.ref_transcript(), self)  # (a new chat with no transcript: none, not the chat before)
             elif on or self.signal.halted:  # (a chat that doesn't run it never steers one another window runs)
-                self.signal.follow(self.ref_transcript())
+                self.signal.follow(self.ref_transcript(), self)
             for view in self.assistant_views():
                 self.queue_refs(view.text)
             if self.history and not self.history.todo:  # the replies further up, not drawn yet (or, while the start of
@@ -16868,7 +16891,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         elif widgets.SIGNAL is old:
             widgets.SIGNAL = None
         if old is not None and was_on and (old is not self.signal or not on) and old.runners:
-            old.steer(next(iter(old.runners)).ref_transcript())  # (another window's chat runs it: its reader reads that)
+            old.steer((runner := next(iter(old.runners))).ref_transcript(), runner)  # (another window's chat runs it: its reader reads that)
         for view in self.assistant_views():
             view.relink()
         self.panel.signal_page.changed()
@@ -16990,7 +17013,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         elif not ref.runners and not ref.halted:
             ref.links_only()  # (another window shows its links; none runs it now)
         elif ran and ref.runners:
-            ref.steer(next(iter(ref.runners)).ref_transcript())  # (its reader reads the chat that runs it now)
+            ref.steer((runner := next(iter(ref.runners))).ref_transcript(), runner)  # (its reader reads the chat that runs it now)
         if widgets.SIGNAL is ref:
             widgets.SIGNAL = None
 
@@ -17016,7 +17039,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if self.signal is not None:
                 self.set_signal(save=False)
         if self.signal is not None and (self.signal_run.get_active() or self.signal.halted):
-            self.signal.follow(transcript)  # (a chat that doesn't run it never steers one another window runs)
+            self.signal.follow(transcript, self)  # (a chat that doesn't run it never steers one another window runs)
         self.panel.git_page.chat_changed()
 
     def ask_ref(self, topic, detail):
@@ -17941,7 +17964,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.update_earlier_btn()
         self.resumed_note = bool(items)  # "— resumed —" goes in when you first write, not on opening
         self.open_at(self.PLACES.get(self.session_id))
-        GLib.timeout_add(self.FILL_AFTER_MS, lambda: (self.plan_fill(), False)[1])
+        held = self.fill_held = object()  # (till then nothing's drawn ahead: the opening frames are the chat's own)
+
+        def release():
+            if self.fill_held is held:
+                self.fill_held = None
+                self.plan_fill()
+            return False
+        GLib.timeout_add(self.FILL_AFTER_MS, release)
 
     def update_earlier_btn(self):
         n = self.history.count() if self.history else 0
@@ -17952,12 +17982,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't
-    # shrink and jump as they're drawn; each is drawn a little a frame (fill_frame): the one under the view or near it
-    # first, the rest ahead of the reader while the chat's still.
+    # shrink and jump as they're drawn; each is drawn a little a frame (fill_frame) as the view comes near it: the one
+    # under the view first, the next ahead of the reader while the chat's still. One far from the view isn't drawn
+    # till the view comes near it, or it's asked for (Show earlier, a place put back, a find's match in it).
     PX_PER_ITEM = 100  # (an item's height, till some are drawn: about the average of long chats)
     FILL_NEAR = 3.0  # screens: a chunk this near the view is drawn even while it's scrolled
+    FILL_AHEAD = 20.0  # screens: and one this near while it's still (a hard fling's length: it meets what's drawn)
     FILL_BUDGET, FILL_BUDGET_STILL = 0.003, 0.008  # s of making items a frame: while the chat's scrolled, still
-    FILL_AFTER_MS = 600  # (after opening: what's earlier is drawn ahead from then on)
+    FILL_AFTER_MS = 600  # (after opening: an earlier chunk near the view is drawn from then on)
 
     def make_chunk_slots(self):
         """The earlier chunks' places, made once it's known how many: a chunk put in above what's drawn moved everything
@@ -18041,15 +18073,15 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         return False
 
     def show_earlier(self):
-        """Draw the previous chunk above what's shown, at once (the Show earlier button; a place put back: open_at),
+        """Draw the topmost chunk not drawn, at once (the Show earlier button, at the chat's top: what's under it),
         keeping the view where it was."""
         if not (self.history and self.history.more):
             return
         self.history.finish()  # (scrolled up before the start of a long chat was indexed: now)
         self.make_chunk_slots()
-        slot = self.history_box.get_last_child()
+        slot = self.history_box.get_first_child()  # (the one under the button: the chat's start, its first not drawn)
         while slot is not None and slot.filled:
-            slot = slot.get_prev_sibling()
+            slot = slot.get_next_sibling()
         if slot is None:  # (nothing in it to draw after all)
             self.update_earlier_btn()
             return
@@ -18085,6 +18117,98 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         slot.sums = {line_sum for _start, line_sum in job.items}  # (what it draws: not drawn again after a rewrite)
         self.fill_jobs.appendleft(job)
         return job
+
+    def find_undrawn(self):
+        """Whether the chat has earlier parts not drawn (ChatFind.undrawn: its count says there may be more)."""
+        return bool(self.history is not None and (self.chunk_slots or self.fill_jobs or self.history.todo))
+
+    _FIND_MARKUP = re.compile(r"[*_`~]+|^[ \t]*(?:#+|>+|[-+]|\d+\.)[ \t]+", re.MULTILINE)
+
+    @classmethod
+    def find_plain(cls, text):
+        """text as find compares what's not drawn: Markdown's marks out (a drawn reply's labels have none: **8.6 m**
+        is found as 8.6 m), spaces and line ends one space, case folded. What's looked for goes through it too."""
+        return " ".join(cls._FIND_MARKUP.sub("", text).split()).casefold()
+
+    @classmethod
+    def item_words(cls, item):
+        """What an item of the transcript shows as text once drawn, as find_plain has it: a message's words, a reply's,
+        and each call's line on its card (summarize_tool: what ChatFind finds there). Not what's folded: a card's input
+        and output, thinking, a summary."""
+        kind, content = item[0], item[1] if len(item) > 1 else None
+        if kind in ("user", "start_prompt"):
+            said = [clean_prompt(t) for t in _prompt_texts(content)]
+        elif kind == "assistant":
+            said = [content] if isinstance(content, str) else [
+                c.get("text") or "" if c.get("type") == "text" else summarize_tool(c.get("name") or "", c.get("input") or {})
+                for c in content or () if isinstance(c, dict) and c.get("type") in ("text", "tool_use", "server_tool_use")]
+        else:
+            said = []
+        return cls.find_plain("\n".join(said))
+
+    FIND_SLICE = 0.008  # s of looking through the transcript at a time, between frames (find_beyond)
+
+    def find_beyond(self, text, by, y0, y1, done):
+        """ChatFind.beyond: the nearest earlier chunk not drawn whose items have text (item_words) drawn at once,
+        looking by (1 down, -1 up) from height y0 in the chat as far as y1 (None: on round its other end, back to
+        y0; y0 None: outward from the view); done(whether one was drawn) once it's known. The transcript's looked
+        through FIND_SLICE at a time between frames (a long one is hundreds of MB), each line parsed only if it has
+        the text's longest word as it's written (HistoryIndex.holds). A chunk looked in is remembered while the
+        text's the same (looked_in): Enter pressed again reads none twice. Returns what stops the look."""
+        scan = {"on": True}
+        needle = self.find_plain(text)
+        if self.history is None or not needle:
+            done(False)
+            return lambda: None
+        history = self.history
+        history.finish()
+        self.make_chunk_slots()
+        if self.looked_in[0] != (history, needle):
+            self.looked_in = ((history, needle), set())
+        looked, places = self.looked_in[1], []
+        content = widgets.ChatFind._content(self.scroller)  # (heights as find has them: in what's scrolled)
+        for slot in list(self.chunk_slots or ()) + [job.slot for job in self.fill_jobs]:
+            ok, b = slot.compute_bounds(content)
+            if ok and slot not in looked:
+                places.append((b.get_y(), b.get_y() + b.get_height(), slot))
+        if y0 is None:
+            top, page = self.view_top()
+            order = sorted(places, key=lambda p: self.slot_away(p[2], top or 0, page))
+        elif by < 0:
+            above = sorted((p for p in places if p[0] < y0), key=lambda p: -p[0])
+            order = [p for p in above if p[1] > y1] if y1 is not None else \
+                above + sorted((p for p in places if p[0] >= y0), key=lambda p: -p[0])
+        else:
+            below = sorted((p for p in places if p[1] > y0), key=lambda p: p[0])
+            order = [p for p in below if p[0] < y1] if y1 is not None else \
+                below + sorted((p for p in places if p[1] <= y0), key=lambda p: p[0])
+        order = collections.deque(slot for _top, _bottom, slot in order)
+        # (a line with the text has its longest run of letters and digits as it's written: in no escape, under no mark)
+        word = max(re.findall(r"[a-z0-9]+", needle), key=len, default="").encode()
+
+        def some():
+            if not scan["on"] or self.history is not history:
+                return False
+            end = time.monotonic() + self.FIND_SLICE
+            while order and time.monotonic() < end:
+                slot = order.popleft()
+                begun = any(job.slot is slot for job in self.fill_jobs)
+                if slot.filled or not (begun or slot in (self.chunk_slots or ())):
+                    continue  # (drawn meanwhile, or gone: the transcript rewritten)
+                # (one begun, part of it drawn, is looked in as the rest are; one rewritten since it was indexed is
+                # passed by)
+                if history.holds(*slot.span, word, lambda item: needle in self.item_words(item)):
+                    self.stick_bottom = False
+                    self.fill_now(slot)
+                    done(True)
+                    return False
+                looked.add(slot)
+            if order:
+                return True
+            done(False)
+            return False
+        GLib.idle_add(some)
+        return lambda: scan.update(on=False)
 
     def history_rewritten(self):
         """The transcript was rewritten since it opened: what's left to draw indexed again, with places of its own above
@@ -18166,8 +18290,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.estimated_per, self.cull_at, self.place_at = 0, None, None
 
     def plan_fill(self):
-        """Draw on, a frame at a time, if there's a chunk to draw (fill_frame picks which)."""
-        if self.fill_tick is None and self.history is not None and (self.chunk_slots or self.fill_jobs):
+        """Draw on, a frame at a time, if there's a chunk to draw (fill_frame picks which). Not while a chat just
+        opened is held (fill_held: its first FILL_AFTER_MS are its own frames')."""
+        if self.fill_tick is None and self.history is not None and (self.chunk_slots or self.fill_jobs) and \
+                self.fill_held is None:
             self.fill_tick = self.scroller.add_tick_callback(self.fill_frame)
 
     def slot_away(self, slot, top, page):
@@ -18177,8 +18303,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def next_fill(self, moving):
         """The chunk to draw on now: the one nearest the view within FILL_NEAR screens (a thumb dragged into a part not
-        drawn yet: what's under the view first), else, while the chat's still, the lowest not drawn (ahead of the
-        reader); None for none now."""
+        drawn yet: what's under the view first), or, while the chat's still, within FILL_AHEAD (ahead of the
+        reader); None for none now. The rest stay places in the file."""
         top, page = self.view_top()
         if top is None:
             return None
@@ -18189,15 +18315,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             return None
         near = [(self.slot_away(job.slot, top, page), i, job) for i, job in enumerate(self.fill_jobs)]
         near += [(self.slot_away(slot, top, page), len(near) + i, slot) for i, slot in enumerate(self.chunk_slots or ())]
-        near = [n for n in near if n[0] < self.FILL_NEAR * page]
+        still = not moving and not self.busy
+        reach = self.FILL_AHEAD if still else self.FILL_NEAR
+        near = [n for n in near if n[0] < reach * page]
         if near:
             what = min(near, key=lambda n: (n[0], n[1]))[2]
-        elif moving or self.busy:
-            return None
-        elif self.fill_jobs:
-            what = self.fill_jobs[0]
-        elif self.chunk_slots:
-            what = self.chunk_slots[0]
+        elif still and self.fill_jobs:
+            what = self.fill_jobs[0]  # (one begun as the view passed near it: not left half made)
         else:
             return None
         if isinstance(what, ChunkFill):
@@ -18259,15 +18383,19 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def last_compact_mark(self):
         """The marker of the last compaction drawn where history's being drawn (a chunk's slot, or the chat), if its
         summary isn't under it yet: the summary's record follows its boundary's, the messages a partial compaction kept
-        between them at most; items are drawn one at a time (fill_item), so it's looked for among what's drawn (a
-        chunk's slot, then the one before it: its boundary the end of that chunk)."""
-        target = self.render_target or self.transcript
-        for where in (target, target.get_prev_sibling() if target is not self.transcript else None):
-            child = where.get_last_child() if where is not None else None
+        between them at most; items are drawn one at a time (fill_item), so it's looked for among what's drawn: a
+        chunk's slot, then the ones before it that are drawn and have no marker (chunks are drawn nearest the view
+        first: the one with its boundary may be several up, drawn before the ones between)."""
+        where = target = self.render_target or self.transcript
+        while where is not None:
+            child = where.get_last_child()
             while child is not None and not isinstance(child, widgets.CompactMark):
                 child = child.get_prev_sibling()
             if child is not None:
                 return child if child.fold is None and child.state == "done" else None
+            if target is self.transcript or (where is not target and not where.filled):
+                return None  # (the chat itself; or a chunk not drawn yet: its marker, if it has one, adopts as it's drawn)
+            where = where.get_prev_sibling()
         return None
 
     COMPACT_LOOK = 200  # (how far past a marker its summary's looked for: what a partial compaction kept between)

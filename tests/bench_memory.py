@@ -21,8 +21,11 @@ many widgets the window has. Phases:
   switch      the next largest sessions opened, one after another
   small       a small session opened after them: what the big ones left behind
   signal      Signal on, for a chat in a copy of this repository
-  pages       the Files, Git and Code pages opened (baude.py in the Code page)
+  pages       the Files, Git and Code pages opened (the Git page on a copy of this repository, baude.py in the
+              Code page)
   closed      the window closed and a new one opened: what a closed window leaves behind
+  host        a host process of its own (baude_headless.py serve, as Baude starts this machine's), idle: here the
+              window's host is in this process, so this is what the other one costs
 """
 import argparse
 import ctypes
@@ -90,6 +93,28 @@ def os_memory():
             "malloc": (mi.uordblks + mi.hblkhd) / 2**20}
 
 
+class _RUsage(ctypes.Structure):  # (macOS: the start of rusage_info_v2, up to ri_phys_footprint; the rest left room)
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + \
+               [(n, ctypes.c_uint64) for n in ("user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins",
+                                               "wired_size", "resident_size", "phys_footprint")] + \
+               [("rest", ctypes.c_uint64 * 64)]
+
+
+def process_memory(pid):
+    """{"footprint", "rss"} in MB of another process (a child of this one), as os_memory counts this one's."""
+    if sys.platform == "darwin":
+        info = _RUsage()
+        libproc = ctypes.CDLL(ctypes.util.find_library("proc"))
+        ok = libproc.proc_pid_rusage(pid, 2, ctypes.byref(info)) == 0  # (2: RUSAGE_INFO_V2)
+        return {"footprint": info.phys_footprint / 2**20 if ok else 0.0, "rss": info.resident_size / 2**20 if ok else 0.0}
+    got = {}
+    with open(f"/proc/{pid}/status") as f:
+        for line in f:
+            if line.startswith(("VmRSS:", "VmSwap:")):
+                got[line.split(":")[0]] = int(line.split()[1]) / 1024
+    return {"footprint": got.get("VmRSS", 0) + got.get("VmSwap", 0), "rss": got.get("VmRSS", 0)}
+
+
 # ---- the sessions: copies of yours
 
 def clone_projects(dest):
@@ -100,6 +125,37 @@ def clone_projects(dest):
         subprocess.run(["cp", "-R", "--reflink=auto", REAL_PROJECTS, dest], check=True)
 
 
+def host_alone(rows):
+    """A host process of its own, with the throwaway state and the copies of your sessions this run has (its socket
+    and state folder its own too: this process's is the window's), once a head has asked what it has: its memory."""
+    from baudelib import wire
+    sock = os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "bench-host.sock")  # (short: a socket's path is)
+    state = os.path.join(os.environ["XDG_DATA_HOME"], "bench-host")
+    host = subprocess.Popen([sys.executable, os.path.join(ROOT, "baude_headless.py"), "serve", "--no-menu-bar",
+                             "--state", state, "--socket", sock, "--exit-after-hours", "0"],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        import select
+        # (its first line: it's listening; waited for 20 s, not for as long as it says nothing)
+        if not select.select([host.stdout], [], [], 20)[0] or not host.stdout.readline() or \
+                not wire.wait_for_socket(sock, 20):
+            return print("host process: it didn't start", flush=True)
+        ch, _info = wire.connect_local(sock)
+        ch.send({"op": "subscribe", "req": 1})
+        ch.reply()
+        ch.close()
+        time.sleep(3)  # (idle again)
+        m = process_memory(host.pid)
+        rows.append({"phase": "host process alone, idle", **m})
+        print(f"{rows[-1]['phase']:28} {m['footprint']:7.0f} MB           rss {m['rss']:6.0f}", flush=True)
+    finally:
+        host.terminate()
+        try:
+            host.wait(15)
+        except subprocess.TimeoutExpired:
+            host.kill()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--trace", type=int, default=0, help="top allocation sites per phase (tracemalloc)")
@@ -107,7 +163,7 @@ def main():
     ap.add_argument("--types", type=int, default=0, help="Python object kinds that grew most per phase")
     ap.add_argument("--sessions", type=int, default=4, help="largest sessions to open")
     ap.add_argument("--turns", type=int, default=20, help="sidebar refreshes, as that many turns ending make")
-    ap.add_argument("--skip", default="", help="phases to skip, comma-separated (signal, pages, closed)")
+    ap.add_argument("--skip", default="", help="phases to skip, comma-separated (signal, pages, closed, host)")
     ap.add_argument("--json", help="also write the phases' numbers here")
     ap.add_argument("--footprint", help="(macOS) save `footprint -p` of each phase in this folder")
     args = ap.parse_args()
@@ -212,9 +268,14 @@ def main():
     open_chat(small)
     measure("small chat after them", win)
 
+    repo = os.path.join(T.TMP, "repo")
+
+    def copy_repo():
+        if not os.path.isdir(repo):
+            subprocess.run(["git", "clone", "-q", "--local", ROOT, repo], check=True)
+
     if "signal" not in skip:
-        repo = os.path.join(T.TMP, "repo")
-        subprocess.run(["git", "clone", "-q", "--local", ROOT, repo], check=True)
+        copy_repo()
         here = os.path.join(ROOT, "")  # this repository's own chats, moved to the copy
         mine = os.path.join(REAL_PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", ROOT))
         chats = sorted((os.path.getsize(os.path.join(mine, n)), os.path.join(mine, n))
@@ -240,8 +301,12 @@ def main():
     if "pages" not in skip:
         win.show_panel(True, "files")
         settle()
-        win.show_panel(True, "git")
-        T.wait_for(lambda: win.panel.git_page.commits, "the git log", 60)
+        # (the copy's history, whatever folder the open chat's in: Signal's phase opens one in the copy, but skipped,
+        # or with no chat of this checkout's to copy, the chat's in a folder that's no repository)
+        copy_repo()
+        win.show_git(folder=repo)
+        git = win.panel.git_page
+        T.wait_for(lambda: git.top and git.commits, "the git log", 60)
         win.show_code(os.path.join(ROOT, "baude.py"), 9000)
         measure("pages (files, git, code)", win)
 
@@ -251,6 +316,8 @@ def main():
         T.wait_for(lambda: not win.sidebar.loading and len(win.sidebar.sessions) > 1, "the sidebar", 120)
         measure("closed, a new window", win)
     T.close(win)
+    if "host" not in skip:
+        host_alone(rows)
     if args.json:
         with open(args.json, "w") as f:
             json.dump([{k: v for k, v in r.items() if k not in ("top", "grew")} for r in rows], f, indent=1)

@@ -82,7 +82,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         take(ctx, chat, uris)
     }
-    LaunchedEffect(chat, chat.draft.value) { // (shared from another app, or not sent: after what's written)
+    LaunchedEffect(chat, chat.draft.value) { // (shared from another app: after what's written)
         val shared = chat.draft.value ?: return@LaunchedEffect
         text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
         chat.draft.value = null
@@ -112,6 +112,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
+            items(Pending.of(at, sid).filter { it.state.value != "sending" }, key = { "unsent:" + it.id }) { Waiting(it) }
             if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -342,6 +343,33 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             Text("from " + (h.sender?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
             Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
+        }
+    }
+}
+
+/** A message you sent that its host doesn't have yet (Pending), as yours is drawn but faint, how it stands under it:
+ * waiting for its host, being looked for, or not sent (why), with ✕ to drop it and ↑ to send it again. */
+@Composable
+private fun Waiting(u: Unsent) {
+    val c = LocalBaude.current
+    val failed = u.state.value == "failed"
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
+        if (failed) {
+            IconButton(Icons.Filled.Close, "Delete this message") { Mesh.dropUnsent(u) }
+            IconButton(Icons.Filled.ArrowUpward, "Send it again") { Mesh.deliver(u) }
+        }
+        Column(Modifier.weight(1f, fill = false).padding(start = if (failed) 0.dp else 48.dp), horizontalAlignment = Alignment.End) {
+            Column(Modifier.clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble.copy(alpha = c.bubble.alpha * 0.55f))
+                .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
+                for (f in u.files) Text((if (f.mime.startsWith("image/")) "🖼 " else "📄 ") + f.name, style = Type.body,
+                    color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (u.text.isNotBlank()) Text(u.text, style = Type.body, color = c.dim)
+            }
+            Text(when (u.state.value) {
+                "waiting" -> "It's sent once this chat's host is there"
+                "checking" -> "Checking whether it was sent…"
+                else -> "Not sent: " + (u.why.value ?: "its host said no")
+            }, style = Type.caption, color = if (failed) c.destructive else c.dim, modifier = Modifier.padding(top = 2.dp, end = 4.dp))
         }
     }
 }

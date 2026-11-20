@@ -73,7 +73,7 @@ class Chat(hostId: String, sid: String) {
     var hostId by mutableStateOf(hostId)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
-    val draft = mutableStateOf<String?>(null) // (text for the box: shared from another app, or not sent)
+    val draft = mutableStateOf<String?>(null) // (text for the box: shared from another app, or kept as the app went)
     val preparing = mutableStateOf(0)         // (picked, still being read)
     val ends = HashMap<String, Int>()         // (a record's uuid: how many lines were shown up to its end)
     val busy = mutableStateOf(false)
@@ -138,6 +138,7 @@ object Mesh {
         WireStrict.look(app)
         readKey()
         hosts.addAll(HostStore.load(app))
+        Pending.load(app)
         channel()
         hosts.forEach { connect(it) }
         start(PhoneHost.connection(app, ::heard) { conn -> main.post { changed(conn) } }) // (this phone's own agents)
@@ -320,6 +321,7 @@ object Mesh {
         if (c.state == "up") {
             c.host?.let { h -> c.info?.id?.takeIf(::isId)?.let { HostStore.setMachine(app, h, it) } }
             if (sessions[c.id] != null) catchUp.add(c.id)
+            waiting(c)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
         if (c.place is Place.Direct) {
@@ -382,6 +384,7 @@ object Mesh {
                     val before = sessions[c.id]
                     sessions[c.id] = now
                     Shares.look() // (its Bots, in the share sheet)
+                    checking(c)
                     listing.server?.let { // (its mesh as it is now)
                         c.info = it
                         if (c.place is Place.Direct) meshed()
@@ -722,19 +725,118 @@ object Mesh {
         }
     }
 
-    /** What you wrote (and the files you chose) sent to the chat, as Baude sends it: a user message for its agent. */
+    /** What you wrote (and the files you chose) sent to the chat, as Baude sends it: a user message for its agent,
+     * kept on this phone till its host has it (Pending). */
     fun send(chat: Chat, text: String, files: List<Picked>) {
-        chat.busy.value = true
         chat.said.value = null
-        val c = conns[chat.hostId]
+        Shares.used(chat)
+        deliver(Unsent(java.util.UUID.randomUUID().toString(), chat.hostId, chat.sid, text, files))
+    }
+
+    /** Where a chat's reached now: a member's, its machine a host of yours since, that host. */
+    fun at(hostId: String): String = moved[hostId] ?: hostId
+
+    private val delivering = HashSet<String>() // (unsent messages on their way: not sent again meanwhile)
+
+    /** A message sent to its chat's host (made off the main thread, base64 and all): let go of once its host has
+     * it; if its host isn't there, kept waiting for it; if the connection went as it was sent, kept to be checked for
+     * once it's back; if its host said no, kept, and why. */
+    fun deliver(u: Unsent) {
+        if (!delivering.add(u.id)) return
+        u.state.value = "sending"
+        u.why.value = null
+        Pending.keep(u)
+        val c = conns[at(u.hostId)]?.takeIf { it.state == "up" }
         if (c == null) {
-            chat.busy.value = false
-            chat.said.value = "It can't be sent while this chat's host isn't there"
-            unsent(chat, text, files)
+            delivering.remove(u.id)
+            u.state.value = "waiting"
+            Pending.keep(u)
             return
         }
-        Shares.used(chat)
-        kotlin.concurrent.thread(name = "send", isDaemon = true) { build(chat, c, text, files) }
+        val chat = open?.takeIf { it.hostId == c.id && it.sid == u.sid }
+        chat?.busy?.value = true
+        kotlin.concurrent.thread(name = "send", isDaemon = true) {
+            val msg = build(u)
+            if (msg == null) {
+                main.post {
+                    delivering.remove(u.id)
+                    chat?.busy?.value = false
+                    Pending.drop(u)
+                }
+                return@thread
+            }
+            c.request(Msg.Input(session = u.sid, msg = msg).json()) { r ->
+                main.post {
+                    delivering.remove(u.id)
+                    chat?.busy?.value = false
+                    if (r.optString("op") != Op.ERROR) {
+                        Pending.drop(u)
+                        waiting(c)
+                    } else {
+                        val e = Msg.Error.from(r)
+                        val why = e.said.orEmpty()
+                        u.state.value = when (e.error) {
+                            Connection.NOT_CONNECTED -> "waiting" // (never written: sent once it's back)
+                            Connection.WENT -> "checking"         // (written, maybe had: looked for once it's back)
+                            else -> "failed"
+                        }
+                        if (u.state.value == "failed") u.why.value = why.ifBlank { null }
+                        Pending.keep(u)
+                    }
+                    if (open === chat) chat?.let(::read)
+                }
+            }
+        }
+    }
+
+    /** An unsent message you've dropped (its ✕). */
+    fun dropUnsent(u: Unsent) {
+        if (u.id !in delivering) Pending.drop(u)
+    }
+
+    /** (a host's up, or a message to it sent) What waits for it sent: each chat's oldest, the next once it's had,
+     * so they come in the order you sent them. */
+    private fun waiting(c: Connection) {
+        val busy = Pending.all.filter { it.id in delivering }.map { it.sid }.toMutableSet()
+        for (u in Pending.all.toList()) if (at(u.hostId) == c.id && u.state.value == "waiting" && busy.add(u.sid)) deliver(u)
+    }
+
+    /** (a host listed its sessions) Each message that went as its connection did looked for in its chat's transcript's
+     * end: there, let go of; not, said, to send again or drop. */
+    private fun checking(c: Connection) {
+        for (u in Pending.all.toList()) {
+            if (at(u.hostId) != c.id || u.state.value != "checking" || !delivering.add(u.id)) continue
+            val size = session(c.id, u.sid)?.size?.toLong()
+            fun done(had: Boolean?) { main.post { // (null: not read, its connection gone again: looked for next time)
+                delivering.remove(u.id)
+                if (had == true) Pending.drop(u)
+                else if (had == false) {
+                    u.state.value = "failed"
+                    u.why.value = Connection.WENT
+                    Pending.keep(u)
+                }
+            } }
+            if (size == null) {
+                done(false)
+                continue
+            }
+            val from = (size - CHECK_TAIL).coerceAtLeast(0)
+            fun look(offset: Long, seen: String) {
+                c.request(Msg.Transcript(session = u.sid, offset = offset).json()) { r ->
+                    if (r.optString("op") != Op.TRANSCRIPT) {
+                        done(null)
+                        return@request
+                    }
+                    val got = Msg.TranscriptReply.from(r)
+                    val data = got.data.orEmpty()
+                    val text = seen + if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
+                    val next = got.next?.toLong() ?: offset
+                    if (data.isNotEmpty() && next < (got.size?.toLong() ?: next)) return@request look(next, text)
+                    done(parse(text, cutFirst = from > 0).any { it.uuid == u.id })
+                }
+            }
+            look(from, "")
+        }
     }
 
     /** A message its host holds for the chat (its held: a subagent's answer that came after its host restarted) sent to
@@ -756,17 +858,12 @@ object Mesh {
         }
     }
 
-    /** A message that wasn't sent put back in the box, to send again once it can be. */
-    private fun unsent(chat: Chat, text: String, files: List<Picked>) {
-        if (text.isNotBlank()) chat.draft.value = listOfNotNull(text, chat.draft.value).joinToString("\n")
-        chat.files.addAll(0, files)
-    }
-
-    /** The message made (base64 and all, off the main thread) and sent. */
-    private fun build(chat: Chat, c: Connection, text: String, files: List<Picked>) {
+    /** The message made (base64 and all, off the main thread), with the uuid it's kept by: null if there's nothing
+     * in it. */
+    private fun build(u: Unsent): JSONObject? {
         val blocks = JSONArray()
         val notes = StringBuilder()
-        for (f in files) {
+        for (f in u.files) {
             when {
                 f.mime in IMAGE_TYPES -> blocks.put(JSONObject().put("type", "image").put("source", JSONObject()
                     .put("type", "base64").put("media_type", f.mime).put("data", f.base64())))
@@ -777,23 +874,11 @@ object Mesh {
                     .append(String(f.bytes, Charsets.UTF_8)).append("\n```")
             }
         }
-        val all = (text + notes).trim()
+        val all = (u.text + notes).trim()
         if (all.isNotEmpty()) blocks.put(JSONObject().put("type", "text").put("text", all))
-        if (blocks.length() == 0) {
-            main.post { chat.busy.value = false }
-            return
-        }
-        val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", blocks))
-        c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
-            main.post {
-                chat.busy.value = false
-                if (r.optString("op") == Op.ERROR) {
-                    chat.said.value = "Couldn't send: " + Msg.Error.from(r).said.orEmpty()
-                    unsent(chat, text, files)
-                }
-                read(chat)
-            }
-        }
+        if (blocks.length() == 0) return null
+        return JSONObject().put("type", "user").put("uuid", u.id)
+            .put("message", JSONObject().put("role", "user").put("content", blocks))
     }
 
     // ---- notifications
@@ -898,6 +983,7 @@ object Mesh {
     private const val ASK_NOTE = 2 // (an ask's notification: its tag says which)
     const val LINKED = "linked"
     private const val TAIL = 400_000L // (a chat's transcript read from its last this much, the first time)
+    private const val CHECK_TAIL = 200_000L // (a message that went as its connection did: looked for in this much)
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
 

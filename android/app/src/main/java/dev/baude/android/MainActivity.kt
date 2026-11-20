@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
             opened(intent)
         }
+        Shares.restore(this, savedInstanceState, screen.value) // (made again after the app went: what was shared)
         setContent {
             BaudeTheme {
                 val now = screen.value
@@ -81,7 +82,7 @@ class MainActivity : ComponentActivity() {
     private fun go(to: List<String>) {
         if (screen.value[0] == "chat" && to[0] != "chat" && to[0] != "feedback") Mesh.close()
         screen.value = if (to[0] == "contacts") listOf("contacts") else to
-        Shares.returns = false
+        if (to[0] != "feedback") Shares.returns = false // (Send Feedback from it, and back: still the shared one)
         val shared = Shares.pending.value
         if (to[0] == "chat" && shared != null) { // (the chat chosen for what's shared)
             Shares.pending.value = null
@@ -120,6 +121,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putStringArrayList("screen", ArrayList(screen.value))
+        Shares.save(this, outState)
     }
 
     override fun onStart() {

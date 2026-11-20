@@ -24,26 +24,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- shared from another app: what a chat's message takes (pictures, PDFs, text and text files) -->
+            <!-- shared from another app: anything, as + takes it (what a chat's message can't take said, not sent) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/*" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="application/pdf" />
-                <data android:mimeType="application/json" />
-                <data android:mimeType="application/xml" />
-                <data android:mimeType="application/x-yaml" />
+                <data android:mimeType="*/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/*" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="application/pdf" />
-                <data android:mimeType="application/json" />
-                <data android:mimeType="application/xml" />
-                <data android:mimeType="application/x-yaml" />
+                <data android:mimeType="*/*" />
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>

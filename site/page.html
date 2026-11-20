@@ -68,6 +68,7 @@ dialog p{color:#e9eaee;text-align:center;margin:12px 0 0;font-size:.9375rem}
     <div class="actions">
       <a class="btn filled" href="#screenshots">Screenshots</a>
       <a class="btn outlined" href="#how">How it works</a>
+      <a class="btn outlined" href="#android">Android</a>
     </div>
   </section>
 
@@ -91,6 +92,17 @@ dialog p{color:#e9eaee;text-align:center;margin:12px 0 0;font-size:.9375rem}
     <p>Sessions are the CLI's own transcripts, so Baude lists every one on the computer. A session another program
     is writing is followed like <code>tail -f</code>, and Baude keeps its own input off until that program is done.
     It is plain Python whose only dependency is PyGObject.</p>
+  </section>
+
+  <section class="how" id="android">
+    <h2>Android</h2>
+    <p>Baude on your phone: your hosts' chats and Bots, their browsers, Memory and Routines, permission asks to
+    answer, and a browser a Bot can drive. It reaches your computers over ssh (Tailscale works well), with a key
+    made on the phone that you add to each host's <code>authorized_keys</code>.</p>
+    <div class="actions">
+      <a class="btn filled" href="baude-android.apk" download>Download the APK</a>
+    </div>
+    <p>Open the file on the phone and allow installs from your browser when Android asks.</p>
   </section>
 
   <footer><a href="/apps/">More apps</a><a href="/">mpts.ie</a></footer>

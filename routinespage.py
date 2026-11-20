@@ -149,7 +149,7 @@ class RoutinesPage(Gtk.Box):
         """A routine made, or (r) changed: what to do, and when."""
         r = r or {}
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        name = Gtk.Entry(placeholder_text=wording.say("lookup.name"), text=r.get("name") or "")
+        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=r.get("name") or "")
         box.append(name)
         prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=6, bottom_margin=6, left_margin=6,
                               right_margin=6)

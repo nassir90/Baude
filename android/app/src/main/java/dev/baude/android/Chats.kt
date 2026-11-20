@@ -58,7 +58,7 @@ fun taskNote(t: String): JSONObject = JSONObject().put("task_id", taskTag(t, "ta
 fun taskLine(t: String): String {
     val status = taskTag(t, "status").orEmpty().ifBlank { "completed" }
     val summary = unescape(taskTag(t, "summary").orEmpty().ifBlank { Wording.TranscriptNotes.taskFinished })
-    val what = if (summary.startsWith("Agent") || summary.startsWith("Subagent")) Wording.TaskNotes.agent
+    val what = if (summary.startsWith("Agent") || summary.startsWith("Subagent")) Wording.Common.agent
         else Wording.TaskNotes.backgroundCommand
     val quoted = Regex("^[^\"]*\"(.*)\"", RegexOption.DOT_MATCHES_ALL).find(summary)?.groupValues?.get(1)
     var desc = (quoted ?: summary).trim().lines().first().ifEmpty { Wording.TaskNotes.unnamed }

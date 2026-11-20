@@ -7923,8 +7923,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: wording.say("window.kubernetes"), self.schema: wording.say("report.capture_databases"),
-                 self.lightbox: wording.say("images.unnamed")}
+                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):
                 areas[child.view] = f"notes: {child.page}"

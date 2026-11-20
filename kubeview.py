@@ -1447,7 +1447,7 @@ class KubeView(Gtk.Box):
         self.search.connect("stop-search", lambda e: e.set_text("") if e.get_text() else self.escape())  # (Esc in it)
         bar.append(self.search)
         bar.append(Gtk.Box(hexpand=True))
-        self.refresh_btn = RefreshButton(tooltip_text=wording.say("fixes.read_again"))
+        self.refresh_btn = RefreshButton(tooltip_text=wording.say("common.read_again"))
         self.refresh_btn.connect("clicked", lambda *_: self.load())
         bar.append(self.refresh_btn)
         close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))

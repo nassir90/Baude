@@ -3,8 +3,8 @@
   "messages": {
     "stopping": "{$host} stopping…",
     "restarting": "{$host} restarting…",
-    "stopping_left": ".input {$total :number} .match $total one {{{$host} stopping — {$left} of {$total} process to stop}} * {{{$host} stopping — {$left} of {$total} processes to stop}}",
-    "restarting_left": ".input {$total :number} .match $total one {{{$host} restarting — {$left} of {$total} process to stop}} * {{{$host} restarting — {$left} of {$total} processes to stop}}",
+    "stopping_left": ".input {$total :number} .match $total one {{{$host} stopping — {$left :number} of {$total} process to stop}} * {{{$host} stopping — {$left :number} of {$total} processes to stop}}",
+    "restarting_left": ".input {$total :number} .match $total one {{{$host} restarting — {$left :number} of {$total} process to stop}} * {{{$host} restarting — {$left :number} of {$total} processes to stop}}",
     "stopping_all_stopped": "{$host} stopping — every process stopped",
     "restarting_all_stopped": "{$host} restarting — every process stopped",
     "no_id": "it gave no id Baude can use",

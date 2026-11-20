@@ -2751,7 +2751,7 @@ class Window(Adw.ApplicationWindow):
         self.who.set_menu_model(self.profile_menu())
 
     def ask_name(self, heading, body, verb, start, then):
-        entry = Gtk.Entry(placeholder_text=wording.say("lookup.name"), activates_default=True, text=start)
+        entry = Gtk.Entry(placeholder_text=wording.say("common.name"), activates_default=True, text=start)
         dlg = Adw.AlertDialog(heading=heading, body=body, extra_child=entry, default_response="ok",
                               close_response="cancel")
         dlg.add_response("cancel", wording.say("common.cancel"))

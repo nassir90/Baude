@@ -1867,7 +1867,7 @@ def task_note_line(note):
     0)", plain text, whether it failed)."""
     status = note.get("status") or "completed"
     summary = html.unescape(note.get("summary") or "")
-    what = wording.say("task_notes.agent") if summary.startswith(("Agent", "Subagent")) else \
+    what = wording.say("common.agent") if summary.startswith(("Agent", "Subagent")) else \
         wording.say("task_notes.background_command")
     quoted = re.match(r'[^"]*"(.*)"', summary, re.S)
     desc = (quoted.group(1) if quoted else summary).strip().splitlines()[:1]
@@ -4159,7 +4159,7 @@ def make_image_interactive(widget, data, path=None, name=None, url=None):
         group.add_action(a)
     widget.insert_action_group("img", group)
     menu = Gio.Menu()
-    menu.append(wording.say("images.view"), "img.view")
+    menu.append(wording.say("common.view"), "img.view")
     if url:
         menu.append(wording.say("images.open_in_browser"), "img.browser")
     menu.append(wording.say("images.copy_image"), "img.copy")
@@ -8222,7 +8222,7 @@ def model_family(value, label=""):
         for key, name, pattern in MODEL_FAMILIES:
             if any(re.search(pattern, s) for s in said):
                 return key, name
-    return None, wording.say("model_picker.other_family")
+    return None, wording.say("common.other")
 
 
 def model_icon(value, label=""):
@@ -10125,7 +10125,7 @@ class RefPalette(Adw.Dialog):
         self.signal = getattr(space, "source", None)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=12, margin_end=12, margin_top=12,
                       margin_bottom=8)
-        self.entry = Gtk.SearchEntry(placeholder_text=wording.say("glossary.search"), hexpand=True)
+        self.entry = Gtk.SearchEntry(placeholder_text=wording.say("common.search"), hexpand=True)
         self.entry.connect("search-changed", lambda *_: self.fill())
         self.entry.connect("activate", lambda *_: self.choose(self.selection.get_selected_item()))
         self.entry.connect("stop-search", lambda *_: self.close())

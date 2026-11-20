@@ -2,7 +2,6 @@
   "description": "The model picker: its search box, empty list and the family of a model it can't place.",
   "messages": {
     "search": "Search models",
-    "none": "No models match",
-    "other_family": "Other"
+    "none": "No models match"
   }
 }

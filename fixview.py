@@ -135,7 +135,7 @@ class FixesPage(Gtk.Box):
                                    css_classes=["flat"])
         self.send_btn.connect("clicked", lambda *_: self.send_feedback())
         head.append(self.send_btn)
-        self.refresh_btn = RefreshButton(tooltip_text=wording.say("fixes.read_again"))
+        self.refresh_btn = RefreshButton(tooltip_text=wording.say("common.read_again"))
         self.refresh_btn.connect("clicked", lambda *_: self.refresh())
         head.append(self.refresh_btn)
         box.append(head)
@@ -287,7 +287,7 @@ class FixesPage(Gtk.Box):
         box.append(Gtk.Label(label=item["title"], xalign=0, wrap=True, selectable=True, css_classes=["title-2"]))
         meta = Gtk.Box(spacing=10)
         meta.append(status_pill(item["status"]))
-        said_by = [wording.say("fixes.from_author", author=item["author"])] if item["author"] else []
+        said_by = [wording.say("common.from_who", author=item["author"])] if item["author"] else []
         meta.append(say_time(dim("", ellipsize=Pango.EllipsizeMode.END, hexpand=True), item["created"],
                              "".join(f"{w} · " for w in [fixes.github_location(item), *said_by] if w)))
         if item["url"]:

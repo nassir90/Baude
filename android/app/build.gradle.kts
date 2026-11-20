@@ -433,6 +433,32 @@ abstract class BaudeCopy : DefaultTask() {
 
     private fun pascal(name: String) = camel(name).trim('`').replaceFirstChar { it.uppercase() }
 
+    /** The keys JSON text has twice in one object, which JsonSlurper takes the last of. */
+    private fun twice(text: String): List<String> {
+        val keys = ArrayList<HashSet<String>?>() // (each open object's keys; null for an array)
+        val out = ArrayList<String>()
+        var i = 0
+        while (i < text.length) {
+            when (text[i]) {
+                '{' -> keys.add(HashSet())
+                '[' -> keys.add(null)
+                '}', ']' -> keys.removeLastOrNull()
+                '"' -> {
+                    val start = ++i
+                    while (i < text.length && text[i] != '"') i += if (text[i] == '\\') 2 else 1
+                    var j = i + 1
+                    while (j < text.length && text[j].isWhitespace()) j++
+                    if (j < text.length && text[j] == ':' && keys.lastOrNull()?.add(text.substring(start, i)) == false)
+                        out.add(text.substring(start, i))
+                }
+            }
+            i++
+        }
+        return out
+    }
+
+    private fun comment(text: String) = text.replace("*/", "* /").replace("/*", "/ *").replace("\n", " ")
+
     private fun quote(text: String) = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
         .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 
@@ -445,6 +471,7 @@ abstract class BaudeCopy : DefaultTask() {
         out.append("    fun number(n: Number): String = java.text.NumberFormat.getNumberInstance(java.util.Locale.ENGLISH).format(n)\n")
         out.append("    fun category(n: Number) = if (n.toDouble() == 1.0) \"one\" else \"other\"\n")
         val seen = HashMap<String, String>()
+        val objects = HashSet<String>()
         val files = copy.get().asFile.listFiles { f -> f.name.endsWith(".json") && !f.name.startsWith(".") }!!
             .sortedBy { it.name }
         for (f in files) {
@@ -452,10 +479,13 @@ abstract class BaudeCopy : DefaultTask() {
             if (!Regex("[a-z][a-z0-9_]*").matches(group)) throw GradleException("schema/copy/${f.name}: not named in lower case")
             @Suppress("UNCHECKED_CAST")
             val doc = groovy.json.JsonSlurper().parse(f) as Map<String, Any?>
+            twice(f.readText()).firstOrNull()?.let { throw GradleException("schema/copy/${f.name}: $it is there twice") }
             if (doc.keys != setOf("description", "messages"))
                 throw GradleException("schema/copy/${f.name}: a description and messages, and nothing else")
-            out.append("\n    /** ${(doc["description"] as String).replace("*/", "* /")} */\n")
+            out.append("\n    /** ${comment(doc["description"] as String)} */\n")
+            if (!objects.add(pascal(group))) throw GradleException("schema/copy/${f.name}: another group's Kotlin name too")
             out.append("    object ${pascal(group)} {\n")
+            val members = HashSet<String>()
             @Suppress("UNCHECKED_CAST")
             for ((key, text) in doc["messages"] as Map<String, Any?>) {
                 val where = "${f.name}: $key"
@@ -463,6 +493,7 @@ abstract class BaudeCopy : DefaultTask() {
                     throw GradleException("schema/copy/$where: a lower-case key and a message's text")
                 seen[text]?.let { throw GradleException("schema/copy/$where: says what $it says") }
                 seen[text] = "$group.$key"
+                if (!members.add(camel(key))) throw GradleException("schema/copy/$where: another key's Kotlin name too")
                 val m = Parser(text, where).message()
                 val types = LinkedHashMap<String, String>()
                 for ((v, fn) in m.declared) types[v] = if (fn == "number") "Number" else "String"
@@ -474,10 +505,10 @@ abstract class BaudeCopy : DefaultTask() {
                     if (p is String) quote(p) else {
                         val (v, fn) = p as Pair<*, *>
                         val number = (fn ?: m.declared[v]) == "number"
-                        "\${" + (if (number) "number(${camel(v as String)})" else camel(v as String)) + "}"
+                        "\${" + (if (number) "Wording.number(${camel(v as String)})" else camel(v as String)) + "}"
                     }
                 } + "\""
-                out.append("        /** ${text.replace("*/", "* /").replace("\n", " ")} */\n")
+                out.append("        /** ${comment(text)} */\n")
                 if (types.isEmpty()) {
                     out.append("        const val ${camel(key)} = ${say(m.variants.single().second)}\n")
                     continue
@@ -498,7 +529,7 @@ abstract class BaudeCopy : DefaultTask() {
                         k == "*" -> null
                         m.declared[sel] != "number" -> "$v == \"${quote(k)}\""
                         k.toDoubleOrNull() != null -> "$v.toDouble() == ${k.toDouble()}"
-                        else -> "category($v) == \"${quote(k)}\""
+                        else -> "Wording.category($v) == \"${quote(k)}\""
                     }
                 }
                 val ordered = m.variants.sortedWith { a, b ->

@@ -2,7 +2,6 @@
   "description": "The glossary (⌘K / Ctrl+K): every name it knows, searched as you type.",
   "messages": {
     "title": "Glossary",
-    "search": "Search",
     "count": "{$matched} out of {$total}"
   }
 }

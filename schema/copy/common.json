@@ -31,6 +31,13 @@
     "untitled": "(untitled)",
     "try_again": "Try again",
     "rename_ellipsis": "Rename…",
-    "rename": "Rename"
+    "rename": "Rename",
+    "other": "Other",
+    "view": "View",
+    "name": "Name",
+    "from_who": "from {$author}",
+    "agent": "Agent",
+    "read_again": "Read it again",
+    "search": "Search"
   }
 }

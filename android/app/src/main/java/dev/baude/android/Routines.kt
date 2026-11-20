@@ -173,7 +173,7 @@ private fun RoutineForm(r: Msg.Routine, clock: Msg.Clock, done: (JSONObject?) ->
         title = { Text(if (new) Wording.Routines.newHeading else Wording.Routines.changeHeading) },
         text = {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(name, { name = it }, Wording.Lookup.name)
+                Field(name, { name = it }, Wording.Common.name)
                 Text(Wording.Routines.task, style = Type.body, color = c.fg)
                 Box(Modifier.fillMaxWidth().heightIn(min = 110.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius))
                     .padding(6.dp)) {

@@ -282,7 +282,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
                 Text(path.substringAfterLast('/'), style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(Wording.FileView.onHost(host = Mesh.label(hostId)) + if (cut) " · its first part" else "", style = Type.caption, color = c.dim)
             }
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back)
+            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val d = data

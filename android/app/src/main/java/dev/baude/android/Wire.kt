@@ -287,7 +287,7 @@ open class Connection(
                 val server = Msg.HelloReply.from(reply).server
                 when {
                     reply.optString("op") != Op.HELLO -> {
-                        said = Msg.Error.from(reply).said ?: "the host said no"
+                        said = Msg.Error.from(reply).said ?: Wording.BotBrowser.hostSaidNo
                         end()
                     }
                     else -> {

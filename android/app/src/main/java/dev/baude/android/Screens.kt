@@ -150,7 +150,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
                 }
                 val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
-                IconButton(Icons.Filled.ArrowUpward, "Send", enabled = ready, tint = if (ready) c.accentFg else c.fg,
+                IconButton(Icons.Filled.ArrowUpward, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
                     chat.send(text, files.toList())
                     text = ""
@@ -234,7 +234,7 @@ private fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObjec
                     if (!multi) other[i] = null
                 }
             }
-            Choice(other[i] != null, multi, Wording.ModelPicker.otherFamily, "") {
+            Choice(other[i] != null, multi, Wording.Common.other, "") {
                 other[i] = if (other[i] != null) null else ""
                 if (!multi && other[i] != null) picked[i] = emptySet()
             }
@@ -303,7 +303,7 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                Text(Wording.Fixes.fromAuthor(author = senderName(from)), style = Type.caption, color = c.dim)
+                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
                 SelectionContainer {
                     val shown = from.shown
                     if (shown != null) Prose(SAID_BY.replace(shown, "").trim(), codeBg = c.inside)
@@ -327,7 +327,7 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
             enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-            Text(Wording.Fixes.fromAuthor(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption, color = c.dim)
+            Text(Wording.Common.fromWho(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption, color = c.dim)
             Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
         }
     }
@@ -518,7 +518,7 @@ fun HostsScreen(back: () -> Unit) {
                 val error = Mesh.keyError.value
                 if (key == null && error != null) {
                     Text(error, style = Type.body, color = c.destructive)
-                    Button("Try Again", suggested = true) { Mesh.readKey() }
+                    Button(Wording.Common.tryAgain, suggested = true) { Mesh.readKey() }
                 } else if (key == null) {
                     Text("Make a key for this phone, then put it in each host's ~/.ssh/authorized_keys.",
                         style = Type.body, color = c.dim)
@@ -530,7 +530,7 @@ fun HostsScreen(back: () -> Unit) {
                         Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
                     }
-                    Button("Copy", suggested = true) {
+                    Button(Wording.Common.copy, suggested = true) {
                         ctx.getSystemService(ClipboardManager::class.java)
                             .setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
                         Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
@@ -566,7 +566,7 @@ fun HostsScreen(back: () -> Unit) {
                         Text(h.dest, style = Type.caption, color = c.dim)
                         Text(state, style = Type.caption, color = colour)
                     }
-                    IconButton(Icons.Filled.Delete, "Remove") { removing = h }
+                    IconButton(Icons.Filled.Delete, Wording.Common.remove) { removing = h }
                 }
             }
             Members()
@@ -576,7 +576,7 @@ fun HostsScreen(back: () -> Unit) {
     removing?.let { h ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
             text = { Text("Its sessions aren't listed here any more. Nothing on the host changes.") },
-            confirmButton = { Button("Remove", destructive = true) { Mesh.removeHost(h); removing = null } },
+            confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.removeHost(h); removing = null } },
             dismissButton = { Button(Wording.Common.cancel) { removing = null } }, containerColor = c.dialog)
     }
     if (renewing) AlertDialog(onDismissRequest = { renewing = false }, title = { Text("Make a new key?") },

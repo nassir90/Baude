@@ -910,7 +910,7 @@ class SchemaView(Gtk.Box):
             bar.append(dd)
         # Find (Ctrl+F): tables and columns by name, every match highlighted; Enter (Ctrl+G) for the next one,
         # Shift+Enter (Ctrl+Shift+G) for the one before, Esc to clear it (then to close the view)
-        self.find = Gtk.SearchEntry(placeholder_text=wording.say("glossary.search"), width_chars=22)
+        self.find = Gtk.SearchEntry(placeholder_text=wording.say("common.search"), width_chars=22)
         self.match_at = -1  # (which of the canvas' matches is shown)
         self.find.connect("search-changed", lambda e: self.find_changed(e.get_text()))
         self.find.connect("activate", lambda e: self.next_match(1))

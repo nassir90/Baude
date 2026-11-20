@@ -5731,9 +5731,6 @@ def tool_input_view(name, inp):
     return box
 
 
-TASK_ENDINGS = {"completed": wording.say("task_notes.finished"), "failed": wording.say("task_notes.failed"),
-                "killed": wording.say("task_notes.stopped"), "error": wording.say("task_notes.failed")}
-
 # What a restart waits for: a command running (real work, a process of its own), not the model writing (a turn cut short
 # there is resumed from its transcript, and said so: show_cut). A call of one of these till its result (a subagent's
 # too), and a background task that isn't a subagent till its end.
@@ -5801,7 +5798,7 @@ def task_note_widget(note, card=None, on_jump=None):
     row = Gtk.Box(halign=Gtk.Align.START)
     row.add_css_class("task-note")
     summary = html.unescape(note.get("summary") or "")
-    ending = TASK_ENDINGS.get(status, status)
+    ending = widgets.TASK_ENDINGS_SAID.get(status, status)
     if (code := re.search(r"exit code (\d+)", summary)) is not None:
         ending = wording.say("task_notes.ending_exit", ending=ending, code=code.group(1))
     label = Gtk.Label(xalign=0, wrap=True, selectable=True)
@@ -5813,7 +5810,7 @@ def task_note_widget(note, card=None, on_jump=None):
         if card is not None:
             what = card.base
         else:
-            what = wording.say("task_notes.agent") if note.get("task_type") == "local_agent" or \
+            what = wording.say("common.agent") if note.get("task_type") == "local_agent" or \
                 summary.startswith(("Agent", "Subagent")) else wording.say("task_notes.background_command")
         desc = inp.get("description") or note.get("description")
         if not desc:  # no description: the command's first line, or what the summary quotes
@@ -5926,7 +5923,7 @@ class QuestionForm(Gtk.Box):
                 b.connect("toggled", lambda *_: self.sync())
                 opts.append((label, b))
                 qbox.append(b)
-            other = Gtk.CheckButton(label=wording.say("model_picker.other_family"))
+            other = Gtk.CheckButton(label=wording.say("common.other"))
             if not multi:
                 other.set_group(group)
             entry = Gtk.Entry(placeholder_text=wording.say("asks.own_answer"), hexpand=True)
@@ -6935,7 +6932,7 @@ class LoginCard(Gtk.Box):
         self.row = Gtk.Box(spacing=6)
         self.code = Gtk.Entry(hexpand=True, placeholder_text="If the page shows a code, paste it here")
         self.code.connect("activate", lambda *_: self.paste())
-        self.send = Gtk.Button(label="Send")
+        self.send = Gtk.Button(label=wording.say("common.send"))
         self.send.connect("clicked", lambda *_: self.paste())
         self.cancel = Gtk.Button(label=wording.say("common.cancel"))
         self.cancel.connect("clicked", lambda *_: self.stop())
@@ -9052,7 +9049,7 @@ class SessionSidebar(Gtk.Box):
                 info["remote"].state != "alive" else \
                 [rename] + ([("Unarchive", "unarchive")] if archived else [] if active else
                             [("Archive", "archive")]) + \
-                ([("Stop", "stop")] if active else []) + \
+                ([(wording.say("common.stop"), "stop")] if active else []) + \
                 [(wording.say("trash.move_dots"), "trash")]  # (Archive stops it: not at a turn)
         items.insert(1 if items[0][1] == "rename" else 0, ("Move to Group", None))  # (any chat's, on a host or not)
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
@@ -9127,7 +9124,7 @@ class SessionSidebar(Gtk.Box):
             return
         bot = info.get("bot") or {}
         named = bot.get("name") or " ".join((info.get("title") or "").split())[:80]  # (a new one: the chat's title)
-        entry = Gtk.Entry(text=named, placeholder_text=wording.say("lookup.name"), activates_default=True)
+        entry = Gtk.Entry(text=named, placeholder_text=wording.say("common.name"), activates_default=True)
         pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
         avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
         choose = Gtk.Button(label="Choose Picture…")
@@ -11336,7 +11333,7 @@ class SidePanel(Gtk.Box):
         panel's Subagents, on it) rather than folding open what it said. Its Output's kept only for an Error."""
         if getattr(card, "view_btn", None) is None:
             tid = task.get("tool_use_id") or card.tool_id
-            btn = Gtk.ToggleButton(label=wording.say("images.view"), valign=Gtk.Align.CENTER, focus_on_click=False,
+            btn = Gtk.ToggleButton(label=wording.say("common.view"), valign=Gtk.Align.CENTER, focus_on_click=False,
                                    tooltip_text="Open this subagent in the side panel")
             btn.add_css_class("tool-toggle")  # (as Prompt is, beside it)
             btn.connect("toggled", lambda b: b.get_active() and (b.set_active(False), self.view_agent(tid)))
@@ -13475,8 +13472,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """The window's parts, by name, for the text a capture records."""
         return {self.sidebar: "sidebar", self.scroller: "chat", self.panel: "side panel",
                 self.composer_box: "input box", self.status.get_parent(): "status bar", self.header_bar: "header",
-                self.banner: "banner", self.kube: wording.say("window.kubernetes"),
-                self.schema: wording.say("report.capture_databases"), self.lightbox: wording.say("images.unnamed")}
+                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
@@ -15756,7 +15752,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         queued one is, with who it's from in a small line at its top."""
         bubble = self.user_bubble(text, atts)
         bubble.add_css_class("sender-bubble")
-        head = Gtk.Label(label=wording.say("fixes.from_author", author=baudelib.wire.sender_name(sender)), xalign=1,
+        head = Gtk.Label(label=wording.say("common.from_who", author=baudelib.wire.sender_name(sender)), xalign=1,
                          wrap=True,
                          wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
         head.add_css_class("sender-from")
@@ -18888,7 +18884,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         server = lambda: servers[servers_dd.get_selected()] if servers_dd is not None else servers[0]  # noqa: E731
         if agents:
             agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
-            field(wording.say("task_notes.agent"), agent_dd)
+            field(wording.say("common.agent"), agent_dd)
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731

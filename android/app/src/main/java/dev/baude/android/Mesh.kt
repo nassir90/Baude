@@ -462,7 +462,7 @@ object Mesh {
                 val contact = contact(c.id, sid) ?: continue
                 val tool = ask.tool.orEmpty()
                 post(contact, if (tool == "AskUserQuestion") Wording.Asks.hasQuestionForYou(name = contact.name)
-                    else Wording.Asks.waitingForTool(tool = toolTitle(tool)), "ask:$key/$rid")
+                    else Wording.Asks.waitingForTool(tool = toolTitle(tool).ifBlank { Wording.Asks.aTool }), "ask:$key/$rid")
             }
         }
     }

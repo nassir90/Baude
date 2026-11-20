@@ -1,7 +1,6 @@
 {
-  "description": "A background task's ending, as a quiet line in a chat (Baude's and Record's).",
+  "description": "A background task's ending, as a quiet line in a chat (Baude's, Record's and the Android app's).",
   "messages": {
-    "agent": "Agent",
     "background_command": "Background command",
     "unnamed": "a background task",
     "finished": "finished",

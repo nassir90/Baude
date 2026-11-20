@@ -115,7 +115,7 @@ def catalogue_ref(surface, entry):
         return Ref(surface, "pr", "resolved", surface, data={"catalogue": True, **github_data(listed)})
     sources = entry.get("sources") or []
     kind = {"k8s": "k8s", "branch": "branch", "file": "file"}.get(entry["kind"], "symbol")
-    what, where = sources[0] if sources else (wording.say("lookup.name"), "")
+    what, where = sources[0] if sources else (wording.say("common.name"), "")
     data, locs = {"catalogue": True}, []
     if entry.get("db"):
         live, n = entry["db"][0], len(entry["db"])
@@ -310,7 +310,7 @@ class Ref:
             loc = self.locations[0] if self.locations else None
             path = loc and (os.path.basename(loc["path"]) if os.path.isabs(loc["path"]) else loc["path"])
             where = (f" ({path}" + (f":{loc['line']}" if loc.get("line") else "") + ")") if loc else ""
-            return (self.data.get("note") or REF_KINDS.get(self.kind, (wording.say("lookup.name"),))[0]) + where
+            return (self.data.get("note") or REF_KINDS.get(self.kind, (wording.say("common.name"),))[0]) + where
         if self.kind in ("constant", "route", "symbol", "config") and self.locations:
             loc = self.locations[0]
             where = loc["path"] + (f":{loc['line']}" if loc.get("line") else "") + \
@@ -2415,7 +2415,7 @@ def items(source):
     for name, e in list(source.catalogue.items()):
         if name in listed:
             continue
-        sources = e.get("sources") or [(wording.say("lookup.name"), "")]
+        sources = e.get("sources") or [(wording.say("common.name"), "")]
         what, where = sources[0]
         icon = {"k8s": "k8s", "branch": "git", "file": "file"}.get(e["kind"]) or \
             ("db" if what.startswith("Database") else "code")

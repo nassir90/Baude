@@ -35,7 +35,6 @@
     "skills": "Skills",
     "http_route": "HTTP route",
     "http_routes": "HTTP routes",
-    "name": "Name",
     "database_in": "Database {$database} ({$engine}, {$container})",
     "collection_in": "Collection {$table} in {$database} ({$engine}, {$container})",
     "table_in": "Table {$table} in {$database} ({$engine}, {$container})",

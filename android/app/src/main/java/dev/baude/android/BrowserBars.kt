@@ -67,10 +67,10 @@ fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String)
     ) {
         IconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, Wording.Browser.back, enabled = b.canBack.value) { nav("back") }
         IconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, Wording.Browser.forward, enabled = b.canForward.value) { nav("forward") }
-        if (b.loading.value) IconButton(Icons.Filled.Close, "Stop") { nav("stop") }
+        if (b.loading.value) IconButton(Icons.Filled.Close, Wording.Common.stop) { nav("stop") }
         else IconButton(Icons.Filled.Refresh, Wording.Browser.reload) { nav("reload") }
         Address(b.shownUrl.value, go, Modifier.weight(1f))
-        IconButton(Icons.Outlined.AddBox, "New Tab", onClick = newTab)
+        IconButton(Icons.Outlined.AddBox, Wording.Browser.newTab, onClick = newTab)
         Row(Modifier.heightIn(min = Gap.composerButton).padding(horizontal = 8.dp), // (who: the profile's, the Bot's
             verticalAlignment = Alignment.CenterVertically) {                        // own, shown not changed here)
             Text(profile, style = Type.bold, color = c.fg.copy(alpha = c.fg.alpha * 0.5f), maxLines = 1,

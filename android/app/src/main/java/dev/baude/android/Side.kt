@@ -113,10 +113,17 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Icons.Filled.CheckCircle, "Done", tint = c.success, modifier = Modifier.size(16.dp))
+        "completed" -> Icon(Icons.Filled.CheckCircle, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
         "interrupted" -> Icon(Icons.Filled.RemoveCircleOutline, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
         else -> Icon(Icons.Filled.Cancel, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
     }
+}
+
+/** A count of tokens as widgets.fmt_tokens says it: 950, 12.3k, 1M. */
+fun fmtTokens(n: Int): String {
+    fun one(x: Double) = String.format(java.util.Locale.ROOT, "%.1f", x).removeSuffix(".0")
+    return if (n >= 1_000_000) Wording.Tokens.millions(n = one(n / 1_000_000.0))
+        else if (n >= 1000) Wording.Tokens.thousands(n = one(n / 1000.0)) else "$n"
 }
 
 /** A subagent's line under its title, as Baude's describe(): its kind, how it ended if it went wrong, what it's
@@ -126,9 +133,9 @@ fun describe(a: Subagent): String {
     val status = a.status.value
     return listOfNotNull(a.kind.ifBlank { null }, status.takeIf { it == "failed" || it == "killed" },
         u?.optInt("tool_uses", 0)?.takeIf { it > 0 }?.let { Wording.SidePanel.toolUses(n = it) },
-        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { n -> Wording.SidePanel.tokens(n = if (n >= 1_000_000) "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
-            else if (n >= 1000) "%.1fk".format(n / 1000.0).replace(".0k", "k") else "$n") },
-        u?.optLong("duration_ms", 0)?.takeIf { it > 0 }?.let { Wording.Time.seconds(seconds = "%.1f".format(it / 1000.0)) },
+        u?.optInt("total_tokens", 0)?.takeIf { it > 0 }?.let { n -> Wording.SidePanel.tokens(n = fmtTokens(n)) },
+        u?.optLong("duration_ms", 0)?.takeIf { it > 0 }?.let {
+            Wording.Time.seconds(seconds = String.format(java.util.Locale.ROOT, "%.1f", it / 1000.0)) },
         a.activity.value.takeIf { status == "running" }).joinToString(" · ")
 }
 

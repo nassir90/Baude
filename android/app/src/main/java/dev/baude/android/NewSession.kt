@@ -72,7 +72,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                 opened(h, id)
                 done()
             } else error = Wording.NewSession.hostRefused(host = Mesh.label(h),
-                why = Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" })
+                why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo })
         }
     }
     AlertDialog(

@@ -95,7 +95,7 @@ fun family(m: ModelChoice): String {
     val said = (m.name + " " + m.value.substringAfterLast('/')).lowercase()
     return listOf("Claude" to "claude|opus|sonnet|haiku|fable", "GPT" to "gpt|openai|codex", "Qwen" to "qwen|qwq",
         "Gemma" to "gemma", "Gemini" to "gemini", "Llama" to "llama", "Mistral" to "mistral|mixtral|stral",
-        "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: Wording.ModelPicker.otherFamily
+        "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: Wording.Common.other
 }
 
 /** A copy of a model somewhere in the mesh, as Baude's provider picker lists it (provider_choices): its value as a

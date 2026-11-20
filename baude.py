@@ -8903,7 +8903,7 @@ class SessionSidebar(Gtk.Box):
             plus = ("list-add-symbolic", f"New session in {label}, through {THIS_MACHINE}'s server",
                     lambda: self.win.ask_remote_start(folder=folder, here=True))
         if (r := self.remote_keys.get(key)) is not None:  # (a folder on a server: a session there, on it, if it's there)
-            plus = ("list-add-symbolic", wording.say("sidebar.new_session_in_on", folder=label, host=remote_name(r)),
+            plus = ("list-add-symbolic", wording.say("sidebar.new_session_in_on", folder=remote_path(folder, r), host=remote_name(r)),
                     lambda: self.win.ask_remote_start(server=r, folder=folder)) if r.state == "alive" else None
         box = widgets.group_header(short_group_label(key, label), collapsed, lambda: self.toggle_folder(key), plus,
                                    tooltip=label, current=is_here)

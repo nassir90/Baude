@@ -344,8 +344,9 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
         }
         if (plus != null) Box(Modifier.size(24.dp).alpha(0.75f).clip(RoundedCornerShape(6.dp)).clickable(onClick = plus),
             contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Add, sec.hostId?.let { Wording.Sidebar.newSessionInOn(folder = sec.full, host = Mesh.label(it)) }
-                ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Add, sec.hostId?.let {
+                Wording.Sidebar.newSessionInOn(folder = shortPath(it, sec.folder.orEmpty()), host = Mesh.label(it))
+            } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp))
         }
     }
 }

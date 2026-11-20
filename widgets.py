@@ -4271,7 +4271,7 @@ def _dispose_tree(widget):
                     if not isinstance(w, Adw.TabView)]:
             w.remove_controller(ctl)  # (a click's handler is the controller's: dispose leaves those till the end)
         if isinstance(w, Gtk.MenuButton):  # (its dispose frees what makes its menu, set_create_popup_func's, each
-            w.set_create_popup_func(None)   # time it's run: the second, as it's freed, freed it again, and crashed)
+            w.set_create_popup_func(None)   # time it's run, and it's run again as it's freed: let go of first)
         if isinstance(w, Gtk.Picture):  # (a picture's dispose lets go of its paintable but keeps pointing at it: the
             Gtk.Picture.set_paintable(w, None)  # second, as it's freed, let go of it again, and crashed)
         w.run_dispose()

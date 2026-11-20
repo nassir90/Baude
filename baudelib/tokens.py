@@ -100,6 +100,11 @@ def ms(path):
     return v["value"] if v["unit"] == "ms" else v["value"] * 1000
 
 
+def color_hex(path, theme=None):
+    """A colour's #rrggbb (its alpha left out), theme's (None: the resolver's default)."""
+    return value(path, "color", theme)["hex"]
+
+
 def number(path):
     return value(path, "number")
 

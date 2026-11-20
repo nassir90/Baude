@@ -8499,11 +8499,11 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .mesh-card.error > .tool-card { border-color: @error_color; }
 .mesh-card.asking > .tool-card { border-color: @warning_color; }
 .mesh-card.flash > .tool-card { background: alpha(@accent_bg_color, 0.12); transition: background 400ms; }
-.mesh-card .mesh-head { padding: 7px 10px; border-radius: 7px; }
+.mesh-card .mesh-head { padding: 7px {gap.card-h}; border-radius: 7px; }
 .mesh-card .mesh-head.openable:hover { background: alpha(currentColor, 0.05); }
 .mesh-card .mesh-answer { background: @baude_raised; border-radius: {radius.bubble}; padding: {gap.bubble-v} {gap.bubble-h}; }
 /* every box's border is 1px, a card's that waits on you too (its colour says so); a quote's rule at the left 3px */
-.perm-card { border: 1px solid @warning_color; border-radius: 8px; padding: 8px 12px; }
+.perm-card { border: 1px solid @warning_color; border-radius: {radius.card}; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
 .mono { font-family: monospace; font-size: {font.mono-scale}em; }
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
@@ -8511,12 +8511,12 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
 .composer-actions button { min-width: {gap.composer-button}; min-height: {gap.composer-button}; padding: 0; }
-.attach-chip { background: @baude_raised; border-radius: 8px; padding: 2px 2px 2px 4px; }
+.attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
 .file-thumb { border-radius: 3px; }
 .attach-chip.image { background: none; padding: 0; }
 .codeblock { background: @baude_raised; border-radius: {radius.code}; }
-.kube-error-fix { background: @baude_raised; border-radius: 6px; padding: 2px 2px 2px 10px; }
+.kube-error-fix { background: @baude_raised; border-radius: {radius.code}; padding: 2px 2px 2px 10px; }
 .codeblock .code-scroll > viewport > label, .codeblock .code-scroll > label { padding: 6px 8px; }
 .codeblock .code-scroll box { padding: 6px 0; }
 /* the tag and copy button sit over the code's first line: give them the block's own colour (opaque, feathered in
@@ -8552,8 +8552,8 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .codeblock .code-copy { min-height: 22px; min-width: 22px; padding: 0; }
 /* secondary icons share one fade: a fainter stroke reads as a thinner one */
 .soft-icon, .codeblock .code-copy, .sidebar-plus { opacity: 0.75; }
-.diff-del { background: alpha(@error_color, 0.16); padding: 0 8px; }
-.diff-add { background: alpha(@success_color, 0.18); padding: 0 8px; }
+.diff-del { background: {diff.removed-line}; padding: 0 8px; }
+.diff-add { background: {diff.added-line}; padding: 0 8px; }
 .diff-ctx { padding: 0 8px; }
 .md-marker { opacity: 0.7; font-weight: bold; }
 .md-h1 { font-size: 1.44em; }
@@ -8719,9 +8719,9 @@ list.filter-list > row:focus-visible { outline-offset: -2px; }
 /* code on the inside's background, as the chat and the notes are, its line numbers' column too; its page's bar on the
    frame's, as the window's bars are */
 .baude-inside .code-view, .baude-inside .code-view > border { background: none; }
-.code-view { font-family: monospace; font-size: 0.9em; }
+.code-view { font-family: monospace; font-size: {font.mono-scale}em; }
 .code-view text { background: transparent; }
-.code-gutter { font-family: monospace; font-size: 0.9em; }
+.code-gutter { font-family: monospace; font-size: {font.mono-scale}em; }
 .code-bar { background-color: @baude_frame; box-shadow: inset 0 -1px @baude_rule; padding: 3px 8px 3px 10px; }
 .code-member { padding: 1px 6px; min-height: 22px; font-family: monospace; font-size: 0.85em; font-weight: normal; }
 .code-member.current { background: alpha(@accent_bg_color, 0.18); }

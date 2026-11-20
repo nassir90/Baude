@@ -46,6 +46,7 @@ import fontsetup  # noqa: E402
 import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+from baudelib import tokens  # noqa: E402  (Meta's measures: schema/tokens, Baude's)
 from baudelib import agentproxy, codex, modelfiles, wire  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
@@ -1811,12 +1812,12 @@ class Agent:
 
 # ---------------------------------------------------------------- how it looks
 
-CSS = f"""
+CSS = tokens.css(f"""
 label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wrote: MetaChat._said) */
 .meta-ui {{ margin-top: 2px; }}
 /* Settings' rows as Meta shows them (a setting's, chats', pages', the changelog's): hollow, in a tool card's outline,
    where Settings has them on a card */
-.meta-ui list.boxed-list {{ background: none; box-shadow: none; border: 1px solid @baude_rule; border-radius: 8px; }}
+.meta-ui list.boxed-list {{ background: none; box-shadow: none; border: 1px solid @baude_rule; border-radius: {{radius.card}}; }}
 .meta-ui list.boxed-list > row {{ background: none; }}
 .meta-ui list.boxed-list > row:hover {{ background: alpha(@view_fg_color, 0.04); }}
 .tool-card button.meta-batch {{ min-height: 0; min-width: 0; padding: 1px 5px; }}
@@ -1826,13 +1827,13 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .meta-foot {{ font-size: 0.85em; padding: 4px 0; }}
 .meta-foot > * {{ opacity: 0.75; }}
 .meta-foot button {{ min-height: 0; padding: 0 4px; font-weight: normal; }}
-label.meta-note {{ font-size: 0.85em; opacity: 0.75; }}
+label.meta-note {{ font-size: {{font.small}}em; opacity: 0.75; }}
 /* a form (MetaChat.form_card): hollow, in a tool card's outline, as Meta's rows are; pinned over the conversation,
    on the pane's own background, a shadow under it */
-.meta-form {{ border: 1px solid @baude_rule; border-radius: 8px; padding: 10px 12px; }}
+.meta-form {{ border: 1px solid @baude_rule; border-radius: {{radius.card}}; padding: 10px 12px; }}
 .meta-form.meta-pinned {{ background: @baude_inside; box-shadow: 0 3px 10px alpha(black, 0.25); }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
-"""
+""")
 _CSS = []
 MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a",
                "edited": "#9141ac"}  # (edited: a page whose text changed; highlight:

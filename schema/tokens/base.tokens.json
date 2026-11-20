@@ -124,7 +124,7 @@
     "chat-v": {"$description": "And from its top and bottom.", "$value": {"value": 12, "unit": "px"}},
     "message": {"$description": "Between a chat's parts on the phone.", "$value": {"value": 8, "unit": "px"}},
     "bubble-v": {
-      "$description": "A message of yours: its bubble's padding, top and bottom (.user-bubble).",
+      "$description": "A message of yours: its bubble's padding, top and bottom (.user-bubble; Record's reader's, .reader-user).",
       "$value": {"value": 8, "unit": "px"}
     },
     "bubble-h": {"$description": "And its sides.", "$value": {"value": 12, "unit": "px"}},
@@ -136,16 +136,32 @@
       "$description": "A tool call's card: its padding, top and bottom (.tool-card).",
       "$value": {"value": 6, "unit": "px"}
     },
-    "card-h": {"$description": "And its sides.", "$value": {"value": 10, "unit": "px"}},
-    "bar": {"$description": "A bar's height: Adw.HeaderBar's.", "$value": {"value": 46, "unit": "px"}}
+    "card-h": {
+      "$description": "And its sides (a mesh card's head's too, .mesh-head: the card itself has none).",
+      "$value": {"value": 10, "unit": "px"}
+    },
+    "bar": {"$description": "A bar's height: Adw.HeaderBar's.", "$value": {"value": 46, "unit": "px"}},
+    "dot": {
+      "$description": "A chat's dot, working or waiting, on the phone (StatusDot).",
+      "$value": {"value": 8, "unit": "px"}
+    }
   },
   "radius": {
     "$type": "dimension",
     "$description": "Corners' radii.",
-    "bubble": {"$description": "A message of yours (.user-bubble).", "$value": {"value": 12, "unit": "px"}},
+    "bubble": {
+      "$description": "A message of yours (.user-bubble; Record's reader's, .reader-user).",
+      "$value": {"value": 12, "unit": "px"}
+    },
     "composer": {"$description": "The box you write in (.composer-box).", "$value": {"value": 12, "unit": "px"}},
-    "card": {"$description": "A tool call's card (.tool-card).", "$value": {"value": 8, "unit": "px"}},
-    "code": {"$description": "A code block (.codeblock).", "$value": {"value": 6, "unit": "px"}}
+    "card": {
+      "$description": "A tool call's card (.tool-card), and what's in the chat as one is: a card asking you (.perm-card), a file sent (.attach-chip), Meta's rows and forms (in a tool card's outline).",
+      "$value": {"value": 8, "unit": "px"}
+    },
+    "code": {
+      "$description": "A code block (.codeblock), and a command to copy (.kube-error-fix).",
+      "$value": {"value": 6, "unit": "px"}
+    }
   },
   "font": {
     "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
@@ -160,11 +176,15 @@
     "caption-line": {"$description": "Its line height.", "$type": "dimension", "$value": {"value": 16, "unit": "px"}},
     "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
     "small": {
-      "$description": "A note's size (.sysnote), and a folder's name's (.sidebar-folder), in em.",
+      "$description": "A note's size (.sysnote, Meta's .meta-note), and a folder's name's (.sidebar-folder), in em.",
       "$type": "number",
       "$value": 0.85
     },
-    "mono-scale": {"$description": "Code's size (.mono), in em.", "$type": "number", "$value": 0.9},
+    "mono-scale": {
+      "$description": "Code's size (.mono; a file's, .code-view, and its lines' numbers', .code-gutter), in em.",
+      "$type": "number",
+      "$value": 0.9
+    },
     "semibold": {"$description": "A Bot's name (.bot-name).", "$type": "fontWeight", "$value": 600},
     "bold": {"$description": "A folder's name, a title.", "$type": "fontWeight", "$value": "bold"}
   },

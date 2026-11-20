@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "description": "An entry in a folder.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "dir": {
+      "type": "boolean",
+      "description": "A folder."
+    },
+    "size": {
+      "type": "integer",
+      "description": "A file's size."
+    },
+    "ignored": {
+      "type": "boolean",
+      "description": "git ignores it."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "How far along stopping it is: its agents left of all it's stopping.",
+  "properties": {
+    "op": {
+      "const": "stopping",
+      "description": "What it is."
+    },
+    "procs": {
+      "type": "integer",
+      "description": "All it's stopping."
+    },
+    "left": {
+      "type": "integer",
+      "description": "Those left."
+    },
+    "restart": {
+      "type": "boolean",
+      "description": "It's to start again."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

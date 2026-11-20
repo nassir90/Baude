@@ -124,7 +124,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         val h = host ?: return@LaunchedEffect
         Mesh.ask(h, Msg.Feedback(check = true).json()) { r ->
             if (r.optString("op") == Op.FEEDBACK_TARGET) target = Msg.FeedbackTarget.from(r).repo.orEmpty()
-            else targetWhy = said(h, Msg.Error.from(r))
+            else targetWhy = said(Msg.Error.from(r))
         }
     }
     val full = context + listOf("phone: Baude for Android ${version(ctx)} on Android ${Build.VERSION.RELEASE} (${Build.MODEL})")
@@ -138,7 +138,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
             if (r.optString("op") == Op.FEEDBACK_FILED) {
                 Toast.makeText(ctx, "Filed as an issue on ${Msg.FeedbackFiled.from(r).repo.orEmpty()}", Toast.LENGTH_LONG).show()
                 back()
-            } else failed = said(h, Msg.Error.from(r))
+            } else failed = said(Msg.Error.from(r))
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
@@ -165,8 +165,6 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
                 }, style = Type.caption, color = c.dim)
             }
             targetWhy?.let { Text(it, style = Type.caption, color = c.warning) }
-            if (host == null && Mesh.reached().any { (h, _) -> Mesh.hosts.any { it.id == h } })
-                Text("Your hosts' Baude can't file feedback for a phone: update it", style = Type.caption, color = c.warning)
             Text(if (showContext) "Hide context" else "Show context", style = Type.body,
                 color = c.accent, modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showContext = !showContext }
                     .padding(vertical = 4.dp))
@@ -188,12 +186,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     }
 }
 
-/** Why a host couldn't file, as you'd say it (an older host's Baude doesn't take the op: its refusal's code says so,
- * or, from one older still, its error). */
-private fun said(host: String, e: Msg.Error): String =
-    if (e.code == WireCheck.UNSUPPORTED || e.code == null && e.error.orEmpty().startsWith("unknown op"))
-        "${Mesh.label(host)}'s Baude can't file feedback for a phone: update it"
-    else e.said?.ifBlank { null } ?: "it said no"
+/** Why a host couldn't file, as it said it. */
+private fun said(e: Msg.Error): String = e.said?.ifBlank { null } ?: "it said no"
 
 private fun version(ctx: Context): String = try {
     ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"

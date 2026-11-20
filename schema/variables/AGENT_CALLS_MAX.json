@@ -1,0 +1,4 @@
+{
+  "description": "Tool calls in one agent turn run on a phone, at most; then the model's asked to answer in words.",
+  "const": 40
+}

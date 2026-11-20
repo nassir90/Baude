@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "The host process stops, its agents too (their sessions kept, resumed next time; one at a turn or asking is marked cut).",
+  "properties": {
+    "op": {
+      "const": "quit",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "if_idle": {
+      "type": "boolean",
+      "description": "Only if no session's running a command, else busy and it goes on."
+    },
+    "restart": {
+      "type": "boolean",
+      "description": "It's to start again."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

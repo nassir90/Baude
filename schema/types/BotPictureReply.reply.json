@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "description": "A Bot's picture.",
+  "properties": {
+    "op": {
+      "const": "bot_picture",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "picture": {
+      "type": ["string", "null"],
+      "contentEncoding": "base64",
+      "description": "A PNG; null for none."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "description": "A phone showing a Bot of this host's browser (on), or not now: while it is, the Bot's browser tools' requests here are carried to it (emission_call).",
+  "properties": {
+    "op": {
+      "const": "emission_serve",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+      "type": "string",
+      "description": "The Bot's id."
+    },
+    "on": {
+      "type": "boolean",
+      "description": "Showing it."
+    },
+    "urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "off: the pages it had open."
+    },
+    "note": {
+      "type": "string",
+      "description": "off: what it hadn't told the Bot yet."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

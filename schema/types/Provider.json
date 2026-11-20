@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "description": "A model provider, as the mesh is told of it (mesh.published): no address or key of its machine's.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "kind": {
+      "type": "string",
+      "description": "What it is (openai, ollama, apple, mlx, ...)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "http": {
+      "type": "boolean",
+      "description": "It serves HTTP, run through a member's Proxy."
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "ProviderModel.json"
+      },
+      "description": "Its models."
+    },
+    "base_url": {
+      "type": ["string", "null"],
+      "description": "Where it's served, on its own machine (info's providers only)."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

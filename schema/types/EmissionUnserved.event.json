@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "Another phone shows this Bot's browser now.",
+  "properties": {
+    "op": {
+      "const": "emission_unserved",
+      "description": "What it is."
+    },
+    "bot": {
+      "type": "string",
+      "description": "The Bot's id."
+    },
+    "why": {
+      "type": "string",
+      "description": "Why."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1,0 +1,4 @@
+{
+  "description": "A Bot's picture, as bot sends it, at most, in bytes.",
+  "const": 2097152
+}

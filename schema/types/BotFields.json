@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "What bot sets: a name and, maybe, a picture.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "picture": {
+      "type": ["string", "null"],
+      "description": "A PNG, base64; \"\" to drop it; left out, kept."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

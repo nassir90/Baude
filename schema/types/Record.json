@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "description": "A member's record: who it is and the members it's linked to. A host sends its own when it changes (seq higher than any it sent before) and passes each one newer than it had on to its other links.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The member's id."
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Its number: higher, newer."
+    },
+    "info": {
+      "$ref": "MemberInfo.json",
+      "description": "Who it is."
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The members it's linked to."
+    }
+  },
+  "required": ["id", "seq"],
+  "additionalProperties": false
+}

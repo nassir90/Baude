@@ -516,7 +516,6 @@ object MetaTools {
             }
             "changelog" -> {
                 val h = Meta.host.value ?: return no("Meta's host isn't connected.")
-                if (!offers(h, "git")) return no(tooOld(h, "show its changelog"))
                 Meta.under(Line("rows", JSONObject().put("changelog", h).toString()))
             }
             "button" -> {

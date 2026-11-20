@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "What the pane says back: a frame taken, its new size.",
+  "properties": {
+    "op": {
+      "const": "emission_watch_say",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "line": {
+      "$ref": "WatchSay.json",
+      "description": "What it says."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

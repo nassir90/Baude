@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "description": "A phone's answer to an emission_call.",
+  "properties": {
+    "op": {
+      "const": "emission_answer",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "id": {
+      "type": "string",
+      "description": "The call's id."
+    },
+    "result": {
+      "type": "object",
+      "description": "What the browser answered."
+    },
+    "error": {
+      "type": "string",
+      "description": "What went wrong."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

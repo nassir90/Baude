@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "description": "Both ways, every PING_S on every connection (and link): SILENT_S of silence and the other end's taken for gone.",
+  "properties": {
+    "op": {
+      "const": "ping",
+      "description": "What it is."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

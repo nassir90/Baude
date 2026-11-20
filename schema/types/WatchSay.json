@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "description": "What a Browser pane says back to the Emission it watches.",
+  "properties": {
+    "ack": {
+      "type": "integer",
+      "description": "A frame taken (its frame)."
+    },
+    "max_w": {
+      "type": "integer",
+      "description": "The pane's width."
+    },
+    "max_h": {
+      "type": "integer",
+      "description": "The pane's height."
+    }
+  },
+  "additionalProperties": false
+}

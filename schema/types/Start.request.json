@@ -1,0 +1,135 @@
+{
+  "type": "object",
+  "description": "A new session. Its prompt is sent once it's begun.",
+  "properties": {
+    "op": {
+      "const": "start",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The first message."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Its folder (default: the forked session's, else home)."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "Its model."
+    },
+    "effort": {
+      "type": ["string", "null"],
+      "description": "Its effort."
+    },
+    "mode": {
+      "type": ["string", "null"],
+      "description": "Its permission mode."
+    },
+    "group": {
+      "type": ["string", "null"],
+      "description": "Its group."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Its title."
+    },
+    "attach": {
+      "type": "boolean",
+      "description": "This connection's attached live to it first."
+    },
+    "answers": {
+      "type": "boolean",
+      "description": "As attach's."
+    },
+    "spawned_by": {
+      "type": "string",
+      "description": "The id of the chat here whose mesh tools start it."
+    },
+    "system": {
+      "type": "string",
+      "description": "More for claude's system prompt (--append-system-prompt)."
+    },
+    "add_dirs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Folders it may use besides its own (--add-dir)."
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tool rules (--allowedTools: [\"Bash(git:*)\", \"Edit\"])."
+    },
+    "disallowed_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tool rules (--disallowedTools)."
+    },
+    "fork_from": {
+      "type": "string",
+      "description": "A session of this host's whose conversation this one starts as a copy of (--fork-session)."
+    },
+    "ask_timeout": {
+      "type": "number",
+      "description": "Seconds a permission it asks waits while nobody who answers is attached, then ask_default answers it."
+    },
+    "ask_default": {
+      "enum": ["deny", "allow"],
+      "description": "What answers when ask_timeout runs out."
+    },
+    "draft": {
+      "type": "boolean",
+      "description": "A new chat, listed as draft and not kept till it's written in, and gone if nobody's attached before it is."
+    },
+    "ephemeral": {
+      "type": "boolean",
+      "description": "A side question's, forked from fork_from (or fresh), keeping nothing, never listed, gone with its last head."
+    },
+    "adopt": {
+      "type": "string",
+      "description": "A conversation claude has here already, by its id, made the host's."
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A head on this machine's environment for the session's agent (kept in memory only)."
+    },
+    "start_key": {
+      "type": "string",
+      "description": "An id the client picks, kept and listed, so it can tell whether a start whose answer it lost was taken."
+    },
+    "app_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Names of MCP servers this head runs itself, for an agent here: each relayed back to it over this connection (mcp_open, mcp, mcp_close), allowed without asking."
+    },
+    "grace": {
+      "type": "number",
+      "description": "Seconds an ephemeral session waits for its head to come back (GRACE_MAX_S at most; else EPHEMERAL_S)."
+    },
+    "as": {
+      "type": "string",
+      "description": "As input's, for the prompt."
+    },
+    "bot": {
+      "$ref": "BotFields.json",
+      "description": "A Bot made of it as it starts (a phone's host takes it; picture left out)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1243,7 +1243,8 @@ def popup_choices(dropdown):
 def _(app):
     win = app.window()
     r = baude.local_host()
-    r.info = {**r.info, "version": baude.baudelib.wire.VERSION - 1}  # (as one started before the update says)
+    r.info = {**r.info, "commit": baude.update.git(baude.update.HERE, "rev-parse", "HEAD~1", timeout=5)}  # (as one
+    # started before the update says)
     baude._HOST_APART.clear()
     baude.baudelib.client.APART_S = 0  # (said at once, not after an update's time to be picked up)
     win.check_host_version()

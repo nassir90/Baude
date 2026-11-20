@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "What a session's agent says, as it says it (claude's stream-json); to those attached live. A worktree made again from its branch is told by {type: \"_note\", text}.",
+  "properties": {
+    "op": {
+      "const": "claude",
+      "description": "What it is."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "msg": {
+      "type": "object",
+      "description": "A stream-json message."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

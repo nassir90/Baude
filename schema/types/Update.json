@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "description": "Its own updater has a newer version ready, and waits for those commands to end before it restarts onto it.",
+  "properties": {
+    "to": {
+      "type": "string",
+      "description": "The commit it'll restart onto."
+    },
+    "waiting": {
+      "type": "array",
+      "items": {
+        "$ref": "Running.json"
+      },
+      "description": "The commands it waits for."
+    }
+  },
+  "additionalProperties": false
+}

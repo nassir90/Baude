@@ -1,0 +1,65 @@
+{
+  "type": "object",
+  "description": "A watched Bot's browser as it is (emission's watch_state).",
+  "properties": {
+    "profile": {
+      "type": ["string", "null"],
+      "description": "Its profile."
+    },
+    "agent": {
+      "type": "boolean",
+      "description": "A Bot's (its tools drive it)."
+    },
+    "view": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "integer"
+      },
+      "description": "The page's size, in CSS pixels."
+    },
+    "selected": {
+      "type": ["string", "null"],
+      "description": "The tab in front."
+    },
+    "tabs": {
+      "type": "array",
+      "items": {
+        "$ref": "Tab.json"
+      },
+      "description": "Its tabs."
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "What's waiting on an answer: {id, tab, kind, ...} (a dialog's)."
+    },
+    "downloads": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Its last downloads: {name, path, error?}."
+    },
+    "now": {
+      "anyOf": [
+        {
+          "$ref": "PageNow.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The tab in front."
+    },
+    "pointer": {
+      "type": "array",
+      "items": {
+        "$ref": "PointerEvent.json"
+      },
+      "description": "What the Bot's tools last did with the mouse, its last 8, oldest first."
+    }
+  },
+  "additionalProperties": false
+}

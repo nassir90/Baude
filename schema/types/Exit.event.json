@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "An agent's program's gone.",
+  "properties": {
+    "op": {
+      "const": "exit",
+      "description": "What it is."
+    },
+    "code": {
+      "type": ["integer", "null"],
+      "description": "Its exit code."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

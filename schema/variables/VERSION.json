@@ -1,0 +1,4 @@
+{
+  "description": "The wire's version, as a host's hello says it: shown and logged, never compared.",
+  "const": 19
+}

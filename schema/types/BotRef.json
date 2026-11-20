@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "A Bot, as its browser's ops name it.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its session's id."
+    },
+    "name": {
+      "type": ["string", "null"],
+      "description": "Its name."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

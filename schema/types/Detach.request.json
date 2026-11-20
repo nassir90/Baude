@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "This connection detached from a session (an ephemeral one its head's done with dropped at once).",
+  "properties": {
+    "op": {
+      "const": "detach",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

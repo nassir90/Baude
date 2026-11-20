@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "description": "read_file's answer.",
+  "properties": {
+    "op": {
+      "const": "file",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+      "type": "string",
+      "description": "The path asked for."
+    },
+    "size": {
+      "type": "integer",
+      "description": "Its size."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Cut short."
+    },
+    "data": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "What it holds."
+    },
+    "error": {
+      "type": "string",
+      "description": "Why it can't be read."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

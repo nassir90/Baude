@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "description": "One of an agent's MCP servers (a relay, baude_headless.py mcp-relay): carried to its caller.",
+  "properties": {
+    "op": {
+      "const": "mcp_relay",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+      "type": "string",
+      "description": "The run's id."
+    },
+    "name": {
+      "type": "string",
+      "description": "The server's name."
+    },
+    "token": {
+      "type": "string",
+      "description": "The run's token for it."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

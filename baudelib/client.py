@@ -51,12 +51,12 @@ APART_S = 3 * selfupdate.CHECK_S  # (how long a head and its host process run di
 def code_apart(info, started, root=selfupdate.HERE):
     """(git: off the main loop) How a head whose code is commit started, from the checkout root, and this machine's
     host process (info: as it says) run different code: None, the same (or nothing to tell by); "head", the head's
-    behind the host's; "host", the host's behind (its protocol, wire.VERSION, too); "both", both apart from what's
-    checked out; "elsewhere", the host's code is another checkout's (its checkout, as it says; or a commit this
-    checkout hasn't got, from one that doesn't say). OSError if git couldn't tell."""
-    commit, old = info.get("commit"), (info.get("version") or 1) < wire.VERSION
+    behind the host's; "host", the host's behind; "both", both apart from what's checked out; "elsewhere", the host's
+    code is another checkout's (its checkout, as it says; or a commit this checkout hasn't got, from one that doesn't
+    say). OSError if git couldn't tell."""
+    commit = info.get("commit")
     if not commit or not started or commit == started:
-        return "host" if old else None
+        return None
     if isinstance(info.get("checkout"), str) and os.path.realpath(info["checkout"]) != os.path.realpath(root):
         return "elsewhere"
     if not _git_ok(root, "cat-file", "-e", f"{commit}^{{commit}}"):
@@ -68,7 +68,7 @@ def code_apart(info, started, root=selfupdate.HERE):
     head = selfupdate.git(root, "rev-parse", "HEAD", timeout=5)  # (neither after the other: a branch changed)
     if head is None:
         raise OSError("git couldn't say what's checked out")
-    return "host" if head == started else "head" if head == commit and not old else "both"
+    return "host" if head == started else "head" if head == commit else "both"
 
 
 def _git_ok(root, *args):
@@ -561,11 +561,10 @@ class Network:
 
     # ---- the mesh: this machine's host process linked to each host given by hand, the link used both ways, and
     # every member it reaches known here, reached through it (baudelib/mesh.py)
-    def here_alive(self, version=3):
-        """This machine's host process, if it's there (and knows the mesh: wire.VERSION version at least)."""
+    def here_alive(self):
+        """This machine's host process, if it's there."""
         with self.lock:
-            here = next((r for r in self.servers.values() if r.mine and r.state == "alive"), None)
-        return here if here is not None and (here.info.get("version") or 1) >= version else None
+            return next((r for r in self.servers.values() if r.mine and r.state == "alive"), None)
 
     def deactivate(self, r, off=True):
         """A host deactivated (off) or activated again: deactivated, it isn't reached, by this window or this
@@ -576,7 +575,7 @@ class Network:
             r.let_go()
         r.wake.set()
         r.untold = True
-        if (here := self.here_alive(4)) is not None and not r.mine:
+        if (here := self.here_alive()) is not None and not r.mine:
             self.tell(r, here)
         self.save(force=True, only=r.key)
         self.changed()
@@ -599,7 +598,7 @@ class Network:
         (one known otherwise, over ssh, say, reached so), and tried again if it's gone; and, once each time it's
         started, every host given by hand linked to from it."""
         state = here.info.get("mesh")
-        if not isinstance(state, dict) or (here.info.get("version") or 1) < 3:
+        if not isinstance(state, dict):
             return
         if here.info.get("pid") != self.linked_pid:
             self.linked_pid = here.info.get("pid")
@@ -607,27 +606,28 @@ class Network:
                 given = [r for r in self.servers.values() if r.by_hand]
             threading.Thread(target=lambda: [self.link(r) for r in given], daemon=True, name="link").start()
         members = [m for m in state.get("members") or [] if isinstance(m, dict) and wire.is_id(m.get("id"))]
-        if (here.info.get("version") or 1) >= 4:  # (what's deactivated is as the host process has it: here, or its
-            with self.lock:                        # command line's; once it's told what was changed here meanwhile)
-                remotes = [r for r in self.servers.values() if not r.mine]
-            for r in remotes:
-                if r.untold:
-                    self.tell(r, here)
-            off = set(state.get("inactive") or [])
-            off_where = [x["where"] for x in state.get("links") or []
-                         if isinstance(x, dict) and x.get("active") is False]
-            for r in remotes:
-                was = r.deactivated
-                now = (r.info.get("id") or r.key) in off or any(mesh.same_place(w, r.reach_where()) for w in off_where)
-                if now != was and time.monotonic() - r.toggled > 5:  # (not one just changed here, not told yet)
-                    r.deactivated = now
-                    if now:
-                        r.let_go()
-                    else:
-                        r.state = "connecting"
-                    r.wake.set()
-                    self.save()
-                    self.changed()
+        # (what's deactivated is as the host process has it: here, or its command line's; once it's told what was
+        # changed here meanwhile)
+        with self.lock:
+            remotes = [r for r in self.servers.values() if not r.mine]
+        for r in remotes:
+            if r.untold:
+                self.tell(r, here)
+        off = set(state.get("inactive") or [])
+        off_where = [x["where"] for x in state.get("links") or []
+                     if isinstance(x, dict) and x.get("active") is False]
+        for r in remotes:
+            was = r.deactivated
+            now = (r.info.get("id") or r.key) in off or any(mesh.same_place(w, r.reach_where()) for w in off_where)
+            if now != was and time.monotonic() - r.toggled > 5:  # (not one just changed here, not told yet)
+                r.deactivated = now
+                if now:
+                    r.let_go()
+                else:
+                    r.state = "connecting"
+                r.wake.set()
+                self.save()
+                self.changed()
         with self.lock:
             listed = {m["id"] for m in members}
             for r in self.servers.values():

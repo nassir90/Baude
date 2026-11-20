@@ -7886,11 +7886,10 @@ def bot_picture(info, then):
 
 
 def can_be_bot(info):
-    """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and knows Bots (wire
-    version 8), on a model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
+    """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and takes bot, on a
+    model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
     r = info.get("remote")
-    return r is not None and not info.get("dead") and r.state == "alive" and \
-        baudelib.wire.speaks(r.info, "bot", 8) and \
+    return r is not None and not info.get("dead") and r.state == "alive" and baudelib.wire.takes(r.info, "bot") and \
         modelslib.model_program(info.get("model")) in ("claude", "pi")
 
 
@@ -7939,12 +7938,6 @@ def host_apart(app):
         _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [w.update_banner() for w in app.windows()
                                                                           if not getattr(w, "let_go_done", False)]))
     return _HOST_APART[0]
-
-
-def host_old():
-    """Is This Mac's host process there but older than Baude (its protocol behind: no adopt, draft or ephemeral)?"""
-    r = local_host()
-    return r is not None and (r.info.get("version") or 1) < baudelib.wire.VERSION
 
 
 def is_desktop(session_id):
@@ -9033,7 +9026,7 @@ class SessionSidebar(Gtk.Box):
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
             items[1:1] = [("Bot Settings…", "make_bot"), ("Turn Back into a Chat", "unbot")] if info.get("bot") else \
                 [("Make Bot…", "make_bot")]
-        if can_be_bot(info) and not info.get("bot") and baudelib.wire.speaks(info["remote"].info, "mesh_tools", 9):
+        if can_be_bot(info) and not info.get("bot") and baudelib.wire.takes(info["remote"].info, "mesh_tools"):
             items.insert(2, ("Remove Mesh Tools", "mesh_off") if info.get("mesh_tools") else
                          ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
@@ -9277,17 +9270,6 @@ class SessionSidebar(Gtk.Box):
         r = info["remote"]
 
         def done(reply):
-            if reply.get("op") == "error" and (reply.get("code") == baudelib.wire.UNSUPPORTED or
-                                               str(reply.get("error") or "").startswith("unknown op")):
-                # (an older host process, without them: archived, or deleted, here only, as Baude did before)
-                if op == "delete":
-                    self.hide_remote(info)
-                else:
-                    st = load_settings()
-                    ids = set(st.get("archived", []))
-                    save_settings(archived=sorted(ids | {info["id"]} if op == "archive" else ids - {info["id"]}))
-                    self.fill()
-                return
             if reply.get("op") == "error":
                 toast(self, f"{remote_name(r)} didn't {op} it: {baudelib.wire.said(reply)}")
                 return
@@ -9425,21 +9407,17 @@ class SessionSidebar(Gtk.Box):
     def new_chat(self):
         """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here. With groups
         picked in ⋮, or only one group's chats listed, it's in one of them (new_group), a draft like any other till
-        it's written in, so its folder and model can still be changed (new_session's group); only while This Mac's
-        host process is too old for drafts, one in a group (or one a chat here wouldn't list) through it
-        (ask_remote_start): Baude's own claude would leave it in none."""
+        it's written in, so its folder and model can still be changed (new_session's group)."""
         key = self.host_dd.value() or HERE_HOST
         if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:  # (gone, deactivated,
             # not known)
             toast(self, said)
         elif key != HERE_HOST and r is not None:
             self.win.new_session_on(r)
-        elif not host_old() or self.mine_listed() and not self.new_group(HERE_HOST):
+        else:
             group = self.new_group(HERE_HOST)
             self.put_in(group)  # (as remote_started does)
             self.win.switch_to(lambda: self.win.new_session(group=group))
-        else:
-            self.win.ask_remote_start(hosts=self.host_filter())
 
     def hide_remote(self, info):
         """Delete a network session that isn't at a turn: its transcript is its server's, so it's only not listed here
@@ -10142,7 +10120,7 @@ class HostFolder:
                 for it in reply["items"] if isinstance(it, dict) and isinstance(it.get("surface"), str))
         if ok and reply.get("busy"):  # (not all made yet: what there is listed, the rest waited for there)
             return self.remote.request({"op": "catalogue", "cwd": self.root, "wait": True}, self._got)
-        # (the host not reached: asked again soon; anything else, an older host's error too, once it's old)
+        # (the host not reached: asked again soon; anything else, a refusal too, once it's old)
         gone = reply.get("op") == "error" and reply.get("error") in GONE
         self.catalogue_at = time.time() - (CATALOGUE_TTL - 5 if gone else 0)
         self.catalogue_busy = False
@@ -14560,11 +14538,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     # ---- process lifecycle
     def runs_here(self):
         """Is the chat's claude this process's own (ClaudeProc)? A Claude Desktop chat's (desktop_chat, however it's
-        opened: is_desktop); and every chat's while This Mac's host process is older than Baude (it'd take adopt and
-        draft for a new conversation: check_host_version offers to restart it). Else every chat of Baude's, new or on
-        this machine already, runs in the host process (take_up), as a host's session does, so a restart or an update
-        of Baude's never stops it."""
-        return self.remote is None and (self.desktop_chat or is_desktop(self.session_id) or host_old())
+        opened: is_desktop). Else every chat of Baude's, new or on this machine already, runs in the host process
+        (take_up), as a host's session does, so a restart or an update of Baude's never stops it."""
+        return self.remote is None and (self.desktop_chat or is_desktop(self.session_id))
 
     def start_proc(self):
         if self.remote is not None:
@@ -14703,18 +14679,17 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """(proc, forked) for a side question in a chat of Baude's: a session of the host process's, forked from the
         chat there (taken up first, if it isn't yet), that keeps nothing (--no-session-persistence), is listed nowhere,
         and goes when it's closed; a fresh one for a chat with nothing saved yet. (None, False) if it can't be had
-        (an older host process: said)."""
+        (said)."""
         r = self.remote or local_host()
         if self.remote is None and r is not None and self.session_id and find_session(self.session_id):
             reply = r.call({"op": "start", "adopt": self.session_id, "cwd": self.recorded_cwd(), "model": self.model,
                             "mode": self.mode, "group": "", "env": claudelib.claude_env()}, timeout=10)
             if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
-                self.note(f"the side question couldn't be asked: {reply.get('error')}")
+                self.note(f"the side question couldn't be asked: {baudelib.wire.said(reply)}")
                 return None, False
-        if r is None or not baudelib.wire.speaks(r.info, "ephemeral", 2):  # (a phone's lists it, its ops)
-            self.note("Daemon is older than Baude: restart it to ask a side question" if r is not None and r.mine else
-                      f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question" +
-                      ("" if r is not None and isinstance(r.info.get("ops"), list) else ": restart it"))
+        if r is None or not baudelib.wire.takes(r.info, "ephemeral"):
+            self.note(f"{remote_name(r)}'s host process can't ask a side question" if r else
+                      f"{THIS_MACHINE}'s host process can't ask a side question: restart it")
             return None, False
         mode = "default" if model_program(self.model) == "codex" else "plan"
         params = {"op": "start", "ephemeral": True, "mode": mode, "model": self.model, "prompt": ""}
@@ -14725,7 +14700,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                       {"cwd": self.run_cwd if r.mine else "~"})
         reply = r.call(params, timeout=10)
         if reply.get("op") != "started":
-            self.note(f"the side question couldn't be asked: {reply.get('error')}")
+            self.note(f"the side question couldn't be asked: {baudelib.wire.said(reply)}")
             return None, False
         forked = bool(reply.get("forked"))
         try:
@@ -16097,14 +16072,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         """Show the permission and effort controls available for this backend."""
         program = model_program(self.model)
         self.effort_dd.set_visible(program == "claude" or self.effort_dd.get_sensitive())
-        self.mode_dd.set_visible(program in ("claude", "codex") or self.host_speaks("set_permission_mode"))
+        self.mode_dd.set_visible(program in ("claude", "codex") or self.host_lists("set_permission_mode"))
         self.sync_mode(self.mode)
 
-    def host_speaks(self, op):
+    def host_lists(self, op):
         """Does this chat's host take op as claude's own modes and always-allow have it, whatever its model's program,
         as it says (its hello's ops: a phone's agents)? Not one that lists no ops: that's said by its program."""
-        r = self.remote
-        return r is not None and isinstance(r.info.get("ops"), list) and baudelib.wire.speaks(r.info, op)
+        ops = None if self.remote is None else self.remote.info.get("ops")
+        return isinstance(ops, list) and op in ops
 
     def sync_models(self, models):
         """Fill the model picker from initialize's list, labelled with real names ("Opus 5.5"), and the models this
@@ -16335,7 +16310,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.mode_dd.set_choices(choices)
         if mode and program == "codex":
             mode = modelslib.codex_mode(mode)
-        elif mode and program != "claude" and not self.host_speaks("set_permission_mode"):
+        elif mode and program != "claude" and not self.host_lists("set_permission_mode"):
             mode = "default"
         if mode:
             self.mode = mode
@@ -16400,18 +16375,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def start_in_folder(self, path):
         """A new chat in a folder (Open folder…, a folder's +): from a new chat not written in yet that was started
-        in a group, in that group still; else in the group New session would put it in (new_group). While This Mac's
-        host process is too old for drafts, a chat in a group is started through it (ask_remote_start), as New
-        session's is: Baude's own claude would leave it in none."""
+        in a group, in that group still; else in the group New session would put it in (new_group)."""
         if not os.path.isdir(path):
             self.note(f"not a folder: {path}")
             return
         draft = self.session_id is None or self.remote is not None and \
             (self.remote.sessions.get(self.session_id) or {}).get("draft")
         group = self.draft_group if draft and getattr(self, "draft_group", "") else self.sidebar.new_group(HERE_HOST)
-        if group and host_old():
-            self.ask_remote_start(folder=path, here=True)
-            return
         self.sidebar.put_in(group)
         self.new_session(path, group=group)
 
@@ -18642,25 +18612,21 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         entry.grab_focus()
         return entry
 
-    def ask_remote_start(self, server=None, folder=None, hosts=None, here=False):
-        """New session through a server: the sidebar's New session while a new chat here isn't listed (hosts: the keys
-        of those that are), or a server's folder's + (here: this machine's, one started there if there's none,
-        local_server). A prompt, a folder and a group (new_group's, if it has one);
+    def ask_remote_start(self, server=None, folder=None, here=False):
+        """New session through a server: a server's folder's + (here: this machine's, one started there if there's
+        none, local_server). A prompt, a folder and a group (new_group's, if it has one);
         the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
         (remote_started)."""
         group = self.sidebar.new_group(HERE_HOST if here else host_key(server) if server is not None else None) or None
         if here:
             servers = [r for r in network().alive() if host_key(r) == HERE_HOST][:1]
         else:
-            servers = [r for r in network().alive(group) if hosts is None or host_key(r) in hosts]
+            servers = network().alive(group)
             if server in servers:
                 servers.remove(server)
                 servers.insert(0, server)
-            if not servers and (hosts is None or HERE_HOST in hosts):  # (none there: through this machine's, started)
+            if not servers:  # (none there: through this machine's, started)
                 return self.ask_remote_start(folder=folder, here=True)
-            if not servers:
-                toast(self.sidebar, "None of those hosts is there")
-                return
         form = self.remote_start_form(servers or [None], folder, group, said=here, here=here)
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="start",
                               close_response="cancel", body=form.body)
@@ -18802,9 +18768,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                               "puts it there")
 
     def check_host_version(self):
-        """This Mac's host process on other code than Baude (an update one has picked up and the other hasn't; its
-        protocol, wire.VERSION, behind; or another checkout's): looked at (host_apart), and said in every window's
-        banner once it's lasted, with the restart that puts them on the same code."""
+        """This Mac's host process on other code than Baude (an update one has picked up and the other hasn't, or
+        another checkout's): looked at (host_apart), and said in every window's banner once it's lasted, with the
+        restart that puts them on the same code."""
         if (app := self.get_application()) is not None:
             host_apart(app).look(local_host())
 
@@ -19399,10 +19365,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 allowed = self.allowed_in(self.session_id)
                 allowed.add(name)
                 if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
-                    # added to its list; an older one's replaced)
-                    new = baudelib.wire.speaks(self.remote.info, "always_allow", 15)
-                    self.remote.request({"op": "always_allow", "session": self.session_id,
-                                         **({"add": [name]} if new else {"tools": sorted(allowed)})})
+                    # added to its list)
+                    self.remote.request({"op": "always_allow", "session": self.session_id, "add": [name]})
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
@@ -19432,7 +19396,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         choices = [("Allow", "allow", False, "suggested-action"),
                    (f"Always allow {tool_display(name)[0]}", "allow", True, None),
                    ("Deny", "deny", False, "destructive-action")]
-        if model_program(self.model) != "claude" and not self.host_speaks("always_allow"):  # (Apple's model, or one on
+        if model_program(self.model) != "claude" and not self.host_lists("always_allow"):  # (Apple's model, or one on
             del choices[1]  # this Mac: each call asked, no always; a host's that keeps it, as a phone's: offered)
         if asking:  # (claude's questions: answered in a form, sent back as the call's answers)
             choices = []

@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "description": "An agent's program stopped.",
+  "properties": {
+    "op": {
+      "const": "kill",
+      "description": "What it is."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

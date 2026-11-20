@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "start's answer, before the prompt's sent (attach: this connection's attached live to it first).",
+  "properties": {
+    "op": {
+      "const": "started",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "$ref": "Session.json",
+      "description": "The session, as it's listed now."
+    },
+    "forked": {
+      "type": "boolean",
+      "description": "Forked from fork_from."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

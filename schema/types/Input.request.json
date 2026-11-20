@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "description": "A stream-json message for the session's agent (started on it, with --resume, if it isn't running). A user message without a uuid is given one.",
+  "properties": {
+    "op": {
+      "const": "input",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "msg": {
+      "type": "object",
+      "description": "The message."
+    },
+    "as": {
+      "type": "string",
+      "description": "The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders)."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

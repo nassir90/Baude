@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "emission_watch's last answer: the watch is over.",
+  "properties": {
+    "op": {
+      "const": "emission_watch_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

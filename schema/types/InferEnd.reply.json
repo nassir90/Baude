@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "infer's and files's answer's end.",
+  "properties": {
+    "op": {
+      "const": "infer_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

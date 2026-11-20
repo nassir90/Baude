@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "description": "infer's and files's answer: some of its body.",
+  "properties": {
+    "op": {
+      "const": "infer_data",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "data": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "The bytes."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

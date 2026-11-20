@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "description": "A member of the mesh, as info's mesh lists it.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "group": {
+      "type": "string",
+      "description": "Its group."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its machine's host name."
+    },
+    "version": {
+      "type": "integer",
+      "description": "Its wire version."
+    },
+    "bonjour": {
+      "type": "string",
+      "description": "Its name on the local network."
+    },
+    "dial": {
+      "type": "boolean",
+      "description": "false: it can't be linked to, only from (a phone, with no sshd)."
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "$ref": "Provider.json"
+      },
+      "description": "Its model providers."
+    },
+    "hops": {
+      "type": "integer",
+      "description": "Links away."
+    },
+    "through": {
+      "type": ["string", "null"],
+      "description": "The member it's reached through, by name; null for one linked to here."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

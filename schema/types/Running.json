@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "A command a session's agent is running, as quit's busy and info's update list them.",
+  "properties": {
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "what": {
+      "type": "string",
+      "description": "What it runs."
+    }
+  },
+  "required": ["session"],
+  "additionalProperties": false
+}

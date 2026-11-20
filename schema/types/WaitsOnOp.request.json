@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "description": "A session's agent waits on another chat's answer, or (done) no longer. Kept with the session (not listed) while its turn goes on: if the host stops meanwhile, it follows the wait once it's started again, and what the wait would have given is held for the session.",
+  "properties": {
+    "op": {
+      "const": "waits_on",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "on": {
+      "$ref": "WaitTarget.json",
+      "description": "What it waits on."
+    },
+    "done": {
+      "type": "boolean",
+      "description": "No longer."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

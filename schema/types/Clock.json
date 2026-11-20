@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "description": "The host's clock.",
+  "properties": {
+    "zone": {
+      "type": ["string", "null"],
+      "description": "Its time zone's name."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Seconds from UTC."
+    }
+  },
+  "additionalProperties": false
+}

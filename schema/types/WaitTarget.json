@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "description": "Another chat's answer a session's agent waits on.",
+  "properties": {
+    "session": {
+      "type": "string",
+      "description": "That chat."
+    },
+    "host": {
+      "type": ["string", "null"],
+      "description": "The member it's on; null for this host."
+    },
+    "kind": {
+      "enum": ["subagent", "chat"],
+      "description": "What it is."
+    },
+    "text": {
+      "type": ["string", "null"],
+      "description": "What it was asked."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Its transcript's size as it was asked."
+    },
+    "until": {
+      "type": "number",
+      "description": "When the wait ends, epoch seconds."
+    },
+    "title": {
+      "type": "string",
+      "description": "The chat's title."
+    }
+  },
+  "required": ["session"],
+  "additionalProperties": false
+}

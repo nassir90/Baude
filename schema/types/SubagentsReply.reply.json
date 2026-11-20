@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "description": "Each one's transcript from where have says the client's copy is, in whole lines; its meta.json whole, if it's changed.",
+  "properties": {
+    "op": {
+      "const": "subagents",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "SubagentFile.json"
+      },
+      "description": "The files."
+    },
+    "more": {
+      "type": "boolean",
+      "description": "There's more, past limit; those it didn't reach aren't listed."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

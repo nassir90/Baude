@@ -1,0 +1,4 @@
+{
+  "description": "A browser screenshot's longest side, in pixels.",
+  "const": 1024
+}

@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "A folder in a session's folder.",
+  "properties": {
+    "op": {
+      "const": "list_dir",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+      "type": "string",
+      "description": "Its absolute path."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

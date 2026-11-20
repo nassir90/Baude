@@ -1,0 +1,4 @@
+{
+  "description": "start's grace, at most, in seconds.",
+  "const": 86400
+}

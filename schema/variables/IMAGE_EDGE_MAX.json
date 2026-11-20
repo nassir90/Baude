@@ -1,0 +1,4 @@
+{
+  "description": "An image attached to a message: its longest side, in pixels, larger ones scaled down.",
+  "const": 1568
+}

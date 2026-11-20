@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "description": "notes's answer: listed {notebooks, ids}, or written {done, by}.",
+  "properties": {
+    "op": {
+      "const": "notes",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebooks": {
+      "type": "array",
+      "items": {
+        "$ref": "Notebook.json"
+      },
+      "description": "Notebooks."
+    },
+    "ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Every one's id, in order."
+    },
+    "done": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The changes made."
+    },
+    "by": {
+      "type": "string",
+      "description": "record: the Record running there made them."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

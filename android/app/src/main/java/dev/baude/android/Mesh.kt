@@ -40,7 +40,7 @@ data class Contact(val hostId: String, val session: Msg.Session) {
 fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
     !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
         m.startsWith("agent/") || m.startsWith("mlx-")) ||
-    hostId != null && Mesh.conn(hostId)?.info?.ops != null && offers(hostId, "always_allow")
+    hostId != null && lists(hostId, "always_allow")
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
@@ -350,10 +350,10 @@ object Mesh {
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): Msg.Session? = sessions[hostId]?.firstOrNull { it.id == sid }
 
-    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (offers): (id,
+    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (takes): (id,
      * label), your hosts first. */
     fun reached(op: String? = null): List<Pair<String, String>> = conns.values
-        .filter { it.state == "up" && (op == null || offers(it.id, op)) }
+        .filter { it.state == "up" && (op == null || takes(it.id, op)) }
         .sortedWith(compareBy({ it.place is Place.Member }, { label(it.id).lowercase() })).map { it.id to label(it.id) }
 
     /** Another connection to where hostId is, for a watch of its own (it doesn't subscribe): started; stop it when
@@ -491,11 +491,8 @@ object Mesh {
         val msg = JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
             .put("request_id", ask.rid).put("response", response))
         if (always) {
-            val all = alwaysAllowed(chat) + ask.tool
             allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
-            val req = if (offers(c.info, "always_allow")) Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool))
-            else Msg.AlwaysAllow(session = chat.sid, tools = all.sorted()) // (added to its list; an older host's replaced:
-            c.request(req.json()) {}                                       // all that's known here)
+            c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) {}
         }
         c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
             if (r.optString("op") == Op.ERROR) main.post {

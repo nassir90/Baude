@@ -1,0 +1,4 @@
+{
+  "description": "A browser zoom's JPEG quality.",
+  "const": 90
+}

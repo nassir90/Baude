@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "description": "A host process as it says it is on a link (mesh._hello_of).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "group": {
+      "type": "string",
+      "description": "Its group."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its machine's host name."
+    },
+    "version": {
+      "type": "integer",
+      "description": "Its wire version."
+    },
+    "bonjour": {
+      "type": "string",
+      "description": "Its name on the local network, if it said one."
+    },
+    "dial": {
+      "type": "boolean",
+      "description": "false: it can't be linked to, only from (a phone, with no sshd)."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

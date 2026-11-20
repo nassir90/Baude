@@ -27,7 +27,6 @@ import kotlin.concurrent.thread
  * The browser's process talks to this one on a socket of the app's own (a uid check: no other app), a line of JSON
  * each way, as Emission's profile socket is. */
 object PhoneBrowser {
-    const val MIN_VERSION = 16 // (wire's version 16: emission_serve, a Bot's browser on a phone)
     private val main = Handler(Looper.getMainLooper())
     private val name = "dev.baude.android.emission." + ByteArray(12).also { SecureRandom().nextBytes(it) }
         .joinToString("") { "%02x".format(it) } // (where the browser's process finds this one: not to be guessed)
@@ -47,7 +46,7 @@ object PhoneBrowser {
     private val calls = HashMap<String, Connection>() // (a request carried to the browser: the connection it came on)
 
     /** Whether the Bot's host can carry its tools' requests to a phone (a host of yours, or a member of its mesh). */
-    fun offered(hostId: String): Boolean = offers(Mesh.conn(hostId)?.info, "emission_serve", MIN_VERSION)
+    fun offered(hostId: String): Boolean = takes(hostId, "emission_serve")
 
     /** The Bot's browser opened here (shown again, if it's open already). */
     fun open(ctx: Context, hostId: String, bot: String, botName: String) {
@@ -182,11 +181,6 @@ object PhoneBrowser {
             if (s.up || c.state != "connecting") s.link.send(JSONObject().put("op", "serving").put("on", false)
                 .put("why", "Can't connect to ${Mesh.label(s.hostId)}" + (c.why?.let { ": $it" } ?: "")))
             s.up = false
-            return
-        }
-        if (!offers(c.info, "emission_serve", MIN_VERSION)) {
-            s.link.send(JSONObject().put("op", "serving").put("on", false)
-                .put("why", "${Mesh.label(s.hostId)}'s Baude is too old for this: update it"))
             return
         }
         c.request(Msg.EmissionServe(bot = s.bot, on = true).json()) { r ->

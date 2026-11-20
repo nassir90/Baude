@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "description": "signal_names's answer.",
+  "properties": {
+    "op": {
+      "const": "signal_names",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "glossary": {
+      "type": ["string", "null"],
+      "description": "The glossary's path; null for none."
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "$ref": "SignalRef.json"
+      },
+      "description": "The names."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

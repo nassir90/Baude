@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "unarchive's answer.",
+  "properties": {
+    "op": {
+      "const": "unarchived",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

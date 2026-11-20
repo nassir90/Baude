@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "description": "A member reached lately, not now (restarting, say).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    }
+  },
+  "additionalProperties": false
+}

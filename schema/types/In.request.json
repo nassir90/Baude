@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "A line for an agent's program's stdin.",
+  "properties": {
+    "op": {
+      "const": "in",
+      "description": "What it is."
+    },
+    "line": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

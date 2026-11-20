@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "A session archived: its agent stopped, and it's listed only to those subscribed with archived.",
+  "properties": {
+    "op": {
+      "const": "archive",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

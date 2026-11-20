@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "description": "catalogue's answer.",
+  "properties": {
+    "op": {
+      "const": "catalogue",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+      "type": ["string", "null"],
+      "description": "The folder asked for."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "lookup's items."
+    },
+    "busy": {
+      "type": "boolean",
+      "description": "There's more to come (ask again, with wait)."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

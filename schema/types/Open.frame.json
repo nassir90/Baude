@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "description": "A tunnel to member to: passed on to the next host on the way (ttl hosts at most), and at to a connection to its host process, served as if a head had connected to its socket.",
+  "properties": {
+    "op": {
+      "const": "open",
+      "description": "What it is."
+    },
+    "t": {
+      "type": "integer",
+      "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "to": {
+      "type": "string",
+      "description": "The member it's to."
+    },
+    "ttl": {
+      "type": "integer",
+      "description": "Hosts it may pass through."
+    },
+    "from": {
+      "type": "string",
+      "description": "The member that opened it."
+    },
+    "sender": {
+      "$ref": "Sender.json",
+      "description": "Who what's sent through it is from (relay's as)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

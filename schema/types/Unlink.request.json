@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "The links made from here to where, or to member id, let go of and forgotten.",
+  "properties": {
+    "op": {
+      "const": "unlink",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "where": {
+      "$ref": "Where.json",
+      "description": "Where."
+    },
+    "id": {
+      "type": "string",
+      "description": "A member's id."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

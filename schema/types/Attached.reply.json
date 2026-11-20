@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "description": "attach's answer.",
+  "properties": {
+    "op": {
+      "const": "attached",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "$ref": "Session.json",
+      "description": "The session, as it's listed now."
+    },
+    "asks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

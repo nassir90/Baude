@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "description": "Feedback a head with no gh of its own wrote (a phone's), filed as an issue by this host's gh where Send Feedback files it, once for each note.",
+  "properties": {
+    "op": {
+      "const": "feedback",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "note": {
+      "type": "string",
+      "description": "The note's id."
+    },
+    "text": {
+      "type": "string",
+      "description": "What it says."
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Context, under it."
+    },
+    "check": {
+      "type": "boolean",
+      "description": "Only where it would go: feedback_target."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

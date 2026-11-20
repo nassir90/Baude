@@ -469,9 +469,8 @@ class Out:
     def take(self, ch, info):
         """A connection to where: made a link, and run till it drops."""
         peer = _hello_of(info)
-        if peer is None or peer["id"] == self.mesh.id or peer["version"] < 3:
-            self.error = "it gave no id Baude can use" if peer is None else "that's this host" \
-                if peer["id"] == self.mesh.id else "its Baude is older, with no mesh: update it"
+        if peer is None or peer["id"] == self.mesh.id:
+            self.error = "it gave no id Baude can use" if peer is None else "that's this host"
             self.state = "dropped"
             ch.close()
             return

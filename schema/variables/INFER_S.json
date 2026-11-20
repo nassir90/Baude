@@ -1,0 +1,4 @@
+{
+  "description": "A provider has this long to answer infer, in seconds.",
+  "const": 600
+}

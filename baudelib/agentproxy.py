@@ -115,10 +115,9 @@ def retarget(data, cwd):
     return json.dumps({**head, "cwd": cwd}, separators=(",", ":"), ensure_ascii=False).encode() + nl + rest
 
 
-def pack(root, ids, seen=None, cwd=None):
-    """A session's files under root (its entries: names with one of ids in them), {path in root: base64}; those that
-    have changed since seen ({path: stamp}, updated), if it's given; each said to be cwd's (retarget), if it's given.
-    None if they're more than SESSIONS_MAX bytes."""
+def pack(root, ids):
+    """A session's files under root (its entries: names with one of ids in them), {path in root: base64}. None if
+    they're more than SESSIONS_MAX bytes."""
     out, size = {}, 0
     try:
         names = [n for n in os.listdir(root) if any(i in n for i in ids)]
@@ -135,16 +134,11 @@ def pack(root, ids, seen=None, cwd=None):
                     continue
                 rel = os.path.relpath(path, root)
                 try:
-                    st = os.stat(path)
-                    if (seen or {}).get(rel) == (st.st_mtime_ns, st.st_size):
-                        continue
-                    size += st.st_size
+                    size += os.stat(path).st_size
                     if size > SESSIONS_MAX:
                         return None
                     with open(path, "rb") as fh:
-                        out[rel] = base64.b64encode(retarget(fh.read(), cwd)).decode()
-                    if seen is not None:
-                        seen[rel] = (st.st_mtime_ns, st.st_size)
+                        out[rel] = base64.b64encode(fh.read()).decode()
                 except OSError:
                     continue
     return out
@@ -339,8 +333,7 @@ class ProxiedProc(ClaudeProc):
         self.ask_for = {"op": "agent", "req": 1, "model": inner, "mode": mode, "effort": effort, "resume": sid,
                         "system_prompt": got.get("--system-prompt"), "persist": persist,
                         "append_system_prompt": got.get("--append-system-prompt"),  # (a Bot's: who it is, its memory)
-                        "servers": sorted(self.servers), "cwd": self.cwd,
-                        "relay": True}  # (pi's session as pi writes it, from a host that does: session.ts)
+                        "servers": sorted(self.servers), "cwd": self.cwd}
         self.ch, self.waiting, self.lock = None, [], threading.Lock()
         self.relays = {}  # (conn: the MCP server started here for it)
         self.opened, self.checked = set(), False  # (the servers it's started here; said if any never came: _check)
@@ -415,8 +408,6 @@ class ProxiedProc(ClaudeProc):
                 self._to_server(msg.get("conn"), msg.get("line"))
             elif op == "mcp_close":
                 self._close(msg.get("conn"))
-            elif op == "sessions" and self.ids:  # (an older host's: pi's session files whole, as it ends each turn)
-                unpack(pi_sessions(), msg.get("files"), self.ids, self.cwd)
             elif op == "exit":
                 code = msg.get("code") if isinstance(msg.get("code"), int) else 1
                 break
@@ -561,14 +552,11 @@ class Run:
         # pi-claude's run; what pi adds to it is sent to the caller as it's added, session.ts)
         self.ids = [resume] if resume and msg.get("persist") is not False and models.model_program(model) == "pi" \
             else []
-        self.sessions, self.stamps = os.path.join(self.folder, "sessions"), {}
-        self.notices = bool(msg.get("relay"))  # (a caller that takes pi's notices; an older one, files each turn: sync)
+        self.sessions = os.path.join(self.folder, "sessions")
         self.told = msg.get("cwd") if isinstance(msg.get("cwd"), str) else ""
         if self.ids and not unpack(self.sessions, msg.get("sessions"), self.ids, os.path.realpath(self.folder)):
             shutil.rmtree(self.folder, ignore_errors=True)
             raise ValueError("pi's session couldn't be written here")
-        if self.ids:  # (as pi has them: not sent back to a caller that takes pi's notices)
-            pack(self.sessions, self.ids, self.stamps)
         cfg = {"mcpServers": {n: {"command": sys.executable,
                                   "args": [HEADLESS, "mcp-relay", "--socket", server.socket_path, self.id, n,
                                            self.token]} for n in names}}
@@ -587,7 +575,7 @@ class Run:
                                       stderr=subprocess.PIPE, text=True, bufsize=1,
                                       env=claude_env() | {"BAUDE_TOOLS_CWD": self.told[:4096]} |
                                       ({"BAUDE_PI_SESSIONS": self.sessions} if self.ids else {}) |
-                                      ({"BAUDE_PI_RELAY": "1"} if self.ids and self.notices else {}))
+                                      ({"BAUDE_PI_RELAY": "1"} if self.ids else {}))
         except OSError:
             shutil.rmtree(self.folder, ignore_errors=True)
             raise
@@ -597,19 +585,11 @@ class Run:
     def _read(self, stream, op):
         for line in stream:
             if line.strip():
-                if op == "out" and '"result"' in line:  # (a turn's end: an older caller's session as it is, first)
-                    self.sync()
                 self.conn.send({"op": op, "line": line.rstrip("\n")})
         if op == "out":
             code = self.p.wait()
-            self.sync()
             self.conn.send({"op": "exit", "code": code})
             self.end()
-
-    def sync(self):
-        """(a caller that doesn't take pi's notices) pi's session files, those written since they were last sent."""
-        if self.ids and not self.notices and (files := pack(self.sessions, self.ids, self.stamps, self.told)):
-            self.conn.send({"op": "sessions", "files": files})
 
     def take(self, msg):
         """A message from the caller."""

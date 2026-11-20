@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "The folder a session's agent runs in, from its next message on (not at a turn).",
+  "properties": {
+    "op": {
+      "const": "set_cwd",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The folder."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

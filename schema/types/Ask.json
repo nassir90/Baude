@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "A permission its agent's asking for, not answered yet. Answered with input: a control_response for its request_id, as claude's stream-json has it.",
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "The control request's id."
+    },
+    "tool": {
+      "type": ["string", "null"],
+      "description": "The tool it asks to use."
+    },
+    "input": {
+      "type": ["object", "null"],
+      "description": "The tool's input (long strings in it cut short)."
+    }
+  },
+  "required": ["request_id"],
+  "additionalProperties": false
+}

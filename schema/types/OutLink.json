@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "description": "A link made from here.",
+  "properties": {
+    "where": {
+      "$ref": "Where.json",
+      "description": "Where it goes."
+    },
+    "id": {
+      "type": ["string", "null"],
+      "description": "The member it reaches."
+    },
+    "name": {
+      "type": ["string", "null"],
+      "description": "Its name."
+    },
+    "state": {
+      "enum": ["linked", "connecting", "dropped", "inactive"],
+      "description": "How it is."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "What's wrong."
+    },
+    "active": {
+      "type": "boolean",
+      "description": "Not deactivated."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "description": "Who's connecting: the first line, always.",
+  "properties": {
+    "op": {
+      "const": "hello",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "client": {
+      "type": "string",
+      "description": "What it is (baude, record, baude-android, a host's mesh, ...)."
+    },
+    "version": {
+      "type": "integer",
+      "description": "The wire version it speaks."
+    },
+    "commit": {
+      "type": "string",
+      "description": "The commit its code is (said in the host's log if it's another than the host's)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "description": "A Bot's routine (baudelib.routines): work it's given on a schedule.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "What it's to do."
+    },
+    "paused": {
+      "type": "boolean",
+      "description": "Paused."
+    },
+    "last": {
+      "type": ["number", "null"],
+      "description": "When it last ran."
+    },
+    "every": {
+      "type": "integer",
+      "description": "Minutes between runs."
+    },
+    "at": {
+      "type": "string",
+      "description": "The host's local time it runs at, HH:MM."
+    },
+    "days": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "The days it runs at at, 0 Monday to 6 Sunday."
+    },
+    "next": {
+      "type": ["number", "null"],
+      "description": "When it runs next."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Why its last run didn't."
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}

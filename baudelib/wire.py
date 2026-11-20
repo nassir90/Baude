@@ -1,19 +1,22 @@
 """What Baude and a server say to each other: one JSON object a line (UTF-8, ending in a newline), each with an "op".
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
-What may be said is schema/wire.schema.json's (JSON Schema, draft 2020-12), read as this is imported: each message
-(its op, its fields, what each is), the entities in them (a session, a host's info, the mesh's records), the
-protocol's constants and its version (VERSION). The Android app's build makes Kotlin of the same file. Its reference,
-as this module's help shows it below, is made from it (docs()); defs has a class for each of its messages and entities
-(Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Python's own senders write
-dicts, as before: every message sent goes through the schema all the same (Channel.send). A field given as None that
-its op doesn't let be null is left out; one with an op or a field the schema doesn't have isn't sent (a request of this
-end's own is refused here, as if the other end had; an answer goes as that refusal; a listing or a turn's end is only
-said on stderr); a message passed on (a tunnel's) goes as it came. A request a host takes is looked at too (refusal):
-an op it doesn't take is answered "unsupported operation", fields that aren't as the schema has them "invalid data
-type", each an error with a code of its own (UNSUPPORTED, INVALID) and what was wrong (detail), the same from every
-host, the phone's too. $BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what
-doesn't fit.
+What may be said is schema/'s (JSON Schema, draft 2020-12), read as this is imported. schema/types has a file for each
+message (its op, its fields, what each is) and each entity in them (a session, a host's info, the mesh's records), named
+for it; a message's name says what it is too: Hello.request.json (a request, which a host takes, its req coming back on
+the answer), HelloReply.reply.json, Sessions.event.json (a host's, unasked), Open.frame.json (on a mesh link). One names
+another by its file's name ({"$ref": "Session.json"}). schema/variables has a file for each of the protocol's constants,
+its version (VERSION, said in hello for a person to read) among them. The Android app's build makes Kotlin of the same
+files. Its reference, as this module's help shows it below, is made from them (docs()); defs has a class for each of its
+messages and entities (Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Python's
+own senders write dicts, as before: every message sent goes through the schema all the same (Channel.send). A field
+given as None that its op doesn't let be null is left out; one with an op or a field the schema doesn't have isn't sent
+(a request of this end's own is refused here, as if the other end had; an answer goes as that refusal; a listing or a
+turn's end is only said on stderr); a message passed on (a tunnel's) goes as it came. A request a host takes is looked
+at too (refusal): an op it doesn't take is answered "unsupported operation", fields that aren't as the schema has them
+"invalid data type", each an error with a code of its own (UNSUPPORTED, INVALID) and what was wrong (detail), the same
+from every host, the phone's too: what a head shows, rather than asking first whether a host takes something.
+$BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what doesn't fit.
 
 A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
 request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
@@ -65,77 +68,96 @@ import sys
 import threading
 import time
 
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema", "wire.schema.json")
+SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema")
 STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
+KINDS = ("request", "reply", "event", "frame")  # (what a message is, as its file's name says: a request a host takes)
+_FILE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\.([a-z]+))?\.json")
+_REF = re.compile(r'"\$ref": "([^"]*)"')
 
 
 class SchemaError(Exception):
-    """schema/wire.schema.json isn't as it must be: a key twice in one object, or a ref to a def that isn't there,
-    say."""
+    """A file in schema/types or schema/variables isn't as it must be, said with its name: JSON that can't be read, a
+    key twice in one object, a $ref to no type, say."""
 
 
-def _load(path):
-    def pairs(kv):  # (a key twice in one object: an error, not the last one taken)
-        out = {}
-        for k, v in kv:
-            if k in out:
-                raise SchemaError(f"{os.path.basename(path)}: {k!r} is there twice in one object")
-            out[k] = v
-        return out
-    with open(path, encoding="utf-8") as f:
-        return json.load(f, object_pairs_hook=pairs)
+def _load(folder):
+    """Each file in schema/<folder>, by its name: {name: (its kind, as its file's name says it, or None; its JSON;
+    its path)}."""
+    out = {}
+    for f in sorted(os.listdir(os.path.join(SCHEMA_DIR, folder))):
+        if f.startswith("."):
+            continue
+        path = f"schema/{folder}/{f}"
+
+        def pairs(kv):  # (a key twice in one object: an error, not the last one taken)
+            obj = {}
+            for k, v in kv:
+                if k in obj:
+                    raise SchemaError(f"{path}: {k!r} is there twice in one object")
+                obj[k] = v
+            return obj
+        if (m := _FILE.fullmatch(f)) is None:
+            raise SchemaError(f"{path}: not named Name.json or Name.kind.json")
+        if m[1] in out:
+            raise SchemaError(f"{path}: {out[m[1]][2]} is {m[1]} too")
+        try:
+            with open(os.path.join(SCHEMA_DIR, folder, f), "rb") as fh:
+                out[m[1]] = (m[2], json.load(fh, object_pairs_hook=pairs), path)
+        except ValueError as e:
+            raise SchemaError(f"{path}: {e}") from None
+    return out
 
 
-SCHEMA = _load(SCHEMA_PATH)
-DEFS = SCHEMA["$defs"]
+def _check(types, variables):
+    """SchemaError, naming the file, for a kind that isn't one of KINDS, a message without an op const, an entity
+    with an op, a $ref to no type, or a variable without a const."""
+    for kind, d, path in types.values():
+        if not isinstance(d, dict):
+            raise SchemaError(f"{path}: not an object")
+        op = d.get("properties", {}).get("op")
+        if kind is not None and kind not in KINDS:
+            raise SchemaError(f"{path}: {kind} isn't one of {', '.join(KINDS)}")
+        if kind is not None and not isinstance((op or {}).get("const"), str):
+            raise SchemaError(f"{path}: a message with no op const")
+        if kind is None and op is not None:
+            raise SchemaError(f"{path}: an op, but no kind in its name (Name.request.json, ...)")
+        for ref in _REF.findall(json.dumps(d)):
+            if _name(ref) not in types or not ref.endswith(".json"):
+                raise SchemaError(f"{path}: no type {ref}")
+    for kind, v, path in variables.values():
+        if kind is not None or "const" not in v:
+            raise SchemaError(f"{path}: not a variable (Name.json, with a const)")
 
 
-def _lines():
-    """The defs that are lines, in order, and each op's: SchemaError, naming the def, for one oneOf names that isn't
-    there, or a line without an op const or an x-kind."""
-    names, ops = [], {}
-    for ref in SCHEMA["oneOf"]:
-        name = ref.get("$ref", "").rsplit("/", 1)[-1]
-        if name not in DEFS:
-            raise SchemaError(f"oneOf's {ref.get('$ref')!r}: no such def")
-        op = DEFS[name].get("properties", {}).get("op", {}).get("const")
-        if not isinstance(op, str):
-            raise SchemaError(f"{name}: a line with no op const")
-        if DEFS[name].get("x-kind") not in ("request", "reply", "event", "frame", "both"):
-            raise SchemaError(f"{name}: a line with no x-kind (request, reply, event, frame or both)")
-        if DEFS[name].get("x-op") != op:
-            raise SchemaError(f"{name}: its x-op isn't its op const")
-        names.append(name)
-        ops.setdefault(op, []).append(name)
-    return names, ops
+def _name(ref):
+    """The type a $ref names (its file's name: Session.json)."""
+    return ref.removesuffix(".json")
 
 
-MESSAGES, OPS = _lines()  # (the defs that are lines, in order; an op: its lines, a request's and its answer's, say)
+_types, _variables = _load("types"), _load("variables")
+_check(_types, _variables)
+DEFS = {name: d for name, (_kind, d, _path) in _types.items()}  # (each message and entity, by its name)
+KIND = {name: kind for name, (kind, _d, _path) in _types.items() if kind}  # (each message's)
+MESSAGES = tuple(KIND)
+OPS = {}  # (an op: its messages, a request's and its answer's, say)
+for _n in MESSAGES:
+    OPS.setdefault(DEFS[_n]["properties"]["op"]["const"], []).append(_n)
+VARIABLES = {name: v for name, (_kind, v, _path) in _variables.items()}  # (each constant: its const, what it is)
+CONSTANTS = {name: v["const"] for name, v in VARIABLES.items()}
+del _types, _variables, _n
 
 
 def _ref(schema):
-    """The def a field's schema is, if it's one (or one or null): its name."""
+    """The type a field's schema is, if it's one (or one or null): its name."""
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[1]
+        return _name(schema["$ref"])
     for s in schema.get("anyOf") or ():
         if "$ref" in s:
-            return s["$ref"].rsplit("/", 1)[1]
+            return _name(s["$ref"])
     return None
 
 
-def _check_schema():
-    """Every def a line or an entity, every $ref one of them (a key twice in one object: _load's)."""
-    for name, d in DEFS.items():
-        if name not in MESSAGES and ("x-op" in d or "op" in d.get("properties", {})):
-            raise SchemaError(f"{name}: a line (it has an op) that oneOf doesn't name")
-        for ref in re.findall(r'"\$ref": "#/\$defs/([^"]+)"', json.dumps(d)):
-            if ref not in DEFS:
-                raise SchemaError(f"{name}: no def {ref}")
-
-
-_check_schema()
-VERSION = SCHEMA["x-version"]
-CONSTANTS = {k: c["value"] for k, c in SCHEMA["x-constants"].items()}
+VERSION = CONSTANTS["VERSION"]  # (said in hello, for a person to read: never compared)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
 PING_S = CONSTANTS["PING_S"]      # a subscriber hears from the server at least this often
@@ -146,13 +168,11 @@ INVALID = "invalid_data_type"
 SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
 
 
-def speaks(info, op, version=1):
-    """Does a host take op: as its hello's ops say, where it lists them (a host that speaks only part of these lines: a
-    phone's); else by its version, the one that brought op."""
+def takes(info, op):
+    """Does a host take op, as far as a head can tell before asking: no only for one whose hello lists the ops it
+    takes (a phone's), without it. Any other's answer says (refused(UNSUPPORTED))."""
     ops = (info or {}).get("ops")
-    if isinstance(ops, list):
-        return op in ops
-    return ((info or {}).get("version") or 1) >= version
+    return not isinstance(ops, list) or op in ops
 
 
 # ---- the classes
@@ -244,8 +264,6 @@ defs = _Defs()
 def _names_checker(schema, where):
     """A function that says what of a value isn't the schema's (a field it doesn't have, in an entity of its own,
     in a list, a map or itself), or None for one with nothing to look at (an open object, a plain value)."""
-    if schema.get("x-open"):
-        return None
     ref = _ref(schema)
     if ref is not None:
         d = DEFS[ref]
@@ -343,12 +361,12 @@ def check(msg):
 
 def problems(msg, kinds=None):
     """Everything about a message that isn't as the schema has it, types too ($BAUDE_WIRE_STRICT's): [what, ...];
-    kinds: as one of its op's lines of those kinds only (x-kind: request, ...)."""
+    kinds: as one of its op's messages of those kinds only (KINDS: request, ...)."""
     if not isinstance(msg, dict) or msg.get("op") not in OPS:
         return [check(msg) or "not a message"]
     best = None
     for name in OPS[msg["op"]]:
-        if kinds is not None and DEFS[name]["x-kind"] not in kinds:
+        if kinds is not None and KIND[name] not in kinds:
             continue
         found = []
         _validate(DEFS[name], msg, msg["op"], found)
@@ -359,7 +377,7 @@ def problems(msg, kinds=None):
     return best or []
 
 
-TAKEN = frozenset(DEFS[n]["x-op"] for n in MESSAGES if DEFS[n]["x-kind"] in ("request", "both"))  # (a host's ops)
+TAKEN = frozenset(DEFS[n]["properties"]["op"]["const"] for n in MESSAGES if KIND[n] == "request")  # (a host's ops)
 
 
 def refused(code, req=None, detail=None):
@@ -386,7 +404,7 @@ NULLABLE = {op: frozenset(f for n in names for f, p in DEFS[n]["properties"].ite
 
 def _cut(schema, value):
     """value with what the schema hasn't left out of it: its closed entities' fields, in lists and maps too."""
-    if schema.get("x-open") or value is None:
+    if value is None:
         return value
     ref = _ref(schema)
     if ref is not None:
@@ -418,8 +436,6 @@ def cut(msg):
 def _unnuller(schema):
     """A function that leaves out of a value the fields given as None that can't be null, in the closed entities
     in it (in lists and maps too), or None if there are none to look at."""
-    if schema.get("x-open"):
-        return None
     ref = _ref(schema)
     if ref is not None:
         return _entity_unnuller(ref) if DEFS[ref].get("additionalProperties") is False else None
@@ -508,7 +524,7 @@ def refusal(msg, takes=TAKEN):
         why = f"no op {msg.get('op') if isinstance(msg, dict) else None!r} here"
         _say(f"refused: {why}")
         return refused(UNSUPPORTED, req, why)
-    if bad := problems(msg, ("request", "both")):
+    if bad := problems(msg, ("request",)):
         _say(f"refused: {bad[0]}")
         return refused(INVALID, req, bad[0])
     return None
@@ -520,7 +536,7 @@ _TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool
 
 def _validate(schema, value, where, out):
     if (ref := schema.get("$ref")) is not None:
-        return _validate(DEFS[ref.rsplit("/", 1)[1]], value, where, out)
+        return _validate(DEFS[_name(ref)], value, where, out)
     if "anyOf" in schema:
         for s in schema["anyOf"]:
             tried = []
@@ -537,8 +553,6 @@ def _validate(schema, value, where, out):
         if not any(isinstance(value, _TYPES[k]) and not (k in ("integer", "number") and isinstance(value, bool))
                    for k in kinds):
             return out.append(f"{where}: {type(value).__name__} where it's {'/'.join(kinds)}")
-    if schema.get("x-open"):
-        return
     if isinstance(value, dict) and "properties" in schema:
         for f in schema.get("required") or ():
             if f not in value:
@@ -585,20 +599,18 @@ def docs():
             out.append(f"{indent}{f}: {kind(p)}. {p.get('description', '')}")
         return out
 
-    lines = ["", "The wire's reference (schema/wire.schema.json):", ""]
+    lines = ["", "The wire's reference (schema/types):", ""]
     for name in MESSAGES:
         d = DEFS[name]
-        answers = [DEFS[r["$ref"].rsplit("/", 1)[1]]["x-op"] for r in d.get("x-reply") or ()]
-        to = f" -> {', '.join(dict.fromkeys(answers))}" if answers else ""
-        lines.append(f"    {d['x-op']} ({d['x-kind']}{to}): {d.get('description', '')}")
+        lines.append(f"    {d['properties']['op']['const']} ({KIND[name]}): {d.get('description', '')}")
         lines += fields(d, "        ")
     lines += ["", "Entities:"]
     for name, d in DEFS.items():
         if name not in MESSAGES:
             lines.append(f"    {name}: {d.get('description', '')}")
             lines += fields(d, "        ")
-    lines += ["", "Constants:"] + [f"    {k} = {c['value']} ({c['unit']}): {c['description']}"
-                                   for k, c in SCHEMA["x-constants"].items()]
+    lines += ["", "Constants (schema/variables):"] + [f"    {k} = {v['const']}: {v.get('description', '')}"
+                                                      for k, v in VARIABLES.items()]
     return "\n".join(lines) + "\n"
 
 
@@ -901,9 +913,7 @@ def through(ch, host, timeout=5.0, as_=None):
     reply = ch.reply()
     if not reply or reply.get("op") != "relayed":
         ch.close()
-        error = (reply or {}).get("error") or "the host process here didn't answer"
-        raise OSError("Daemon is older than client, with no mesh: restart it" if error.startswith("no session")
-                      else error)
+        raise OSError(said(reply) if reply else "the host process here didn't answer")
     return _hello(ch, max(timeout, 10.0), host)
 
 

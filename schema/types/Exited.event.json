@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "A session's agent stopped.",
+  "properties": {
+    "op": {
+      "const": "exited",
+      "description": "What it is."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "code": {
+      "type": ["integer", "null"],
+      "description": "Its exit code."
+    },
+    "stopped": {
+      "type": "boolean",
+      "description": "Told to (stop)."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

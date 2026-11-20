@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): the same from every host, what was wrong in detail.",
+  "properties": {
+    "op": {
+      "const": "error",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    },
+    "code": {
+      "enum": ["unsupported_operation", "invalid_data_type"],
+      "description": "One of the schema's own refusals."
+    },
+    "detail": {
+      "type": "string",
+      "description": "A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is."
+    },
+    "plain": {
+      "type": "boolean",
+      "description": "Said for the user as it is."
+    },
+    "gone": {
+      "$ref": "GoneFolder.json",
+      "description": "A session's folder gone and not made again."
+    },
+    "session": {
+      "type": "string",
+      "description": "memory's refusal: the session."
+    },
+    "text": {
+      "type": "string",
+      "description": "memory's refusal: the memory as the Bot left it."
+    },
+    "seen": {
+      "type": ["string", "null"],
+      "description": "memory's refusal: what the user's accepted of it."
+    },
+    "mtime": {
+      "type": ["number", "null"],
+      "description": "memory's refusal: its mtime (ns; a phone's, seconds)."
+    },
+    "path": {
+      "type": "string",
+      "description": "memory's refusal: where it is."
+    }
+  },
+  "required": ["op", "error"],
+  "additionalProperties": false
+}

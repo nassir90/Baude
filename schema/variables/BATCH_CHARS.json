@@ -1,0 +1,4 @@
+{
+  "description": "A browser batch's whole answer, in characters, at most, its pictures counted as their tokens' worth.",
+  "const": 60000
+}

@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "description": "This host's Proxy, which runs other members' models over HTTP.",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "Where it is."
+    },
+    "key": {
+      "type": "string",
+      "description": "What it's asked with."
+    }
+  },
+  "additionalProperties": false
+}

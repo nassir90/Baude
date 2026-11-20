@@ -13747,7 +13747,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             # where a click without a move between lands come back with the next frame)
             self.transcript.queue_allocate()
         if self.chunk_slots or self.fill_jobs:
-            self.plan_fill()  # (the rest of the history drawn on, now it's still)
+            self.plan_fill()  # (what's near the view of its history drawn on, now it's still)
 
     def chat_moving(self):
         """Scrolled by the reader, and not still since (chat_still): what's drawn ahead waits for that."""
@@ -13839,6 +13839,11 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if at == self.cull_at:
             return
         self.cull_at = at
+        if self.chunk_slots or self.fill_jobs:
+            # (the view's somewhere else now it's laid out: a chunk near it is drawn. Asked as it was moved,
+            # on_scrolled, the frame's look came before its layout, at where the view had been: a jump into a part
+            # not drawn, a click in the scrollbar's trough, found nothing near and left it empty)
+            self.plan_fill()
         going, slot = set(), hist.get_first_child()
         while slot is not None:
             ok, b = slot.compute_bounds(self.transcript)
@@ -17979,12 +17984,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't
-    # shrink and jump as they're drawn; each is drawn a little a frame (fill_frame): the one under the view or near it
-    # first, the rest ahead of the reader while the chat's still.
+    # shrink and jump as they're drawn; each is drawn a little a frame (fill_frame) as the view comes near it: the one
+    # under the view first, the next ahead of the reader while the chat's still. One far from the view is never drawn.
     PX_PER_ITEM = 100  # (an item's height, till some are drawn: about the average of long chats)
     FILL_NEAR = 3.0  # screens: a chunk this near the view is drawn even while it's scrolled
+    FILL_AHEAD = 8.0  # screens: and one this near while it's still, once it's scrolled up from its end
     FILL_BUDGET, FILL_BUDGET_STILL = 0.003, 0.008  # s of making items a frame: while the chat's scrolled, still
-    FILL_AFTER_MS = 600  # (after opening: what's earlier is drawn ahead from then on)
+    FILL_AFTER_MS = 600  # (after opening: an earlier chunk near the view is drawn from then on)
 
     def make_chunk_slots(self):
         """The earlier chunks' places, made once it's known how many: a chunk put in above what's drawn moved everything
@@ -18204,8 +18210,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def next_fill(self, moving):
         """The chunk to draw on now: the one nearest the view within FILL_NEAR screens (a thumb dragged into a part not
-        drawn yet: what's under the view first), else, while the chat's still, the lowest not drawn (ahead of the
-        reader); None for none now."""
+        drawn yet: what's under the view first), or, while the chat's still and scrolled up from its end, within
+        FILL_AHEAD (ahead of the reader); None for none now. The rest stay places in the file: drawn ahead whatever
+        their distance, a long chat left open was all drawn within the minute, and held all its widgets."""
         top, page = self.view_top()
         if top is None:
             return None
@@ -18216,15 +18223,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             return None
         near = [(self.slot_away(job.slot, top, page), i, job) for i, job in enumerate(self.fill_jobs)]
         near += [(self.slot_away(slot, top, page), len(near) + i, slot) for i, slot in enumerate(self.chunk_slots or ())]
-        near = [n for n in near if n[0] < self.FILL_NEAR * page]
+        still = not moving and not self.busy
+        reach = self.FILL_AHEAD if still and not self.stick_bottom else self.FILL_NEAR
+        near = [n for n in near if n[0] < reach * page]
         if near:
             what = min(near, key=lambda n: (n[0], n[1]))[2]
-        elif moving or self.busy:
-            return None
-        elif self.fill_jobs:
-            what = self.fill_jobs[0]
-        elif self.chunk_slots:
-            what = self.chunk_slots[0]
+        elif still and self.fill_jobs:
+            what = self.fill_jobs[0]  # (one begun as the view passed near it: not left half made)
         else:
             return None
         if isinstance(what, ChunkFill):

@@ -176,8 +176,8 @@ def content(tool, result):
     return out
 
 
-BATCH_MAX = 25  # (a batch's actions at most)
-BATCH_CHARS = 60000  # (a batch's whole answer at most, its pictures counted as their tokens' worth: well under what
+BATCH_MAX = wire.CONSTANTS["BATCH_MAX"]  # (a batch's actions at most)
+BATCH_CHARS = wire.CONSTANTS["BATCH_CHARS"]  # (a batch's whole answer at most, its pictures counted as their tokens' worth: well under what
 # an agent takes from a tool)
 NOT_BATCHED = {"browser_batch", "javascript_tool"}  # (a batch is the tools only: no script in it, nor a batch)
 SAID = ("tabId", "title", "url", "loading", "selected")  # (a tab's description: in a batch, said only as it changes)

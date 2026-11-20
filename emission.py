@@ -44,6 +44,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
+from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities: schema/wire.schema.json's, the phone's too)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
@@ -3426,8 +3427,8 @@ class Control:
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
     TYPE_GAP_MS = 12  # (between characters typed: xdotool type's own pace)
     LOAD_S = 30  # (a page's load waited for this long at most)
-    SHOT_MAX = 1024  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
-    ZOOM_MAX = 1568  # (a zoom's longest side: what a model sees whole)
+    SHOT_MAX = wire.CONSTANTS["SHOT_MAX"]  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
+    ZOOM_MAX = wire.CONSTANTS["ZOOM_MAX"]  # (a zoom's longest side: what a model sees whole)
     NEAR = 1  # (read_page: what's shown, and this many screens above and below it)
     CAME_LINES, CAME_CHARS = 30, 1500  # (a scroll's answer: at most this much of what came into view)
 
@@ -3581,7 +3582,8 @@ class Control:
             w, h = view["w"], view["h"]
             scale = min(1.0, self.SHOT_MAX / max(w, h))
             pw, ph = max(1, round(w * scale)), max(1, round(h * scale))
-            image = self.jpeg_of(pic, 0, 0, pic.get_width(), pic.get_height(), pw, ph, 82)
+            image = self.jpeg_of(pic, 0, 0, pic.get_width(), pic.get_height(), pw, ph,
+                                 wire.CONSTANTS["SHOT_QUALITY"])
             self.scales[t.id] = scale
             answer({**self.describe(t), "image": image, "mime": "image/jpeg", "width": pw, "height": ph,
                     "note": "x and y for click, scroll and zoom are this picture's pixels"})
@@ -3611,7 +3613,8 @@ class Control:
             px, py, pw, ph = x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k
             fit = min(1.0, self.ZOOM_MAX / max(pw, ph))
             ow, oh = max(1, round(pw * fit)), max(1, round(ph * fit))
-            answer({**self.describe(t), "image": self.jpeg_of(pic, px, py, pw, ph, ow, oh, 90), "mime": "image/jpeg",
+            image = self.jpeg_of(pic, px, py, pw, ph, ow, oh, wire.CONSTANTS["ZOOM_QUALITY"])
+            answer({**self.describe(t), "image": image, "mime": "image/jpeg",
                     "width": ow, "height": oh, "region": [round(v) for v in region],
                     "note": "x and y for click and scroll are still the screenshot's pixels"})
         self.picture(t, answer, shot)
@@ -4156,7 +4159,7 @@ def scaled(w, h, stride, data, max_w, max_h):
     return pic.get_width(), pic.get_height(), pic.get_rowstride(), pic.read_pixel_bytes().get_data()
 
 
-def jpeg(w, h, stride, data, quality=72):
+def jpeg(w, h, stride, data, quality=wire.CONSTANTS["FRAME_QUALITY"]):
     gi.require_version("GdkPixbuf", "2.0")
     from gi.repository import GdkPixbuf
     pic = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, True, 8, w, h, stride)

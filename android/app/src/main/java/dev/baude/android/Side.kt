@@ -162,9 +162,8 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
         while (true) { // (each file held said, so only what's new comes; one request at a time)
             val have = JSONObject()
             for ((n, sm) in held) have.put(n, org.json.JSONArray(listOf(sm.first, sm.second)))
-            val r = asked(chat.hostId, JSONObject().put("op", "subagents").put("session", chat.sid).put("have", have)
-                .put("limit", 4 shl 20))
-            if (r.optString("op") != "subagents") { delay(5_000); continue }
+            val r = asked(chat.hostId, Msg.Subagents(session = chat.sid, have = have, limit = 4 shl 20).json())
+            if (r.optString("op") != Op.SUBAGENTS) { delay(5_000); continue }
             for (f in r.optJSONArray("files").list()) {
                 val n = f.optString("name")
                 val data = f.optString("data")

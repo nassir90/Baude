@@ -324,7 +324,7 @@ object Mesh {
     fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {
         val c = conns[hostId]
         if (c == null) {
-            then(JSONObject().put("op", "error").put("error", "the server isn't there"))
+            then(Msg.Error(error = "the server isn't there").json())
             return
         }
         c.request(msg) { r -> main.post { then(r) } }
@@ -462,13 +462,13 @@ object Mesh {
         if (always) {
             val all = alwaysAllowed(chat) + ask.tool
             allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
-            val req = JSONObject().put("op", "always_allow").put("session", chat.sid)
+            val req = Msg.AlwaysAllow(session = chat.sid).json()
             if ((c.info?.optInt("version", 1) ?: 1) >= 15) req.put("add", JSONArray(listOf(ask.tool))) // (added to
             else req.put("tools", JSONArray(all.sorted())) // its list; an older host's replaced: all that's known here)
             c.request(req) {}
         }
-        c.request(JSONObject().put("op", "input").put("session", chat.sid).put("msg", msg)) { r ->
-            if (r.optString("op") == "error") main.post {
+        c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
+            if (r.optString("op") == Op.ERROR) main.post {
                 chat.said.value = "Couldn't answer: " + r.optString("error")
                 if (open === chat && chat.asks.none { it.rid == ask.rid }) chat.asks.add(ask) // (still asked: again)
             }
@@ -486,7 +486,7 @@ object Mesh {
     fun picture(c: Contact) {
         if (c.pictureKey in pictures || c.session.optJSONObject("bot")?.isNull("picture") != false) return
         pictures[c.pictureKey] = null
-        conns[c.hostId]?.request(JSONObject().put("op", "bot_picture").put("session", c.id)) { r ->
+        conns[c.hostId]?.request(Msg.BotPicture(session = c.id).json()) { r ->
             val data = r.optString("picture", "")
             if (data.isEmpty()) {
                 main.post { pictures.remove(c.pictureKey) } // (asked again next time it's drawn)
@@ -520,9 +520,9 @@ object Mesh {
 
     fun close() {
         val chat = open ?: return
-        conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", chat.sid))
+        conns[chat.hostId]?.send(Msg.Detach(session = chat.sid).json())
         for (q in chat.btw) if (q.sid.isNotEmpty()) // (its side questions let go of with it, as Baude's window's are)
-            conns[chat.hostId]?.send(JSONObject().put("op", "detach").put("session", q.sid))
+            conns[chat.hostId]?.send(Msg.Detach(session = q.sid).json())
         open = null
     }
 
@@ -537,9 +537,8 @@ object Mesh {
     /** The chat attached to live, as one that answers what it asks while the app's on screen (its asks, as they are,
      * shown to answer). */
     private fun attach(chat: Chat) {
-        conns[chat.hostId]?.request(JSONObject().put("op", "attach").put("session", chat.sid).put("live", true)
-            .put("answers", visible)) { r ->
-            if (r.optString("op") != "attached") return@request
+        conns[chat.hostId]?.request(Msg.Attach(session = chat.sid, live = true, answers = visible).json()) { r ->
+            if (r.optString("op") != Op.ATTACHED) return@request
             val asks = r.optJSONArray("asks").list().mapNotNull(Ask::of)
             main.post {
                 if (open !== chat) return@post
@@ -557,11 +556,11 @@ object Mesh {
         val listed = sessions[chat.hostId]?.firstOrNull { it.optString("id") == chat.sid }?.optLong("senders", 0) ?: 0
         if (listed == chat.sendersRev || chat.fetchingSenders) return
         chat.fetchingSenders = true
-        c.request(JSONObject().put("op", "senders").put("session", chat.sid)) { r ->
+        c.request(Msg.SendersOp(session = chat.sid).json()) { r ->
             val got = r.optJSONObject("senders")
             main.post {
                 chat.fetchingSenders = false
-                if (r.optString("op") != "senders" || got == null) return@post
+                if (r.optString("op") != Op.SENDERS || got == null) return@post
                 chat.sendersRev = r.optLong("rev", listed)
                 val now = got.keys().asSequence().mapNotNull { k -> got.optJSONObject(k)?.let { k to it } }.toMap()
                 chat.senders.keys.retainAll(now.keys)
@@ -581,14 +580,14 @@ object Mesh {
         val from = if (chat.offset < 0) (size - TAIL).coerceAtLeast(0) else chat.offset
         if (chat.offset < 0 && sessions[chat.hostId] == null) return // (its size not known yet: read once it is)
         chat.reading = true
-        c.request(JSONObject().put("op", "transcript").put("session", chat.sid).put("offset", from)) { r ->
+        c.request(Msg.Transcript(session = chat.sid, offset = from).json()) { r ->
             val data = r.optString("data", "")
             val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
             val next = r.optLong("next", from)
             val more = next < r.optLong("size", next)
             val lines = parse(text, cutFirst = chat.offset < 0 && from > 0)
             main.post {
-                if (r.optString("op") == "transcript") {
+                if (r.optString("op") == Op.TRANSCRIPT) {
                     chat.offset = next
                     for (line in lines) {
                         when (line.kind) {
@@ -704,10 +703,10 @@ object Mesh {
         if (c == null || id in chat.holding) return
         chat.holding.add(id)
         chat.said.value = null
-        c.request(JSONObject().put("op", "held").put("session", chat.sid).put("id", id).put("send", send)) { r ->
+        c.request(Msg.HeldOp(session = chat.sid, id = id, send = send).json()) { r ->
             main.post {
                 chat.holding.remove(id)
-                if (r.optString("op") == "error")
+                if (r.optString("op") == Op.ERROR)
                     chat.said.value = (if (send) "Not sent: " else "Not deleted: ") + r.optString("error")
                 else read(chat)
             }
@@ -736,10 +735,10 @@ object Mesh {
             return
         }
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", blocks))
-        c.request(JSONObject().put("op", "input").put("session", chat.sid).put("msg", msg)) { r ->
+        c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
             main.post {
                 chat.busy.value = false
-                if (r.optString("op") == "error") chat.said.value = "Couldn't send: " + r.optString("error")
+                if (r.optString("op") == Op.ERROR) chat.said.value = "Couldn't send: " + r.optString("error")
                 read(chat)
             }
         }
@@ -792,8 +791,7 @@ object Mesh {
 
     private fun last(c: Connection, sid: String, size: Long) {
         val contact = contact(c.id, sid) ?: return
-        c.request(JSONObject().put("op", "transcript").put("session", sid)
-            .put("offset", (size - 64_000).coerceAtLeast(0))) { r ->
+        c.request(Msg.Transcript(session = sid, offset = (size - 64_000).coerceAtLeast(0)).json()) { r ->
             val data = r.optString("data", "")
             val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
             val last = parse(text, cutFirst = true).lastOrNull { it.kind == "bot" || it.kind == "error" }?.text ?: return@request

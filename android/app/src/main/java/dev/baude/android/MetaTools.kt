@@ -232,10 +232,10 @@ object MetaTools {
 
     private fun rename(h: String, sid: String, title: String, then: (String?) -> Unit) {
         var answered = false
-        Mesh.ask(h, JSONObject().put("op", "rename").put("session", sid).put("title", title)) { r ->
+        Mesh.ask(h, Msg.Rename(session = sid, title = title).json()) { r ->
             if (answered) return@ask
             answered = true
-            then(if (r.optString("op") == "renamed") null else r.optString("error").ifBlank { "it said no" })
+            then(if (r.optString("op") == Op.RENAMED) null else r.optString("error").ifBlank { "it said no" })
         }
         Mesh.later(30_000) { if (!answered) { answered = true; then("its host didn't answer") } }
     }
@@ -360,9 +360,8 @@ object MetaTools {
             "read_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
                 val size = s.optLong("size", 0)
-                Mesh.ask(h, JSONObject().put("op", "transcript").put("session", s.optString("id"))
-                    .put("offset", (size - 60_000).coerceAtLeast(0))) { r ->
-                    if (r.optString("op") != "transcript") return@ask no(r.optString("error"))
+                Mesh.ask(h, Msg.Transcript(session = s.optString("id"), offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
+                    if (r.optString("op") != Op.TRANSCRIPT) return@ask no(r.optString("error"))
                     val data = r.optString("data", "")
                     val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
                     val said = parse(text, cutFirst = size > 60_000).filter { it.kind in setOf("you", "bot", "tool", "note", "error") }

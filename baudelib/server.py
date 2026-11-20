@@ -31,8 +31,8 @@ from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hos
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
 DRAFT_S = 30  # (a new chat never written in, nobody attached this long: gone)
-EPHEMERAL_S = 1  # (a side question whose head's gone: gone this soon)
-GRACE_MOST = 24 * 3600  # (start's grace: an ephemeral session waits at most this long for its head to come back)
+EPHEMERAL_S = wire.CONSTANTS["EPHEMERAL_S"]  # (a side question whose head's gone: gone this soon)
+GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral session waits at most this long for its head to come back)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 FILE_LIMIT = 4 << 20

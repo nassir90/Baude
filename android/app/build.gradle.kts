@@ -304,6 +304,167 @@ androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeTokens, BaudeTokens::outputDir) }
 }
 
+/** schema/wire.schema.json, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names, Since's
+ * versions (each op's and field's, as Feature), WireConstants, and Msg's classes, one for each message and entity,
+ * built with their fields and made JSON (json) or read from it (from). The build fails if the schema's versions don't
+ * add up (a version claimed twice, one whose history isn't what's marked with it), as wire.py's import does. */
+abstract class WireSchema : DefaultTask() {
+    @get:InputFile abstract val schema: RegularFileProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    private fun plain(v: Any?): Any? = when (v) {
+        is Map<*, *> -> v.entries.associateTo(LinkedHashMap<String, Any?>()) { it.key as String to plain(it.value) }
+        is List<*> -> v.map { plain(it) }
+        else -> v
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun map(v: Any?) = (v ?: emptyMap<String, Any?>()) as Map<String, Any?>
+
+    private val keywords = setOf("as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
+        "interface", "is", "null", "object", "package", "return", "super", "this", "throw", "true", "try", "typealias",
+        "typeof", "val", "var", "when", "while")
+
+    private fun camel(name: String) = name.split("_").mapIndexed { i, w ->
+        if (i == 0) w else w.replaceFirstChar { it.uppercase() } }.joinToString("").let { if (it in keywords) "`$it`" else it }
+
+    private fun upper(key: String) = key.replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").replace(".", "_").uppercase()
+
+    private fun ref(p: Map<String, Any?>): String? = (p["\$ref"] as String?)?.substringAfterLast("/")
+        ?: (p["anyOf"] as List<*>?)?.firstNotNullOfOrNull { (map(it)["\$ref"] as String?)?.substringAfterLast("/") }
+
+    private fun types(p: Map<String, Any?>): List<String> = when (val t = p["type"]) {
+        is String -> listOf(t)
+        is List<*> -> t.map { it as String }.filter { it != "null" }
+        else -> emptyList()
+    }
+
+    /** (Kotlin's type for a field, how it's made JSON, how it's read) */
+    private fun kind(p: Map<String, Any?>, key: String): Triple<String, (String) -> String, String> {
+        val r = ref(p)
+        val t = types(p)
+        if (r != null && "array" !in t) return Triple(r, { "$it.json()" }, "o.optJSONObject(\"$key\")?.let { $r.from(it) }")
+        if ("array" in t) {
+            val items = map(p["items"])
+            val ir = ref(items)
+            if (ir != null) return Triple("List<$ir>", { "JSONArray($it.map { x -> x.json() })" },
+                "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { $ir.from(it) } } }")
+            if (types(items) == listOf("string")) return Triple("List<String>", { "JSONArray($it)" },
+                "o.optJSONArray(\"$key\")?.let { a -> (0 until a.length()).map { i -> a.optString(i) } }")
+            return Triple("JSONArray", { it }, "o.optJSONArray(\"$key\")")
+        }
+        return when {
+            "const" in p || "enum" in p || t == listOf("string") -> Triple("String", { it }, "o.wireStr(\"$key\")")
+            t == listOf("integer") || t == listOf("number") -> Triple("Number", { it }, "o.opt(\"$key\") as? Number")
+            t == listOf("boolean") -> Triple("Boolean", { it }, "o.opt(\"$key\") as? Boolean")
+            t == listOf("object") -> Triple("JSONObject", { it }, "o.optJSONObject(\"$key\")")
+            else -> Triple("Any", { it }, "o.opt(\"$key\")?.takeIf { it != JSONObject.NULL }")
+        }
+    }
+
+    private fun doc(text: Any?, indent: String) = if (text == null) "" else
+        "$indent/** ${(text as String).replace("*/", "*&#47;")} */\n"
+
+    @Suppress("UNCHECKED_CAST")
+    @TaskAction
+    fun write() {
+        val s = map(plain(groovy.json.JsonSlurper().parse(schema.get().asFile)))
+        val defs = map(s["\$defs"]).mapValues { map(it.value) }
+        val messages = (s["oneOf"] as List<*>).map { (map(it)["\$ref"] as String).substringAfterLast("/") }
+        fun props(d: Map<String, Any?>) = map(d["properties"]).mapValues { map(it.value) }
+        fun op(d: Map<String, Any?>) = props(d)["op"]?.get("const") as String
+
+        // (every op, entity and field with the version it came with, checked against the history, as wire.py does)
+        val since = LinkedHashMap<String, Int>()
+        for ((name, d) in defs) {
+            val key = if (name in messages) op(d) else name
+            val v = (d["x-since"] as Number?)?.toInt() ?: 1
+            since[key]?.let { if (it != v) throw GradleException("wire schema: $key's lines say versions $it and $v") }
+            since[key] = v
+            for ((f, p) in props(d)) if (f != "op") since["$key.$f"] = maxOf((p["x-since"] as Number?)?.toInt() ?: 1, v)
+        }
+        val history = map(s["x-versions"]).mapValues { map(it.value) }
+        val numbers = history.keys.map { it.toInt() }.sorted()
+        if (numbers != (1..numbers.size).toList()) throw GradleException("wire schema: x-versions isn't 1 to ${numbers.size}")
+        for (v in numbers.drop(1)) {
+            val said = (history["$v"]!!["adds"] as List<String>?).orEmpty().toSet()
+            val have = since.filter { (k, n) -> n == v && !('.' in k && since[k.substringBefore('.')] == v) }.keys
+            if (said != have) throw GradleException("wire schema: version $v's history says it added ${said - have} that " +
+                "don't say it, and not ${have - said} that do: is it claimed twice?")
+        }
+        val version = numbers.last()
+        since.filterValues { it > version }.keys.takeIf { it.isNotEmpty() }?.let {
+            throw GradleException("wire schema: these came with a version past $version: $it") }
+
+        val out = StringBuilder()
+        out.append("package dev.baude.android\n\nimport org.json.JSONArray\nimport org.json.JSONObject\n\n")
+        out.append("// Made from schema/wire.schema.json as the app's built (android/app/build.gradle.kts's WireSchema).\n\n")
+        out.append("/** The wire's ops. */\nobject Op {\n")
+        for (o in messages.map { op(defs[it]!!) }.distinct()) out.append("    const val ${upper(o)} = \"$o\"\n")
+        out.append("}\n\n")
+        out.append("/** Something a host takes from a version on (or, where its hello lists its ops, if it lists it). */\n")
+        out.append("class Feature(val key: String, val since: Int)\n\n")
+        out.append("/** The version each op (START) and entity (SESSION) came with, and their fields (Start.EPHEMERAL). */\n")
+        out.append("object Since {\n    const val VERSION = $version\n")
+        val names = HashSet<String>()
+        for ((k, v) in since) if ('.' !in k) {
+            if (!names.add(upper(k))) throw GradleException("wire schema: two of its names are ${upper(k)} in Kotlin")
+            out.append("    val ${upper(k)} = Feature(\"$k\", $v)\n")
+        }
+        for (owner in since.keys.filter { '.' !in it }) {
+            val obj = owner.split("_").joinToString("") { w -> w.replaceFirstChar { it.uppercase() } }
+            if (!names.add(obj)) throw GradleException("wire schema: two of its names are $obj in Kotlin")
+            out.append("\n    object $obj {\n")
+            for ((k, v) in since) if (k.substringBefore('.') == owner && '.' in k)
+                out.append("        val ${upper(k.substringAfter('.'))} = Feature(\"$k\", $v)\n")
+            out.append("    }\n")
+        }
+        out.append("}\n\n")
+        out.append("/** The protocol's constants. */\nobject WireConstants {\n")
+        for ((k, c) in map(s["x-constants"])) {
+            val v = map(c)["value"]
+            out.append(doc("${map(c)["description"]} (${map(c)["unit"]})", "    "))
+            out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
+        }
+        out.append("}\n\n")
+        out.append("private fun JSONObject.wireStr(key: String): String? = if (isNull(key)) null else optString(key)\n\n")
+        out.append("/** The wire's messages and the entities in them: each built with the fields it's given (those left null aren't " +
+            "sent), json() as it goes, from() as it came (a field it doesn't have left out). */\nobject Msg {\n")
+        for ((name, d) in defs) {
+            val fields = props(d).filterKeys { it != "op" }
+            out.append(doc(d["description"], "    "))
+            out.append("    class $name(\n")
+            for ((f, p) in fields) {
+                out.append(doc(p["description"], "        "))
+                out.append("        val ${camel(f)}: ${kind(p, f).first}? = null,\n")
+            }
+            out.append("    ) {\n")
+            out.append("        fun json(): JSONObject {\n")
+            out.append("            val o = JSONObject()\n")
+            if (name in messages) out.append("            o.put(\"op\", Op.${upper(op(d))})\n")
+            for ((f, p) in fields) out.append("            ${camel(f)}?.let { o.put(\"$f\", ${kind(p, f).second("it")}) }\n")
+            out.append("            return o\n        }\n\n")
+            out.append("        companion object {\n")
+            out.append("            fun from(o: JSONObject) = $name(\n")
+            for ((f, p) in fields) out.append("                ${camel(f)} = ${kind(p, f).third},\n")
+            out.append("            )\n        }\n    }\n\n")
+        }
+        out.append("}\n")
+        val dir = outputDir.get().asFile.resolve("dev/baude/android")
+        dir.mkdirs()
+        dir.resolve("WireSchema.kt").writeText(out.toString())
+    }
+}
+
+val wireSchema = tasks.register<WireSchema>("wireSchema") {
+    schema.set(rootProject.layout.projectDirectory.file("../schema/wire.schema.json"))
+    outputDir.set(layout.buildDirectory.dir("generated/wireSchema"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(wireSchema, WireSchema::outputDir) }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

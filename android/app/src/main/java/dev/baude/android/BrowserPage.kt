@@ -69,7 +69,7 @@ import java.util.Base64
 /** A Bot's browser watched, as Baude's Browser page's Stream does from another machine: a connection of its own to
  * the Bot's host (one watch a connection), emission_watch on it, each frame (a JPEG) shown and acknowledged, its
  * state (tabs, the page's size, what's asked) kept; its picture's size told as it changes. */
-class Watch(private val hostId: String, private val bot: JSONObject) {
+class Watch(private val hostId: String, private val bot: Msg.BotRef) {
     val frame = mutableStateOf<ImageBitmap?>(null)
     val state = mutableStateOf<JSONObject?>(null)
     val status = mutableStateOf("connecting") // (connecting, watching, failed, stopped)
@@ -81,8 +81,8 @@ class Watch(private val hostId: String, private val bot: JSONObject) {
         conn = Mesh.watch(hostId, ::heard) { c ->
             if (c.state == "up") {
                 status.value = "connecting"
-                c.send(JSONObject().put("op", "emission_watch").put("req", REQ).put("bot", bot)
-                    .put("max_w", size.width.coerceAtLeast(200)).put("max_h", size.height.coerceAtLeast(200)))
+                c.send(Msg.EmissionWatch(req = REQ, bot = bot, maxW = size.width.coerceAtLeast(200),
+                    maxH = size.height.coerceAtLeast(200)).json())
             } else if (c.state == "down" && status.value == "watching") {
                 status.value = "failed"
                 why.value = "Can't connect to the browser."
@@ -99,8 +99,8 @@ class Watch(private val hostId: String, private val bot: JSONObject) {
     fun resized(to: IntSize) {
         if (to == size || to.width < 1) return
         size = to
-        conn?.send(JSONObject().put("op", "emission_watch_say").put("line", JSONObject()
-            .put("max_w", to.width.coerceAtLeast(200)).put("max_h", to.height.coerceAtLeast(200))))
+        conn?.send(Msg.EmissionWatchSay(line = Msg.WatchSay(maxW = to.width.coerceAtLeast(200),
+            maxH = to.height.coerceAtLeast(200))).json())
     }
 
     /** (on its connection's thread) What the watch says. */
@@ -121,7 +121,7 @@ class Watch(private val hostId: String, private val bot: JSONObject) {
                 Mesh.post {
                     frame.value = bmp
                     status.value = "watching"
-                    c.send(JSONObject().put("op", "emission_watch_say").put("line", JSONObject().put("ack", n)))
+                    c.send(Msg.EmissionWatchSay(line = Msg.WatchSay(ack = n)).json())
                 }
             }
         }
@@ -133,7 +133,7 @@ class Watch(private val hostId: String, private val bot: JSONObject) {
 }
 
 /** The browser's calls (the emission op's), sent one at a time in turn, each answered before the next (Asks). */
-private class Calls(val hostId: String, val bot: JSONObject, val failed: (String) -> Unit) {
+private class Calls(val hostId: String, val bot: Msg.BotRef, val failed: (String) -> Unit) {
     private val queue = ArrayDeque<JSONObject>()
     private var going = false
 
@@ -146,9 +146,9 @@ private class Calls(val hostId: String, val bot: JSONObject, val failed: (String
         if (going) return
         val c = queue.removeFirstOrNull() ?: return
         going = true
-        Mesh.ask(hostId, JSONObject().put("op", "emission").put("bot", bot).put("call", c)) { r ->
+        Mesh.ask(hostId, Msg.Emission(bot = bot, call = c).json()) { r ->
             going = false
-            val error = if (r.optString("op") == "error") r.optString("error")
+            val error = if (r.optString("op") == Op.ERROR) r.optString("error")
             else r.optJSONObject("result")?.optString("error")?.ifBlank { null }
             if (error != null) failed(if (error in setOf("the server isn't there", "the server's gone", "not connected"))
                 "Can't connect to the browser." else "Couldn't ${DOING[c.optString("op")] ?: "do that"}.")
@@ -171,7 +171,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val density = LocalDensity.current
-    val bot = remember(sid, name) { JSONObject().put("id", sid).put("name", name) }
+    val bot = remember(sid, name) { Msg.BotRef(id = sid, name = name) }
     val watch = remember(hostId, sid) { Watch(hostId, bot) }
     var said by remember { mutableStateOf<String?>(null) }
     val calls = remember(hostId, sid) { Calls(hostId, bot) { said = it } }

@@ -142,7 +142,7 @@ object PhoneBrowser {
             "answer" -> { // (a request's answer: to the host that asked)
                 val id = msg.optString("id")
                 val conn = calls.remove(id) ?: return
-                val reply = JSONObject().put("op", "emission_answer").put("id", id)
+                val reply = Msg.EmissionAnswer(id = id).json()
                 if (msg.has("result")) reply.put("result", msg.get("result")) else reply.put("error", msg.optString("error"))
                 conn.send(reply)
             }
@@ -162,12 +162,12 @@ object PhoneBrowser {
     private fun stop(s: Served) {
         if (served === s) served = null
         Mesh.conn(s.hostId)?.let { c ->
-            if (c.state == "up") c.send(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", false)
-                .put("note", s.note).put("urls", s.urls))
+            if (c.state == "up") c.send(Msg.EmissionServe(bot = s.bot, on = false, note = s.note,
+                urls = s.urls.strings()).json())
         }
         for ((id, conn) in calls.toList()) {
             calls.remove(id)
-            conn.send(JSONObject().put("op", "emission_answer").put("id", id).put("error", "the phone's browser closed"))
+            conn.send(Msg.EmissionAnswer(id = id, error = "the phone's browser closed").json())
         }
     }
 
@@ -189,10 +189,10 @@ object PhoneBrowser {
                 .put("why", "${Mesh.label(s.hostId)}'s Baude is too old for this: update it"))
             return
         }
-        c.request(JSONObject().put("op", "emission_serve").put("bot", s.bot).put("on", true)) { r ->
+        c.request(Msg.EmissionServe(bot = s.bot, on = true).json()) { r ->
             main.post {
                 if (served !== s) return@post
-                s.up = r.optString("op") == "emission_serving"
+                s.up = r.optString("op") == Op.EMISSION_SERVING
                 s.link.send(JSONObject().put("op", "serving").put("on", s.up)
                     .apply { if (!s.up) put("why", r.optString("error", "the host said no")) })
             }
@@ -226,7 +226,7 @@ object PhoneBrowser {
         val bot = msg.optJSONObject("bot")?.optString("id")
         val s = served
         if (s == null || s.hostId != c.id || s.bot != bot || !s.up) {
-            c.send(JSONObject().put("op", "emission_answer").put("id", id).put("error", "the phone's browser is closed"))
+            c.send(Msg.EmissionAnswer(id = id, error = "the phone's browser is closed").json())
             return
         }
         calls[id] = c

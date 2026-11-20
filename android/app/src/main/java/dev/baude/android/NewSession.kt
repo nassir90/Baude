@@ -59,15 +59,14 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
         val h = at ?: return
         busy = true
         error = null
-        val msg = JSONObject().put("op", "start").put("prompt", prompt.trim()).put("cwd", cwd.trim().ifBlank { "~" })
-            .put("mode", mode).put("group", group.trim())
+        val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode, group = group.trim()).json()
         model?.let { msg.put("model", it) }
         effort?.let { msg.put("effort", it) }
         if (prompt.isBlank()) msg.put("draft", true)
         Mesh.ask(h, msg) { r ->
             busy = false
             val id = r.optJSONObject("session")?.optString("id")
-            if (r.optString("op") == "started" && id != null) {
+            if (r.optString("op") == Op.STARTED && id != null) {
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
                 opened(h, id)
                 done()

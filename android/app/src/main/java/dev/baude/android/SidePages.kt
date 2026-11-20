@@ -83,10 +83,10 @@ fun sideQuestions(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
         "claude" -> {
             val m = msg.optJSONObject("msg") ?: return@l
             Ask.of(m)?.let { a -> // (no tools that ask: denied, as Baude's side questions deny them)
-                Mesh.ask(at, JSONObject().put("op", "input").put("session", q.sid).put("msg", JSONObject()
+                Mesh.ask(at, Msg.Input(session = q.sid, msg = JSONObject()
                     .put("type", "control_response").put("response", JSONObject().put("subtype", "success")
                         .put("request_id", a.rid).put("response", JSONObject().put("behavior", "deny")
-                            .put("message", "Side questions can't run tools that need permission."))))) {}
+                            .put("message", "Side questions can't run tools that need permission.")))).json()) {}
             }
             when (m.optString("type")) {
                 "assistant" -> if (m.isNull("parent_tool_use_id")) for (b in m.optJSONObject("message")
@@ -119,8 +119,8 @@ fun SideQuestionsPage(chat: Chat) {
         q.status.value = "running"
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
             .put("content", (if (q.thread.count { it.kind == "you" } == 1) PREFACE else "") + text))
-        Mesh.ask(hostId, JSONObject().put("op", "input").put("session", q.sid).put("msg", msg)) { r ->
-            if (r.optString("op") == "error") { q.status.value = "error"; q.thread.add(Line("error", r.optString("error"))) }
+        Mesh.ask(hostId, Msg.Input(session = q.sid, msg = msg).json()) { r ->
+            if (r.optString("op") == Op.ERROR) { q.status.value = "error"; q.thread.add(Line("error", r.optString("error"))) }
         }
     }
     fun start(text: String) {
@@ -128,12 +128,11 @@ fun SideQuestionsPage(chat: Chat) {
         val q = SideQuestion(text)
         chat.btw.add(0, q)
         val model = s?.str("model")
-        val msg = JSONObject().put("op", "start").put("ephemeral", true).put("prompt", "").put("fork_from", chat.sid)
-            .put("mode", if (program(model) == "codex") "default" else "plan").put("attach", true).put("answers", true)
+        val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
         model?.let { msg.put("model", it) }
         Mesh.ask(hostId, msg) { r ->
             val id = r.optJSONObject("session")?.optString("id")
-            if (r.optString("op") != "started" || id == null) {
+            if (r.optString("op") != Op.STARTED || id == null) {
                 q.status.value = "error"
                 q.thread.add(Line("error", "The side question couldn't be asked: " + r.optString("error")))
                 return@ask
@@ -210,8 +209,8 @@ fun FilesPage(hostId: String, sid: String) {
     var file by remember(root) { mutableStateOf<String?>(null) }
     var again by remember { mutableStateOf(0) }
     LaunchedEffect(at, again) {
-        Mesh.ask(hostId, JSONObject().put("op", "list_dir").put("path", at)) { r ->
-            if (r.optString("op") == "dir" && r.str("error") == null) entries = r.optJSONArray("entries").list()
+        Mesh.ask(hostId, Msg.ListDir(path = at).json()) { r ->
+            if (r.optString("op") == Op.DIR && r.str("error") == null) entries = r.optJSONArray("entries").list()
             else error = r.optString("error").ifBlank { "Couldn't read it" }
         }
     }
@@ -262,8 +261,8 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
     var why by remember(path) { mutableStateOf<String?>(null) }
     var cut by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) {
-        Mesh.ask(hostId, JSONObject().put("op", "read_file").put("path", path).put("limit", 1_000_000)) { r ->
-            if (r.optString("op") == "file" && r.str("error") == null) {
+        Mesh.ask(hostId, Msg.ReadFile(path = path, limit = 1_000_000).json()) { r ->
+            if (r.optString("op") == Op.FILE && r.str("error") == null) {
                 data = Base64.getDecoder().decode(r.optString("data"))
                 cut = r.optBoolean("truncated") || r.optLong("size") > (data?.size ?: 0)
             } else why = r.optString("error").ifBlank { "Couldn't read it" }
@@ -309,9 +308,8 @@ fun GitPage(hostId: String, sid: String) {
     var why by remember(cwd) { mutableStateOf<String?>(null) }
     var commit by remember(cwd) { mutableStateOf<String?>(null) }
     var again by remember { mutableStateOf(0) }
-    fun more(skip: Int) = Mesh.ask(hostId, JSONObject().put("op", "git").put("what", "log").put("cwd", cwd).put("limit", 50)
-        .put("skip", skip)) { r ->
-        if (r.optString("op") == "git" && r.str("error") == null) {
+    fun more(skip: Int) = Mesh.ask(hostId, Msg.Git(what = "log", cwd = cwd, limit = 50, skip = skip).json()) { r ->
+        if (r.optString("op") == Op.GIT && r.str("error") == null) {
             log = r
             if (skip == 0) commits.clear()
             commits.addAll(r.optJSONArray("commits").list())
@@ -363,12 +361,12 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
     var diff by remember(sha) { mutableStateOf<String?>(null) }
     var diffText by remember(sha) { mutableStateOf<String?>(null) }
     LaunchedEffect(sha) {
-        Mesh.ask(hostId, JSONObject().put("op", "git").put("what", "card").put("cwd", cwd).put("sha", sha)) { card = it }
+        Mesh.ask(hostId, Msg.Git(what = "card", cwd = cwd, sha = sha).json()) { card = it }
     }
     LaunchedEffect(diff) {
         val p = diff ?: return@LaunchedEffect
         diffText = null
-        Mesh.ask(hostId, JSONObject().put("op", "git").put("what", "diff").put("cwd", cwd).put("sha", sha).put("path", p)) { r ->
+        Mesh.ask(hostId, Msg.Git(what = "diff", cwd = cwd, sha = sha, path = p).json()) { r ->
             diffText = r.str("error") ?: r.optString("text")
         }
     }
@@ -459,7 +457,7 @@ fun SignalPage(hostId: String, sid: String) {
     var filter by remember { mutableStateOf("") }
     var again by remember { mutableStateOf(0) }
     LaunchedEffect(cwd, sid, again) {
-        val msg = JSONObject().put("op", "signal_names").put("cwd", cwd).put("session", sid)
+        val msg = Msg.SignalNames(cwd = cwd, session = sid).json()
         s.str("cli_id")?.let { msg.put("cli_id", it) }
         Mesh.ask(hostId, msg) { got = it }
     }
@@ -471,7 +469,7 @@ fun SignalPage(hostId: String, sid: String) {
         }
         when {
             g == null -> Empty("Reading them…")
-            g.optString("op") == "error" || g.str("error") != null -> Empty(g.optString("error"))
+            g.optString("op") == Op.ERROR || g.str("error") != null -> Empty(g.optString("error"))
             else -> {
                 val refs = g.optJSONArray("refs").list()
                 if (refs.isEmpty()) return@Column StatusPage(Icons.Filled.HelpOutline, "Signal",

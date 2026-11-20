@@ -1,0 +1,6356 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/nassir90/Baude/schema/wire.schema.json",
+ "title": "Baude's wire",
+ "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-since: the wire version an op, entity or field came with (none: 1). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
+ "x-versions": {
+  "1": {
+   "description": "The first (#98-#123): every op and field with no later version."
+  },
+  "2": {
+   "description": "adopt, ephemeral, env, info's init.",
+   "adds": [
+    "Info.init",
+    "attach.env",
+    "start.adopt",
+    "start.env",
+    "start.ephemeral"
+   ]
+  },
+  "3": {
+   "description": "The mesh: link, unlink, join, relay, infer.",
+   "adds": [
+    "HostHello",
+    "Info.mesh",
+    "Info.providers",
+    "Member",
+    "MemberInfo",
+    "MeshView",
+    "OutLink",
+    "Proxy",
+    "Record",
+    "data",
+    "infer",
+    "infer_data",
+    "infer_end",
+    "infer_head",
+    "join",
+    "joined",
+    "link",
+    "linking",
+    "mesh",
+    "open",
+    "opened",
+    "relay",
+    "relayed",
+    "unlink",
+    "unlinked"
+   ]
+  },
+  "4": {
+   "description": "deactivate, activate.",
+   "adds": [
+    "MeshView.inactive",
+    "activate",
+    "activated",
+    "deactivate",
+    "deactivated"
+   ]
+  },
+  "5": {
+   "description": "catalogue.",
+   "adds": [
+    "catalogue"
+   ]
+  },
+  "6": {
+   "description": "notes, Record's notebooks.",
+   "adds": [
+    "Info.notes",
+    "Notebook",
+    "notes"
+   ]
+  },
+  "7": {
+   "description": "Links straight to members learned of through others, info's mesh found.",
+   "adds": [
+    "FoundLink",
+    "MeshView.found",
+    "join.straight"
+   ]
+  },
+  "8": {
+   "description": "bot, bot_picture, memory: Bots.",
+   "adds": [
+    "BotFields",
+    "BotListing",
+    "Session.bot",
+    "bot",
+    "bot_picture",
+    "bot_set",
+    "memory"
+   ]
+  },
+  "9": {
+   "description": "mesh_tools, a session's spawned_by and mesh_tools.",
+   "adds": [
+    "Session.mesh_tools",
+    "Session.spawned_by",
+    "mesh_tools",
+    "mesh_tools_set",
+    "start.spawned_by"
+   ]
+  },
+  "10": {
+   "description": "emission, a Bot's browser here.",
+   "adds": [
+    "BotRef",
+    "emission"
+   ]
+  },
+  "11": {
+   "description": "emission_watch, emission_watch_say, a Bot's browser watched.",
+   "adds": [
+    "Tab",
+    "WatchSay",
+    "WatchState",
+    "emission_frame",
+    "emission_watch",
+    "emission_watch_end",
+    "emission_watch_say",
+    "emission_watching"
+   ]
+  },
+  "12": {
+   "description": "routines, run_routine.",
+   "adds": [
+    "Clock",
+    "Routine",
+    "routines",
+    "run_routine"
+   ]
+  },
+  "13": {
+   "description": "waits_on, start's start_key, a session's waits_on and start_key, info's mesh gone.",
+   "adds": [
+    "Gone",
+    "MeshView.gone",
+    "Session.start_key",
+    "WaitTarget",
+    "start.start_key",
+    "waits_on"
+   ]
+  },
+  "14": {
+   "description": "A session's acting, emission_watch's state's now and pointer.",
+   "adds": [
+    "PageNow",
+    "PointerEvent",
+    "Session.acting",
+    "WatchState.now",
+    "WatchState.pointer"
+   ]
+  },
+  "15": {
+   "description": "always_allow's add, attach's always_allow added, a session's always_allow.",
+   "adds": [
+    "Session.always_allow",
+    "always_allow.add",
+    "attach.always_allow"
+   ]
+  },
+  "16": {
+   "description": "emission_serve, emission_call, emission_answer, emission_unserved, a session's on_phone: a Bot's browser on a phone.",
+   "adds": [
+    "Session.on_phone",
+    "emission_answer",
+    "emission_call",
+    "emission_serve",
+    "emission_serving",
+    "emission_unserved"
+   ]
+  },
+  "17": {
+   "description": "feedback, filed by this host's gh; start's app_tools and grace, attach's app_tools, list_dir, git, signal_names.",
+   "adds": [
+    "Branch",
+    "Commit",
+    "DirEntry",
+    "SignalRef",
+    "attach.app_tools",
+    "dir",
+    "feedback",
+    "feedback_filed",
+    "feedback_target",
+    "git",
+    "list_dir",
+    "mcp_late",
+    "signal_names",
+    "start.app_tools",
+    "start.grace"
+   ]
+  },
+  "18": {
+   "description": "input's, start's and relay's as, held, senders, a session's held and senders.",
+   "adds": [
+    "HeldMessage",
+    "Sender",
+    "Session.held",
+    "Session.senders",
+    "WaitTarget.title",
+    "held",
+    "input.as",
+    "open.sender",
+    "relay.as",
+    "senders",
+    "start.as"
+   ]
+  }
+ },
+ "x-constants": {
+  "PING_S": {
+   "value": 5,
+   "unit": "s",
+   "description": "A connection's ends each say something at least this often (ping)."
+  },
+  "SILENT_S": {
+   "value": 16,
+   "unit": "s",
+   "description": "Silent this long, the other end's taken for gone."
+  },
+  "OPEN_S": {
+   "value": 20,
+   "unit": "s",
+   "description": "A member of the mesh, reached through it: its tunnel has this long to open."
+  },
+  "EPHEMERAL_S": {
+   "value": 1,
+   "unit": "s",
+   "description": "A side question whose head's gone (or detached): gone this soon."
+  },
+  "GRACE_MAX_S": {
+   "value": 86400,
+   "unit": "s",
+   "description": "start's grace, at most."
+  },
+  "INFER_S": {
+   "value": 600,
+   "unit": "s",
+   "description": "A provider has this long to answer infer."
+  },
+  "BACKLOG": {
+   "value": 32,
+   "unit": "messages",
+   "description": "A model's files' messages waiting to go out, on a link or a connection, before more are read."
+  },
+  "ASK_S": {
+   "value": 60,
+   "unit": "s",
+   "description": "A subagent asking a permission no one's there to give (a mesh tool's start's ask_timeout): refused after this long."
+  },
+  "AGENT_CALLS_MAX": {
+   "value": 40,
+   "unit": "calls",
+   "description": "Tool calls in one agent turn run on a phone, at most; then the model's asked to answer in words."
+  },
+  "BATCH_MAX": {
+   "value": 25,
+   "unit": "actions",
+   "description": "A browser batch's actions, at most."
+  },
+  "BATCH_CHARS": {
+   "value": 60000,
+   "unit": "characters",
+   "description": "A browser batch's whole answer, at most, its pictures counted as their tokens' worth."
+  },
+  "SHOT_MAX": {
+   "value": 1024,
+   "unit": "px",
+   "description": "A browser screenshot's longest side."
+  },
+  "ZOOM_MAX": {
+   "value": 1568,
+   "unit": "px",
+   "description": "A browser zoom's longest side."
+  },
+  "SHOT_QUALITY": {
+   "value": 82,
+   "unit": "JPEG quality",
+   "description": "A browser screenshot's."
+  },
+  "ZOOM_QUALITY": {
+   "value": 90,
+   "unit": "JPEG quality",
+   "description": "A browser zoom's."
+  },
+  "FRAME_QUALITY": {
+   "value": 72,
+   "unit": "JPEG quality",
+   "description": "A watched browser's frames' (emission_frame)."
+  }
+ },
+ "oneOf": [
+  {
+   "$ref": "#/$defs/Hello"
+  },
+  {
+   "$ref": "#/$defs/HelloReply"
+  },
+  {
+   "$ref": "#/$defs/Ping"
+  },
+  {
+   "$ref": "#/$defs/Error"
+  },
+  {
+   "$ref": "#/$defs/Subscribe"
+  },
+  {
+   "$ref": "#/$defs/Sessions"
+  },
+  {
+   "$ref": "#/$defs/TurnEnded"
+  },
+  {
+   "$ref": "#/$defs/Quit"
+  },
+  {
+   "$ref": "#/$defs/Quitting"
+  },
+  {
+   "$ref": "#/$defs/Busy"
+  },
+  {
+   "$ref": "#/$defs/Stopping"
+  },
+  {
+   "$ref": "#/$defs/Start"
+  },
+  {
+   "$ref": "#/$defs/Started"
+  },
+  {
+   "$ref": "#/$defs/Attach"
+  },
+  {
+   "$ref": "#/$defs/Attached"
+  },
+  {
+   "$ref": "#/$defs/Claude"
+  },
+  {
+   "$ref": "#/$defs/Exited"
+  },
+  {
+   "$ref": "#/$defs/Deleted"
+  },
+  {
+   "$ref": "#/$defs/Detach"
+  },
+  {
+   "$ref": "#/$defs/Input"
+  },
+  {
+   "$ref": "#/$defs/Accepted"
+  },
+  {
+   "$ref": "#/$defs/HeldOp"
+  },
+  {
+   "$ref": "#/$defs/HeldReply"
+  },
+  {
+   "$ref": "#/$defs/SendersOp"
+  },
+  {
+   "$ref": "#/$defs/SendersReply"
+  },
+  {
+   "$ref": "#/$defs/Stop"
+  },
+  {
+   "$ref": "#/$defs/Stopped"
+  },
+  {
+   "$ref": "#/$defs/SetCwd"
+  },
+  {
+   "$ref": "#/$defs/CwdSet"
+  },
+  {
+   "$ref": "#/$defs/AlwaysAllow"
+  },
+  {
+   "$ref": "#/$defs/Allowed"
+  },
+  {
+   "$ref": "#/$defs/Archive"
+  },
+  {
+   "$ref": "#/$defs/Unarchive"
+  },
+  {
+   "$ref": "#/$defs/Archived"
+  },
+  {
+   "$ref": "#/$defs/Unarchived"
+  },
+  {
+   "$ref": "#/$defs/Delete"
+  },
+  {
+   "$ref": "#/$defs/Transcript"
+  },
+  {
+   "$ref": "#/$defs/TranscriptReply"
+  },
+  {
+   "$ref": "#/$defs/Subagents"
+  },
+  {
+   "$ref": "#/$defs/SubagentsReply"
+  },
+  {
+   "$ref": "#/$defs/Rename"
+  },
+  {
+   "$ref": "#/$defs/Renamed"
+  },
+  {
+   "$ref": "#/$defs/Bot"
+  },
+  {
+   "$ref": "#/$defs/BotSetReply"
+  },
+  {
+   "$ref": "#/$defs/BotPicture"
+  },
+  {
+   "$ref": "#/$defs/BotPictureReply"
+  },
+  {
+   "$ref": "#/$defs/Memory"
+  },
+  {
+   "$ref": "#/$defs/MemoryReply"
+  },
+  {
+   "$ref": "#/$defs/MeshTools"
+  },
+  {
+   "$ref": "#/$defs/MeshToolsSet"
+  },
+  {
+   "$ref": "#/$defs/WaitsOnOp"
+  },
+  {
+   "$ref": "#/$defs/WaitsOnReply"
+  },
+  {
+   "$ref": "#/$defs/Routines"
+  },
+  {
+   "$ref": "#/$defs/RoutinesReply"
+  },
+  {
+   "$ref": "#/$defs/RunRoutine"
+  },
+  {
+   "$ref": "#/$defs/ReadFile"
+  },
+  {
+   "$ref": "#/$defs/File"
+  },
+  {
+   "$ref": "#/$defs/ListDir"
+  },
+  {
+   "$ref": "#/$defs/Dir"
+  },
+  {
+   "$ref": "#/$defs/Git"
+  },
+  {
+   "$ref": "#/$defs/GitReply"
+  },
+  {
+   "$ref": "#/$defs/SignalNames"
+  },
+  {
+   "$ref": "#/$defs/SignalNamesReply"
+  },
+  {
+   "$ref": "#/$defs/Feedback"
+  },
+  {
+   "$ref": "#/$defs/FeedbackFiled"
+  },
+  {
+   "$ref": "#/$defs/FeedbackTarget"
+  },
+  {
+   "$ref": "#/$defs/Catalogue"
+  },
+  {
+   "$ref": "#/$defs/CatalogueReply"
+  },
+  {
+   "$ref": "#/$defs/Notes"
+  },
+  {
+   "$ref": "#/$defs/NotesReply"
+  },
+  {
+   "$ref": "#/$defs/Link"
+  },
+  {
+   "$ref": "#/$defs/Linking"
+  },
+  {
+   "$ref": "#/$defs/Unlink"
+  },
+  {
+   "$ref": "#/$defs/Unlinked"
+  },
+  {
+   "$ref": "#/$defs/Deactivate"
+  },
+  {
+   "$ref": "#/$defs/Activate"
+  },
+  {
+   "$ref": "#/$defs/Deactivated"
+  },
+  {
+   "$ref": "#/$defs/Activated"
+  },
+  {
+   "$ref": "#/$defs/Join"
+  },
+  {
+   "$ref": "#/$defs/Joined"
+  },
+  {
+   "$ref": "#/$defs/Relay"
+  },
+  {
+   "$ref": "#/$defs/Relayed"
+  },
+  {
+   "$ref": "#/$defs/MeshFrame"
+  },
+  {
+   "$ref": "#/$defs/Open"
+  },
+  {
+   "$ref": "#/$defs/Opened"
+  },
+  {
+   "$ref": "#/$defs/Close"
+  },
+  {
+   "$ref": "#/$defs/Data"
+  },
+  {
+   "$ref": "#/$defs/Infer"
+  },
+  {
+   "$ref": "#/$defs/Files"
+  },
+  {
+   "$ref": "#/$defs/InferHead"
+  },
+  {
+   "$ref": "#/$defs/InferData"
+  },
+  {
+   "$ref": "#/$defs/InferEnd"
+  },
+  {
+   "$ref": "#/$defs/Agent"
+  },
+  {
+   "$ref": "#/$defs/AgentStarted"
+  },
+  {
+   "$ref": "#/$defs/In"
+  },
+  {
+   "$ref": "#/$defs/Kill"
+  },
+  {
+   "$ref": "#/$defs/Out"
+  },
+  {
+   "$ref": "#/$defs/Err"
+  },
+  {
+   "$ref": "#/$defs/Exit"
+  },
+  {
+   "$ref": "#/$defs/AgentSessions"
+  },
+  {
+   "$ref": "#/$defs/McpOpen"
+  },
+  {
+   "$ref": "#/$defs/Mcp"
+  },
+  {
+   "$ref": "#/$defs/McpClose"
+  },
+  {
+   "$ref": "#/$defs/McpLate"
+  },
+  {
+   "$ref": "#/$defs/McpRelay"
+  },
+  {
+   "$ref": "#/$defs/Relaying"
+  },
+  {
+   "$ref": "#/$defs/McpLine"
+  },
+  {
+   "$ref": "#/$defs/Emission"
+  },
+  {
+   "$ref": "#/$defs/EmissionReply"
+  },
+  {
+   "$ref": "#/$defs/EmissionWatch"
+  },
+  {
+   "$ref": "#/$defs/EmissionWatching"
+  },
+  {
+   "$ref": "#/$defs/EmissionFrame"
+  },
+  {
+   "$ref": "#/$defs/EmissionWatchEnd"
+  },
+  {
+   "$ref": "#/$defs/EmissionWatchSay"
+  },
+  {
+   "$ref": "#/$defs/EmissionServe"
+  },
+  {
+   "$ref": "#/$defs/EmissionServing"
+  },
+  {
+   "$ref": "#/$defs/EmissionUnserved"
+  },
+  {
+   "$ref": "#/$defs/EmissionCall"
+  },
+  {
+   "$ref": "#/$defs/EmissionAnswer"
+  }
+ ],
+ "$defs": {
+  "Ask": {
+   "type": "object",
+   "description": "A permission its agent's asking for, not answered yet. Answered with input: a control_response for its request_id, as claude's stream-json has it.",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "description": "The control request's id."
+    },
+    "tool": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The tool it asks to use."
+    },
+    "input": {
+     "description": "The tool's input (long strings in it cut short).",
+     "x-open": true
+    }
+   },
+   "required": [
+    "request_id"
+   ],
+   "additionalProperties": false
+  },
+  "Command": {
+   "type": "object",
+   "description": "What its agent is running: a Bash or PowerShell call (its subagents' too) from the call to its result (one waiting on its permission ask isn't running yet), or a background task but a subagent from its start to its notification.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The call's tool_use_id, or the task's task_id."
+    },
+    "what": {
+     "type": "string",
+     "description": "What it runs, 80 characters at most."
+    },
+    "since": {
+     "type": "number",
+     "description": "When it started, epoch seconds."
+    },
+    "background": {
+     "type": "boolean",
+     "description": "Run in the background."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false
+  },
+  "Running": {
+   "type": "object",
+   "description": "A command a session's agent is running, as quit's busy and info's update list them.",
+   "properties": {
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "what": {
+     "type": "string",
+     "description": "What it runs."
+    }
+   },
+   "required": [
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "BotListing": {
+   "type": "object",
+   "description": "A Bot, as a session lists it.",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "since": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When it was made a Bot, epoch seconds."
+    },
+    "picture": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "Its picture's mtime; null for none."
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "Sender": {
+   "type": "object",
+   "description": "Who a message to a session is from, if not its user, filled in by the host from what it knows itself (wire.clean_sender: words, cut short).",
+   "properties": {
+    "kind": {
+     "enum": [
+      "bot",
+      "chat",
+      "subagent",
+      "host"
+     ],
+     "description": "What it is."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "host": {
+     "type": "string",
+     "description": "Its host's id."
+    },
+    "host_name": {
+     "type": "string",
+     "description": "Its host's name."
+    },
+    "session": {
+     "type": "string",
+     "description": "Its session's id, on its host."
+    }
+   },
+   "required": [
+    "kind"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "HeldMessage": {
+   "type": "object",
+   "description": "A message held for a session: one its host had for it while nobody was there to say whether it should go (a subagent's answer after a restart, say).",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id, as held takes it."
+    },
+    "text": {
+     "type": "string",
+     "description": "What it says."
+    },
+    "sender": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Sender"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "Who it's from."
+    },
+    "at": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When it was held, epoch seconds."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "Session": {
+   "type": "object",
+   "description": "A session as a host lists it.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "A UUID the host made as it started it (claude's --session-id: what it's resumed by)."
+    },
+    "title": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its title: given, its agent's, or its prompt's start."
+    },
+    "cwd": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The folder its agent runs in."
+    },
+    "model": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its model."
+    },
+    "effort": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its effort."
+    },
+    "mode": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its permission mode."
+    },
+    "group": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its group."
+    },
+    "created": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When it was made, epoch seconds."
+    },
+    "said": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When something was last said in it, epoch seconds."
+    },
+    "updated": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "Its transcript's mtime."
+    },
+    "size": {
+     "type": "integer",
+     "description": "Its transcript's size."
+    },
+    "state": {
+     "enum": [
+      "working",
+      "waiting",
+      "idle",
+      "stopped"
+     ],
+     "description": "working: at a turn; waiting: asking permission; idle: its agent running, between turns; stopped: no agent running."
+    },
+    "prompts": {
+     "type": "integer",
+     "description": "How many prompts it's had."
+    },
+    "cli_id": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The id claude has for it where that's another (a fork's: its transcript's named so)."
+    },
+    "transcript": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Where its transcript is on its host's machine (what's on the same machine reads it there rather than fetching a copy)."
+    },
+    "archived": {
+     "type": "boolean",
+     "description": "Archived."
+    },
+    "draft": {
+     "type": "boolean",
+     "description": "A new chat not written in yet (a head leaves it out of its lists)."
+    },
+    "written": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "Its transcript's size as its own agent last left it (more since, with it stopped: another program's writing to it)."
+    },
+    "subagents": {
+     "type": "number",
+     "description": "The mtime of its subagents' newest file (0 for none: what a client's copy is checked against)."
+    },
+    "commands": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Command"
+     },
+     "description": "What its agent is running; none once its agent's gone."
+    },
+    "cut": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When the host process stopped its agent at a turn or asking (shutting down, a quit, a restart), so a head can offer to carry it on; null once a user message is sent to it."
+    },
+    "bot": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/BotListing"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "A Bot's; null for a chat.",
+     "x-since": 8
+    },
+    "acting": {
+     "type": "boolean",
+     "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking.",
+     "x-since": 14
+    },
+    "on_phone": {
+     "type": "boolean",
+     "description": "A Bot's browser is on a phone now.",
+     "x-since": 16
+    },
+    "fork_from": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The session it was forked from."
+    },
+    "spawned_by": {
+     "description": "Who started it (a chat's mesh tools: start's spawned_by).",
+     "x-since": 9,
+     "x-open": true
+    },
+    "start_key": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its start's start_key, if it was given one.",
+     "x-since": 13
+    },
+    "held": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/HeldMessage"
+     },
+     "description": "Messages held for it, oldest first.",
+     "x-since": 18
+    },
+    "senders": {
+     "type": "integer",
+     "description": "Its sender store's revision (0 for none): what a head's copy is checked against.",
+     "x-since": 18
+    },
+    "mesh_tools": {
+     "type": "boolean",
+     "description": "Its agent has the mesh's tools (a Bot's always).",
+     "x-since": 9
+    },
+    "always_allow": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "The tools allowed whenever it asks for them, sorted.",
+     "x-since": 15
+    },
+    "asks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Ask"
+     },
+     "description": "What it's asking, not answered yet."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false
+  },
+  "Update": {
+   "type": "object",
+   "description": "Its own updater has a newer version ready, and waits for those commands to end before it restarts onto it.",
+   "properties": {
+    "to": {
+     "type": "string",
+     "description": "The commit it'll restart onto."
+    },
+    "waiting": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Running"
+     },
+     "description": "The commands it waits for."
+    }
+   },
+   "additionalProperties": false
+  },
+  "ProviderModel": {
+   "type": "object",
+   "description": "A model a provider has, as the mesh is told of it (mesh._model).",
+   "properties": {
+    "value": {
+     "type": "string",
+     "description": "What it's run as."
+    },
+    "displayName": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "id": {
+     "type": "string",
+     "description": "Its provider's id for it."
+    },
+    "tools": {
+     "type": "boolean",
+     "description": "It takes tools."
+    },
+    "thinking": {
+     "type": "boolean",
+     "description": "It thinks."
+    },
+    "window": {
+     "type": "integer",
+     "description": "Its context window."
+    },
+    "version": {
+     "type": "string",
+     "description": "Its version."
+    },
+    "digest": {
+     "type": "string",
+     "description": "Its digest."
+    },
+    "input": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "What it takes in."
+    }
+   },
+   "required": [
+    "value"
+   ],
+   "additionalProperties": false
+  },
+  "Provider": {
+   "type": "object",
+   "description": "A model provider, as the mesh is told of it (mesh.published): no address or key of its machine's.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "kind": {
+     "type": "string",
+     "description": "What it is (openai, ollama, apple, mlx, ...)."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "http": {
+     "type": "boolean",
+     "description": "It serves HTTP, run through a member's Proxy."
+    },
+    "models": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/ProviderModel"
+     },
+     "description": "Its models."
+    },
+    "base_url": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Where it's served, on its own machine (info's providers only)."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false
+  },
+  "HostHello": {
+   "type": "object",
+   "description": "A host process as it says it is on a link (mesh._hello_of).",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "group": {
+     "type": "string",
+     "description": "Its group."
+    },
+    "host": {
+     "type": "string",
+     "description": "Its machine's host name."
+    },
+    "version": {
+     "type": "integer",
+     "description": "Its wire version."
+    },
+    "bonjour": {
+     "type": "string",
+     "description": "Its name on the local network, if it said one."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "MemberInfo": {
+   "type": "object",
+   "description": "Who a member is, in its record.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "group": {
+     "type": "string",
+     "description": "Its group."
+    },
+    "host": {
+     "type": "string",
+     "description": "Its machine's host name."
+    },
+    "version": {
+     "type": "integer",
+     "description": "Its wire version."
+    },
+    "bonjour": {
+     "type": "string",
+     "description": "Its name on the local network."
+    },
+    "providers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Provider"
+     },
+     "description": "Its model providers."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Record": {
+   "type": "object",
+   "description": "A member's record: who it is and the members it's linked to. A host sends its own when it changes (seq higher than any it sent before) and passes each one newer than it had on to its other links.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The member's id."
+    },
+    "seq": {
+     "type": "integer",
+     "description": "Its number: higher, newer."
+    },
+    "info": {
+     "$ref": "#/$defs/MemberInfo",
+     "description": "Who it is."
+    },
+    "links": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "The members it's linked to."
+    }
+   },
+   "required": [
+    "id",
+    "seq"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Member": {
+   "type": "object",
+   "description": "A member of the mesh, as info's mesh lists it.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "group": {
+     "type": "string",
+     "description": "Its group."
+    },
+    "host": {
+     "type": "string",
+     "description": "Its machine's host name."
+    },
+    "version": {
+     "type": "integer",
+     "description": "Its wire version."
+    },
+    "bonjour": {
+     "type": "string",
+     "description": "Its name on the local network."
+    },
+    "providers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Provider"
+     },
+     "description": "Its model providers."
+    },
+    "hops": {
+     "type": "integer",
+     "description": "Links away."
+    },
+    "through": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The member it's reached through, by name; null for one linked to here."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Where": {
+   "type": "object",
+   "description": "Somewhere wire.reach can go: this machine's host process, one listening on another socket, one over ssh, or a member of the mesh through this machine's.",
+   "properties": {
+    "via": {
+     "enum": [
+      "local",
+      "unix",
+      "ssh",
+      "mesh"
+     ],
+     "description": "How it's reached."
+    },
+    "path": {
+     "type": "string",
+     "description": "unix: its socket; mesh: the host process it's reached through."
+    },
+    "dest": {
+     "type": "string",
+     "description": "ssh: where (an alias in ~/.ssh/config, a host, user@host)."
+    },
+    "command": {
+     "type": "string",
+     "description": "ssh: the host process there (default baude_headless.py, on its PATH)."
+    },
+    "strict": {
+     "type": "boolean",
+     "description": "ssh: its key must be known already."
+    },
+    "host": {
+     "type": "string",
+     "description": "mesh: the member's id."
+    }
+   },
+   "required": [
+    "via"
+   ],
+   "additionalProperties": false
+  },
+  "OutLink": {
+   "type": "object",
+   "description": "A link made from here.",
+   "properties": {
+    "where": {
+     "$ref": "#/$defs/Where",
+     "description": "Where it goes."
+    },
+    "id": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The member it reaches."
+    },
+    "name": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its name."
+    },
+    "state": {
+     "enum": [
+      "linked",
+      "connecting",
+      "dropped",
+      "inactive"
+     ],
+     "description": "How it is."
+    },
+    "error": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "What's wrong."
+    },
+    "active": {
+     "type": "boolean",
+     "description": "Not deactivated."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "FoundLink": {
+   "type": "object",
+   "description": "A link straight to a member learned of through others (mesh's Found).",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The member's id."
+    },
+    "name": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its name."
+    },
+    "state": {
+     "enum": [
+      "waiting",
+      "connecting",
+      "linked",
+      "dropped"
+     ],
+     "description": "How it is."
+    },
+    "error": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "What's wrong."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 7
+  },
+  "Proxy": {
+   "type": "object",
+   "description": "This host's Proxy, which runs other members' models over HTTP.",
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "Where it is."
+    },
+    "key": {
+     "type": "string",
+     "description": "What it's asked with."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Gone": {
+   "type": "object",
+   "description": "A member reached lately, not now (restarting, say).",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 13
+  },
+  "MeshView": {
+   "type": "object",
+   "description": "The mesh as a host sees it (mesh.Mesh.view).",
+   "properties": {
+    "members": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Member"
+     },
+     "description": "The members it reaches."
+    },
+    "links": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/OutLink"
+     },
+     "description": "The links made from here."
+    },
+    "proxy": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Proxy"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "Its Proxy: null till a member has a provider."
+    },
+    "inactive": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "The ids of members deactivated here.",
+     "x-since": 4
+    },
+    "found": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/FoundLink"
+     },
+     "description": "Links straight to members learned of through others.",
+     "x-since": 7
+    },
+    "gone": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Gone"
+     },
+     "description": "Members reached lately, not now (not one deactivated here).",
+     "x-since": 13
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Info": {
+   "type": "object",
+   "description": "What a host is, as its hello says (and sessions carries).",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "group": {
+     "type": "string",
+     "description": "Its default group."
+    },
+    "version": {
+     "type": "integer",
+     "description": "The wire version it speaks."
+    },
+    "models": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Every model it can run: {value, displayName}, a Codex model's as its catalogue has it.",
+     "x-open": true
+    },
+    "host": {
+     "type": "string",
+     "description": "Its machine's host name."
+    },
+    "home": {
+     "type": "string",
+     "description": "Its user's home folder."
+    },
+    "pid": {
+     "type": "integer",
+     "description": "Its process's id."
+    },
+    "checkout": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Where its code is (a head here run from elsewhere is told so)."
+    },
+    "groups": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Its sessions' groups."
+    },
+    "init": {
+     "type": [
+      "object",
+      "null"
+     ],
+     "description": "What a session's program last said to initialize, with every model it can run in it.",
+     "x-since": 2,
+     "x-open": true
+    },
+    "commit": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The git commit its code was as it started (null: not a checkout)."
+    },
+    "update": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Update"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "Its own updater's newer version, if it has one ready."
+    },
+    "providers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Provider"
+     },
+     "description": "This machine's model providers (with base_url).",
+     "x-since": 3
+    },
+    "mesh": {
+     "$ref": "#/$defs/MeshView",
+     "description": "The members it reaches and the links it's made.",
+     "x-since": 3
+    },
+    "notes": {
+     "description": "Record's notebooks here, as written last (notes.stamp).",
+     "x-since": 6,
+     "x-open": true
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false
+  },
+  "BotRef": {
+   "type": "object",
+   "description": "A Bot, as its browser's ops name it.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its session's id."
+    },
+    "name": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its name."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 10
+  },
+  "BotFields": {
+   "type": "object",
+   "description": "What bot sets: a name and, maybe, a picture.",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "picture": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "A PNG, base64; \"\" to drop it; left out, kept."
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "WaitTarget": {
+   "type": "object",
+   "description": "Another chat's answer a session's agent waits on.",
+   "properties": {
+    "session": {
+     "type": "string",
+     "description": "That chat."
+    },
+    "host": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The member it's on; null for this host."
+    },
+    "kind": {
+     "enum": [
+      "subagent",
+      "chat"
+     ],
+     "description": "What it is."
+    },
+    "text": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "What it was asked."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Its transcript's size as it was asked."
+    },
+    "until": {
+     "type": "number",
+     "description": "When the wait ends, epoch seconds."
+    },
+    "title": {
+     "type": "string",
+     "description": "The chat's title.",
+     "x-since": 18
+    }
+   },
+   "required": [
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 13
+  },
+  "Routine": {
+   "type": "object",
+   "description": "A Bot's routine (baudelib.routines): work it's given on a schedule.",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "prompt": {
+     "type": "string",
+     "description": "What it's to do."
+    },
+    "paused": {
+     "type": "boolean",
+     "description": "Paused."
+    },
+    "last": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When it last ran."
+    },
+    "every": {
+     "type": "integer",
+     "description": "Minutes between runs."
+    },
+    "at": {
+     "type": "string",
+     "description": "The host's local time it runs at, HH:MM."
+    },
+    "days": {
+     "type": "array",
+     "items": {
+      "type": "integer"
+     },
+     "description": "The days it runs at at, 0 Monday to 6 Sunday."
+    },
+    "next": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "When it runs next."
+    },
+    "error": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Why its last run didn't."
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 12
+  },
+  "Clock": {
+   "type": "object",
+   "description": "The host's clock.",
+   "properties": {
+    "zone": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its time zone's name."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Seconds from UTC."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 12
+  },
+  "SubagentFile": {
+   "type": "object",
+   "description": "One of a session's subagents' files, from where the client's copy is.",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "size": {
+     "type": "integer",
+     "description": "Its size."
+    },
+    "mtime": {
+     "description": "Its mtime (ns)."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Where data starts."
+    },
+    "next": {
+     "type": "integer",
+     "description": "Where the next read starts."
+    },
+    "data": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "What's new of it, in whole lines (a meta.json whole)."
+    }
+   },
+   "additionalProperties": false
+  },
+  "DirEntry": {
+   "type": "object",
+   "description": "An entry in a folder.",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "dir": {
+     "type": "boolean",
+     "description": "A folder."
+    },
+    "size": {
+     "type": "integer",
+     "description": "A file's size."
+    },
+    "ignored": {
+     "type": "boolean",
+     "description": "git ignores it."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Commit": {
+   "type": "object",
+   "description": "A commit, as git's log has it.",
+   "properties": {
+    "sha": {
+     "type": "string",
+     "description": "Its sha."
+    },
+    "parents": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Its parents."
+    },
+    "author": {
+     "type": "string",
+     "description": "Its author."
+    },
+    "email": {
+     "type": "string",
+     "description": "Their email."
+    },
+    "at": {
+     "type": "integer",
+     "description": "When, epoch seconds."
+    },
+    "refs": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Branches and tags at it."
+    },
+    "subject": {
+     "type": "string",
+     "description": "Its first line."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Branch": {
+   "type": "object",
+   "description": "A checkout's branch.",
+   "properties": {
+    "name": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its name."
+    },
+    "upstream": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "What it tracks."
+    },
+    "ahead": {
+     "type": "integer",
+     "description": "Commits ahead of it."
+    },
+    "behind": {
+     "type": "integer",
+     "description": "Commits behind it."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "SignalRef": {
+   "type": "object",
+   "description": "A name Signal's glossary has.",
+   "properties": {
+    "surface": {
+     "type": "string",
+     "description": "As it's written."
+    },
+    "kind": {
+     "type": "string",
+     "description": "What it names."
+    },
+    "canonical": {
+     "description": "What it is."
+    },
+    "status": {
+     "type": "string",
+     "description": "Its status."
+    },
+    "summary": {
+     "description": "What's said of it."
+    },
+    "locations": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Where it's mentioned: {role, path, line, note, rev}.",
+     "x-open": true
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Notebook": {
+   "type": "object",
+   "description": "One of Record's notebooks, as another machine's Record is given it.",
+   "properties": {
+    "id": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its id."
+    },
+    "name": {
+     "type": "string",
+     "description": "Its name."
+    },
+    "pages": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "Its pages."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 6
+  },
+  "PageNow": {
+   "type": "object",
+   "description": "The tab in front, as it is now.",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Its title."
+    },
+    "url": {
+     "type": "string",
+     "description": "Its address."
+    },
+    "progress": {
+     "type": "number",
+     "description": "How far it's loaded, 0 to 1."
+    },
+    "loading": {
+     "type": "boolean",
+     "description": "Loading."
+    },
+    "back": {
+     "type": "boolean",
+     "description": "It can go back."
+    },
+    "forward": {
+     "type": "boolean",
+     "description": "It can go forward."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 14
+  },
+  "PointerEvent": {
+   "type": "object",
+   "description": "What a Bot's tools did with the mouse, numbered (seq starts again from 1 with each Emission).",
+   "properties": {
+    "seq": {
+     "type": "integer",
+     "description": "Its number."
+    },
+    "kind": {
+     "enum": [
+      "hover",
+      "click",
+      "drag",
+      "scroll"
+     ],
+     "description": "What it was."
+    },
+    "x": {
+     "type": "number",
+     "description": "Where, in CSS pixels."
+    },
+    "y": {
+     "type": "number",
+     "description": "Where, in CSS pixels."
+    },
+    "path": {
+     "type": "array",
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "description": "A drag's path from there, 40 points at most."
+    },
+    "count": {
+     "type": "integer",
+     "description": "Clicks, more than one."
+    },
+    "dx": {
+     "type": "number",
+     "description": "A scroll's."
+    },
+    "dy": {
+     "type": "number",
+     "description": "A scroll's."
+    }
+   },
+   "required": [
+    "seq"
+   ],
+   "additionalProperties": false,
+   "x-since": 14
+  },
+  "Tab": {
+   "type": "object",
+   "description": "A tab of a Bot's browser.",
+   "properties": {
+    "tab": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "title": {
+     "type": "string",
+     "description": "Its title."
+    },
+    "url": {
+     "type": "string",
+     "description": "Its address."
+    },
+    "loading": {
+     "type": "boolean",
+     "description": "Loading."
+    },
+    "selected": {
+     "type": "boolean",
+     "description": "In front."
+    },
+    "prompts": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "What it's waiting on an answer to.",
+     "x-open": true
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "WatchState": {
+   "type": "object",
+   "description": "A watched Bot's browser as it is (emission's watch_state).",
+   "properties": {
+    "profile": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its profile."
+    },
+    "agent": {
+     "description": "The Bot it's for.",
+     "x-open": true
+    },
+    "view": {
+     "type": [
+      "array",
+      "null"
+     ],
+     "items": {
+      "type": "integer"
+     },
+     "description": "The page's size, in CSS pixels."
+    },
+    "selected": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The tab in front."
+    },
+    "tabs": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Tab"
+     },
+     "description": "Its tabs."
+    },
+    "prompts": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "What's waiting on an answer: {id, tab, kind, ...} (a dialog's).",
+     "x-open": true
+    },
+    "downloads": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Its last downloads: {name, path, error?}.",
+     "x-open": true
+    },
+    "now": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/PageNow"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "The tab in front.",
+     "x-since": 14
+    },
+    "pointer": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/PointerEvent"
+     },
+     "description": "What the Bot's tools last did with the mouse, its last 8, oldest first.",
+     "x-since": 14
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "WatchSay": {
+   "type": "object",
+   "description": "What a Browser pane says back to the Emission it watches.",
+   "properties": {
+    "ack": {
+     "type": "integer",
+     "description": "A frame taken (its frame)."
+    },
+    "max_w": {
+     "type": "integer",
+     "description": "The pane's width."
+    },
+    "max_h": {
+     "type": "integer",
+     "description": "The pane's height."
+    }
+   },
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "GoneFolder": {
+   "type": "object",
+   "description": "A session's folder gone and not made again.",
+   "properties": {
+    "why": {
+     "type": "string",
+     "description": "Why."
+    },
+    "folder": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Where to carry on instead; null for nowhere to say."
+    }
+   },
+   "additionalProperties": false
+  },
+  "Hello": {
+   "type": "object",
+   "description": "Who's connecting: the first line, always.",
+   "x-op": "hello",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "hello",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "client": {
+     "type": "string",
+     "description": "What it is (baude, record, baude-android, a host's mesh, ...)."
+    },
+    "version": {
+     "type": "integer",
+     "description": "The wire version it speaks."
+    },
+    "commit": {
+     "type": "string",
+     "description": "The commit its code is (said in the host's log if it's another than the host's)."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "HelloReply": {
+   "type": "object",
+   "description": "The host's answer to hello.",
+   "x-op": "hello",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "hello",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "server": {
+     "$ref": "#/$defs/Info",
+     "description": "What the host is."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Ping": {
+   "type": "object",
+   "description": "Both ways, every PING_S on every connection (and link): SILENT_S of silence and the other end's taken for gone.",
+   "x-op": "ping",
+   "x-kind": "both",
+   "properties": {
+    "op": {
+     "const": "ping",
+     "description": "What it is."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Error": {
+   "type": "object",
+   "description": "Anything wrong, with the request's req.",
+   "x-op": "error",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "error",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "error": {
+     "type": "string",
+     "description": "What's wrong."
+    },
+    "plain": {
+     "type": "boolean",
+     "description": "Said for the user as it is."
+    },
+    "gone": {
+     "$ref": "#/$defs/GoneFolder",
+     "description": "A session's folder gone and not made again."
+    },
+    "session": {
+     "type": "string",
+     "description": "memory's refusal: the session."
+    },
+    "text": {
+     "type": "string",
+     "description": "memory's refusal: the memory as the Bot left it."
+    },
+    "seen": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "memory's refusal: what the user's accepted of it."
+    },
+    "mtime": {
+     "description": "memory's refusal: its mtime (ns)."
+    },
+    "path": {
+     "type": "string",
+     "description": "memory's refusal: where it is."
+    }
+   },
+   "required": [
+    "op",
+    "error"
+   ],
+   "additionalProperties": false
+  },
+  "Subscribe": {
+   "type": "object",
+   "description": "The host's sessions, now and on every change, and ping; turn_ended as each of its sessions' turns ends.",
+   "x-op": "subscribe",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "subscribe",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "archived": {
+     "type": "boolean",
+     "description": "Those archived listed too, and their turns' ends (default: not)."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Sessions": {
+   "type": "object",
+   "description": "Its sessions (newest first; a side question's never), and what it is: subscribe's answer, then again on every change.",
+   "x-op": "sessions",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "sessions",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "sessions": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Session"
+     },
+     "description": "Its sessions."
+    },
+    "server": {
+     "$ref": "#/$defs/Info",
+     "description": "What it is."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "TurnEnded": {
+   "type": "object",
+   "description": "A session's turn ended.",
+   "x-op": "turn_ended",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "turn_ended",
+     "description": "What it is."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "result": {
+     "description": "Its result.",
+     "x-open": true
+    },
+    "is_error": {
+     "description": "It ended in an error."
+    },
+    "cost": {
+     "description": "Its cost, USD."
+    },
+    "turns": {
+     "description": "Its turns."
+    },
+    "duration_ms": {
+     "description": "How long it took."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Quit": {
+   "type": "object",
+   "description": "The host process stops, its agents too (their sessions kept, resumed next time; one at a turn or asking is marked cut).",
+   "x-op": "quit",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "quit",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "if_idle": {
+     "type": "boolean",
+     "description": "Only if no session's running a command, else busy and it goes on."
+    },
+    "restart": {
+     "type": "boolean",
+     "description": "It's to start again."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Quitting": {
+   "type": "object",
+   "description": "It's stopping.",
+   "x-op": "quitting",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "quitting",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Busy": {
+   "type": "object",
+   "description": "quit's if_idle: commands are running, so it goes on.",
+   "x-op": "busy",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "busy",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "sessions": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "The sessions running them."
+    },
+    "commands": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Running"
+     },
+     "description": "What they run."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Stopping": {
+   "type": "object",
+   "description": "How far along stopping it is: its agents left of all it's stopping.",
+   "x-op": "stopping",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "stopping",
+     "description": "What it is."
+    },
+    "procs": {
+     "type": "integer",
+     "description": "All it's stopping."
+    },
+    "left": {
+     "type": "integer",
+     "description": "Those left."
+    },
+    "restart": {
+     "type": "boolean",
+     "description": "It's to start again."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Start": {
+   "type": "object",
+   "description": "A new session. Its prompt is sent once it's begun.",
+   "x-op": "start",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "start",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "prompt": {
+     "type": "string",
+     "description": "The first message."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "Its folder (default: the forked session's, else home)."
+    },
+    "model": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its model."
+    },
+    "effort": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its effort."
+    },
+    "mode": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its permission mode."
+    },
+    "group": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its group."
+    },
+    "title": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its title."
+    },
+    "attach": {
+     "type": "boolean",
+     "description": "This connection's attached live to it first."
+    },
+    "answers": {
+     "type": "boolean",
+     "description": "As attach's."
+    },
+    "spawned_by": {
+     "description": "Who started it (a chat's mesh tools).",
+     "x-since": 9,
+     "x-open": true
+    },
+    "system": {
+     "type": "string",
+     "description": "More for claude's system prompt (--append-system-prompt)."
+    },
+    "add_dirs": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Folders it may use besides its own (--add-dir)."
+    },
+    "allowed_tools": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Tool rules (--allowedTools: [\"Bash(git:*)\", \"Edit\"])."
+    },
+    "disallowed_tools": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Tool rules (--disallowedTools)."
+    },
+    "fork_from": {
+     "type": "string",
+     "description": "A session of this host's whose conversation this one starts as a copy of (--fork-session)."
+    },
+    "ask_timeout": {
+     "type": "number",
+     "description": "Seconds a permission it asks waits while nobody who answers is attached, then ask_default answers it."
+    },
+    "ask_default": {
+     "enum": [
+      "deny",
+      "allow"
+     ],
+     "description": "What answers when ask_timeout runs out."
+    },
+    "draft": {
+     "type": "boolean",
+     "description": "A new chat, listed as draft and not kept till it's written in, and gone if nobody's attached before it is."
+    },
+    "ephemeral": {
+     "type": "boolean",
+     "description": "A side question's, forked from fork_from (or fresh), keeping nothing, never listed, gone with its last head.",
+     "x-since": 2
+    },
+    "adopt": {
+     "type": "string",
+     "description": "A conversation claude has here already, by its id, made the host's.",
+     "x-since": 2
+    },
+    "env": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "A head on this machine's environment for the session's agent (kept in memory only).",
+     "x-since": 2
+    },
+    "start_key": {
+     "type": "string",
+     "description": "An id the client picks, kept and listed, so it can tell whether a start whose answer it lost was taken.",
+     "x-since": 13
+    },
+    "app_tools": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Names of MCP servers this head runs itself, for an agent here: each relayed back to it over this connection (mcp_open, mcp, mcp_close), allowed without asking.",
+     "x-since": 17
+    },
+    "grace": {
+     "type": "number",
+     "description": "Seconds an ephemeral session waits for its head to come back (GRACE_MAX_S at most; else EPHEMERAL_S).",
+     "x-since": 17
+    },
+    "as": {
+     "type": "string",
+     "description": "As input's, for the prompt.",
+     "x-since": 18
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Started": {
+   "type": "object",
+   "description": "start's answer, before the prompt's sent (attach: this connection's attached live to it first).",
+   "x-op": "started",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "started",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "$ref": "#/$defs/Session",
+     "description": "The session, as it's listed now."
+    },
+    "forked": {
+     "type": "boolean",
+     "description": "Forked from fork_from."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Attach": {
+   "type": "object",
+   "description": "This connection attached to a session.",
+   "x-op": "attach",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "attach",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "live": {
+     "type": "boolean",
+     "description": "claude, exited and deleted as they come."
+    },
+    "answers": {
+     "type": "boolean",
+     "description": "(default true; kept for the connection, its last attach's or start's) false for a head that won't answer what the session asks: it isn't counted as there to answer."
+    },
+    "app_tools": {
+     "type": "boolean",
+     "description": "The session's app_tools (start's) carried to this connection from now.",
+     "x-since": 17
+    },
+    "always_allow": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Tools added to those allowed whenever it asks.",
+     "x-since": 15
+    },
+    "env": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "As start's.",
+     "x-since": 2
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Attached": {
+   "type": "object",
+   "description": "attach's answer.",
+   "x-op": "attached",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "attached",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "$ref": "#/$defs/Session",
+     "description": "The session, as it's listed now."
+    },
+    "asks": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Claude": {
+   "type": "object",
+   "description": "What a session's agent says, as it says it (claude's stream-json); to those attached live. A worktree made again from its branch is told by {type: \"_note\", text}.",
+   "x-op": "claude",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "claude",
+     "description": "What it is."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "msg": {
+     "type": "object",
+     "description": "A stream-json message.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Exited": {
+   "type": "object",
+   "description": "A session's agent stopped.",
+   "x-op": "exited",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "exited",
+     "description": "What it is."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "code": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "Its exit code."
+    },
+    "stopped": {
+     "type": "boolean",
+     "description": "Told to (stop)."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Deleted": {
+   "type": "object",
+   "description": "delete's answer (and an event to those attached: nothing to carry on).",
+   "x-op": "deleted",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "deleted",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "trashed": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "What was moved to the trash."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Detach": {
+   "type": "object",
+   "description": "This connection detached from a session (an ephemeral one its head's done with dropped at once).",
+   "x-op": "detach",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "detach",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Input": {
+   "type": "object",
+   "description": "A stream-json message for the session's agent (started on it, with --resume, if it isn't running). A user message without a uuid is given one.",
+   "x-op": "input",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "input",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "msg": {
+     "type": "object",
+     "description": "The message.",
+     "x-open": true
+    },
+    "as": {
+     "type": "string",
+     "description": "The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders).",
+     "x-since": 18
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Accepted": {
+   "type": "object",
+   "description": "input's answer, given a req.",
+   "x-op": "accepted",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "accepted",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "HeldOp": {
+   "type": "object",
+   "description": "A message held for a session dropped, or sent as input would send it, from its sender.",
+   "x-op": "held",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "held",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "id": {
+     "type": "string",
+     "description": "The held message's id."
+    },
+    "send": {
+     "type": "boolean",
+     "description": "Sent, not dropped."
+    }
+   },
+   "required": [
+    "op",
+    "session",
+    "id"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "HeldReply": {
+   "type": "object",
+   "description": "held's answer.",
+   "x-op": "held",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "held",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "SendersOp": {
+   "type": "object",
+   "description": "A session's messages from others than its user.",
+   "x-op": "senders",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "senders",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "SendersReply": {
+   "type": "object",
+   "description": "Its sender store.",
+   "x-op": "senders",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "senders",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "senders": {
+     "type": "object",
+     "additionalProperties": {
+      "$ref": "#/$defs/Sender"
+     },
+     "description": "By message uuid."
+    },
+    "rev": {
+     "type": "integer",
+     "description": "Its revision."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 18
+  },
+  "Stop": {
+   "type": "object",
+   "description": "A session's agent stopped: the next message resumes it.",
+   "x-op": "stop",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "stop",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "restart": {
+     "type": "boolean",
+     "description": "Those attached aren't told it went."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Stopped": {
+   "type": "object",
+   "description": "stop's answer.",
+   "x-op": "stopped",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "stopped",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "SetCwd": {
+   "type": "object",
+   "description": "The folder a session's agent runs in, from its next message on (not at a turn).",
+   "x-op": "set_cwd",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "set_cwd",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The folder."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "CwdSet": {
+   "type": "object",
+   "description": "set_cwd's answer.",
+   "x-op": "cwd_set",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "cwd_set",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The folder, real."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "AlwaysAllow": {
+   "type": "object",
+   "description": "Tools allowed whenever a session's agent asks for them, a head attached or not (kept in memory).",
+   "x-op": "always_allow",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "always_allow",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "tools": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "These in place of any there were."
+    },
+    "add": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "These added to them (before 15, tools replaced them).",
+     "x-since": 15
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Allowed": {
+   "type": "object",
+   "description": "always_allow's answer.",
+   "x-op": "allowed",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "allowed",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "tools": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "All of them now, sorted."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Archive": {
+   "type": "object",
+   "description": "A session archived: its agent stopped, and it's listed only to those subscribed with archived.",
+   "x-op": "archive",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "archive",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Unarchive": {
+   "type": "object",
+   "description": "A session listed to all again.",
+   "x-op": "unarchive",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "unarchive",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Archived": {
+   "type": "object",
+   "description": "archive's answer.",
+   "x-op": "archived",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "archived",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Unarchived": {
+   "type": "object",
+   "description": "unarchive's answer.",
+   "x-op": "unarchived",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "unarchived",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Delete": {
+   "type": "object",
+   "description": "A session gone: its agent stopped and waited for, its transcript and the folder beside it (its subagents'), pi's own copy of it, and a Bot's folder moved to the trash; then it's gone from the list. One whose files can't be moved stays: error, saying why.",
+   "x-op": "delete",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "delete",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Transcript": {
+   "type": "object",
+   "description": "Whole lines of a session's transcript.",
+   "x-op": "transcript",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "transcript",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "From here."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "This much at most."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "TranscriptReply": {
+   "type": "object",
+   "description": "Whole lines of its transcript, as they are, byte for byte.",
+   "x-op": "transcript",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "transcript",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Where data starts."
+    },
+    "next": {
+     "type": "integer",
+     "description": "Where the next read starts."
+    },
+    "size": {
+     "type": "integer",
+     "description": "The transcript's size."
+    },
+    "data": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "The lines."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Subagents": {
+   "type": "object",
+   "description": "A session's subagents' files (in the folder beside its transcript).",
+   "x-op": "subagents",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "subagents",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "have": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "array",
+      "items": {}
+     },
+     "description": "Where the client's copy of each is: {name: [size, mtime]}."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "All of them together, at most."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "SubagentsReply": {
+   "type": "object",
+   "description": "Each one's transcript from where have says the client's copy is, in whole lines; its meta.json whole, if it's changed.",
+   "x-op": "subagents",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "subagents",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "files": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/SubagentFile"
+     },
+     "description": "The files."
+    },
+    "more": {
+     "type": "boolean",
+     "description": "There's more, past limit; those it didn't reach aren't listed."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Rename": {
+   "type": "object",
+   "description": "A session renamed (by its agent if it's running; else as it would).",
+   "x-op": "rename",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "rename",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "title": {
+     "type": "string",
+     "description": "Its title."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false
+  },
+  "Renamed": {
+   "type": "object",
+   "description": "rename's answer.",
+   "x-op": "renamed",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "renamed",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "$ref": "#/$defs/Session",
+     "description": "The session, as it's listed now."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Bot": {
+   "type": "object",
+   "description": "A session made a Bot, or its name or picture changed; bot null, a chat again (its memory and picture kept). Its agent's told who it is from its next start.",
+   "x-op": "bot",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "bot",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "bot": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/BotFields"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "The Bot."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "BotSetReply": {
+   "type": "object",
+   "description": "bot's answer.",
+   "x-op": "bot_set",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "bot_set",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "$ref": "#/$defs/Session",
+     "description": "The session, as it's listed now."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "BotPicture": {
+   "type": "object",
+   "description": "A Bot's picture.",
+   "x-op": "bot_picture",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "bot_picture",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "BotPictureReply": {
+   "type": "object",
+   "description": "A Bot's picture.",
+   "x-op": "bot_picture",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "bot_picture",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "picture": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "contentEncoding": "base64",
+     "description": "A PNG; null for none."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "Memory": {
+   "type": "object",
+   "description": "A Bot's memory (the file its agent keeps it in, on the host), after writing text if it's given: refused (error, with the memory as the Bot left it) if the Bot's written it since base_mtime.",
+   "x-op": "memory",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "memory",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "text": {
+     "type": "string",
+     "description": "What to write."
+    },
+    "seen": {
+     "type": "string",
+     "description": "What the user's accepted of it."
+    },
+    "base_mtime": {
+     "description": "The mtime the text was written against."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "MemoryReply": {
+   "type": "object",
+   "description": "A Bot's memory.",
+   "x-op": "memory",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "memory",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "text": {
+     "type": "string",
+     "description": "Its text."
+    },
+    "seen": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "What the user's accepted of it."
+    },
+    "mtime": {
+     "description": "Its mtime (ns)."
+    },
+    "path": {
+     "type": "string",
+     "description": "Where it is, on the host."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 8
+  },
+  "MeshTools": {
+   "type": "object",
+   "description": "A session's agent given the mesh's tools (baudelib.meshtools), or not, from its next start; a Bot's has them always.",
+   "x-op": "mesh_tools",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "mesh_tools",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "on": {
+     "type": "boolean",
+     "description": "Given them."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 9
+  },
+  "MeshToolsSet": {
+   "type": "object",
+   "description": "mesh_tools's answer.",
+   "x-op": "mesh_tools_set",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "mesh_tools_set",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "$ref": "#/$defs/Session",
+     "description": "The session, as it's listed now."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 9
+  },
+  "WaitsOnOp": {
+   "type": "object",
+   "description": "A session's agent waits on another chat's answer, or (done) no longer. Kept with the session (not listed) while its turn goes on: if the host stops meanwhile, it follows the wait once it's started again, and what the wait would have given is held for the session (version 18; 13: sent as its user's message).",
+   "x-op": "waits_on",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "waits_on",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "on": {
+     "$ref": "#/$defs/WaitTarget",
+     "description": "What it waits on."
+    },
+    "done": {
+     "type": "boolean",
+     "description": "No longer."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 13
+  },
+  "WaitsOnReply": {
+   "type": "object",
+   "description": "waits_on's answer.",
+   "x-op": "waits_on",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "waits_on",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 13
+  },
+  "Routines": {
+   "type": "object",
+   "description": "A Bot's routines: set, one made or changed (by its id); delete, one gone (its id).",
+   "x-op": "routines",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "routines",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "set": {
+     "type": "object",
+     "description": "A routine (as Routine, its next worked out here).",
+     "x-open": true
+    },
+    "delete": {
+     "type": "string",
+     "description": "A routine's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 12
+  },
+  "RoutinesReply": {
+   "type": "object",
+   "description": "A Bot's routines.",
+   "x-op": "routines",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "routines",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "routines": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Routine"
+     },
+     "description": "Its routines."
+    },
+    "clock": {
+     "$ref": "#/$defs/Clock",
+     "description": "The host's clock."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 12
+  },
+  "RunRoutine": {
+   "type": "object",
+   "description": "One of a Bot's routines run now (routines answers).",
+   "x-op": "run_routine",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "run_routine",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session's id."
+    },
+    "id": {
+     "type": "string",
+     "description": "The routine's id."
+    }
+   },
+   "required": [
+    "op",
+    "session"
+   ],
+   "additionalProperties": false,
+   "x-since": 12
+  },
+  "ReadFile": {
+   "type": "object",
+   "description": "A file in one of the host's sessions' folders.",
+   "x-op": "read_file",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "read_file",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+     "type": "string",
+     "description": "Its absolute path."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "This much at most."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "File": {
+   "type": "object",
+   "description": "read_file's answer.",
+   "x-op": "file",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "file",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+     "type": "string",
+     "description": "The path asked for."
+    },
+    "size": {
+     "type": "integer",
+     "description": "Its size."
+    },
+    "truncated": {
+     "type": "boolean",
+     "description": "Cut short."
+    },
+    "data": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "What it holds."
+    },
+    "error": {
+     "type": "string",
+     "description": "Why it can't be read."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "ListDir": {
+   "type": "object",
+   "description": "A folder in a session's folder.",
+   "x-op": "list_dir",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "list_dir",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+     "type": "string",
+     "description": "Its absolute path."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Dir": {
+   "type": "object",
+   "description": "Its entries, folders first (.git left out), DIR_LIMIT at most.",
+   "x-op": "dir",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "dir",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "path": {
+     "type": "string",
+     "description": "The folder."
+    },
+    "entries": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/DirEntry"
+     },
+     "description": "Its entries."
+    },
+    "more": {
+     "type": "boolean",
+     "description": "There are more."
+    },
+    "error": {
+     "type": "string",
+     "description": "Why it can't be read."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Git": {
+   "type": "object",
+   "description": "A session's folder's git, read only (nothing fetched): log (the host's own checkout's too, for a changelog), card (sha), diff (sha, path?).",
+   "x-op": "git",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "git",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The folder."
+    },
+    "what": {
+     "enum": [
+      "log",
+      "card",
+      "diff"
+     ],
+     "description": "What to read."
+    },
+    "rev": {
+     "type": "string",
+     "description": "log: from where (default HEAD)."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "log: how many."
+    },
+    "skip": {
+     "type": "integer",
+     "description": "log: after how many."
+    },
+    "sha": {
+     "type": "string",
+     "description": "card, diff: the commit."
+    },
+    "path": {
+     "type": "string",
+     "description": "diff: one file's only."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "GitReply": {
+   "type": "object",
+   "description": "git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author, email, at, committer, message, files, more_files, branches}; diff {sha, path, text, truncated}.",
+   "x-op": "git",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "git",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+     "type": "string",
+     "description": "What was read."
+    },
+    "error": {
+     "type": "string",
+     "description": "What's wrong."
+    },
+    "top": {
+     "type": "string",
+     "description": "log: the checkout's top folder."
+    },
+    "branch": {
+     "$ref": "#/$defs/Branch",
+     "description": "log: its branch."
+    },
+    "commits": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Commit"
+     },
+     "description": "log: the commits."
+    },
+    "skip": {
+     "type": "integer",
+     "description": "log: after how many."
+    },
+    "more": {
+     "type": "boolean",
+     "description": "log: there are more."
+    },
+    "sha": {
+     "type": "string",
+     "description": "card, diff: the commit."
+    },
+    "parents": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "card: its parents."
+    },
+    "author": {
+     "type": "string",
+     "description": "card: its author."
+    },
+    "email": {
+     "type": "string",
+     "description": "card: their email."
+    },
+    "at": {
+     "type": "integer",
+     "description": "card: when, epoch seconds."
+    },
+    "committer": {
+     "type": "string",
+     "description": "card: its committer."
+    },
+    "message": {
+     "type": "string",
+     "description": "card: its message."
+    },
+    "files": {
+     "type": "array",
+     "items": {
+      "type": "array",
+      "items": {}
+     },
+     "description": "card: [path, lines added, removed] (null for a binary file's)."
+    },
+    "more_files": {
+     "type": "boolean",
+     "description": "card: more files than listed."
+    },
+    "branches": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "card: the branches it's on."
+    },
+    "path": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "diff: the file."
+    },
+    "text": {
+     "type": "string",
+     "description": "diff: the diff."
+    },
+    "truncated": {
+     "type": "boolean",
+     "description": "diff: cut short."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "SignalNames": {
+   "type": "object",
+   "description": "The names Signal's glossary has for a session's folder, read as they are; nothing looked up or written.",
+   "x-op": "signal_names",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "signal_names",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The folder."
+    },
+    "session": {
+     "type": "string",
+     "description": "The chat's own mentions only."
+    },
+    "cli_id": {
+     "type": "string",
+     "description": "Its id there, if it's another."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "SignalNamesReply": {
+   "type": "object",
+   "description": "signal_names's answer.",
+   "x-op": "signal_names",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "signal_names",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "glossary": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The glossary's path; null for none."
+    },
+    "refs": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/SignalRef"
+     },
+     "description": "The names."
+    },
+    "error": {
+     "type": "string",
+     "description": "What's wrong."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Feedback": {
+   "type": "object",
+   "description": "Feedback a head with no gh of its own wrote (a phone's), filed as an issue by this host's gh where Send Feedback files it, once for each note.",
+   "x-op": "feedback",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "feedback",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "note": {
+     "type": "string",
+     "description": "The note's id."
+    },
+    "text": {
+     "type": "string",
+     "description": "What it says."
+    },
+    "context": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Context, under it."
+    },
+    "check": {
+     "type": "boolean",
+     "description": "Only where it would go: feedback_target."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "FeedbackFiled": {
+   "type": "object",
+   "description": "Filed.",
+   "x-op": "feedback_filed",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "feedback_filed",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "url": {
+     "type": "string",
+     "description": "The issue."
+    },
+    "number": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "Its number."
+    },
+    "repo": {
+     "type": "string",
+     "description": "Where."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "FeedbackTarget": {
+   "type": "object",
+   "description": "Where it would be filed.",
+   "x-op": "feedback_target",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "feedback_target",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "repo": {
+     "type": "string",
+     "description": "Where."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "Catalogue": {
+   "type": "object",
+   "description": "What @ lists for one of its sessions' folders, made there (lookup.items: its files, branches, Kubernetes objects, what's running on that machine, its pull requests and issues): what there is, at once; waited for while it's made if there's none yet, or with wait.",
+   "x-op": "catalogue",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "catalogue",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The folder."
+    },
+    "wait": {
+     "type": "boolean",
+     "description": "Wait for it."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 5
+  },
+  "CatalogueReply": {
+   "type": "object",
+   "description": "catalogue's answer.",
+   "x-op": "catalogue",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "catalogue",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "cwd": {
+     "description": "The folder asked for."
+    },
+    "items": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "lookup's items.",
+     "x-open": true
+    },
+    "busy": {
+     "type": "boolean",
+     "description": "There's more to come (ask again, with wait)."
+    },
+    "error": {
+     "type": "string",
+     "description": "What's wrong."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 5
+  },
+  "Notes": {
+   "type": "object",
+   "description": "Record's notebooks here, for another machine's Record: listed, or changed.",
+   "x-op": "notes",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "notes",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "action": {
+     "type": "string",
+     "description": "write: changes made; else listed."
+    },
+    "have": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "Those the asker has, {id: digest}: only those it hasn't as they are are sent."
+    },
+    "changes": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Changes to notebooks.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 6
+  },
+  "NotesReply": {
+   "type": "object",
+   "description": "notes's answer: listed {notebooks, ids}, or written {done, by}.",
+   "x-op": "notes",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "notes",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebooks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Notebook"
+     },
+     "description": "Notebooks."
+    },
+    "ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Every one's id, in order."
+    },
+    "done": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "The changes made."
+    },
+    "by": {
+     "type": "string",
+     "description": "record: the Record running there made them."
+    },
+    "error": {
+     "type": "string",
+     "description": "What's wrong."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 6
+  },
+  "Link": {
+   "type": "object",
+   "description": "A link made from this host process to where, kept and made again whenever it drops, and used both ways: the mesh.",
+   "x-op": "link",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "link",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "where": {
+     "$ref": "#/$defs/Where",
+     "description": "Where (not local or mesh)."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Linking": {
+   "type": "object",
+   "description": "link's answer.",
+   "x-op": "linking",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "linking",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "where": {
+     "description": "Where."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Unlink": {
+   "type": "object",
+   "description": "The links made from here to where, or to member id, let go of and forgotten.",
+   "x-op": "unlink",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "unlink",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "where": {
+     "$ref": "#/$defs/Where",
+     "description": "Where."
+    },
+    "id": {
+     "type": "string",
+     "description": "A member's id."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Unlinked": {
+   "type": "object",
+   "description": "unlink's answer.",
+   "x-op": "unlinked",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "unlinked",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "any": {
+     "type": "boolean",
+     "description": "There were any."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Deactivate": {
+   "type": "object",
+   "description": "A member deactivated here: its links let go of and not made, its joins and tunnels refused.",
+   "x-op": "deactivate",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "deactivate",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "where": {
+     "$ref": "#/$defs/Where",
+     "description": "Where a link goes."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 4
+  },
+  "Activate": {
+   "type": "object",
+   "description": "A member taken up again.",
+   "x-op": "activate",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "activate",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "id": {
+     "type": "string",
+     "description": "Its id."
+    },
+    "where": {
+     "$ref": "#/$defs/Where",
+     "description": "Where a link goes."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 4
+  },
+  "Deactivated": {
+   "type": "object",
+   "description": "deactivate's answer.",
+   "x-op": "deactivated",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "deactivated",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "any": {
+     "type": "boolean",
+     "description": "There was one."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 4
+  },
+  "Activated": {
+   "type": "object",
+   "description": "activate's answer.",
+   "x-op": "activated",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "activated",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "any": {
+     "type": "boolean",
+     "description": "There was one."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 4
+  },
+  "Join": {
+   "type": "object",
+   "description": "(another host process's) This connection, from now on, a link it's made to here.",
+   "x-op": "join",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "join",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "host": {
+     "$ref": "#/$defs/HostHello",
+     "description": "Who it is."
+    },
+    "straight": {
+     "type": "boolean",
+     "description": "A link straight to a member learned of through others (refused by one that's unlinked it).",
+     "x-since": 7
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Joined": {
+   "type": "object",
+   "description": "join's answer.",
+   "x-op": "joined",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "joined",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "host": {
+     "$ref": "#/$defs/HostHello",
+     "description": "Who this is."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Relay": {
+   "type": "object",
+   "description": "This connection, from now on, a tunnel to member to's host process (hello first, as ever); error if there's no way to it now.",
+   "x-op": "relay",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "relay",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "to": {
+     "type": "string",
+     "description": "The member's id."
+    },
+    "as": {
+     "type": "string",
+     "description": "The id of one of this host's chats whose mesh tools open it: what's sent through it is from that chat.",
+     "x-since": 18
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Relayed": {
+   "type": "object",
+   "description": "relay's answer.",
+   "x-op": "relayed",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "relayed",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "to": {
+     "description": "The member's id."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "MeshFrame": {
+   "type": "object",
+   "description": "Members' records, on a link.",
+   "x-op": "mesh",
+   "x-kind": "frame",
+   "properties": {
+    "op": {
+     "const": "mesh",
+     "description": "What it is."
+    },
+    "records": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Record"
+     },
+     "description": "The records."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Open": {
+   "type": "object",
+   "description": "A tunnel to member to: passed on to the next host on the way (ttl hosts at most), and at to a connection to its host process, served as if a head had connected to its socket.",
+   "x-op": "open",
+   "x-kind": "frame",
+   "properties": {
+    "op": {
+     "const": "open",
+     "description": "What it is."
+    },
+    "t": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "to": {
+     "type": "string",
+     "description": "The member it's to."
+    },
+    "ttl": {
+     "type": "integer",
+     "description": "Hosts it may pass through."
+    },
+    "from": {
+     "type": "string",
+     "description": "The member that opened it."
+    },
+    "sender": {
+     "$ref": "#/$defs/Sender",
+     "description": "Who what's sent through it is from (relay's as).",
+     "x-since": 18
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Opened": {
+   "type": "object",
+   "description": "A tunnel's there.",
+   "x-op": "opened",
+   "x-kind": "frame",
+   "properties": {
+    "op": {
+     "const": "opened",
+     "description": "What it is."
+    },
+    "t": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "r": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (the other end's)."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Close": {
+   "type": "object",
+   "description": "A tunnel closed, from either end; or (agent) the program's stdin closed.",
+   "x-op": "close",
+   "x-kind": "frame",
+   "properties": {
+    "op": {
+     "const": "close",
+     "description": "What it is."
+    },
+    "t": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "r": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (the other end's)."
+    },
+    "error": {
+     "type": "string",
+     "description": "Why."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Data": {
+   "type": "object",
+   "description": "A wire message in a tunnel, passed on as it came.",
+   "x-op": "data",
+   "x-kind": "frame",
+   "properties": {
+    "op": {
+     "const": "data",
+     "description": "What it is."
+    },
+    "t": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (this end's)."
+    },
+    "r": {
+     "type": "integer",
+     "description": "The tunnel, by the number of the end that opened it (the other end's)."
+    },
+    "msg": {
+     "type": "object",
+     "description": "The message.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Infer": {
+   "type": "object",
+   "description": "An HTTP request to one of this machine's model providers (an OpenAI-compatible server's: path after its base_url), its answer as it comes.",
+   "x-op": "infer",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "infer",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "provider": {
+     "type": "string",
+     "description": "The provider's id."
+    },
+    "method": {
+     "type": "string",
+     "description": "Its method."
+    },
+    "path": {
+     "type": "string",
+     "description": "Its path."
+    },
+    "headers": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "Its headers."
+    },
+    "body": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "Its body."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Files": {
+   "type": "object",
+   "description": "One of this machine's models' files, or where they are (modelfiles.serve), read-only.",
+   "x-op": "files",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "files",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "method": {
+     "type": "string",
+     "description": "Its method."
+    },
+    "path": {
+     "type": "string",
+     "description": "Its path."
+    },
+    "headers": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "Its headers."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "InferHead": {
+   "type": "object",
+   "description": "infer's and files's answer's status and headers.",
+   "x-op": "infer_head",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "infer_head",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "status": {
+     "type": "integer",
+     "description": "Its status."
+    },
+    "headers": {
+     "type": "object",
+     "additionalProperties": {},
+     "description": "Its headers."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "InferData": {
+   "type": "object",
+   "description": "Some of its body.",
+   "x-op": "infer_data",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "infer_data",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "data": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "The bytes."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "InferEnd": {
+   "type": "object",
+   "description": "Its end.",
+   "x-op": "infer_end",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "infer_end",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 3
+  },
+  "Agent": {
+   "type": "object",
+   "description": "A model of this machine's, run here by its program (apple-claude, pi-claude) as an agent for a chat elsewhere (agentproxy), its tools there.",
+   "x-op": "agent",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "agent",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "model": {
+     "type": "string",
+     "description": "Its model here."
+    },
+    "mode": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its permission mode."
+    },
+    "effort": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its effort."
+    },
+    "resume": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "The session it resumes."
+    },
+    "system_prompt": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "Its system prompt."
+    },
+    "persist": {
+     "type": "boolean",
+     "description": "Its session's kept."
+    },
+    "append_system_prompt": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "More for its system prompt (a Bot's: who it is, its memory)."
+    },
+    "servers": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Its MCP servers, run on the caller's side."
+    },
+    "cwd": {
+     "type": "string",
+     "description": "The chat's folder, on the caller's side."
+    },
+    "relay": {
+     "type": "boolean",
+     "description": "pi's session as pi writes it (session.ts's lines)."
+    },
+    "sessions": {
+     "type": "object",
+     "additionalProperties": {},
+     "description": "pi's session's files, for pi to take it up from.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "AgentStarted": {
+   "type": "object",
+   "description": "agent's answer.",
+   "x-op": "agent_started",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "agent_started",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+     "type": "string",
+     "description": "The run's id."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "In": {
+   "type": "object",
+   "description": "A line for an agent's program's stdin.",
+   "x-op": "in",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "in",
+     "description": "What it is."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Kill": {
+   "type": "object",
+   "description": "An agent's program stopped.",
+   "x-op": "kill",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "kill",
+     "description": "What it is."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Out": {
+   "type": "object",
+   "description": "What an agent's program says, on stdout.",
+   "x-op": "out",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "out",
+     "description": "What it is."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Err": {
+   "type": "object",
+   "description": "What an agent's program says, on stderr.",
+   "x-op": "err",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "err",
+     "description": "What it is."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Exit": {
+   "type": "object",
+   "description": "An agent's program's gone.",
+   "x-op": "exit",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "exit",
+     "description": "What it is."
+    },
+    "code": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "Its exit code."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "AgentSessions": {
+   "type": "object",
+   "description": "(an older caller's) pi's session files, those written since they were last sent.",
+   "x-op": "sessions",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "sessions",
+     "description": "What it is."
+    },
+    "files": {
+     "type": "object",
+     "additionalProperties": {},
+     "description": "The files.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "McpOpen": {
+   "type": "object",
+   "description": "An agent's program (or a session's agent, for a head's app_tools) has started an MCP server: it's started at the other end.",
+   "x-op": "mcp_open",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "mcp_open",
+     "description": "What it is."
+    },
+    "session": {
+     "type": "string",
+     "description": "The session (app_tools)."
+    },
+    "conn": {
+     "type": "integer",
+     "description": "Its relay's number."
+    },
+    "name": {
+     "type": "string",
+     "description": "The server's name."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Mcp": {
+   "type": "object",
+   "description": "A line for an MCP server, or from it.",
+   "x-op": "mcp",
+   "x-kind": "both",
+   "properties": {
+    "op": {
+     "const": "mcp",
+     "description": "What it is."
+    },
+    "conn": {
+     "type": "integer",
+     "description": "Its relay's number."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "McpClose": {
+   "type": "object",
+   "description": "An MCP server's gone, on either side.",
+   "x-op": "mcp_close",
+   "x-kind": "both",
+   "properties": {
+    "op": {
+     "const": "mcp_close",
+     "description": "What it is."
+    },
+    "conn": {
+     "type": "integer",
+     "description": "Its relay's number."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "McpLate": {
+   "type": "object",
+   "description": "A call the head answered after it was failed (its connection was gone), as it did run.",
+   "x-op": "mcp_late",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "mcp_late",
+     "description": "What it is."
+    },
+    "conn": {
+     "type": "integer",
+     "description": "Its relay's number."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 17
+  },
+  "McpRelay": {
+   "type": "object",
+   "description": "One of an agent's MCP servers (a relay, baude_headless.py mcp-relay): carried to its caller.",
+   "x-op": "mcp_relay",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "mcp_relay",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+     "type": "string",
+     "description": "The run's id."
+    },
+    "name": {
+     "type": "string",
+     "description": "The server's name."
+    },
+    "token": {
+     "type": "string",
+     "description": "The run's token for it."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Relaying": {
+   "type": "object",
+   "description": "mcp_relay's answer.",
+   "x-op": "relaying",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "relaying",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "McpLine": {
+   "type": "object",
+   "description": "A line for a relayed MCP server, or from it.",
+   "x-op": "mcp_line",
+   "x-kind": "both",
+   "properties": {
+    "op": {
+     "const": "mcp_line",
+     "description": "What it is."
+    },
+    "line": {
+     "type": "string",
+     "description": "The line."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false
+  },
+  "Emission": {
+   "type": "object",
+   "description": "A Bot's browser tool's request (baudelib.emissiontools) to the Emission that has the Bot's own profile here, started for it if none has (or to the phone showing it).",
+   "x-op": "emission",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "emission",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+     "$ref": "#/$defs/BotRef",
+     "description": "The Bot."
+    },
+    "call": {
+     "type": "object",
+     "description": "The tool's request.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 10
+  },
+  "EmissionReply": {
+   "type": "object",
+   "description": "The tool's answer.",
+   "x-op": "emission",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "emission",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "result": {
+     "type": "object",
+     "description": "What Emission answered.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 10
+  },
+  "EmissionWatch": {
+   "type": "object",
+   "description": "A Bot's browser here watched (Baude's Browser pane): one a connection.",
+   "x-op": "emission_watch",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "emission_watch",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+     "$ref": "#/$defs/BotRef",
+     "description": "The Bot."
+    },
+    "max_w": {
+     "type": "integer",
+     "description": "The pane's width."
+    },
+    "max_h": {
+     "type": "integer",
+     "description": "The pane's height."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "EmissionWatching": {
+   "type": "object",
+   "description": "It's watched: emission_frame follows, many, till emission_watch_end.",
+   "x-op": "emission_watching",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "emission_watching",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "EmissionFrame": {
+   "type": "object",
+   "description": "A frame of the page in front, or its state as it changes.",
+   "x-op": "emission_frame",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "emission_frame",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "frame": {
+     "type": "integer",
+     "description": "Its number (ack it)."
+    },
+    "w": {
+     "type": "integer",
+     "description": "Its width."
+    },
+    "h": {
+     "type": "integer",
+     "description": "Its height."
+    },
+    "jpeg": {
+     "type": "string",
+     "contentEncoding": "base64",
+     "description": "The frame."
+    },
+    "state": {
+     "$ref": "#/$defs/WatchState",
+     "description": "The browser's state."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "EmissionWatchEnd": {
+   "type": "object",
+   "description": "The watch is over.",
+   "x-op": "emission_watch_end",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "emission_watch_end",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "EmissionWatchSay": {
+   "type": "object",
+   "description": "What the pane says back: a frame taken, its new size.",
+   "x-op": "emission_watch_say",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "emission_watch_say",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "line": {
+     "$ref": "#/$defs/WatchSay",
+     "description": "What it says."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 11
+  },
+  "EmissionServe": {
+   "type": "object",
+   "description": "A phone showing a Bot of this host's browser (on), or not now: while it is, the Bot's browser tools' requests here are carried to it (emission_call).",
+   "x-op": "emission_serve",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "emission_serve",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+     "type": "string",
+     "description": "The Bot's id."
+    },
+    "on": {
+     "type": "boolean",
+     "description": "Showing it."
+    },
+    "urls": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "off: the pages it had open."
+    },
+    "note": {
+     "type": "string",
+     "description": "off: what it hadn't told the Bot yet."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 16
+  },
+  "EmissionServing": {
+   "type": "object",
+   "description": "emission_serve's answer.",
+   "x-op": "emission_serving",
+   "x-kind": "reply",
+   "properties": {
+    "op": {
+     "const": "emission_serving",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "bot": {
+     "type": "string",
+     "description": "The Bot's id."
+    },
+    "on": {
+     "type": "boolean",
+     "description": "Its requests come here."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 16
+  },
+  "EmissionUnserved": {
+   "type": "object",
+   "description": "Another phone shows this Bot's browser now.",
+   "x-op": "emission_unserved",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "emission_unserved",
+     "description": "What it is."
+    },
+    "bot": {
+     "type": "string",
+     "description": "The Bot's id."
+    },
+    "why": {
+     "type": "string",
+     "description": "Why."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 16
+  },
+  "EmissionCall": {
+   "type": "object",
+   "description": "A Bot's browser tool's request, carried to the phone showing it.",
+   "x-op": "emission_call",
+   "x-kind": "event",
+   "properties": {
+    "op": {
+     "const": "emission_call",
+     "description": "What it is."
+    },
+    "id": {
+     "type": "string",
+     "description": "Its id: the answer's."
+    },
+    "bot": {
+     "$ref": "#/$defs/BotRef",
+     "description": "The Bot."
+    },
+    "call": {
+     "type": "object",
+     "description": "The request.",
+     "x-open": true
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 16
+  },
+  "EmissionAnswer": {
+   "type": "object",
+   "description": "A phone's answer to an emission_call.",
+   "x-op": "emission_answer",
+   "x-kind": "request",
+   "properties": {
+    "op": {
+     "const": "emission_answer",
+     "description": "What it is."
+    },
+    "req": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "id": {
+     "type": "string",
+     "description": "The call's id."
+    },
+    "result": {
+     "type": "object",
+     "description": "What the browser answered.",
+     "x-open": true
+    },
+    "error": {
+     "type": "string",
+     "description": "What went wrong."
+    }
+   },
+   "required": [
+    "op"
+   ],
+   "additionalProperties": false,
+   "x-since": 16
+  }
+ }
+}

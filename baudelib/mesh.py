@@ -82,10 +82,11 @@ OPEN_S = 20  # a tunnel's far end has this long to say it's there
 TTL = 16  # hosts a tunnel's passed through at most
 PROVIDERS_S = 60  # this machine's providers looked at again this often, while it's linked
 FORGET_S = 3600  # a record of a member no longer reached is let go after this long
-INFER_S = 600  # a provider has this long to answer
+INFER_S = wire.CONSTANTS["INFER_S"]  # a provider has this long to answer
 CHUNK = 64 << 10
-BACKLOG = 32  # (messages a model's files may have waiting to go out, on a link or a connection, before more are read:
-# what's read goes no faster than the link takes it, and a ping waits behind no more than this)
+BACKLOG = wire.CONSTANTS["BACKLOG"]  # (messages a model's files may have waiting to go out, on a link or a
+# connection, before more are read: what's read goes no faster than the link takes it, and a ping waits behind no more
+# than this)
 LINKS = "links.json"
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
 _PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
@@ -271,8 +272,9 @@ class _Out:
         self.ch, self.q = ch, queue.Queue()
         threading.Thread(target=self._run, daemon=True, name=name).start()
 
-    def put(self, msg):
-        self.q.put(("msg", msg))
+    def put(self, msg, passed=False):
+        """passed: a message passed on as it came (Channel.send's)."""
+        self.q.put(("passed" if passed else "msg", msg))
 
     def close(self, then=None):
         """No more: then() once what's queued is sent."""
@@ -285,7 +287,7 @@ class _Out:
                 if item is not None:
                     item()
                 return
-            if not self.ch.send(item):  # (gone: the rest dropped, till the end's put)
+            if not self.ch.send(item, passed=kind == "passed"):  # (gone: the rest dropped, till the end's put)
                 while (got := self.q.get())[0] != "end":
                     pass
                 if got[1] is not None:
@@ -350,7 +352,7 @@ class Here:
 
     def deliver(self, msg):
         if isinstance(msg, dict):
-            self.out.put(msg)
+            self.out.put(msg, passed=True)
 
     def closed(self, error=None):
         self.error = error or "the tunnel was closed"

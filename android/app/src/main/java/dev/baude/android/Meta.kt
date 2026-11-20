@@ -154,10 +154,9 @@ object Meta {
         val c = chat
         if (!started || c.sid.isEmpty()) return
         val was = c.thinking.value
-        Mesh.ask(h, JSONObject().put("op", "attach").put("session", c.sid).put("live", true).put("answers", true)
-            .put("app_tools", true)) { r ->
+        Mesh.ask(h, Msg.Attach(session = c.sid, live = true, answers = true, appTools = true).json()) { r ->
             if (chat !== c) return@ask
-            if (r.optString("op") != "attached") {
+            if (r.optString("op") != Op.ATTACHED) {
                 started = false
                 c.sid = ""
                 c.thinking.value = false
@@ -218,14 +217,13 @@ object Meta {
             c.hostId = h
             listen(h)
             val haiku = models(h).firstOrNull { it.value == "haiku" || it.name.lowercase().startsWith("haiku") }
-            val msg = JSONObject().put("op", "start").put("prompt", index() + "\n\n" + before + ran + text).put("cwd", "~")
-                .put("mode", "default").put("ephemeral", true).put("grace", GRACE_S).put("title", "Meta")
-                .put("system", SYSTEM).put("allowed_tools", JSONArray(listOf("Read", "Grep", "Glob"))).put("attach", true)
-                .put("app_tools", JSONArray(listOf(MetaTools.NAME)))
+            val msg = Msg.Start(prompt = index() + "\n\n" + before + ran + text, cwd = "~", mode = "default",
+                ephemeral = true, grace = GRACE_S, title = "Meta", system = SYSTEM,
+                allowedTools = listOf("Read", "Grep", "Glob"), attach = true, appTools = listOf(MetaTools.NAME)).json()
             haiku?.let { msg.put("model", it.value) }
             Mesh.ask(h, msg) { r ->
                 val id = r.optJSONObject("session")?.optString("id")
-                if (r.optString("op") == "started" && id != null) {
+                if (r.optString("op") == Op.STARTED && id != null) {
                     c.sid = id
                     save()
                     waiting.toList().also { waiting.clear() }.forEach { input(c, h, it) }
@@ -243,8 +241,8 @@ object Meta {
 
     private fun input(c: Chat, h: String, text: String) {
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", text))
-        Mesh.ask(h, JSONObject().put("op", "input").put("session", c.sid).put("msg", msg)) { r ->
-            if (r.optString("op") == "error") {
+        Mesh.ask(h, Msg.Input(session = c.sid, msg = msg).json()) { r ->
+            if (r.optString("op") == Op.ERROR) {
                 c.thinking.value = false
                 c.said.value = "Couldn't send: " + r.optString("error")
                 if (r.optString("error").startsWith("no session")) { started = false; c.sid = ""; save() }
@@ -271,8 +269,7 @@ object Meta {
                     if (call.optString("method") == "tools/call" && what != null) running[key] = what
                     MetaTools.line(msg.optString("line")) { answer ->
                         if (answer == null) return@line
-                        val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(JSONObject().put("op", "mcp")
-                            .put("conn", n).put("line", answer)) == true
+                        val sent = Mesh.conn(h)?.takeIf { it.state == "up" }?.send(Msg.Mcp(conn = n, line = answer).json()) == true
                         val was = running.remove(key)
                         if (!sent && was != null) ranLate(was, answer) // (its host gone meanwhile: it failed it there)
                     }
@@ -312,8 +309,8 @@ object Meta {
     fun clear() {
         val c = chat
         if (started && c.sid.isNotEmpty()) {
-            Mesh.conn(c.hostId)?.send(JSONObject().put("op", "stop").put("session", c.sid))
-            Mesh.conn(c.hostId)?.send(JSONObject().put("op", "detach").put("session", c.sid))
+            Mesh.conn(c.hostId)?.send(Msg.Stop(session = c.sid).json())
+            Mesh.conn(c.hostId)?.send(Msg.Detach(session = c.sid).json())
         }
         started = false
         waiting.clear()
@@ -420,8 +417,8 @@ fun MetaRows(text: String) {
         var why by androidx.compose.runtime.remember(text) { mutableStateOf<String?>(null) }
         androidx.compose.runtime.LaunchedEffect(text) {
             val checkout = Mesh.conn(h)?.info?.str("checkout") ?: return@LaunchedEffect run { why = "Its host didn't say where its code is." }
-            Mesh.ask(h, JSONObject().put("op", "git").put("what", "log").put("cwd", checkout).put("limit", 15)) { r ->
-                if (r.optString("op") == "git" && r.str("error") == null) log = r.optJSONArray("commits").list()
+            Mesh.ask(h, Msg.Git(what = "log", cwd = checkout, limit = 15).json()) { r ->
+                if (r.optString("op") == Op.GIT && r.str("error") == null) log = r.optJSONArray("commits").list()
                 else why = r.optString("error").ifBlank { "Couldn't read it." }
             }
         }
@@ -453,8 +450,8 @@ fun MetaRows(text: String) {
                 text = { Text("Its transcript goes to ${Mesh.label(h)}'s trash. It can't be undone here.") },
                 confirmButton = { Button("Move to Trash", destructive = true) {
                     asking = false
-                    Mesh.ask(h, JSONObject().put("op", "delete").put("session", sid)) { r ->
-                        if (r.optString("op") == "error") Meta.chat.said.value = "Couldn't: " + r.optString("error")
+                    Mesh.ask(h, Msg.Delete(session = sid).json()) { r ->
+                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "Couldn't: " + r.optString("error")
                     }
                 } },
                 dismissButton = { Button("Cancel") { asking = false } }, containerColor = c.dialog)

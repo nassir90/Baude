@@ -209,7 +209,7 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
     var done = false
     heard = { at, msg ->
         val r = msg.optJSONObject("msg")?.optJSONObject("response")
-        if (at == hostId && msg.optString("op") == "claude" && msg.optString("session") == sid &&
+        if (at == hostId && msg.optString("op") == Op.CLAUDE && msg.optString("session") == sid &&
             msg.optJSONObject("msg")?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
             done = true
@@ -222,8 +222,8 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
         then("it didn't answer")
     }
     val msg = JSONObject().put("type", "control_request").put("request_id", rid).put("request", request)
-    Mesh.ask(hostId, JSONObject().put("op", "input").put("session", sid).put("msg", msg)) { r ->
-        if (r.optString("op") == "error" && Mesh.listeners.remove(heard)) {
+    Mesh.ask(hostId, Msg.Input(session = sid, msg = msg).json()) { r ->
+        if (r.optString("op") == Op.ERROR && Mesh.listeners.remove(heard)) {
             done = true
             then(r.optString("error"))
         }
@@ -300,12 +300,11 @@ private fun pickModel(hostId: String, sid: String, s: JSONObject, v: String, cho
                       asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit) {
     val was = s.str("model") ?: defaultModel(hostId)
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
-        val msg = JSONObject().put("op", "start").put("prompt", "").put("cwd", s.optString("cwd").ifBlank { "~" })
-            .put("model", v).put("mode", if (program(v) == "codex") "default" else "auto").put("draft", true)
+        val msg = Msg.Start(prompt = "", cwd = s.optString("cwd").ifBlank { "~" }, model = v, mode = if (program(v) == "codex") "default" else "auto", draft = true).json()
         if (!s.isNull("group")) msg.put("group", s.optString("group"))
         Mesh.ask(hostId, msg) { r ->
             val id = r.optJSONObject("session")?.optString("id")
-            if (r.optString("op") == "started" && id != null) open(hostId, id)
+            if (r.optString("op") == Op.STARTED && id != null) open(hostId, id)
             else said("Couldn't start a chat with it: " + r.optString("error"))
         }
         return

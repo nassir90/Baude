@@ -127,8 +127,8 @@ class MemoryState(val hostId: String, val sid: String) {
     }
 
     /** Read from its host: as it is there, or (changed here meanwhile) the Bot's changes since merged into yours. */
-    fun load() = Mesh.ask(hostId, JSONObject().put("op", "memory").put("session", sid)) { r ->
-        if (r.optString("op") != "memory") { failed = r.optString("error"); return@ask }
+    fun load() = Mesh.ask(hostId, Msg.Memory(session = sid).json()) { r ->
+        if (r.optString("op") != Op.MEMORY) { failed = r.optString("error"); return@ask }
         if (edits == 0 || base == null) return@ask took(r)
         val theirs = r.optString("text")
         if (theirs != base) text = merge3(base!!, text, theirs) ?: text
@@ -170,12 +170,12 @@ class MemoryState(val hostId: String, val sid: String) {
         val n = edits
         val t = text
         val s = seen
-        val msg = JSONObject().put("op", "memory").put("session", sid).put("text", t).put("seen", s)
+        val msg = Msg.Memory(session = sid, text = t, seen = s).json()
         mtime?.let { msg.put("base_mtime", it) }
         Mesh.ask(hostId, msg) { r ->
             saving = false
             when {
-                r.optString("op") == "memory" -> {
+                r.optString("op") == Op.MEMORY -> {
                     wait = 5_000L
                     base = r.optString("text")
                     mtime = if (r.isNull("mtime")) null else r.optLong("mtime")
@@ -224,7 +224,7 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     DisposableEffect(m) { onDispose { m.save(said = say) } }
     DisposableEffect(hostId, sid) {
         val l: (String, JSONObject) -> Unit = { at, msg ->
-            if (at == hostId && msg.optString("op") == "turn_ended" && msg.optString("session") == sid) m.load()
+            if (at == hostId && msg.optString("op") == Op.TURN_ENDED && msg.optString("session") == sid) m.load()
         }
         Mesh.listeners.add(l)
         onDispose { Mesh.listeners.remove(l) }

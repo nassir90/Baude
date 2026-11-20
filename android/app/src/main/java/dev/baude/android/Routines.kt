@@ -97,7 +97,7 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
     var loaded by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     fun took(r: JSONObject, failed: String) {
-        if (r.optString("op") == "routines") {
+        if (r.optString("op") == Op.ROUTINES) {
             list.clear()
             list.addAll(r.optJSONArray("routines").list())
             clock = r.optJSONObject("clock") ?: JSONObject()
@@ -105,9 +105,9 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
             error = null
         } else error = failed + r.optString("error").let { if (it.isNotBlank()) " ($it)" else "" }
     }
-    fun load() = Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid)) { took(it, "Couldn't load the routines.") }
+    fun load() = Mesh.ask(hostId, Msg.Routines(session = sid).json()) { took(it, "Couldn't load the routines.") }
     fun set(r: JSONObject, failed: String = "Couldn't save the routine.") =
-        Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid).put("set", r)) { took(it, failed) }
+        Mesh.ask(hostId, Msg.Routines(session = sid, set = r).json()) { took(it, failed) }
     LaunchedEffect(here) {
         while (here) {
             load()
@@ -116,7 +116,7 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
     }
     DisposableEffect(hostId, sid) {
         val l: (String, JSONObject) -> Unit = { at, msg ->
-            if (at == hostId && msg.optString("op") == "turn_ended" && msg.optString("session") == sid) load()
+            if (at == hostId && msg.optString("op") == Op.TURN_ENDED && msg.optString("session") == sid) load()
         }
         Mesh.listeners.add(l)
         onDispose { Mesh.listeners.remove(l) }
@@ -138,13 +138,13 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
                         colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg),
                         modifier = Modifier.padding(end = 4.dp))
                     IconButton(Icons.Filled.PlayArrow, "Run now") {
-                        Mesh.ask(hostId, JSONObject().put("op", "run_routine").put("session", sid).put("id", r.optString("id"))) {
+                        Mesh.ask(hostId, Msg.RunRoutine(session = sid, id = r.optString("id")).json()) {
                             took(it, "Couldn't run the routine.")
                         }
                     }
                     IconButton(Icons.Filled.Edit, "Change") { editing = r }
                     IconButton(Icons.Filled.Delete, "Delete") {
-                        Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid).put("delete", r.optString("id"))) {
+                        Mesh.ask(hostId, Msg.Routines(session = sid, delete = r.optString("id")).json()) {
                             took(it, "Couldn't delete the routine.")
                         }
                     }

@@ -1,255 +1,30 @@
 """What Baude and a server say to each other: one JSON object a line (UTF-8, ending in a newline), each with an "op".
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
-A client's requests (a "req" it picks comes back on the reply):
-    hello {client}                                  -> hello {server: info} (info: its id, name, group, version,
-                                                       models, host, home, pid, groups, init; providers, this
-                                                       machine's model providers; mesh, the members it reaches and
-                                                       the links it's made (mesh.Mesh.view); commit, the git commit
-                                                       its code was as it started (None: not a checkout); update,
-                                                       None or {to: a commit, waiting: [{session, what}]}: its own
-                                                       updater has a newer version ready, and waits for those
-                                                       commands to end before it restarts onto it)
-    subscribe {archived?}                           -> sessions {sessions}, then again on every change, and ping;
-                                                       turn_ended {session, result, is_error, cost, turns,
-                                                       duration_ms} as each of its sessions' turns ends. archived:
-                                                       those archived listed too, and their turns' ends (default:
-                                                       not). Each session's written: its transcript's size as its
-                                                       own claude last left it (more since, with it stopped: another
-                                                       program's writing to it)
-    start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
-           allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?, app_tools?, grace?, as?}
-                                                    -> started {session, forked}, before the prompt's sent: attach,
-                                                       and this
-                                                       connection's attached live to it first. system: more for
-                                                       claude's system prompt (--append-system-prompt); add_dirs:
-                                                       folders it may use besides its own (--add-dir);
-                                                       allowed_tools / disallowed_tools: tool rules (--allowedTools,
-                                                       --disallowedTools: ["Bash(git:*)", "Edit"]); fork_from: a
-                                                       session of this server's whose conversation this one starts
-                                                       as a copy of (--fork-session); those are claude's, for
-                                                       Claude's models. ask_timeout: seconds a permission it asks
-                                                       waits while nobody who answers is attached, then ask_default
-                                                       ("deny", or "allow") answers it. answers: as attach's
-    attach {session, live, answers?, app_tools?}    -> attached {session, asks}; live: claude {session, msg} as it
-                                                       speaks, exited {session, code} when it stops; deleted
-                                                       {session} when it's deleted (nothing to carry on). answers
-                                                       (default true; kept for the connection, its last attach's or
-                                                       start's): false for a head that won't answer what the session
-                                                       asks (a permission): it isn't counted as there to answer, so
-                                                       ask_timeout's wait still runs out and ask_default answers, as
-                                                       if nobody were attached. app_tools: (version 17) the session's
-                                                       app_tools (start's) carried to this connection from now. draft: a new chat, listed as
-                                                       draft (a head leaves it out of its lists) and not kept till
-                                                       it's written in (its first user input), and gone if nobody's
-                                                       attached before it is. ephemeral: a side
-                                                       question's, forked from fork_from (or fresh), keeping nothing
-                                                       (--no-session-persistence), never listed, gone with its last
-                                                       head. adopt: a conversation claude has here already, by its
-                                                       id, made the host's (resumed by it; started: as it is, if
-                                                       it's the host's already). env: a head on this machine's
-                                                       environment for the session's claude (kept in memory only;
-                                                       attach takes it too). start_key: (version 13) an id the client
-                                                       picks, kept and listed, so it can tell whether a start whose
-                                                       answer it lost was taken. app_tools: (version 17) names of MCP
-                                                       servers this head runs itself (a phone's Meta's tools, which
-                                                       act on the phone), for a claude here: each relayed back to it
-                                                       over this connection (agentproxy.AppTools), allowed without
-                                                       asking; mcp_open {session, conn, name} when its claude starts
-                                                       one, then mcp {conn, line} either way and mcp_close {conn}
-                                                       from either side, as an agent's are (agent); while this
-                                                       connection's gone, their calls fail, till attach's app_tools
-                                                       binds them to the head's new one (a call the head answers
-                                                       after it was failed: mcp_late {conn, line} back to it, as it
-                                                       did run); gone with the session. A detach drops an ephemeral
-                                                       session at once; grace is for a head that's gone.
-                                                       grace: (version 17) seconds an ephemeral session waits for its
-                                                       head to come back (a day at most; else EPHEMERAL_S), its idle
-                                                       claude not stopped meanwhile (it keeps nothing)
-                                                       as: (version 18) as input's, for the prompt
-    detach {session}
-    input {session, msg, as?}                       -> accepted {session}, given a req (a stream-json message for
-                                                       the session's claude: started on it, with --resume, if it
-                                                       isn't running). A user message without a uuid is given one
-                                                       (its program keeps it: Senders). as: (version 18) the id of
-                                                       one of this host's chats whose mesh tools send it
-                                                       (baudelib.meshtools): it's from that chat, not the session's
-                                                       user, so the host says so to its agent (said_by) and keeps
-                                                       who it's from (Senders); through a tunnel, from the chat its
-                                                       relay named, else this one on the member it came from
-    held {session, id, send?}                       -> held {session}: (version 18) a message held for the session
-                                                       (its held: one its host had for it while nobody was there to
-                                                       say whether it should go, a subagent's answer after a restart,
-                                                       say) dropped, or sent (send) as input would send it, from
-                                                       its sender
-    senders {session}                               -> senders {session, senders: {uuid: sender}, rev}: (version 18)
-                                                       its messages from others than its user (Senders)
-    stop {session, restart?}                        -> stopped {session} (its claude: the next message resumes it;
-                                                       restart: those attached aren't told it went)
-    set_cwd {session, cwd}                          -> cwd_set {session, cwd}: the folder its claude runs in, from its
-                                                       next message on (not at a turn)
-    always_allow {session, tools | add}             -> allowed {session, tools}: tools allowed whenever its claude
-                                                       asks for them, a head attached or not (kept in memory): tools,
-                                                       these in place of any there were; add (version 15), these
-                                                       added to them, as attach's always_allow adds too (before 15,
-                                                       it replaced them). The reply's tools: all of them now, as a
-                                                       session's always_allow lists them
-    archive {session}, unarchive {session}          -> archived / unarchived {session}: its claude stopped, and it's
-                                                       listed only to those subscribed with archived (unarchive: to
-                                                       all again)
-    delete {session}                                -> deleted {session, trashed: [paths]}: its claude stopped and
-                                                       waited for, its transcript and the folder beside it (its
-                                                       subagents'), pi's own copy of it, and a Bot's folder (its
-                                                       memory, its picture), moved to the trash,
-                                                       where they can be got back, as Baude's Move to Trash does
-                                                       with a chat of its own; then it's gone from the list and from
-                                                       what the server keeps. One whose files can't be moved stays:
-                                                       error, saying why
-    quit {if_idle?}                                 -> quitting: the host process stops, its claudes too (their
-                                                       sessions kept, resumed next time; one at a turn or asking is
-                                                       marked cut). if_idle: only if no session's running a command
-                                                       (its commands), else busy {sessions: [id], commands:
-                                                       [{session, what}]} and it goes on (a version 1 host quits
-                                                       whatever it's given; one before commands, busy if a session's
-                                                       at a turn or asking)
-    transcript {session, offset, limit?}            -> transcript {session, offset, next, size, data (base64)}
-    subagents {session, have?, limit?}              -> subagents {session, files: [{name, size, mtime, offset, next,
-                                                       data (base64)}], more} (its subagents' files, in the folder
-                                                       beside its transcript: each one's transcript, from where have
-                                                       {name: [size, mtime]} says the client's copy is, in whole lines
-                                                       like transcript's; its meta.json whole, if it's changed. more:
-                                                       there's more, past limit; those it didn't reach aren't listed)
-    rename {session, title}                         -> renamed {session} (claude renames it, if it's running; else
-                                                       the server does as claude would)
-    bot {session, bot}                              -> bot_set {session}: (version 8) the session made a Bot, bot
-                                                       {name, picture?} (picture: a PNG, base64; "" to drop it; left
-                                                       out, kept), its name or picture changed; bot null, a chat
-                                                       again, its memory and picture kept. Its agent's told who it
-                                                       is and what its memory says from its next start (one running
-                                                       is started again with the next message, after its turn)
-    bot_picture {session}                           -> bot_picture {session, picture}: a Bot's picture (base64), or
-                                                       null for none (version 8)
-    memory {session, text?}                         -> memory {session, text, path, mtime}: a Bot's memory (the file
-                                                       its agent keeps it in, on the host), after writing text if
-                                                       it's given (version 8)
-    mesh_tools {session, on}                        -> mesh_tools_set {session}: (version 9) the session's agent given
-                                                       the mesh's tools (baudelib.meshtools), or not, from its next
-                                                       start; a Bot's has them always
-    waits_on {session, on: {session, host, kind,     -> waits_on {session}: (version 13) the session's agent waits on
-              text, offset, until, title?}, done?}     another chat's answer (on: that chat, on member host, None for
-                                                       this host; kind "subagent" or "chat", text what it was asked,
-                                                       offset its transcript's size as it was asked, until when the
-                                                       wait ends, epoch seconds, title the chat's), or done: no
-                                                       longer. Kept with the session (not listed) while its turn goes
-                                                       on: if this host stops meanwhile, which stops its agent, it
-                                                       follows the wait once it's started again, and what the wait
-                                                       would have given is held for the session (held), from that
-                                                       chat (sender), till a head sends it or drops it (version 18;
-                                                       13: sent to it as its user's message)
-    emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
-                                                       {state}, many, till emission_watch_end: (version 11) a Bot's
-                                                       browser here watched (Baude's Browser pane). Its state also
-                                                       says (version 14) now, the tab in front's {title, url,
-                                                       progress, loading, back, forward}, and pointer, what the Bot's
-                                                       tools last did with the mouse, numbered, oldest first: [{seq,
-                                                       kind (hover, click, drag, scroll), x, y (CSS pixels), path?,
-                                                       count?, dx?, dy?}] (its last 8; seq starts again from 1 with
-                                                       each Emission)
-    emission_watch_say {line: {ack?, max_w?, max_h?}} -> nothing: a frame taken (ack: its frame), or the pane's size
-    emission {bot: {id, name}, call}                -> emission {result}: (version 10) call (a Bot's browser tool's
-                                                       request, baudelib.emissiontools) to the Emission that has the
-                                                       Bot's own profile here, started for it if none has
-    routines {session, set?, delete?}               -> routines {session, routines, clock}: (version 12) a Bot's routines
-                                                       (baudelib.routines): set, one made or changed (by its id),
-                                                       delete, one gone (its id); clock, the host's {zone, offset}
-    run_routine {session, id}                       -> routines {session, routines}: one of them run now
-    read_file {path, limit?}                        -> file {path, size, data (base64), error?} (in a session's folder)
-    list_dir {path}                                 -> dir {path, entries: [{name, dir, size?, ignored}], more}:
-                                                       (version 17) a folder in a session's folder, folders first
-                                                       (.git left out; ignored: git ignores it), at most 2000
-    git {cwd, what, rev?, limit?, skip?, sha?, path?} -> git {what, ...}: (version 17) a session's folder's git, read
-                                                       only (nothing fetched): log, its branch {name, upstream, ahead,
-                                                       behind} and commits [{sha, parents, author, email, at, refs,
-                                                       subject}] (the host's own checkout's too, for a changelog);
-                                                       card (sha): {author, at, message, files [[path, +, -]],
-                                                       branches}; diff (sha, path?): {text, truncated}
-    signal_names {cwd, session?, cli_id?}           -> signal_names {glossary, refs: [{surface, kind, canonical,
-                                                       status, summary, locations}]}: (version 17) the names Signal's
-                                                       glossary has for a session's folder (session: the chat's own
-                                                       mentions), read as they are; nothing looked up or written
-    feedback {note, text, context?}                 -> feedback_filed {url, number, repo}: (version 17) feedback a head
-                                                       with no gh of its own wrote (a phone's), filed as an issue by
-                                                       this host's gh where Send Feedback files it
-                                                       (fixes.submit_issue_target), once for each note (its id);
-                                                       check: true -> feedback_target {repo}, where it would go
-    catalogue {cwd, wait?}                          -> catalogue {cwd, items, busy, error?}: what @ lists for one of
-                                                       its sessions' folders, made there (lookup.items: its files,
-                                                       branches, Kubernetes objects, what's running on that machine,
-                                                       its pull requests and issues): what there is, at once; waited
-                                                       for while it's made if there's none yet, or with wait. busy:
-                                                       there's more to come (ask again, with wait)
-    link {where}                                    -> linking {where}: a link made from this host process to
-                                                       where (as reach has it, not "local" or "mesh"), kept and made
-                                                       again whenever it drops, and used both ways: the mesh
-                                                       (mesh.py). Its state's in info's mesh
-    unlink {where?, id?}                            -> unlinked {any}: the links made from here to where, or to
-                                                       member id, let go of and forgotten
-    deactivate {id?, where?}, activate {id?, where?} -> deactivated / activated {any}: a member (its id, or where a
-                                                       link from here goes) deactivated here: its links let go of
-                                                       and not made, its joins and tunnels refused (info's mesh:
-                                                       inactive); activate, taken up again
-    join {host}                                     -> joined {host}: (another host process's) this connection,
-                                                       from now on, a link it's made to here (mesh.py)
-    relay {to, as?}                                 -> relayed {to}: this connection, from now on, a tunnel to
-                                                       member to's host process (hello first, as ever); error if
-                                                       there's no way to it now. as: (version 18) the id of one of
-                                                       this host's chats whose mesh tools open it: what's sent
-                                                       through it is from that chat (input's as), as this host has
-                                                       it (its Bot's name or its title), on this host
-    infer {provider, method, path, headers, body}   -> infer_head {status, headers}, infer_data {data (base64)}...,
-                                                       infer_end: an HTTP request to one of this machine's model
-                                                       providers (an OpenAI-compatible server's: path after its
-                                                       base_url), its answer as it comes
-    files {method, path, headers}                   -> infer_head, infer_data..., infer_end: one of this machine's
-                                                       models' files, or where they are (modelfiles.serve), read-only
-    ping                                            (both ways, every PING_S on every connection: SILENT_S of silence
-                                                     and the other end's taken for gone)
-Anything wrong: error {error, plain?, gone?}, with the request's "req" (plain: said for the user as it is; gone
-{why, folder}: a session's folder gone and not made again, why, and where to carry on instead, null for nowhere to say).
-A session's worktree that's gone is made again from its branch as a message or a revert is sent to it; those watching
-it are told so by its claude's message {type: "_note", text}.
+What may be said is schema/wire.schema.json's (JSON Schema, draft 2020-12), read as this is imported: each message
+(its op, its fields, what each is, the version it came with), the entities in them (a session, a host's info, the
+mesh's records), the protocol's constants, and the versions' history. The Android app's build makes Kotlin of the same
+file. Its reference, as this module's help shows it below, is made from it (docs()); defs has a class for each of its
+messages and entities (Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Every
+message sent goes through it: one with an op or a field it doesn't have isn't sent, and an error goes for its request
+in its place (as for one that isn't JSON), said on stderr; a message passed on (a tunnel's) goes as it came.
+$BAUDE_WIRE_STRICT=1 checks each one's types as well, those read too, and says on stderr what doesn't fit.
 
-A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow, held, senders}: its id a UUID the server
-made as it started it (claude's --session-id; what it's resumed by), state "working"
-(at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
-archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
-is checked against), asks what
-it's asking, not answered yet: [{request_id, tool, input}] (long strings in input cut short), cli_id the id claude
-has for it where that's another (a fork's: its transcript's named so), else None. An ask is answered with
-input: a control_response for its request_id, as claude's stream-json has it. commands: what its claude is running,
-[{id, what (80 characters at most), since (epoch seconds), background}]: its Bash and PowerShell calls, its subagents'
-too, from the call to its result (one waiting on its permission ask isn't running yet; a turn's result ends any left,
-but those in a subagent running in the background), and its background tasks but subagents (a Bash run in the
-background: background true) from their start to their notification; none once its claude's gone. cut: when (epoch
-seconds) the host process stopped its claude at a turn or asking (shutting down, a quit, a restart; not a turn that
-ended as it was stopped), so a head can offer to carry it on; None once a user message is sent to it (input). bot:
-a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None for a chat (version 8). start_key:
-its start's, if it was given one (version 13). acting: whether its turn is at its tools (version 14): from a tool
-call's start in what its agent says till text starts after it, the turn ends or its agent goes; only while it's
-"working" (not while it asks permission). always_allow: (version 15) the tools allowed whenever it asks for them,
-sorted. held: (version 18) messages held for it, oldest first, [{id, text, sender, at (epoch seconds)}]. senders:
-(version 18) its sender store's revision (0 for none: Senders), what a head's copy is checked against.
+VERSION is the schema's last version, and since() and speaks() what a host takes, by the version an op or field came
+with (or its hello's ops, where it lists them). A version claimed twice, or one whose ops and fields aren't those its
+history says it brought, is an error as this is imported: two changes can't both be the same version unseen.
+
+A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
+request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
+those watching it are told so by its claude's message {type: "_note", text}.
 
 Senders (version 18). A message passed to a session from another than its user (input's as, a held message sent, a
 subagent's task) has a uuid its program keeps: Claude Code's as its transcript record's, pi's on its session entry
 (pi-claude's /baude-uuid), the host's own transcript's for the others (Server.keep). Its host keeps who it's from,
 by that uuid, beside the session (its state folder's senders/<session>.json), and heads draw a message as from
 another only if it's there, never from its text: the tag said_by puts at the head of its text is for its agent.
-A sender is {kind ("bot", "chat", "subagent", "host"), name, host (its host's id), host_name, session}, filled in by
-the host from what it knows itself. The store goes as its session's transcript goes: copied to a fork, trashed with
-it, and what a revert drops (its message and those after it) gone from it too.
+The store goes as its session's transcript goes: copied to a fork, trashed with it, and what a revert drops (its
+message and those after it) gone from it too.
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
@@ -275,30 +50,395 @@ connects to any of them:
     {"via": "mesh", "host": ID, "path"?}            member ID of the mesh this machine's host process is in (or the
                                                     one listening at path), through it: relay
 """
+import dataclasses
 import json
+import keyword
 import os
 import re
 import select
 import socket
 import stat
 import subprocess
+import sys
 import threading
 import time
+import types
 
-VERSION = 18  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
-# 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
-# others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
-# 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
-# 12: routines, run_routine; 13: waits_on, start's start_key, a session's waits_on and start_key, info's mesh
-# gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
-# always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer,
-# emission_unserved, a session's on_phone: a Bot's browser on a phone; 17: feedback, filed by this host's gh; start's
-# app_tools and grace, attach's app_tools, list_dir, git, signal_names;
-# 18: input's, start's and relay's as, held, senders, a session's held and senders)
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema", "wire.schema.json")
+STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
+
+
+class SchemaError(Exception):
+    """schema/wire.schema.json isn't as it must be: a version claimed twice, say."""
+
+
+def _load(path):
+    def pairs(kv):  # (a key twice in one object: an error, not the last one taken)
+        out = {}
+        for k, v in kv:
+            if k in out:
+                raise SchemaError(f"{os.path.basename(path)}: {k!r} is there twice in one object")
+            out[k] = v
+        return out
+    with open(path, encoding="utf-8") as f:
+        return json.load(f, object_pairs_hook=pairs)
+
+
+SCHEMA = _load(SCHEMA_PATH)
+DEFS = SCHEMA["$defs"]
+MESSAGES = [ref["$ref"].rsplit("/", 1)[1] for ref in SCHEMA["oneOf"]]  # (the defs that are lines, in order)
+OPS = {}  # (an op: the defs of its lines, a request's and its answer's, say)
+for _name in MESSAGES:
+    OPS.setdefault(DEFS[_name]["properties"]["op"]["const"], []).append(_name)
+
+
+def _ref(schema):
+    """The def a field's schema is, if it's one (or one or null): its name."""
+    if "$ref" in schema:
+        return schema["$ref"].rsplit("/", 1)[1]
+    for s in schema.get("anyOf") or ():
+        if "$ref" in s:
+            return s["$ref"].rsplit("/", 1)[1]
+    return None
+
+
+def _versioned():
+    """Every op, entity and field with the version it came with (x-since; none: 1): op, op.field, Entity,
+    Entity.field. An op's lines must agree on its."""
+    out = {}
+    for name, d in DEFS.items():
+        key = d["properties"]["op"]["const"] if name in MESSAGES else name
+        if (v := d.get("x-since", 1)) != out.get(key, v):
+            raise SchemaError(f"{key}'s lines say it came with versions {out[key]} and {v}")
+        out[key] = v
+        for f, p in d["properties"].items():
+            if f != "op":
+                out[f"{key}.{f}"] = max(p.get("x-since", 1), v)
+    return out
+
+
+def _check_schema():
+    """VERSION, once the schema's been checked: each version claimed once (as _load sees), 1 to the last with none
+    left out, and each one's adds those, and only those, whose x-since is it; every def a line or an entity, every
+    $ref one of them."""
+    history = SCHEMA["x-versions"]
+    numbers = sorted(int(v) for v in history)
+    if numbers != list(range(1, len(numbers) + 1)):
+        raise SchemaError(f"x-versions isn't 1 to {len(numbers)}: {numbers}")
+    since = _versioned()
+    for v in numbers[1:]:
+        said = set(history[str(v)].get("adds") or ())
+        have = {k for k, n in since.items() if n == v and not (k.count(".") and since[k.split(".")[0]] == v)}
+        if said != have:
+            raise SchemaError(f"version {v}'s history says it added {sorted(said - have)} that don't say it, and "
+                              f"not {sorted(have - said)} that do: is it claimed twice?")
+    if past := [k for k, n in since.items() if n > numbers[-1]]:
+        raise SchemaError(f"these came with a version past {numbers[-1]}, the last there is: {past}")
+    for name, d in DEFS.items():
+        if name in MESSAGES and "x-op" not in d or name not in MESSAGES and "x-op" in d:
+            raise SchemaError(f"{name} is a line but not in oneOf, or the other way round")
+    for ref in re.findall(r'"\$ref": "#/\$defs/([^"]+)"', json.dumps(DEFS)):
+        if ref not in DEFS:
+            raise SchemaError(f"no def {ref}")
+    return numbers[-1], since
+
+
+VERSION, SINCE = _check_schema()
+CONSTANTS = {k: c["value"] for k, c in SCHEMA["x-constants"].items()}
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
-STATES = ("working", "waiting", "idle", "stopped")
-PING_S = 5      # a subscriber hears from the server at least this often
-SILENT_S = 16   # and takes it for gone after this long without a word
+STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
+PING_S = CONSTANTS["PING_S"]      # a subscriber hears from the server at least this often
+SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long without a word
+OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: the tunnel's this long to open)
+
+
+def since(key):
+    """The version an op ("git"), an op's field ("start.ephemeral"), an entity or its field ("Session.held") came
+    with. KeyError for one the schema hasn't."""
+    return SINCE[key]
+
+
+def speaks(info, key):
+    """Does a host take key (as since() has it): as its hello's ops say, where it lists them (a host that speaks only
+    part of these lines); else by its version."""
+    ops = (info or {}).get("ops")
+    if isinstance(ops, list):
+        return key in ops or key.rsplit(".", 1)[-1] in ops
+    return ((info or {}).get("version") or 1) >= since(key)
+
+
+# ---- the classes
+_UNSET = type("Unset", (), {"__repr__": lambda self: "UNSET", "__bool__": lambda self: False})()
+UNSET = _UNSET  # (a field a class was built without: not sent)
+
+
+def py_name(field):
+    """A field's name in Python: as it is, or with _ after it if it's a keyword (as, from)."""
+    return field + "_" if keyword.iskeyword(field) else field
+
+
+def _to_wire(value):
+    if isinstance(value, Def):
+        return value.to_wire()
+    if isinstance(value, list):
+        return [_to_wire(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_wire(v) for k, v in value.items()}
+    return value
+
+
+class Def:
+    """What each of defs' classes is: built with its fields (by keyword, Python's names: as_ for as), those left out
+    not sent."""
+    _def = None
+    _fields = ()  # ((the wire's name, Python's), ...)
+
+    def to_wire(self):
+        """The message or entity as it goes: the schema's fields only, those that were given."""
+        out = {"op": self._op} if self._op else {}
+        for wire_name, name in self._fields:
+            if (v := getattr(self, name)) is not _UNSET:
+                out[wire_name] = _to_wire(v)
+        return out
+
+    @classmethod
+    def from_wire(cls, obj):
+        """One as it came (a dict): the fields the schema has, entities in them made objects too; others left out."""
+        kw = {}
+        for wire_name, name in cls._fields:
+            if wire_name in obj:
+                kw[name] = _from_wire(cls._def["properties"][wire_name], obj[wire_name])
+        return cls(**kw)
+
+
+def _from_wire(schema, value):
+    if value is None:
+        return None
+    ref = _ref(schema)
+    if ref is not None and isinstance(value, dict) and DEFS[ref].get("additionalProperties") is False:
+        return getattr(defs, ref).from_wire(value)
+    if schema.get("type") == "array" and isinstance(value, list) and "items" in schema:
+        return [_from_wire(schema["items"], v) for v in value]
+    return value
+
+
+def _make_class(name, d):
+    fields = [(f, py_name(f)) for f in d["properties"] if f != "op"]
+    op = d["properties"]["op"]["const"] if name in MESSAGES else None
+    cls = dataclasses.make_dataclass(name, [(py, object, dataclasses.field(default=_UNSET)) for _f, py in fields],
+                                     bases=(Def,), namespace={"__doc__": d.get("description")})
+    cls._def, cls._fields, cls._op = d, tuple(fields), op
+    return cls
+
+
+defs = types.SimpleNamespace(**{name: _make_class(name, d) for name, d in DEFS.items()})
+
+
+# ---- what's sent, checked
+def _names_checker(schema, where):
+    """A function that says what of a value isn't the schema's (a field it doesn't have, in an entity of its own,
+    in a list, a map or itself), or None for one with nothing to look at (an open object, a plain value)."""
+    if schema.get("x-open"):
+        return None
+    ref = _ref(schema)
+    if ref is not None:
+        d = DEFS[ref]
+        if d.get("additionalProperties") is not False:
+            return None
+        return _entity_checker(ref, d)
+    if schema.get("type") == "array" and "items" in schema or \
+            isinstance(schema.get("type"), list) and "array" in schema["type"] and "items" in schema:
+        inner = _names_checker(schema["items"], where)
+        if inner is None:
+            return None
+
+        def items(value):
+            if isinstance(value, list):
+                for i, v in enumerate(value):
+                    if (bad := inner(v)) is not None:
+                        return f"[{i}]{bad}"
+            return None
+        return items
+    if isinstance(schema.get("additionalProperties"), dict):
+        inner = _names_checker(schema["additionalProperties"], where)
+        if inner is None:
+            return None
+
+        def values(value):
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    if (bad := inner(v)) is not None:
+                        return f"[{k!r}]{bad}"
+            return None
+        return values
+    return None
+
+
+_entities = {}
+
+
+def _entity_checker(name, d):
+    if name in _entities:
+        return _entities[name]
+    allowed = frozenset(d["properties"])
+    nested = []
+
+    def check(value):
+        if not isinstance(value, dict):
+            return None
+        if not value.keys() <= allowed:
+            return f".{sorted(set(value) - allowed)[0]}: {name} has no such field"
+        for f, c in nested:
+            if (v := value.get(f)) is not None and (bad := c(v)) is not None:
+                return f".{f}{bad}"
+        return None
+    _entities[name] = check
+    for f, p in d["properties"].items():
+        if (c := _names_checker(p, f)) is not None:
+            nested.append((f, c))
+    return check
+
+
+def _op_checker(op, names):
+    """What of a line with this op isn't the schema's: its fields those of any of its lines, each as that line has
+    it (a field two of them have otherwise than each other isn't looked into)."""
+    allowed = frozenset(f for n in names for f in DEFS[n]["properties"])
+    nested = []
+    for f in allowed:
+        said = {json.dumps(DEFS[n]["properties"][f], sort_keys=True) for n in names if f in DEFS[n]["properties"]}
+        if len(said) == 1 and (c := _names_checker(json.loads(said.pop()), f)) is not None:
+            nested.append((f, c))
+    nested = tuple(nested)
+
+    def check(msg):
+        if not msg.keys() <= allowed:
+            return f"{op}.{sorted(set(msg) - allowed)[0]}: {op} has no such field"
+        for f, c in nested:
+            if (v := msg.get(f)) is not None and (bad := c(v)) is not None:
+                return f"{op}.{f}{bad}"
+        return None
+    return check
+
+
+_CHECKS = {op: _op_checker(op, names) for op, names in OPS.items()}
+_said = set()
+
+
+def check(msg):
+    """What of a message isn't the schema's (its op, a field), or None: what send refuses."""
+    if not isinstance(msg, dict):
+        return "not an object"
+    c = _CHECKS.get(msg.get("op"))
+    if c is None:
+        return f"no op {msg.get('op')!r} in the schema"
+    return c(msg)
+
+
+def problems(msg):
+    """Everything about a message that isn't as the schema has it, types too ($BAUDE_WIRE_STRICT's): [what, ...]."""
+    if not isinstance(msg, dict) or msg.get("op") not in OPS:
+        return [check(msg) or "not a message"]
+    best = None
+    for name in OPS[msg["op"]]:
+        found = []
+        _validate(DEFS[name], msg, msg["op"], found)
+        if not found:
+            return []
+        if best is None or len(found) < len(best):
+            best = found
+    return best
+
+
+_TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "object": dict, "array": list,
+          "null": type(None)}
+
+
+def _validate(schema, value, where, out):
+    if (ref := schema.get("$ref")) is not None:
+        return _validate(DEFS[ref.rsplit("/", 1)[1]], value, where, out)
+    if "anyOf" in schema:
+        for s in schema["anyOf"]:
+            tried = []
+            _validate(s, value, where, tried)
+            if not tried:
+                return
+        return out.append(f"{where}: {json.dumps(value)[:60]} is none of what it may be")
+    if "const" in schema and value != schema["const"]:
+        return out.append(f"{where}: not {schema['const']!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        return out.append(f"{where}: {value!r} isn't one of {schema['enum']}")
+    if "type" in schema:
+        kinds = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+        if not any(isinstance(value, _TYPES[k]) and not (k in ("integer", "number") and isinstance(value, bool))
+                   for k in kinds):
+            return out.append(f"{where}: {type(value).__name__} where it's {'/'.join(kinds)}")
+    if schema.get("x-open"):
+        return
+    if isinstance(value, dict) and "properties" in schema:
+        for f in schema.get("required") or ():
+            if f not in value:
+                out.append(f"{where}.{f}: missing")
+        for f, v in value.items():
+            if f in schema["properties"]:
+                _validate(schema["properties"][f], v, f"{where}.{f}", out)
+            elif schema.get("additionalProperties") is False:
+                out.append(f"{where}.{f}: no such field")
+    elif isinstance(value, dict) and isinstance(schema.get("additionalProperties"), dict):
+        for k, v in value.items():
+            _validate(schema["additionalProperties"], v, f"{where}[{k!r}]", out)
+    if isinstance(value, list) and "items" in schema:
+        for i, v in enumerate(value):
+            _validate(schema["items"], v, f"{where}[{i}]", out)
+
+
+def _say(what):
+    if what not in _said:
+        _said.add(what)
+        print(f"wire: {what}", file=sys.stderr, flush=True)
+
+
+def docs():
+    """The wire's reference, made from the schema: each op's lines and fields, the entities, the constants, the
+    versions."""
+    def kind(p):
+        if (ref := _ref(p)) is not None:
+            return ref + ("?" if "anyOf" in p else "")
+        t = p.get("type", "any")
+        t = "/".join(t) if isinstance(t, list) else t
+        if "items" in p:
+            t += f" of {kind(p['items'])}"
+        if "enum" in p:
+            t = " | ".join(map(str, p["enum"]))
+        return t
+
+    def fields(d, indent):
+        out = []
+        for f, p in d["properties"].items():
+            if f in ("op", "req"):
+                continue
+            v = f" (version {p['x-since']})" if p.get("x-since") else ""
+            out.append(f"{indent}{f}: {kind(p)}{v}. {p.get('description', '')}")
+        return out
+
+    lines = ["", "The wire's reference (schema/wire.schema.json):", ""]
+    for name in MESSAGES:
+        d = DEFS[name]
+        v = f", version {d['x-since']}" if d.get("x-since") else ""
+        lines.append(f"    {d['x-op']} ({d['x-kind']}{v}): {d.get('description', '')}")
+        lines += fields(d, "        ")
+    lines += ["", "Entities:"]
+    for name, d in DEFS.items():
+        if name not in MESSAGES:
+            v = f", version {d['x-since']}" if d.get("x-since") else ""
+            lines.append(f"    {name}{v}: {d.get('description', '')}")
+            lines += fields(d, "        ")
+    lines += ["", "Constants:"] + [f"    {k} = {c['value']} ({c['unit']}): {c['description']}"
+                                   for k, c in SCHEMA["x-constants"].items()]
+    lines += ["", "Versions:"] + [f"    {v}: {h['description']}" for v, h in SCHEMA["x-versions"].items()]
+    return "\n".join(lines) + "\n"
+
+
+__doc__ += docs()
 
 
 def encode(msg):
@@ -319,9 +459,20 @@ class Channel:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return cls(sock.makefile("rb"), sock.makefile("wb"), sock)
 
-    def send(self, msg):
-        """False once the other end's gone. A message that can't be written as JSON goes as an error, for its
-        request."""
+    def send(self, msg, passed=False):
+        """False once the other end's gone. A message the schema hasn't (its op, a field: check), or that can't be
+        written as JSON, goes as an error, for its request. passed: one passed on as it came (a tunnel's), not
+        looked at."""
+        if isinstance(msg, Def):
+            msg = msg.to_wire()
+        if not passed:
+            if (bad := check(msg)) is not None:
+                _say(f"not sent: {bad}")
+                req = msg.get("req") if isinstance(msg, dict) else None
+                msg = {"op": "error", "req": req, "error": f"not sent: {bad}"}
+            elif STRICT:
+                for p in problems(msg):
+                    _say(f"sent: {p}")
         try:
             data = encode(msg)
         except (TypeError, ValueError) as e:
@@ -353,6 +504,9 @@ class Channel:
                 msg = json.loads(line)
             except ValueError:
                 return None
+            if STRICT and isinstance(msg, dict):
+                for p in problems(msg):
+                    _say(f"read: {p}")
             return msg if isinstance(msg, dict) else None
 
     def reply(self):
@@ -547,9 +701,6 @@ def connect_ssh(dest, command=None, strict=False, timeout=25.0):
         except subprocess.TimeoutExpired:
             pass
         raise OSError("; ".join(s for s in said if s) or str(e)) from None
-
-
-OPEN_S = 20  # (a member of the mesh, reached through it: the tunnel's this long to open)
 
 
 def through(ch, host, timeout=5.0, as_=None):

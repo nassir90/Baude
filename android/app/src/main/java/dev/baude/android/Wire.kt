@@ -221,10 +221,10 @@ class Connection(
         out = stream
         var reached = false
         val hello = {
-            request(JSONObject().put("op", "hello").put("client", "baude-android")) { reply ->
+            request(Msg.Hello(client = "baude-android").json()) { reply ->
                 val server = reply.optJSONObject("server")
                 when {
-                    reply.optString("op") != "hello" -> {
+                    reply.optString("op") != Op.HELLO -> {
                         said = reply.optString("error", "the host said no")
                         end()
                     }
@@ -238,15 +238,15 @@ class Connection(
                         reached = true
                         set("up")
                         if (subscribes) // (archived ones too: the home screen lists them, folded)
-                            send(JSONObject().put("op", "subscribe").put("archived", true))
+                            send(Msg.Subscribe(archived = true).json())
                     }
                 }
             }
         }
         val member = (place as? Place.Member)?.member
         if (member == null) hello()
-        else request(JSONObject().put("op", "relay").put("to", member)) { reply -> // (wire.through)
-            if (reply.optString("op") == "relayed") hello()
+        else request(Msg.Relay(to = member).json()) { reply -> // (wire.through)
+            if (reply.optString("op") == Op.RELAYED) hello()
             else {
                 said = reply.optString("error", "${via?.host?.label ?: "its host"} couldn't reach it")
                 end()
@@ -258,7 +258,7 @@ class Connection(
             try {
                 while (!stopped && out != null) {
                     Thread.sleep(PING_MS)
-                    send(JSONObject().put("op", "ping"))
+                    send(Msg.Ping().json())
                     if (SystemClock.elapsedRealtime() - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
                         said = "the host stopped answering"                   // the socket says)
                         end()
@@ -310,14 +310,14 @@ class Connection(
         calls[req] = then
         if (!send(msg.put("req", req))) {
             calls.remove(req)
-            then(JSONObject().put("op", "error").put("error", "not connected"))
+            then(Msg.Error(error = "not connected").json())
         }
     }
 
     private fun failAll() {
         val waiting = calls.values.toList()
         calls.clear()
-        waiting.forEach { it(JSONObject().put("op", "error").put("error", "the connection went")) }
+        waiting.forEach { it(Msg.Error(error = "the connection went").json()) }
     }
 
     private fun plain(e: Exception): String {

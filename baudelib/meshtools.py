@@ -17,7 +17,7 @@ NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
 SUBAGENT_MODES = ("auto", "acceptEdits", "default", "plan")  # (a subagent's: Auto at most; its host holds it to these)
 READ_ONLY = ("hosts", "chats", "read_chat")  # (looking, never asked about; starting or saying: as the chat's mode is)
 WAIT_S, WAIT_MAX_S = 600, 3600  # (a subagent's or a chat's reply waited for this long, by default and at most)
-ASK_S = 60  # (a subagent asking a permission no one's there to give: refused after this long)
+ASK_S = wire.CONSTANTS["ASK_S"]  # (a subagent asking a permission no one's there to give: refused after this long)
 TEXT_MAX = 20000  # (characters of a reply, or of what a chat said, given back)
 BACK_S = 120  # (a host gone from the mesh, restarting say, as a subagent's started or its answer's waited for: waited
 # for this long to come back, and tried again)

@@ -270,13 +270,13 @@ object Update {
         val tries = bad?.get(1)?.toIntOrNull() ?: 0
         if (!user && bad != null &&
             System.currentTimeMillis() - bad[2].toLong() < minOf(RETRY_MS shl (tries - 1).coerceIn(0, 10), RETRY_MAX_MS)) {
-            main.post { if (state.value == "") state.value = "found" } // (Update: tried again now)
+            main.post { if (state.value == "" || state.value == "wrong") state.value = "found" } // (Update: tried again now; a build that was signed with another key, gone)
             return
         }
         dev.baude.android.Settings.load(app)
         if (!user && !wanted && !dev.baude.android.Settings.meteredUpdates.value &&
             app.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered) {
-            main.post { if (state.value == "") state.value = "found" }
+            main.post { if (state.value == "" || state.value == "wrong") state.value = "found" }
             return
         }
         val part = File(dir, "$sha.part")

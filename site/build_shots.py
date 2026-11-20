@@ -77,7 +77,7 @@ def publish_apk(built_apk, out, live=FEED):
                  "(android/, emission.py and schema/ committed)")
     if live:
         try:
-            with urllib.request.urlopen(urllib.request.Request(live, headers={"Cache-Control": "no-cache"}),
+            with urllib.request.urlopen(urllib.request.Request(live, headers={"Cache-Control": "no-cache", "User-Agent": "baude-site-build"}),
                                         timeout=30) as r:
                 was = json.load(r)["versionCode"]
         except urllib.error.HTTPError as e:

@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         MeshService.keep(this)
+        Update.start(this) // (a newer build on the Baude site: downloaded and offered, Update at the home screen's foot)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)
         else {
@@ -62,8 +63,12 @@ class MainActivity : ComponentActivity() {
         opened(intent)
     }
 
-    /** Opened from a Bot's notification: its chat. */
+    /** Opened from a Bot's notification: its chat; from A new version is ready's Update: the install. */
     private fun opened(intent: Intent?) {
+        if (intent?.getBooleanExtra("update", false) == true) {
+            intent.removeExtra("update")
+            Update.install(this)
+        }
         val host = intent?.getStringExtra("host") ?: return
         val session = intent.getStringExtra("session") ?: return
         go(listOf("chat", host, session))
@@ -101,6 +106,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Mesh.onScreen(true)
+        Update.resumed(this)
     }
 
     override fun onStop() {

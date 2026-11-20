@@ -28,7 +28,7 @@ data class Served(val member: String, val memberName: String, val provider: Stri
         fun of(o: JSONObject) = Served(o.optString("member"), o.optString("member_name"), o.optString("provider"),
             o.optString("provider_name"), o.optString("model"), o.optString("display"), o.optInt("window", WINDOW))
 
-        const val WINDOW = 32768 // (providers.DEFAULT_WINDOW: a model's context, where its host says none)
+        const val WINDOW = WireConstants.DEFAULT_WINDOW // (a model's context, where its host says none)
     }
 }
 
@@ -43,7 +43,7 @@ fun endpointId(member: String, provider: String): String {
 /** The models the mesh serves this phone's agents: those the machines this phone reaches serve over an API, as any
  * member may use the mesh's inference, and the calls to them. */
 object Inference {
-    const val WAIT_MS = 600_000L // (mesh.INFER_S: a provider has this long to say something, each time)
+    const val WAIT_MS = WireConstants.INFER_S * 1000L // (mesh.INFER_S: a provider has this long to say something, each time)
 
     /** Every model those machines serve over an API (and that call tools), by machine. */
     fun found(): List<Served> {
@@ -52,17 +52,17 @@ object Inference {
         for (c in Mesh.states.values.toList()) {
             if (c.state != "up" || c.place is Place.Phone) continue
             val info = c.info ?: continue
-            val member = info.optString("id").takeIf(::isId) ?: continue
+            val member = info.id?.takeIf(::isId) ?: continue
             if (!seen.add(member)) continue
-            for (p in info.optJSONArray("providers").list()) {
-                if (!p.optBoolean("http") && p.isNull("base_url")) continue
-                for (m in p.optJSONArray("models").list()) {
-                    if (!m.optBoolean("tools", true)) continue
-                    val id = m.optString("id").ifBlank { m.optString("value") }
+            for (p in info.providers.orEmpty()) {
+                if (p.http != true && p.baseUrl == null) continue
+                for (m in p.models.orEmpty()) {
+                    if (m.tools == false) continue
+                    val id = m.id.orEmpty().ifBlank { m.value.orEmpty() }
                     if (id.isBlank()) continue
-                    out.add(Served(member, info.optString("name").ifBlank { member.take(8) }, p.optString("id"),
-                        p.optString("name").ifBlank { p.optString("id") }, id, m.optString("displayName").ifBlank { id },
-                        m.optInt("window", Served.WINDOW).takeIf { it > 0 } ?: Served.WINDOW))
+                    out.add(Served(member, info.name.orEmpty().ifBlank { member.take(8) }, p.id.orEmpty(),
+                        p.name.orEmpty().ifBlank { p.id.orEmpty() }, id, m.displayName.orEmpty().ifBlank { id },
+                        m.window?.toInt()?.takeIf { it > 0 } ?: Served.WINDOW))
                 }
             }
         }
@@ -78,7 +78,7 @@ object Inference {
 
     /** The connection to a member's host process that's up now (a host of yours, or reached through one). */
     fun connTo(member: String): Connection? = Mesh.states.values.toList().firstOrNull {
-        it.state == "up" && it.place !is Place.Phone && it.info?.optString("id") == member
+        it.state == "up" && it.place !is Place.Phone && it.info?.id.orEmpty() == member
     }
 
     class Failed(why: String) : Exception(why)
@@ -102,25 +102,25 @@ object Inference {
         val sse = Sse(text)
         val line = WireLine(ch.inputStream, ch.outputStream) { ch.disconnect() }
         s.stopModel = { line.shut() }
-        val infer = JSONObject().put("op", "infer").put("provider", served.provider).put("method", "POST")
-            .put("path", "/chat/completions").put("headers", JSONObject().put("content-type", "application/json")
-                .put("accept", "text/event-stream"))
-            .put("body", Base64.getEncoder().encodeToString(body.put("stream", true).toString().toByteArray())).put("req", 2)
+        val infer = Msg.Infer(provider = served.provider, method = "POST", path = "/chat/completions",
+            headers = mapOf("content-type" to "application/json", "accept" to "text/event-stream"),
+            body = Base64.getEncoder().encodeToString(body.put("stream", true).toString().toByteArray()), req = 2).json()
         thread(name = "infer", isDaemon = true) {
             try {
                 ch.connect(15_000)
-                line.send(if (conn.place is Place.Member) JSONObject().put("op", "relay").put("to", served.member).put("req", 0)
-                    else JSONObject().put("op", "hello").put("client", "baude-android").put("req", 1))
+                line.send(if (conn.place is Place.Member) Msg.Relay(to = served.member, req = 0).json()
+                    else Msg.Hello(client = "baude-android", req = 1).json())
                 line.run { m ->
                     heard = System.currentTimeMillis()
                     when (m.optString("op")) {
-                        "relayed" -> line.send(JSONObject().put("op", "hello").put("client", "baude-android").put("req", 1))
-                        "hello" -> line.send(infer)
-                        "infer_head" -> sse.head(m.optInt("status"), m.optJSONObject("headers")?.optString("Content-Type").orEmpty())
-                        "infer_data" -> sse.feed(Base64.getDecoder().decode(m.optString("data")))
-                        "infer_end" -> line.shut()
-                        "error" -> {
-                            error = m.optString("error", "the host said no")
+                        Op.RELAYED -> line.send(Msg.Hello(client = "baude-android", req = 1).json())
+                        Op.HELLO -> line.send(infer)
+                        Op.INFER_HEAD -> Msg.InferHead.from(m).let { h ->
+                            sse.head(h.status?.toInt() ?: 0, h.headers?.optString("Content-Type").orEmpty()) }
+                        Op.INFER_DATA -> sse.feed(Base64.getDecoder().decode(Msg.InferData.from(m).data.orEmpty()))
+                        Op.INFER_END -> line.shut()
+                        Op.ERROR -> {
+                            error = Msg.Error.from(m).said ?: "the host said no"
                             line.shut()
                         }
                     }
@@ -246,7 +246,7 @@ object Inference {
 object PhoneAgent {
     /** Tool calls in one turn, at most; then the model's asked to answer in words. In Manual each edit's asked of
      * you, so a turn that needs more is one to split; and it bounds what a model stuck in a loop costs the machine that serves it. */
-    private const val MAX_CALLS = 40
+    private const val MAX_CALLS = WireConstants.AGENT_CALLS_MAX
     const val STOPPED = "[Request interrupted by user]"
     private const val COMPACT_AT = 0.8 // (of its model's context: the conversation compacted, as claude's auto-compact)
     private const val COMPACT_ASK = "Your task is to create a detailed summary of the conversation so far, paying " +

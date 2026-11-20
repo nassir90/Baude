@@ -52,26 +52,24 @@ import java.util.TimeZone
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 /** When a routine runs, as routinespage.when_text says it. */
-fun whenText(r: JSONObject): String {
-    if (r.has("every") && !r.isNull("every")) {
-        val m = r.optInt("every")
+fun whenText(r: Msg.Routine): String {
+    r.every?.let { every ->
+        val m = every.toInt()
         return when {
             m == 60 -> "every hour"
             m % 60 == 0 && m >= 120 -> "every ${m / 60} hours"
             else -> "every $m minutes"
         }
     }
-    val days = r.optJSONArray("days").ints()
+    val days = r.days.orEmpty().map { it.toInt() }
     val said = when (days) {
         listOf(0, 1, 2, 3, 4) -> "weekdays"
         listOf(5, 6) -> "weekends"
         (0..6).toList() -> "every day"
         else -> days.joinToString(", ") { DAYS.getOrElse(it) { "?" } }
     }
-    return "$said at ${r.optString("at")}"
+    return "$said at ${r.at.orEmpty()}"
 }
-
-fun JSONArray?.ints(): List<Int> = if (this == null) emptyList() else (0 until length()).map { optInt(it) }
 
 /** A time as the page says it, on the host's clock (its offset): its time today, else its day too; never, none. */
 fun stamp(t: Double?, offset: Int): String {
@@ -83,31 +81,30 @@ fun stamp(t: Double?, offset: Int): String {
     return SimpleDateFormat(pattern, Locale.ENGLISH).apply { timeZone = zone }.format(at)
 }
 
-private fun JSONObject.time(k: String): Double? = if (isNull(k) || !has(k)) null else optDouble(k)
-
 /** A Bot's routines (work it's given on a schedule, its host's clock), as Baude's Routines page: each one's when,
  * next and last run, on or paused, run now, changed or deleted; + for a new one. Read again every 30 s while it's
  * shown, and as a turn ends. */
 @Composable
 fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
     val c = LocalBaude.current
-    val list = remember(hostId, sid) { mutableStateListOf<JSONObject>() }
-    var clock by remember { mutableStateOf(JSONObject()) }
+    val list = remember(hostId, sid) { mutableStateListOf<Msg.Routine>() }
+    var clock by remember { mutableStateOf(Msg.Clock()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loaded by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<JSONObject?>(null) }
+    var editing by remember { mutableStateOf<Msg.Routine?>(null) }
     fun took(r: JSONObject, failed: String) {
-        if (r.optString("op") == "routines") {
+        if (r.optString("op") == Op.ROUTINES) {
+            val got = Msg.RoutinesReply.from(r)
             list.clear()
-            list.addAll(r.optJSONArray("routines").list())
-            clock = r.optJSONObject("clock") ?: JSONObject()
+            list.addAll(got.routines.orEmpty())
+            clock = got.clock ?: Msg.Clock()
             loaded = true
             error = null
-        } else error = failed + r.optString("error").let { if (it.isNotBlank()) " ($it)" else "" }
+        } else error = failed + Msg.Error.from(r).said.orEmpty().let { if (it.isNotBlank()) " ($it)" else "" }
     }
-    fun load() = Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid)) { took(it, "Couldn't load the routines.") }
+    fun load() = Mesh.ask(hostId, Msg.Routines(session = sid).json()) { took(it, "Couldn't load the routines.") }
     fun set(r: JSONObject, failed: String = "Couldn't save the routine.") =
-        Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid).put("set", r)) { took(it, failed) }
+        Mesh.ask(hostId, Msg.Routines(session = sid, set = r).json()) { took(it, failed) }
     LaunchedEffect(here) {
         while (here) {
             load()
@@ -116,7 +113,7 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
     }
     DisposableEffect(hostId, sid) {
         val l: (String, JSONObject) -> Unit = { at, msg ->
-            if (at == hostId && msg.optString("op") == "turn_ended" && msg.optString("session") == sid) load()
+            if (at == hostId && msg.optString("op") == Op.TURN_ENDED && Msg.TurnEnded.from(msg).session.orEmpty() == sid) load()
         }
         Mesh.listeners.add(l)
         onDispose { Mesh.listeners.remove(l) }
@@ -125,26 +122,26 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Spacer(Modifier.weight(1f))
-            IconButton(Icons.Filled.Add, "New routine") { editing = JSONObject() }
+            IconButton(Icons.Filled.Add, "New routine") { editing = Msg.Routine() }
         }
         BoxedList(list.toList(), if (loaded || error == null) "No routines yet" else "") { r ->
-            val offset = clock.optInt("offset", 0)
+            val offset = clock.offset?.toInt() ?: 0
             val parts = listOfNotNull(whenText(r),
-                if (r.optBoolean("paused")) "paused" else "next " + stamp(r.time("next"), offset),
-                r.time("last")?.let { "last " + stamp(it, offset) }, r.optString("error").ifBlank { null })
-            ActionRow(r.optString("name").ifBlank { "Routine" }, parts.joinToString(" · "), suffix = {
+                if (r.paused == true) "paused" else "next " + stamp(r.next?.toDouble(), offset),
+                r.last?.let { "last " + stamp(it.toDouble(), offset) }, r.error?.ifBlank { null })
+            ActionRow(r.name.orEmpty().ifBlank { "Routine" }, parts.joinToString(" · "), suffix = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(!r.optBoolean("paused"), { on -> set(JSONObject(r.toString()).put("paused", !on)) },
+                    Switch(r.paused != true, { on -> set(r.json().put("paused", !on)) },
                         colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg),
                         modifier = Modifier.padding(end = 4.dp))
                     IconButton(Icons.Filled.PlayArrow, "Run now") {
-                        Mesh.ask(hostId, JSONObject().put("op", "run_routine").put("session", sid).put("id", r.optString("id"))) {
+                        Mesh.ask(hostId, Msg.RunRoutine(session = sid, id = r.id.orEmpty()).json()) {
                             took(it, "Couldn't run the routine.")
                         }
                     }
                     IconButton(Icons.Filled.Edit, "Change") { editing = r }
                     IconButton(Icons.Filled.Delete, "Delete") {
-                        Mesh.ask(hostId, JSONObject().put("op", "routines").put("session", sid).put("delete", r.optString("id"))) {
+                        Mesh.ask(hostId, Msg.Routines(session = sid, delete = r.id.orEmpty()).json()) {
                             took(it, "Couldn't delete the routine.")
                         }
                     }
@@ -159,17 +156,17 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
 /** New Routine, or Change Routine (routinespage's form): its name, its task, and when: every so many minutes or
  * hours, or at a time of day on the days picked (the host's clock). */
 @Composable
-private fun RoutineForm(r: JSONObject, clock: JSONObject, done: (JSONObject?) -> Unit) {
+private fun RoutineForm(r: Msg.Routine, clock: Msg.Clock, done: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
-    val new = !r.has("id")
-    var name by remember { mutableStateOf(r.optString("name")) }
-    var task by remember { mutableStateOf(r.optString("prompt")) }
-    var atTime by remember { mutableStateOf(r.has("at") && !r.isNull("at")) }
-    val every = if (r.has("every") && !r.isNull("every")) r.optInt("every") else 60
+    val new = r.id == null
+    var name by remember { mutableStateOf(r.name.orEmpty()) }
+    var task by remember { mutableStateOf(r.prompt.orEmpty()) }
+    var atTime by remember { mutableStateOf(r.at != null) }
+    val every = r.every?.toInt() ?: 60
     var hours by remember { mutableStateOf(every % 60 == 0) }
     var count by remember { mutableStateOf((if (every % 60 == 0) every / 60 else every).toString()) }
-    var at by remember { mutableStateOf(r.optString("at").ifBlank { "09:00" }) }
-    val days = remember { mutableStateListOf<Int>().apply { addAll(r.optJSONArray("days").ints().ifEmpty { listOf(0, 1, 2, 3, 4) }) } }
+    var at by remember { mutableStateOf(r.at.orEmpty().ifBlank { "09:00" }) }
+    val days = remember { mutableStateListOf<Int>().apply { addAll(r.days.orEmpty().map { it.toInt() }.ifEmpty { listOf(0, 1, 2, 3, 4) }) } }
     AlertDialog(
         onDismissRequest = { done(null) },
         title = { Text(if (new) "New Routine" else "Change Routine") },
@@ -191,7 +188,7 @@ private fun RoutineForm(r: JSONObject, clock: JSONObject, done: (JSONObject?) ->
                     Picker(if (hours) "hours" else "minutes", "Minutes or hours", listOf("minutes" to "m", "hours" to "h"),
                         if (hours) "h" else "m") { hours = it == "h" }
                 } else {
-                    Text(clock.optString("zone").ifBlank { null }?.let { "Times in $it" } ?: "Times on the host's clock",
+                    Text(clock.zone?.ifBlank { null }?.let { "Times in $it" } ?: "Times on the host's clock",
                         style = Type.caption, color = c.dim)
                     Box(Modifier.width(90.dp)) { NumberField(at) { at = it.filter { ch -> ch.isDigit() || ch == ':' }.take(5) } }
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -207,8 +204,8 @@ private fun RoutineForm(r: JSONObject, clock: JSONObject, done: (JSONObject?) ->
         },
         confirmButton = {
             Button("Save", suggested = true) {
-                val made = JSONObject().put("name", name).put("prompt", task).put("paused", r.optBoolean("paused"))
-                if (!new) made.put("id", r.optString("id"))
+                val made = JSONObject().put("name", name).put("prompt", task).put("paused", r.paused == true)
+                if (!new) made.put("id", r.id.orEmpty())
                 if (atTime) made.put("at", at).put("days", JSONArray(days.sorted()))
                 else made.put("every", (count.toIntOrNull() ?: 60) * if (hours) 60 else 1)
                 done(made)

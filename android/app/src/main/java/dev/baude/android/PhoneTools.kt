@@ -212,7 +212,7 @@ object PhoneTools {
     /** The machines this phone reaches now: itself, its hosts, and their mesh's members (their connections). */
     private fun reached(): List<Reached> = Mesh.states.values.toList().mapNotNull { c ->
         val info = c.info ?: return@mapNotNull null
-        Reached(info.optString("id"), info.optString("name").ifBlank { Mesh.label(c.id) }, c)
+        Reached(info.id.orEmpty(), info.name.orEmpty().ifBlank { Mesh.label(c.id) }, c)
     }.sortedBy { if (it.conn.place is Place.Phone) 0 else 1 }
 
     private fun find(host: String?): Reached? = if (host.isNullOrBlank()) reached().firstOrNull { it.conn.place is Place.Phone }
@@ -221,43 +221,43 @@ object PhoneTools {
     private fun hosts(): Pair<String, Boolean> {
         val out = JSONArray()
         for (p in reached()) {
-            val models = p.conn.info?.optJSONArray("models").list().map { it.optString("value") }
+            val models = p.conn.info?.models.orEmpty().map { it.optString("value") }
             out.put(JSONObject().put("id", p.id).put("name", p.name).put("connected", p.conn.state == "up")
                 .put("this_phone", p.conn.place is Place.Phone).put("models", JSONArray(models.take(40))))
         }
         return out.toString(1) to false
     }
 
-    private fun sessionsOf(p: Reached): List<JSONObject> = Mesh.sessions[p.conn.id].orEmpty()
+    private fun sessionsOf(p: Reached): List<Msg.Session> = Mesh.sessions[p.conn.id].orEmpty()
 
     private fun chats(input: JSONObject): Pair<String, Boolean> {
         val p = find(input.optString("host")) ?: return "No host ${input.optString("host")} in reach" to true
         val bots = input.optBoolean("bots")
         val out = JSONArray()
-        for (x in sessionsOf(p).filter { !bots || it.optJSONObject("bot") != null }.sortedByDescending { it.optDouble("said") }.take(50)) {
-            out.put(JSONObject().put("id", x.optString("id")).put("title", x.opt("title")).put("state", x.optString("state"))
-                .put("bot", x.optJSONObject("bot")?.optString("name") ?: JSONObject.NULL))
+        for (x in sessionsOf(p).filter { !bots || it.bot != null }.sortedByDescending { it.said?.toDouble() ?: Double.NaN }.take(50)) {
+            out.put(JSONObject().put("id", x.id.orEmpty()).put("title", x.title ?: JSONObject.NULL).put("state", x.state.orEmpty())
+                .put("bot", x.bot?.let { it.name.orEmpty() } ?: JSONObject.NULL))
         }
         return out.toString(1) to false
     }
 
     private fun owner(sid: String, host: String?): Reached? = if (!host.isNullOrBlank()) find(host)
-    else reached().firstOrNull { p -> sessionsOf(p).any { it.optString("id") == sid } }
+    else reached().firstOrNull { p -> sessionsOf(p).any { it.id.orEmpty() == sid } }
 
     /** A request to a host, waited for (at most seconds). */
     private fun ask(c: Connection, msg: JSONObject, seconds: Long = 30): JSONObject {
         val done = CountDownLatch(1)
         var got: JSONObject? = null
         c.request(msg) { got = it; done.countDown() }
-        if (!done.await(seconds, TimeUnit.SECONDS)) return JSONObject().put("op", "error").put("error", "no answer")
-        return got ?: JSONObject().put("op", "error").put("error", "no answer")
+        if (!done.await(seconds, TimeUnit.SECONDS)) return Msg.Error(error = "no answer").json()
+        return got ?: Msg.Error(error = "no answer").json()
     }
 
     private fun tail(p: Reached, sid: String, last: Int): List<Line> {
-        val size = sessionsOf(p).firstOrNull { it.optString("id") == sid }?.optLong("size", 0) ?: 0
+        val size = sessionsOf(p).firstOrNull { it.id.orEmpty() == sid }?.size?.toLong() ?: 0
         val from = (size - 200_000).coerceAtLeast(0)
-        val r = ask(p.conn, JSONObject().put("op", "transcript").put("session", sid).put("offset", from))
-        val text = String(Base64.getDecoder().decode(r.optString("data", "")), Charsets.UTF_8)
+        val r = ask(p.conn, Msg.Transcript(session = sid, offset = from).json())
+        val text = String(Base64.getDecoder().decode(Msg.TranscriptReply.from(r).data.orEmpty()), Charsets.UTF_8)
         return parse(text, cutFirst = from > 0).filter { it.kind == "you" || it.kind == "bot" }.takeLast(last)
     }
 
@@ -276,23 +276,22 @@ object PhoneTools {
         val sid = input.optString("session")
         val p = owner(sid, input.optString("host")) ?: return "No chat $sid in reach" to true
         val text = input.optString("text").ifBlank { return "Nothing to say" to true }
-        val before = sessionsOf(p).firstOrNull { it.optString("id") == sid }?.optLong("size", 0) ?: 0
+        val before = sessionsOf(p).firstOrNull { it.id.orEmpty() == sid }?.size?.toLong() ?: 0
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", text))))
-        val req = JSONObject().put("op", "input").put("session", sid).put("msg", msg)
+        val req = Msg.Input(session = sid, msg = msg).json()
         val r = if (p.conn.place is Place.Phone) ask(p.conn, req.put("as", s.id))
-            else PhoneLink.request(p.id, PhoneHost.chatSender(s.id), req).takeIf { !it.optBoolean("unreached") }
-                ?: ask(p.conn, req)
-        if (r.optString("op") == "error") return "${p.name} didn't take it: ${r.optString("error")}" to true
+            else PhoneLink.request(p.id, PhoneHost.chatSender(s.id), req) ?: ask(p.conn, req)
+        if (r.optString("op") == Op.ERROR) return "${p.name} didn't take it: ${Msg.Error.from(r).said.orEmpty()}" to true
         if (!input.optBoolean("wait", true)) return "Sent to ${p.name}" to false
         val until = System.currentTimeMillis() + 1000L * input.optInt("timeout_s", WAIT_S).coerceIn(5, WAIT_MAX_S)
         var began = false
         while (System.currentTimeMillis() < until) {
             Thread.sleep(1000)
-            val now = sessionsOf(p).firstOrNull { it.optString("id") == sid } ?: continue
-            val state = now.optString("state")
+            val now = sessionsOf(p).firstOrNull { it.id.orEmpty() == sid } ?: continue
+            val state = now.state.orEmpty()
             if (state == "working" || state == "waiting") began = true
-            if ((began || now.optLong("size", 0) > before) && state != "working" && state != "waiting") {
+            if ((began || (now.size?.toLong() ?: 0) > before) && state != "working" && state != "waiting") {
                 val last = tail(p, sid, 1).lastOrNull { it.kind == "bot" }?.text
                 return (last ?: "It answered nothing") .take(RESULT_MAX) to false
             }

@@ -1,0 +1,14 @@
+{
+  "version": "2025.10",
+  "name": "Baude",
+  "description": "Baude's design tokens, light and dark. Baude, Record and Emission read them as they start (baudelib/tokens.py), and the Android app's build makes Kotlin of them.",
+  "sets": {"base": {"sources": [{"$ref": "base.tokens.json"}]}},
+  "modifiers": {
+    "theme": {
+      "description": "Light or dark.",
+      "contexts": {"light": [{"$ref": "light.tokens.json"}], "dark": [{"$ref": "dark.tokens.json"}]},
+      "default": "light"
+    }
+  },
+  "resolutionOrder": [{"$ref": "#/sets/base"}, {"$ref": "#/modifiers/theme"}]
+}

@@ -62,6 +62,7 @@ object PhoneHost {
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
+    private val TAKES = OPS.toSet() - CONTROLS
     lateinit var ctx: Context
     @Volatile var id = ""
     @Volatile var name = "Phone"
@@ -148,19 +149,20 @@ object PhoneHost {
         private val waiting = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
         private val next = AtomicInteger(1)
         private val head = object : Head() {
-            override fun send(msg: JSONObject) {
-                val req = msg.optInt("req", -1)
-                if (msg.optString("op") == "sessions") msg.optJSONObject("server")?.let { info = it }
+            override fun send(sent: JSONObject) {
+                val msg = checked(sent, answer = true) ?: return
+                val req = (msg.opt("req") as? Number)?.toInt() ?: -1
+                if (msg.optString("op") == Op.SESSIONS) Msg.Sessions.from(msg).server?.let { info = it }
                 val call = if (req < 0) null else waiting.remove(req)
                 if (call != null) call(msg) else hear(this@Local, msg)
             }
         }
 
         override fun start() {
-            info = PhoneHost.info()
+            info = Msg.Info.from(PhoneHost.info())
             state = "up"
             told(this)
-            send(JSONObject().put("op", "subscribe").put("archived", true))
+            send(Msg.Subscribe(archived = true).json())
         }
 
         override fun stop() {
@@ -168,14 +170,15 @@ object PhoneHost {
         }
 
         override fun send(msg: JSONObject): Boolean {
-            take(head, msg)
+            checked(msg)?.let { take(head, it) }
             return true
         }
 
         override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
             val req = next.getAndIncrement()
+            ownRefusal(msg.put("req", req))?.let { return then(it) }
             waiting[req] = then
-            send(msg.put("req", req))
+            send(msg)
         }
     }
 
@@ -185,7 +188,8 @@ object PhoneHost {
             try {
                 if (msg == null) gone(head) else handle(head, msg)
             } catch (e: Exception) {
-                msg?.let { head.send(JSONObject().put("op", "error").put("req", it.opt("req")).put("error", "${e.javaClass.simpleName}: ${e.message}")) }
+                msg?.let { head.send(Msg.Error(req = it.opt("req") as? Number,
+                    error = "${e.javaClass.simpleName}: ${e.message}").json()) }
             }
         }
     }
@@ -223,38 +227,55 @@ object PhoneHost {
         fun reply(kind: String, vararg kv: Pair<String, Any?>) {
             val o = JSONObject().put("op", kind)
             if (req != null) o.put("req", req)
-            for ((k, v) in kv) o.put(k, v ?: JSONObject.NULL)
+            for ((k, v) in kv) if (v != null) o.put(k, v) // (one that may be null: given as JSONObject.NULL)
             head.send(o)
         }
         synchronized(lock) { heads.add(head) }
+        if (op == Op.PING) return
+        // (an op it doesn't take, or fields not as the wire's schema has them: its two refusals, as any host's; looked
+        // at as it is on the wire, this app's own head's too)
+        WireCheck.refusal(JSONObject(msg.toString()), TAKES)?.let { return head.send(it) }
         when (op) {
-            "ping" -> return
-            "hello" -> return reply("hello", "server" to info())
-            "subscribe" -> {
+            Op.HELLO -> return reply(Op.HELLO, "server" to info())
+            Op.SUBSCRIBE -> {
                 head.subscribed = true
-                head.archived = msg.optBoolean("archived")
-                return reply("sessions", "sessions" to listing(head.archived), "server" to info())
+                head.archived = Msg.Subscribe.from(msg).archived == true
+                return reply(Op.SESSIONS, "sessions" to listing(head.archived), "server" to info())
             }
         }
-        if (op !in OPS || op in CONTROLS) return reply("error", "error" to "unknown op '$op' (${name} is a phone: it takes " +
-            "${(OPS - CONTROLS).joinToString()})")
-        if (op == "start") return start(head, msg, ::reply)
-        if (op == "read_file") return reply("file", *readFile(msg))
-        if (op == "list_dir") return reply("dir", *listDir(if (msg.isNull("path")) "" else msg.optString("path")))
-        if (op == "catalogue") return reply("catalogue", *catalogue(if (msg.isNull("cwd")) "" else msg.optString("cwd")))
-        val s = synchronized(lock) { sessions[msg.optString("session")] }
-            ?: return reply("error", "error" to "no session ${msg.optString("session")}")
+        if (op == Op.START) return start(head, msg, ::reply)
+        if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
+        if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
+        if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
+        val sid = when (op) { // (the session each of the rest is about)
+            Op.ATTACH -> Msg.Attach.from(msg).session
+            Op.DETACH -> Msg.Detach.from(msg).session
+            Op.INPUT -> Msg.Input.from(msg).session
+            Op.STOP -> Msg.Stop.from(msg).session
+            Op.TRANSCRIPT -> Msg.Transcript.from(msg).session
+            Op.SUBAGENTS -> Msg.Subagents.from(msg).session
+            Op.SENDERS -> Msg.SendersOp.from(msg).session
+            Op.RENAME -> Msg.Rename.from(msg).session
+            Op.ARCHIVE -> Msg.Archive.from(msg).session
+            Op.UNARCHIVE -> Msg.Unarchive.from(msg).session
+            Op.DELETE -> Msg.Delete.from(msg).session
+            Op.ALWAYS_ALLOW -> Msg.AlwaysAllow.from(msg).session
+            Op.BOT -> Msg.Bot.from(msg).session
+            Op.BOT_PICTURE -> Msg.BotPicture.from(msg).session
+            Op.MEMORY -> Msg.Memory.from(msg).session
+            else -> null
+        }.orEmpty()
+        val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
         when (op) {
-            "attach" -> synchronized(lock) {
-                head.answers = msg.optBoolean("answers", true)
+            Op.ATTACH -> synchronized(lock) {
+                val a = Msg.Attach.from(msg)
+                head.answers = a.answers ?: true
                 s.viewers.add(head)
-                if (msg.optBoolean("live")) s.live.add(head)
-                msg.optJSONArray("always_allow")?.let { a ->
-                    for (i in 0 until a.length()) a.optString(i).takeIf { it != ASK_TOOL }?.let { s.alwaysAllow.add(it) }
-                }
-                reply("attached", "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()))
+                if (a.live == true) s.live.add(head)
+                for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
+                reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()))
             }
-            "detach" -> {
+            Op.DETACH -> {
                 val last = synchronized(lock) {
                     s.viewers.remove(head)
                     s.live.remove(head)
@@ -262,29 +283,31 @@ object PhoneHost {
                 }
                 if (last) drop(s)
             }
-            "input" -> {
-                input(head, s, msg.optJSONObject("msg") ?: JSONObject(), sentBy(head, msg))
-                if (req != null) reply("accepted", "session" to s.id)
+            Op.INPUT -> {
+                val i = Msg.Input.from(msg)
+                input(head, s, i.msg ?: JSONObject(), sentBy(head, i.`as`))
+                if (req != null) reply(Op.ACCEPTED, "session" to s.id)
             }
-            "stop" -> {
+            Op.STOP -> {
                 stopTurn(s)
-                reply("stopped", "session" to s.id)
+                reply(Op.STOPPED, "session" to s.id)
             }
-            "transcript" -> reply("transcript", "session" to s.id, *lines(transcript(s), msg.optLong("offset", 0),
-                msg.optInt("limit", 0)))
-            "subagents" -> reply("subagents", "session" to s.id, "files" to JSONArray(), "more" to false)
-            "senders" -> senders(s)?.let { reply("senders", "session" to s.id, "senders" to JSONObject(it.toString()),
-                "rev" to s.meta.optInt("senders")) } ?: reply("error", "error" to "its sender store couldn't be read")
-            "rename" -> {
+            Op.TRANSCRIPT -> Msg.Transcript.from(msg).let { t ->
+                reply(Op.TRANSCRIPT, "session" to s.id, *lines(transcript(s), t.offset?.toLong() ?: 0, t.limit?.toInt() ?: 0))
+            }
+            Op.SUBAGENTS -> reply(Op.SUBAGENTS, "session" to s.id, "files" to JSONArray(), "more" to false)
+            Op.SENDERS -> senders(s)?.let { reply(Op.SENDERS, "session" to s.id, "senders" to JSONObject(it.toString()),
+                "rev" to s.meta.optInt("senders")) } ?: reply(Op.ERROR, "error" to "its sender store couldn't be read")
+            Op.RENAME -> {
                 live(s) {
-                    s.meta.put("title", (if (msg.isNull("title")) "" else msg.optString("title")).trim().take(200).ifBlank { null } ?: JSONObject.NULL)
+                    s.meta.put("title", Msg.Rename.from(msg).title.orEmpty().trim().take(200).ifBlank { null } ?: JSONObject.NULL)
                     save(s)
                 }
                 changed()
-                reply("renamed", "session" to listing(s))
+                reply(Op.RENAMED, "session" to listing(s))
             }
-            "archive", "unarchive" -> {
-                if (op == "archive") stopTurn(s)
+            Op.ARCHIVE, Op.UNARCHIVE -> {
+                if (op == Op.ARCHIVE) stopTurn(s)
                 live(s) {
                     s.meta.put("archived", op == "archive")
                     save(s)
@@ -292,7 +315,7 @@ object PhoneHost {
                 changed()
                 reply(op + "d", "session" to s.id)
             }
-            "delete" -> {
+            Op.DELETE -> {
                 stopTurn(s)
                 // (under the lock: nothing it says after is kept, or made again)
                 val (watching, went) = synchronized(lock) {
@@ -301,48 +324,49 @@ object PhoneHost {
                     val went = trash(s)
                     (s.viewers + s.live).toSet() to went
                 }
-                for (h in watching) h.send(JSONObject().put("op", "deleted").put("session", s.id))
+                for (h in watching) h.send(Msg.Deleted(session = s.id).json())
                 changed()
-                reply("deleted", "session" to s.id, "trashed" to JSONArray(went))
+                reply(Op.DELETED, "session" to s.id, "trashed" to JSONArray(went))
             }
-            "always_allow" -> {
+            Op.ALWAYS_ALLOW -> {
                 synchronized(lock) {
-                    fun given(a: JSONArray) = (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() && it != ASK_TOOL }
-                    msg.optJSONArray("add")?.let { s.alwaysAllow.addAll(given(it)) }
-                        ?: msg.optJSONArray("tools")?.let {
+                    val r = Msg.AlwaysAllow.from(msg)
+                    fun given(a: List<String>) = a.filter { it.isNotBlank() && it != ASK_TOOL }
+                    r.add?.let { s.alwaysAllow.addAll(given(it)) }
+                        ?: r.tools?.let {
                             s.alwaysAllow.clear()
                             s.alwaysAllow.addAll(given(it))
                         }
                 }
                 changed()
-                reply("allowed", "session" to s.id, "tools" to JSONArray(s.alwaysAllow.sorted()))
+                reply(Op.ALLOWED, "session" to s.id, "tools" to JSONArray(s.alwaysAllow.sorted()))
             }
-            "bot" -> {
+            Op.BOT -> {
                 live(s) {
-                    val bot = msg.optJSONObject("bot")
+                    val bot = Msg.Bot.from(msg).bot
                     if (bot == null) s.meta.put("bot", JSONObject.NULL)
                     else {
-                        s.meta.put("bot", JSONObject().put("name", bot.optString("name").trim().take(64).ifBlank { "Agent" })
+                        s.meta.put("bot", JSONObject().put("name", bot.name.orEmpty().trim().take(64).ifBlank { "Agent" })
                             .put("since", s.meta.optJSONObject("bot")?.optDouble("since") ?: now()))
-                        if (bot.has("picture")) { // (a PNG, base64; "" to drop it; left out, kept)
-                            val pic = picture(s)
-                            val data = if (bot.isNull("picture")) "" else bot.optString("picture")
+                        if (msg.optJSONObject("bot")?.has("picture") == true) { // (a PNG, base64; "" or null to drop it;
+                            val pic = picture(s)                                 // left out, kept)
+                            val data = bot.picture.orEmpty()
                             if (data.isEmpty()) pic.delete()
-                            else Base64.getDecoder().decode(data).takeIf { it.size <= PICTURE_MAX }?.let { pic.writeBytes(it) }
+                            else Base64.getDecoder().decode(data).takeIf { it.size <= WireConstants.BOT_PICTURE_MAX }?.let { pic.writeBytes(it) }
                         }
                     }
                     save(s)
                 }
                 changed()
-                reply("bot_set", "session" to listing(s))
+                reply(Op.BOT_SET, "session" to listing(s))
             }
-            "bot_picture" -> reply("bot_picture", "session" to s.id, "picture" to
-                picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) })
-            "memory" -> {
+            Op.BOT_PICTURE -> reply(Op.BOT_PICTURE, "session" to s.id, "picture" to
+                (picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) } ?: JSONObject.NULL))
+            Op.MEMORY -> {
                 val file = File(s.folder, MEMORY)
-                if (msg.has("text")) live(s) { file.writeText(msg.optString("text")) }
-                reply("memory", "session" to s.id, "text" to (if (file.exists()) file.readText() else ""),
-                    "path" to MEMORY, "mtime" to if (file.exists()) file.lastModified() / 1000.0 else null)
+                Msg.Memory.from(msg).text?.let { t -> live(s) { file.writeText(t) } }
+                reply(Op.MEMORY, "session" to s.id, "text" to (if (file.exists()) file.readText() else ""),
+                    "path" to MEMORY, "mtime" to if (file.exists()) file.lastModified() / 1000.0 else JSONObject.NULL)
             }
         }
     }
@@ -351,23 +375,24 @@ object PhoneHost {
      * (Inference's value; none given, the first of them, as a host runs its own default). ask_timeout, ask_default and
      * spawned_by as a host's start has them (a subagent: Auto at most, meshtools.SUBAGENT_MODES). */
     private fun start(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
-        if (msg.has("adopt") && !msg.isNull("adopt"))
-            return reply("error", arrayOf("error" to "an agent on $name can't take up a conversation it doesn't have", "plain" to true))
-        if (msg.has("ask_default") && !msg.isNull("ask_default") && msg.optString("ask_default") !in setOf("deny", "allow"))
-            return reply("error", arrayOf("error" to "ask_default is deny or allow"))
-        fun str(k: String) = if (msg.isNull(k)) "" else msg.optString(k) // (JSON's null: none given, not "null")
+        val r = Msg.Start.from(msg)
+        if (r.adopt != null)
+            return reply(Op.ERROR, arrayOf("error" to "an agent on $name can't take up a conversation it doesn't have", "plain" to true))
+        if (r.askDefault != null && r.askDefault !in setOf("deny", "allow"))
+            return reply(Op.ERROR, arrayOf("error" to "ask_default is deny or allow"))
         // (a fork: a copy of one of its agents' conversations, under an id of its own; ephemeral, a side question's,
         // in Plan, kept nowhere and gone with its last head)
-        val ephemeral = msg.optBoolean("ephemeral")
-        val src = str("fork_from").takeIf(::isId)?.let { f ->
-            session(f) ?: return reply("error", arrayOf("error" to "no conversation here to fork: $f"))
+        val ephemeral = r.ephemeral == true
+        val model = r.model.orEmpty()
+        val src = r.forkFrom.orEmpty().takeIf(::isId)?.let { f ->
+            session(f) ?: return reply(Op.ERROR, arrayOf("error" to "no conversation here to fork: $f"))
         }
-        val served = (if (str("model").isNotBlank()) Inference.of(str("model"))
+        val served = (if (model.isNotBlank()) Inference.of(model)
             else src?.meta?.optJSONObject("infer")?.let { Served.of(it) } ?: Inference.found().firstOrNull())
-            ?: return reply("error", arrayOf("error" to "$name can't run ${str("model").ifBlank { "a model" }}: its agents " +
+            ?: return reply(Op.ERROR, arrayOf("error" to "$name can't run ${model.ifBlank { "a model" }}: its agents " +
                 "run the models the mesh's machines serve over an API, and none does now", "plain" to true))
         val sid = UUID.randomUUID().toString()
-        val botName = msg.optJSONObject("bot")?.optString("name")?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
+        val botName = r.bot?.let { it.name.orEmpty() }?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
         val slug = (botName ?: if (src != null) "fork" else "chat").lowercase().replace(Regex("[^a-z0-9]+"), "-")
             .trim('-').take(24).ifBlank { "chat" }
         val folder = when { // (named as you'd say it: Baude lists a folder's chats under its name)
@@ -377,22 +402,22 @@ object PhoneHost {
                 if (src != null) src.folder.copyRecursively(this, overwrite = true) else mkdirs() // (a fork: its own copy)
             }
         }
-        val spawnedBy = str("spawned_by").takeIf(::isId)
-        val asked = if (ephemeral) "plan" else str("mode").takeIf { m -> MODES.any { it.first == m } } ?: "default"
-        val prompt = str("prompt")
+        val spawnedBy = r.spawnedBy.orEmpty().takeIf(::isId)
+        val asked = if (ephemeral) "plan" else r.mode.orEmpty().takeIf { m -> MODES.any { it.first == m } } ?: "default"
+        val prompt = r.prompt.orEmpty()
         val meta = JSONObject().put("id", sid).put("cwd", folder.path).put("model", served.value)
-            .put("infer", served.json()).put("title", str("title").trim().ifBlank { null } ?: JSONObject.NULL)
+            .put("infer", served.json()).put("title", r.title.orEmpty().trim().ifBlank { null } ?: JSONObject.NULL)
             .put("created", now()).put("said", now()).put("prompts", 0).put("archived", false)
-            .put("draft", msg.optBoolean("draft") && prompt.isBlank())
+            .put("draft", r.draft == true && prompt.isBlank())
             .put("mode", if (spawnedBy != null && asked !in SUBAGENT_MODES) "auto" else asked)
             .put("spawned_by", spawnedBy ?: JSONObject.NULL)
-            .put("ask_timeout", msg.optDouble("ask_timeout").takeIf { it > 0 } ?: JSONObject.NULL)
-            .put("ask_default", if (str("ask_default") == "allow") "allow" else "deny")
+            .put("ask_timeout", r.askTimeout?.toDouble()?.takeIf { it > 0 } ?: JSONObject.NULL)
+            .put("ask_default", if (r.askDefault == "allow") "allow" else "deny")
             .put("bot", if (botName != null) JSONObject().put("name", botName).put("since", now()) else JSONObject.NULL)
-            .put("start_key", str("start_key").takeIf(::isId) ?: JSONObject.NULL)
+            .put("start_key", r.startKey.orEmpty().takeIf(::isId) ?: JSONObject.NULL)
             .put("fork_from", src?.id ?: JSONObject.NULL).put("ephemeral", ephemeral)
             .put("own_folder", !(ephemeral && src != null))
-        if (src != null && !ephemeral) meta.put("title", str("title").trim().ifBlank { null }
+        if (src != null && !ephemeral) meta.put("title", r.title.orEmpty().trim().ifBlank { null }
             ?: src.meta.opt("title") ?: JSONObject.NULL)
         val s = PhoneSession(meta)
         if (botName != null && !File(folder, MEMORY).exists()) File(folder, MEMORY).writeText("")
@@ -410,14 +435,14 @@ object PhoneHost {
             }
             sessions[sid] = s
             save(s)
-            if (msg.optBoolean("attach")) {
+            if (r.attach == true) {
                 s.viewers.add(head)
                 s.live.add(head)
             }
         }
-        reply("started", arrayOf("session" to listing(s), "forked" to (src != null)))
+        reply(Op.STARTED, arrayOf("session" to listing(s), "forked" to (src != null)))
         if (prompt.isNotBlank()) input(head, s, JSONObject().put("type", "user").put("message", textMessage(prompt)),
-            sentBy(head, msg))
+            sentBy(head, r.`as`))
         changed()
     }
 
@@ -458,10 +483,10 @@ object PhoneHost {
             "control_request" -> {
                 val rid = msg.optString("request_id")
                 val request = msg.optJSONObject("request") ?: JSONObject()
-                fun answer(response: JSONObject?, error: String? = null) = head.send(JSONObject().put("op", "claude")
-                    .put("session", s.id).put("msg", JSONObject().put("type", "control_response").put("response",
+                fun answer(response: JSONObject?, error: String? = null) = head.send(Msg.Claude(session = s.id,
+                    msg = JSONObject().put("type", "control_response").put("response",
                         if (error != null) JSONObject().put("subtype", "error").put("request_id", rid).put("error", error)
-                        else JSONObject().put("subtype", "success").put("request_id", rid).put("response", response))))
+                        else JSONObject().put("subtype", "success").put("request_id", rid).put("response", response))).json())
                 when (request.optString("subtype")) {
                     "initialize" -> answer(JSONObject().put("commands", JSONArray()).put("agents", JSONArray())
                         .put("models", JSONArray((listOf(s.meta.optString("model") to Inference.display(s)) +
@@ -575,7 +600,7 @@ object PhoneHost {
     /** Said to those attached live, as claude says it (stream-json). */
     fun tell(s: PhoneSession, msg: JSONObject) {
         val to = synchronized(lock) { if (s.deleted) return else s.live.toList() }
-        for (h in to) h.send(JSONObject().put("op", "claude").put("session", s.id).put("msg", msg))
+        for (h in to) h.send(Msg.Claude(session = s.id, msg = msg).json())
     }
 
     /** May the agent use a tool: as its chat's permission mode has it (PhoneTools.need), or one always allowed in this
@@ -598,7 +623,7 @@ object PhoneHost {
             s.waits[rid] = wait
             s.viewers.toList()
         }
-        for (h in to) h.send(JSONObject().put("op", "claude").put("session", s.id).put("msg", ask))
+        for (h in to) h.send(Msg.Claude(session = s.id, msg = ask).json())
         changed()
         s.meta.optDouble("ask_timeout").takeIf { it > 0 }?.let { timeout(s, rid, wait, input, it) }
         return try {
@@ -668,8 +693,8 @@ object PhoneHost {
             }
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
         }
-        val end = JSONObject().put("op", "turn_ended").put("session", s.id).put("result", result).put("is_error", error)
-            .put("cost", 0).put("turns", turns).put("duration_ms", ms)
+        val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns,
+            durationMs = ms).json()
         for (h in subscribed) h.send(end)
         changed()
     }
@@ -761,7 +786,7 @@ object PhoneHost {
         .put("host", name).put("home", if (::root.isInitialized) File(root, "agents").path else "")
         .put("pid", android.os.Process.myPid()).put("groups", JSONArray().put(name)).put("init", JSONObject.NULL)
         .put("commit", JSONObject.NULL).put("update", JSONObject.NULL).put("providers", JSONArray())
-        .put("notes", JSONObject.NULL).put("phone", true)
+        .put("phone", true)
         .put("mesh", JSONObject().put("members", JSONArray()).put("links", JSONArray()).put("proxy", JSONObject.NULL)
             .put("inactive", JSONArray()).put("found", JSONArray()).put("gone", JSONArray()))
 
@@ -807,7 +832,7 @@ object PhoneHost {
                 dirty = false
                 heads.filter { it.subscribed }.toList() to info()
             }
-            for (h in to) h.send(JSONObject().put("op", "sessions").put("sessions", listing(h.archived)).put("server", info))
+            for (h in to) h.send(JSONObject().put("op", Op.SESSIONS).put("sessions", listing(h.archived)).put("server", info))
             main.post { Mesh.tick.value++ }
         }, 80, TimeUnit.MILLISECONDS)
     }
@@ -849,8 +874,8 @@ object PhoneHost {
     /** Who a request passing a message in (input, start) is from, as server.sent_by has it: through a tunnel, the
      * chat its relay named (else the one its as names) on the member it came from; here, the agent of this phone's its
      * as names; null for the agent's user. */
-    private fun sentBy(head: Head, msg: JSONObject): JSONObject? {
-        val asId = (if (msg.isNull("as")) "" else msg.optString("as")).takeIf(::isId)
+    private fun sentBy(head: Head, asked: String?): JSONObject? {
+        val asId = asked.orEmpty().takeIf(::isId)
         val origin = head.origin ?: return asId?.let { chatSender(it) }
         val said = head.sender ?: asId?.let { JSONObject().put("kind", "chat").put("session", it) } ?: return null
         val name = PhoneLink.nameOf(origin)
@@ -910,12 +935,13 @@ object PhoneHost {
     /** A file in one of its agents' folders, as a host's read_file serves one in a session's folder:
      * {path, size, data (base64), error?}. */
     private fun readFile(msg: JSONObject): Array<Pair<String, Any?>> {
-        val path = if (msg.isNull("path")) "" else msg.optString("path")
+        val r = Msg.ReadFile.from(msg)
+        val path = r.path.orEmpty()
         val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return arrayOf("path" to path, "error" to "not an absolute path")
         val inside = synchronized(lock) { sessions.values.any { f.path.startsWith(it.folder.canonicalPath + File.separator) } }
         if (!inside) return arrayOf("path" to path, "error" to "not in one of its sessions' folders")
         if (!f.isFile) return arrayOf("path" to path, "error" to "No such file")
-        val limit = msg.optInt("limit", FILE_LIMIT).coerceIn(1, FILE_LIMIT)
+        val limit = (r.limit?.toInt() ?: FILE_LIMIT).coerceIn(1, FILE_LIMIT)
         val data = f.inputStream().use { it.readNBytes(limit + 1) }
         return arrayOf("path" to path, "size" to f.length(), "data" to Base64.getEncoder().encodeToString(data))
     }
@@ -1018,7 +1044,6 @@ object PhoneHost {
     private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
     private const val CATALOGUE_LIMIT = 5000
     private const val DIR_LIMIT = 2000 // (hostfiles.DIR_LIMIT)
-    private const val PICTURE_MAX = 2 shl 20 // (server.BOT_PICTURE_MAX)
     private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)
     const val MEMORY = "memory.md" // (a Bot's memory, in its own folder: its file tools edit it)
 }

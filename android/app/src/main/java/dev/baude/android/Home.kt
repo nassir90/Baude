@@ -103,9 +103,9 @@ object HomePrefs {
 }
 
 /** A row of the home screen: a session on a host, nested depth deep under the one that forked or started it. */
-data class Item(val hostId: String, val s: JSONObject, val depth: Int) {
-    val id: String get() = s.optString("id")
-    val bot: JSONObject? get() = s.optJSONObject("bot")
+data class Item(val hostId: String, val s: Msg.Session, val depth: Int) {
+    val id: String get() = s.id.orEmpty()
+    val bot: Msg.BotListing? get() = s.bot
 }
 
 /** A section: a folder, a day, the Bots (no header) or the archived ones; top: its rows at depth 0, for its limit. */
@@ -113,17 +113,17 @@ data class Section(val key: String, val label: String, val hostId: String?, val 
                    val full: String = label)
 
 /** The group a session's in, as Baude's chat_group has it from a host: its group, unless it's the host's own. */
-fun groupOf(hostId: String, s: JSONObject): String {
-    HomePrefs.chatGroups["$hostId/${s.optString("id")}"]?.let { return it } // (moved here: this phone's say)
-    val g = if (s.isNull("group")) "" else s.optString("group")
-    return if (g == Mesh.conn(hostId)?.info?.optString("group")) "" else g
+fun groupOf(hostId: String, s: Msg.Session): String {
+    HomePrefs.chatGroups["$hostId/${s.id.orEmpty()}"]?.let { return it } // (moved here: this phone's say)
+    val g = s.group.orEmpty()
+    return if (g == Mesh.conn(hostId)?.info?.let { it.group.orEmpty() }) "" else g
 }
 
-private fun said(s: JSONObject) = s.optDouble("said", s.optDouble("updated", 0.0))
+private fun said(s: Msg.Session) = (s.said ?: s.updated)?.toDouble() ?: 0.0
 
 /** A folder as the sidebar says it: home as ~. */
 fun shortPath(hostId: String, cwd: String): String {
-    val home = Mesh.conn(hostId)?.info?.optString("home").orEmpty()
+    val home = Mesh.conn(hostId)?.info?.home.orEmpty()
     return if (home.isNotEmpty() && (cwd == home || cwd.startsWith("$home/"))) "~" + cwd.removePrefix(home) else cwd
 }
 
@@ -139,15 +139,15 @@ fun sections(query: String): List<Section> {
     val groups = HomePrefs.groups.toSet()
     // (as Baude's sidebar lists them: each host's sessions that pass the host picked and the groups shown; a chat an
     // agent started, on another host or in another group, pulled in to go under it if that's listed; then the search)
-    val everywhere = Mesh.sessions.flatMap { (h, list) -> list.filter { !it.optBoolean("draft") }.map { h to it } }
-    fun key(h: String, s: JSONObject) = "$h/${s.optString("id")}"
-    val byKey = HashMap<String, Pair<String, JSONObject>>() // ("host/id" and "host/cli_id": the session)
-    val byId = HashMap<String, Pair<String, JSONObject>>()  // (id or cli_id alone: an agent on another host)
-    for ((h, s) in everywhere) for (id in listOfNotNull(s.optString("id"), s.str("cli_id"))) {
+    val everywhere = Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true }.map { h to it } }
+    fun key(h: String, s: Msg.Session) = "$h/${s.id.orEmpty()}"
+    val byKey = HashMap<String, Pair<String, Msg.Session>>() // ("host/id" and "host/cli_id": the session)
+    val byId = HashMap<String, Pair<String, Msg.Session>>()  // (id or cli_id alone: an agent on another host)
+    for ((h, s) in everywhere) for (id in listOfNotNull(s.id.orEmpty(), s.cliId?.ifBlank { null })) {
         byKey["$h/$id"] = h to s
         byId.putIfAbsent(id, h to s)
     }
-    fun agent(h: String, s: JSONObject) = s.str("spawned_by")?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
+    fun agent(h: String, s: Msg.Session) = s.spawnedBy?.ifBlank { null }?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
     val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) }
         .map { (h, s) -> key(h, s) }.toMutableSet()
     val pulled = HashSet<String>()
@@ -158,8 +158,8 @@ fun sections(query: String): List<Section> {
         listedKeys.addAll(more)
         pulled.addAll(more)
     }
-    val found = everywhere.filter { (h, s) -> key(h, s) in listedKeys && (q.isEmpty() || listOf(s.str("title").orEmpty(),
-        s.optString("cwd"), Mesh.label(h), s.optJSONObject("bot")?.optString("name").orEmpty()).any { it.lowercase().contains(q) }) }
+    val found = everywhere.filter { (h, s) -> key(h, s) in listedKeys && (q.isEmpty() || listOf(s.title?.ifBlank { null }.orEmpty(),
+        s.cwd.orEmpty(), Mesh.label(h), s.bot?.name.orEmpty()).any { it.lowercase().contains(q) }) }
     val kept = found.map { (h, s) -> key(h, s) }.toMutableSet()
     while (true) { // (one pulled in whose agent isn't listed after all (not found by the search, say): nor is it)
         val lost = found.filter { (h, s) -> key(h, s) in kept && key(h, s) in pulled && agent(h, s)?.let { key(it.first, it.second) } !in kept }
@@ -168,26 +168,26 @@ fun sections(query: String): List<Section> {
     }
     // (nested under the one it forked from, on its host, or the agent that started it, wherever that is, if that's
     // listed; in its own place otherwise)
-    fun parent(h: String, s: JSONObject): Pair<String, JSONObject>? {
-        s.str("fork_from")?.let { f -> byKey["$h/$f"]?.takeIf { it.second !== s && key(it.first, it.second) in kept }?.let { return it } }
+    fun parent(h: String, s: Msg.Session): Pair<String, Msg.Session>? {
+        s.forkFrom?.ifBlank { null }?.let { f -> byKey["$h/$f"]?.takeIf { it.second !== s && key(it.first, it.second) in kept }?.let { return it } }
         return agent(h, s)?.takeIf { key(it.first, it.second) in kept }
     }
-    val children = HashMap<String, MutableList<Pair<String, JSONObject>>>()
-    val top = ArrayList<Pair<String, JSONObject>>()
+    val children = HashMap<String, MutableList<Pair<String, Msg.Session>>>()
+    val top = ArrayList<Pair<String, Msg.Session>>()
     for ((h, s) in found) {
         if (key(h, s) !in kept) continue
         val p = parent(h, s)
         if (p != null) children.getOrPut(key(p.first, p.second)) { ArrayList() }.add(h to s) else top.add(h to s)
     }
-    fun flat(h: String, s: JSONObject, depth: Int, into: MutableList<Item>, seen: MutableSet<String>) {
+    fun flat(h: String, s: Msg.Session, depth: Int, into: MutableList<Item>, seen: MutableSet<String>) {
         if (!seen.add(key(h, s))) return // (a loop of parents: each once)
         into.add(Item(h, s, depth))
         for ((ch, c) in children[key(h, s)].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into, seen)
     }
     val seen = HashSet<String>()
-    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.optBoolean("archived")) archived else live, seen)
+    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true) archived else live, seen)
     for ((h, s) in found) if (key(h, s) in kept && key(h, s) !in seen) // (in a loop of parents: in its own place)
-        flat(h, s, 0, if (s.optBoolean("archived")) archived else live, seen)
+        flat(h, s, 0, if (s.archived == true) archived else live, seen)
     val several = shown.count { !Mesh.sessions[it].isNullOrEmpty() } > 1
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
@@ -213,7 +213,7 @@ fun sections(query: String): List<Section> {
     } else {
         val (bots, chats) = runs(live).partition { it[0].bot != null }
         if (bots.isNotEmpty()) out.add(Section("bots", "Bots", null, null, bots.sortedByDescending { said(it[0].s) }.flatten()))
-        val folders = chats.groupBy { it[0].hostId to it[0].s.optString("cwd") }
+        val folders = chats.groupBy { it[0].hostId to it[0].s.cwd.orEmpty() }
         for ((key, group) in folders.entries.sortedByDescending { e -> e.value.maxOf { said(it[0].s) } }) {
             val (hostId, cwd) = key
             val name = if (cwd.isEmpty()) "Unknown folder" else shortPath(hostId, cwd).trimEnd('/').substringAfterLast('/')
@@ -338,12 +338,12 @@ private fun SessionRow(item: Item, onClick: () -> Unit) {
         .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
         .clickable(onClick = onClick).padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val title = s.str("title") ?: "(untitled)"
-        val bot = item.bot?.optString("name")?.ifBlank { null }
+        val title = s.title?.ifBlank { null } ?: "(untitled)"
+        val bot = item.bot?.name?.ifBlank { null }
         Text(bot ?: title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f))
         HeldTag(s)
-        StatusDot(s.optString("state"), (s.optJSONArray("asks")?.length() ?: 0) > 0 || s.optString("state") == "waiting")
+        StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty() || s.state == "waiting")
     }
 }
 
@@ -361,7 +361,7 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
         Spacer(Modifier.width(Gap.avatarGap))
         Column(Modifier.weight(1f)) {
             Text(contact.name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val what = item.s.str("title")
+            val what = item.s.title?.ifBlank { null }
             if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         HeldTag(item.s)
@@ -371,9 +371,9 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
 
 /** A row's "held" mark (Baude's held_tag): its host holds messages for the chat, to send or delete in it. */
 @Composable
-private fun HeldTag(s: org.json.JSONObject) {
+private fun HeldTag(s: Msg.Session) {
     val c = LocalBaude.current
-    if ((s.optJSONArray("held")?.length() ?: 0) == 0) return
+    if (s.held.isNullOrEmpty()) return
     Text("held", style = Type.caption, color = c.dim, modifier = Modifier.clip(RoundedCornerShape(4.dp))
         .background(c.raised).padding(horizontal = 5.dp))
 }

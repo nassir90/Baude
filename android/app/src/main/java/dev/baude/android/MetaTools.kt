@@ -113,23 +113,23 @@ object MetaTools {
 
     // ---- chats, hosts, groups
 
-    private fun all(): List<Pair<String, JSONObject>> =
-        Mesh.sessions.flatMap { (h, list) -> list.filter { !it.optBoolean("draft") }.map { h to it } }
+    private fun all(): List<Pair<String, Msg.Session>> =
+        Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true }.map { h to it } }
 
     /** A chat named as Meta names one: its short id (or more of it), its title, or its Bot's name. */
-    private fun find(ref: String): Pair<String, JSONObject>? {
+    private fun find(ref: String): Pair<String, Msg.Session>? {
         val r = ref.trim().lowercase()
         if (r.isEmpty()) return null
         val all = all()
-        return all.firstOrNull { (_, s) -> r.length >= 4 && s.optString("id").lowercase().startsWith(r) }
-            ?: all.firstOrNull { (_, s) -> s.str("title")?.lowercase() == r }
-            ?: all.firstOrNull { (_, s) -> s.optJSONObject("bot")?.str("name")?.lowercase() == r }
+        return all.firstOrNull { (_, s) -> r.length >= 4 && s.id.orEmpty().lowercase().startsWith(r) }
+            ?: all.firstOrNull { (_, s) -> s.title?.ifBlank { null }?.lowercase() == r }
+            ?: all.firstOrNull { (_, s) -> s.bot?.name?.ifBlank { null }?.lowercase() == r }
     }
 
-    private fun title(s: JSONObject) = s.optJSONObject("bot")?.str("name")?.let { "Bot $it" } ?: s.str("title") ?: "(untitled)"
+    private fun title(s: Msg.Session) = s.bot?.name?.ifBlank { null }?.let { "Bot $it" } ?: s.title?.ifBlank { null } ?: "(untitled)"
 
-    private fun chats(refs: List<String>): Pair<List<Pair<String, JSONObject>>, List<String>> =
-        refs.mapNotNull(::find).distinctBy { it.first + it.second.optString("id") } to refs.filter { find(it) == null }
+    private fun chats(refs: List<String>): Pair<List<Pair<String, Msg.Session>>, List<String>> =
+        refs.mapNotNull(::find).distinctBy { it.first + it.second.id.orEmpty() } to refs.filter { find(it) == null }
 
     private fun notFound(missing: List<String>) =
         "No chat ${missing.joinToString(", ") { "'$it'" }}: app_index chats lists them, each with its id."
@@ -138,10 +138,10 @@ object MetaTools {
         Mesh.reached("start").firstOrNull { it.second.equals(name, true) || it.first == name }?.first
 
     fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
-        Mesh.conn(id)?.info?.optJSONArray("groups").strings() - (Mesh.conn(id)?.info?.optString("group") ?: "")
+        Mesh.conn(id)?.info?.groups.orEmpty() - (Mesh.conn(id)?.info?.let { it.group.orEmpty() } ?: "")
     } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sorted()
 
-    private fun key(h: String, s: JSONObject) = "$h/${s.optString("id")}"
+    private fun key(h: String, s: Msg.Session) = "$h/${s.id.orEmpty()}"
 
     // ---- the journal
 
@@ -232,10 +232,10 @@ object MetaTools {
 
     private fun rename(h: String, sid: String, title: String, then: (String?) -> Unit) {
         var answered = false
-        Mesh.ask(h, JSONObject().put("op", "rename").put("session", sid).put("title", title)) { r ->
+        Mesh.ask(h, Msg.Rename(session = sid, title = title).json()) { r ->
             if (answered) return@ask
             answered = true
-            then(if (r.optString("op") == "renamed") null else r.optString("error").ifBlank { "it said no" })
+            then(if (r.optString("op") == Op.RENAMED) null else Msg.Error.from(r).said.orEmpty().ifBlank { "it said no" })
         }
         Mesh.later(30_000) { if (!answered) { answered = true; then("its host didn't answer") } }
     }
@@ -245,9 +245,9 @@ object MetaTools {
         val failed = ArrayList<String>()
         var left = chats.size
         if (left == 0) return then(failed)
-        for ((h, sid) in chats) Mesh.ask(h, JSONObject().put("op", op).put("session", sid)) { r ->
+        for ((h, sid) in chats) Mesh.ask(h, (if (op == "archive") Msg.Archive(session = sid).json() else Msg.Unarchive(session = sid).json())) { r ->
             if (r.optString("op") != op + "d") failed.add("${Mesh.session(h, sid)?.let(::title) ?: sid.take(8)}: " +
-                r.optString("error").ifBlank { "it said no" })
+                Msg.Error.from(r).said.orEmpty().ifBlank { "it said no" })
             if (--left == 0) then(failed)
         }
     }
@@ -359,11 +359,11 @@ object MetaTools {
             "show" -> show(args, ok, no)
             "read_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
-                val size = s.optLong("size", 0)
-                Mesh.ask(h, JSONObject().put("op", "transcript").put("session", s.optString("id"))
-                    .put("offset", (size - 60_000).coerceAtLeast(0))) { r ->
-                    if (r.optString("op") != "transcript") return@ask no(r.optString("error"))
-                    val data = r.optString("data", "")
+                val size = s.size?.toLong() ?: 0
+                Mesh.ask(h, Msg.Transcript(session = s.id.orEmpty(),
+                    offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
+                    if (r.optString("op") != Op.TRANSCRIPT) return@ask no(Msg.Error.from(r).said.orEmpty())
+                    val data = Msg.TranscriptReply.from(r).data.orEmpty()
                     val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
                     val said = parse(text, cutFirst = size > 60_000).filter { it.kind in setOf("you", "bot", "tool", "note", "error") }
                         .joinToString("\n") { "[${it.kind}] ${it.text}" }.takeLast(20_000).ifEmpty { "(nothing said yet)" }
@@ -374,11 +374,11 @@ object MetaTools {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
                 val to = args.optString("title").split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
                 if (to.isEmpty()) return no("A title is needed.")
-                val before = s.str("title") ?: ""
+                val before = s.title?.ifBlank { null } ?: ""
                 if (to == before) return ok("It's called that already.")
-                rename(h, s.optString("id"), to) { e ->
+                rename(h, s.id.orEmpty(), to) { e ->
                     if (e != null) return@rename no("Couldn't rename it: $e")
-                    val a = act("Renamed “$before” to “$to”", "rename", JSONObject().put("host", h).put("sid", s.optString("id"))
+                    val a = act("Renamed “$before” to “$to”", "rename", JSONObject().put("host", h).put("sid", s.id.orEmpty())
                         .put("from", before).put("to", to))
                     ok("Renamed (action ${a.id}).")
                 }
@@ -472,9 +472,9 @@ object MetaTools {
                 val (found, missing) = chats(args.optJSONArray("chats").strings())
                 if (missing.isNotEmpty()) return no(notFound(missing))
                 val op = if (name == "archive_chats") "archive" else "unarchive"
-                val change = found.filter { (_, s) -> s.optBoolean("archived") != (op == "archive") } // (only those it
+                val change = found.filter { (_, s) -> (s.archived == true) != (op == "archive") } // (only those it
                 if (change.isEmpty()) return ok("They're ${op}d already.")                             // changes: undone)
-                val pairs = change.map { (h, s) -> h to s.optString("id") }
+                val pairs = change.map { (h, s) -> h to s.id.orEmpty() }
                 archive(pairs, op) { failed ->
                     val went = pairs.filter { (h, sid) -> failed.none { it.startsWith((Mesh.session(h, sid)?.let(::title) ?: sid.take(8)) + ":") } }
                     if (went.isEmpty()) return@archive no("Couldn't: ${failed.joinToString("; ")}")
@@ -505,7 +505,7 @@ object MetaTools {
                 val (found, missing) = chats(items)
                 if (missing.isNotEmpty()) return no(notFound(missing))
                 Meta.under(Line("rows", JSONObject().put("chats", JSONArray(found.map { (h, s) ->
-                    JSONArray(listOf(h, s.optString("id"))) })).toString()))
+                    JSONArray(listOf(h, s.id.orEmpty())) })).toString()))
             }
             "pages" -> {
                 val have = Meta.pages().map { it.title }
@@ -525,7 +525,7 @@ object MetaTools {
                 when (rest) {
                     "trash" -> {
                         val (h, s) = item?.let(::find) ?: return no("There's no button trash without items: app_index buttons.")
-                        Meta.under(Line("rows", JSONObject().put("button", "trash").put("host", h).put("sid", s.optString("id"))
+                        Meta.under(Line("rows", JSONObject().put("button", "trash").put("host", h).put("sid", s.id.orEmpty())
                             .put("label", "Move “${title(s)}” to Trash…").toString()))
                     }
                     "host" -> {
@@ -550,10 +550,10 @@ object MetaTools {
             "${Mesh.label(id)}: ${Mesh.conn(id)?.state ?: "not connected"}" + if (id.startsWith("mesh:")) " (through the mesh)" else ""
         }
         "chats", "sessions" -> all().map { (h, s) ->
-            "${s.optString("id").take(8)} " + listOfNotNull("\"${s.str("title") ?: "(untitled)"}\"", Mesh.label(h),
-                shortPath(h, s.optString("cwd")), s.optString("state"), s.optJSONObject("bot")?.str("name")?.let { "Bot $it" },
-                groupOf(h, s).ifEmpty { null }?.let { "group $it" }, if (s.optBoolean("archived")) "archived" else null,
-                s.str("model")).joinToString(" · ")
+            "${s.id.orEmpty().take(8)} " + listOfNotNull("\"${s.title?.ifBlank { null } ?: "(untitled)"}\"", Mesh.label(h),
+                shortPath(h, s.cwd.orEmpty()), s.state.orEmpty(), s.bot?.name?.ifBlank { null }?.let { "Bot $it" },
+                groupOf(h, s).ifEmpty { null }?.let { "group $it" }, if (s.archived == true) "archived" else null,
+                s.model?.ifBlank { null }).joinToString(" · ")
         }
         "groups" -> listOf("No group") + groupNames()
         "settings" -> listOf("sidebar_group=${settingValue("sidebar_group")} (folder or date: how the left bar, the home " +

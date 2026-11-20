@@ -88,9 +88,9 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     Mesh.tick.value
     val s = Mesh.session(at, sid)
-    val bot = s?.optJSONObject("bot")
+    val bot = s?.bot
     val contact = s?.let { Contact(at, it) }
-    val name = if (bot != null) contact!!.name else s?.str("title") ?: "(untitled)"
+    val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null } ?: "(untitled)"
     val all = pages(bot != null, at)
     var shown by rememberSaveable(hostId, sid) { mutableStateOf("chat") }
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
@@ -128,7 +128,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "chat" -> ChatPage(chat, name, hint = if (bot != null) "Message $name" else "")
                 "meta" -> MetaPage(at, here)
                 "memory" -> MemoryPage(at, sid, here)
-                "browser" -> BrowserPage(at, sid, bot?.optString("name").orEmpty(), here)
+                "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
                 "routines" -> RoutinesPage(at, sid, here)
                 "agents" -> SubagentsPage(chat)
                 "processes" -> ProcessesPage(at, sid)

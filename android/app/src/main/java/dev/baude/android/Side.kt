@@ -162,14 +162,14 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
         while (true) { // (each file held said, so only what's new comes; one request at a time)
             val have = JSONObject()
             for ((n, sm) in held) have.put(n, org.json.JSONArray(listOf(sm.first, sm.second)))
-            val r = asked(chat.hostId, JSONObject().put("op", "subagents").put("session", chat.sid).put("have", have)
-                .put("limit", 4 shl 20))
-            if (r.optString("op") != "subagents") { delay(5_000); continue }
-            for (f in r.optJSONArray("files").list()) {
-                val n = f.optString("name")
-                val data = f.optString("data")
+            val r = asked(chat.hostId, Msg.Subagents(session = chat.sid, have = have, limit = 4 shl 20).json())
+            if (r.optString("op") != Op.SUBAGENTS) { delay(5_000); continue }
+            val got = Msg.SubagentsReply.from(r)
+            for (f in got.files.orEmpty()) {
+                val n = f.name.orEmpty()
+                val data = f.data.orEmpty()
                 if (n == name && data.isNotEmpty()) {
-                    val offset = f.optLong("offset")
+                    val offset = f.offset?.toLong() ?: 0L
                     if (offset == 0L) text.setLength(0)
                     if (offset == 0L || offset == (held[n]?.first ?: 0L)) {
                         text.append(String(Base64.getDecoder().decode(data), Charsets.UTF_8))
@@ -178,9 +178,9 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
                             .filter { it.kind in setOf("you", "bot", "tool", "note", "error") })
                     }
                 }
-                held[n] = f.optLong("next", f.optLong("size")) to f.optLong("mtime")
+                held[n] = ((f.next ?: f.size)?.toLong() ?: 0L) to (f.mtime?.toLong() ?: 0L)
             }
-            if (r.optBoolean("more")) continue
+            if (got.more == true) continue
             if (a.status.value != "running" && name in held) break
             delay(2_000)
         }
@@ -220,17 +220,17 @@ suspend fun asked(hostId: String, msg: JSONObject): JSONObject = kotlinx.corouti
 fun ProcessesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     Mesh.tick.value
-    val commands = Mesh.session(hostId, sid)?.optJSONArray("commands").list()
+    val commands = Mesh.session(hostId, sid)?.commands.orEmpty()
     var said by remember { mutableStateOf<String?>(null) }
     Scrolled {
         BoxedList(commands, "No background processes") { cmd ->
-            val since = cmd.optDouble("since", 0.0)
-            val sub = listOfNotNull(if (cmd.optBoolean("background")) "In the background" else null,
+            val since = cmd.since?.toDouble() ?: 0.0
+            val sub = listOfNotNull(if (cmd.background == true) "In the background" else null,
                 if (since > 0) "since " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
                     .format(java.util.Date((since * 1000).toLong())) else null).joinToString(" · ")
-            ActionRow(cmd.optString("what").lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
+            ActionRow(cmd.what.orEmpty().lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
                 if (offers(hostId, "control")) IconButton(Icons.Filled.Stop, "Stop this process") {
-                    control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.optString("id"))) { e ->
+                    control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.id.orEmpty())) { e ->
                         if (e != null) said = "Couldn't stop it: $e"
                     }
                 }

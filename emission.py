@@ -1294,7 +1294,7 @@ class BotPointer:
     IDLE_S, FADE_S, APPEAR_S = 6.0, 0.35, 0.15  # (nothing done this long: the pointer faded out, in this long; in, this)
     GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = 0.35, 0.8, 0.5
     BEHIND = 6  # (more than this many steps waiting: glides quicker, so it isn't left behind)
-    MOST = 64  # (steps kept waiting: play)
+    MOST = 256  # (steps kept waiting while nothing draws them: play; a drag is some 45)
 
     def __init__(self):
         self.at, self.steps, self.step, self.step_t = None, [], None, 0.0
@@ -1337,9 +1337,10 @@ class BotPointer:
                 self.steps += [("tap", None, 1.0)] * max(1, min(3, int(ev.get("count") or 1)))
             elif kind == "scroll":
                 self.steps.append(("hint", (ev.get("dx") or 0, ev.get("dy") or 0), 1.0))
-        if len(self.steps) > self.MOST:  # (not being drawn, a hosted page out of sight: steps are only taken as it's
-            # looked at, and a Bot at work behind a hidden Browser page left every one it made, to be played from
-            # the first when the page was shown; the oldest are skipped, the pointer where they'd have left it)
+        # (not being drawn, a hosted page out of sight: steps are only taken as it's looked at, so a Bot at work
+        # behind a hidden Browser page only adds to them. The oldest are skipped then, the pointer where they'd have
+        # left it; never while it's drawn, where a drag's steps are all played)
+        if len(self.steps) > self.MOST and (self.looked is None or time.monotonic() - self.looked > 1.0):
             skipped, self.steps = self.steps[:-self.MOST], self.steps[-self.MOST:]
             for kind, what, _t in skipped:
                 if kind == "glide":
@@ -2068,7 +2069,8 @@ class GtkWeb:
         return True
 
     def focus(self):
-        self.view.grab_focus()
+        if self.view is not None:
+            self.view.grab_focus()
 
     def follow(self):
         pass  # (a widget in its place: GTK lays it out)
@@ -2093,6 +2095,8 @@ class GtkWeb:
 
     def state(self):
         v = self.view
+        if v is None:  # (its tab closed: what's still waiting on it, a click's answer, is told nothing's there)
+            return {}
         return {"title": v.get_title() or "", "url": v.get_uri() or "", "progress": v.get_estimated_load_progress(),
                 "loading": v.is_loading(), "back": v.can_go_back(), "forward": v.can_go_forward()}
 
@@ -2206,7 +2210,7 @@ class GtkWeb:
         xt.x.XFlush(xt.d)
 
     def view_size(self):
-        return [self.view.get_width(), self.view.get_height()]
+        return [self.view.get_width(), self.view.get_height()] if self.view is not None else [0, 0]
 
     def key(self, name, mods=()):
         xt = XTest.get()
@@ -2248,19 +2252,18 @@ class GtkWeb:
         return None  # (WebKitGTK's own: already Safari's kind)
 
     def close(self):
-        """Its tab's closed: the page gone, its process with it. try_close alone only asks the page (its unload
-        handlers) and says it closed: the view lived on, held by its own signals' handlers, which lead back to it
-        through this (PyGObject frees no widget so held), and with it its web process, its Tab and its place: a tab
-        closed gave nothing back. Disposed once the main loop's idle (what closes it may be its own signal)."""
+        """Its tab's closed: its view out of its place and disposed, once the main loop's idle (what closes it may be
+        its own signal's handler). Its signals' handlers hold the view through this, and PyGObject frees no widget
+        so held: disposing lets go of them, and WebKit ends its web process once no other page shares it (a page it
+        opened, or was opened by, lives on in the same one). The page isn't asked first (try_close): its tab's gone
+        whatever it answers, and one that asks before unloading would put a dialog up for it."""
         view, self.view = self.view, None
         if view is None:
             return
         self.views.pop(view, None)
-        self.popup = self.closed = None
-        view.try_close()
+        self.window = self.popup = self.closed = None
 
         def gone():
-            view.terminate_web_process()
             if (parent := view.get_parent()) is not None:
                 parent.remove(view)
             view.run_dispose()
@@ -3555,7 +3558,7 @@ class Control:
             (then or (lambda v: answer({"result": v})))(value)
         finish = once(guarded(done, answer))
         # (a script that never settles, a promise nothing resolves: said so once whoever asked has stopped waiting,
-        # where its request, its connection and, of input, every request queued behind it were kept for good)
+        # so its request and connection go, and input queued behind it gets its turn)
         timer = [GLib.timeout_add_seconds(self.JS_S, lambda: (
             timer.clear(), finish(None, f"the script hadn't finished after {self.JS_S} s"))[1] and False)]
 
@@ -3579,9 +3582,9 @@ class Control:
             self.next_input()
 
     def next_input(self):
-        """The first of what's waiting done (the next once it's answered, whatever the answer), once: asked again
-        while it's being done (its turn come by the last one's answer, and the request after that one here before the
-        idle moment that answer left: run), it was done twice, a tab opened or a click made two times over."""
+        """The first of what's waiting done (the next once it's answered, whatever the answer), once (doing): this
+        is asked again while it's being done, when the request after the last one answered comes before the idle
+        moment that answer left (run begins it, then that moment's here)."""
         while self.queue and self.queue[0] is not self.doing:
             self.doing = self.queue[0]
             fn, msg, answer = self.queue[0]

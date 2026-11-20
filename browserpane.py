@@ -213,7 +213,7 @@ class Asks:
         self.q.put((remote, bot, call, done))
 
     def stop(self):
-        """Its pane's gone: its thread ends, after what's waiting (it went on waiting for good, a thread a pane)."""
+        """Its pane's gone: its thread ends, after what's waiting."""
         self.q.put(None)
 
     def run(self):
@@ -326,8 +326,7 @@ class Here:
             win = emission.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
             if win.Engine is None or win.status is not None:
                 why = win.status.get_description() if win.status is not None else "no page engine here"
-                win.closing_window()
-                win.destroy()
+                self.free(win)
                 emission.ProfileSocket.close(pid)
                 emissionlink.unlock_profile(pid)
                 return self.done(why)
@@ -348,8 +347,7 @@ class Here:
             try:
                 import emission
                 if "win" in locals():
-                    win.closing_window()
-                    win.destroy()
+                    self.free(win)
                 emission.ProfileSocket.close(pid)
             except Exception:
                 sys.excepthook(*sys.exc_info())
@@ -357,6 +355,20 @@ class Here:
             return self.done(f"{type(e).__name__}: {e}")
         self.watching = GLib.timeout_add_seconds(60, self.idle_check)
         self.done(None)
+
+    @staticmethod
+    def free(win):
+        """A hosted browser's window closed, and freed with its pages and bars: each is held by its own handlers, and
+        the window through them, so a destroy alone frees none (widgets.discard)."""
+        if win.body.get_parent() is not None:
+            win.body.get_parent().remove(win.body)
+        bars = win.get_content()
+        win.closing_window()
+        win.set_content(None)
+        win.destroy()
+        for part in (win.body, bars, win):
+            if part is not None:
+                widgets.discard(part)
 
     def idle_check(self):
         """Gone unused (by the Bot) this long, and not shown: let go of, as an agent's Emission goes when idle."""
@@ -378,15 +390,10 @@ class Here:
         HERE.pop(self.sid, None)
         if win is None:
             return
-        if win.body.get_parent() is not None:
-            win.body.get_parent().remove(win.body)
-        bars = win.get_content()
-        win.closing_window()
-        win.set_content(None)
-        win.destroy()
-        for part in (win.body, bars, win):  # (freed: held by their own handlers, and the window through them, they
-            if part is not None:           # lived on, its tabs and their pages' engines with them)
-                widgets.discard(part)
+        for pane in list(ALL):  # (a window of its own showing it: its tabs' strip on the stand-ins again, not left
+            if pane.here is self and pane.bound is not None:  # on a view that's about to go)
+                pane.tabs.set_view(pane.mirror)
+        self.free(win)
         emission.ProfileSocket.close(self.pid)
         pid = self.pid
         RELEASED[pid] = time.monotonic()
@@ -625,8 +632,7 @@ class BrowserWindow(Adw.ApplicationWindow):
             self.main = None
         self.pane.stop()
         # (its pane and itself freed: a window's destroy disposes neither its child nor its keys, whose handlers lead
-        # back to it, and both lived on, with every widget in the pane, its half-second timer running, its thread
-        # waiting)
+        # back to it; the pane's dispose ends its timer and its thread)
         self.set_content(None)
         if not closing:
             self.destroy()

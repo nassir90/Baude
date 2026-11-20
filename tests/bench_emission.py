@@ -21,6 +21,8 @@ What a phase leaves should be what the one before left: a tab closed, a picture 
   idle        ten seconds with nothing asked
 """
 import argparse
+import ctypes
+import ctypes.util
 import http.server
 import json
 import os
@@ -41,9 +43,34 @@ os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="eb-", dir="/tmp")  # 
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 from baudelib import emissionlink  # noqa: E402
-from bench_memory import process_memory  # noqa: E402
 
 BOT = "bench-emission"
+
+
+class _RUsage(ctypes.Structure):  # (macOS: the start of rusage_info_v2, up to ri_phys_footprint; the rest left room)
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + \
+               [(n, ctypes.c_uint64) for n in ("user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins",
+                                               "wired_size", "resident_size", "phys_footprint")] + \
+               [("rest", ctypes.c_uint64 * 64)]
+
+
+def process_memory(pid):
+    """{"footprint", "rss"} in MB of a process: macOS, its physical footprint (what Activity Monitor shows); Linux,
+    RSS + swap."""
+    if sys.platform == "darwin":
+        info = _RUsage()
+        libproc = ctypes.CDLL(ctypes.util.find_library("proc"))
+        ok = libproc.proc_pid_rusage(pid, 2, ctypes.byref(info)) == 0  # (2: RUSAGE_INFO_V2)
+        return {"footprint": info.phys_footprint / 2**20 if ok else 0.0, "rss": info.resident_size / 2**20 if ok else 0.0}
+    got = {}
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith(("VmRSS:", "VmSwap:")):
+                    got[line.split(":")[0]] = int(line.split()[1]) / 1024
+    except OSError:  # (gone meanwhile)
+        pass
+    return {"footprint": got.get("VmRSS", 0) + got.get("VmSwap", 0), "rss": got.get("VmRSS", 0)}
 
 
 def png(w, h, seed):
@@ -88,15 +115,12 @@ class Pages(http.server.BaseHTTPRequestHandler):
 
 
 def forget_store(pid):
-    """(macOS) The bench's Bot's profile's store deleted: WebKit keeps a profile's cookies and cache under
-    ~/Library/WebKit by its id, whatever folders this run was given, so it's taken away again."""
-    import emission
-    from gi.repository import GLib
-    loop = GLib.MainLoop()
-    emission.MacWeb.remove_store(pid, lambda why: (why and print(f"   (the bench's store wasn't removed: {why})"),
-                                                   loop.quit()))
-    GLib.timeout_add_seconds(10, loop.quit)
-    loop.run()
+    """(macOS) The bench's Bot's profile's store taken away: WebKit keeps a profile's cookies and cache under
+    ~/Library/WebKit/<the program>/WebsiteDataStore/<its id>, whatever folders this run was given. Its folder's
+    removed once its Emission's gone (WebKit's own removal needs a WebKit run loop, which this process hasn't)."""
+    import glob
+    for path in glob.glob(os.path.expanduser(f"~/Library/WebKit/*/WebsiteDataStore/{pid.lower()}")):
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def main():

@@ -65,10 +65,10 @@ fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String)
         Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", enabled = b.canBack.value) { nav("back") }
-        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Forward", enabled = b.canForward.value) { nav("forward") }
+        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, Wording.Browser.back, enabled = b.canBack.value) { nav("back") }
+        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, Wording.Browser.forward, enabled = b.canForward.value) { nav("forward") }
         if (b.loading.value) IconButton(Icons.Filled.Close, "Stop") { nav("stop") }
-        else IconButton(Icons.Filled.Refresh, "Reload") { nav("reload") }
+        else IconButton(Icons.Filled.Refresh, Wording.Browser.reload) { nav("reload") }
         Address(b.shownUrl.value, go, Modifier.weight(1f))
         IconButton(Icons.Outlined.AddBox, "New Tab", onClick = newTab)
         Row(Modifier.heightIn(min = Gap.composerButton).padding(horizontal = 8.dp), // (who: the profile's, the Bot's
@@ -91,7 +91,7 @@ private fun Address(url: String, go: (String) -> Unit, modifier: Modifier) {
     if (!typing && text != url) text = url
     Box(modifier.height(Gap.composerButton).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.1f))
         .padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
-        if (text.isEmpty()) Text("Search or type an address", style = Type.body, color = c.dim, maxLines = 1,
+        if (text.isEmpty()) Text(Wording.Browser.address, style = Type.body, color = c.dim, maxLines = 1,
             overflow = TextOverflow.Clip)
         BasicTextField(text, { text = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg),
@@ -165,15 +165,16 @@ fun PromptCards(b: Browser, answer: (org.json.JSONObject) -> Unit) {
             Column(Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.card)
                 .padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val text = when (kind) {
-                    "sign_in" -> "${p.optString("host").ifBlank { "A site" }} asks to sign in" +
-                        p.optString("realm").let { if (it.isNotBlank()) " (“$it”)" else "" }
-                    "files" -> "The page asks for files to upload"
+                    "sign_in" -> p.optString("host").ifBlank { Wording.Browser.aSite }.let { host ->
+                        p.optString("realm").let { if (it.isNotBlank()) Wording.Browser.signInRealm(host = host, realm = it)
+                            else Wording.Browser.signIn(host = host) } }
+                    "files" -> Wording.BotBrowser.asksForFiles
                     else -> p.optString("message")
                 }
                 Text(text, style = Type.body, color = c.fg)
                 for ((k, v) in fields) Box(Modifier.fillMaxWidth().height(Gap.composerButton).clip(RoundedCornerShape(8.dp))
                     .background(c.fg.copy(alpha = 0.1f)).padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
-                    if (v.value.isEmpty() && k != "text") Text(if (k == "user") "User name" else "Password", style = Type.body,
+                    if (v.value.isEmpty() && k != "text") Text(if (k == "user") Wording.Browser.userName else Wording.Browser.password, style = Type.body,
                         color = c.dim)
                     BasicTextField(v.value, { v.value = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
                         visualTransformation = if (k == "password") androidx.compose.ui.text.input.PasswordVisualTransformation()
@@ -181,8 +182,8 @@ fun PromptCards(b: Browser, answer: (org.json.JSONObject) -> Unit) {
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth())
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
-                    if (kind != "alert") Button("Cancel") { answer(org.json.JSONObject().put("id", p.optString("id")).put("accept", false)) }
-                    if (kind != "files") Button("OK", suggested = true) {
+                    if (kind != "alert") Button(Wording.Common.cancel) { answer(org.json.JSONObject().put("id", p.optString("id")).put("accept", false)) }
+                    if (kind != "files") Button(Wording.Common.ok, suggested = true) {
                         answer(org.json.JSONObject().put("id", p.optString("id")).put("accept", true).apply {
                             for ((k, v) in fields) put(k, v.value)
                         })

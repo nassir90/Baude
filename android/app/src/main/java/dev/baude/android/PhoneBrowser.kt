@@ -179,7 +179,8 @@ object PhoneBrowser {
         if (c.state != "up") {
             calls.entries.removeAll { it.value === c }
             if (s.up || c.state != "connecting") s.link.send(JSONObject().put("op", "serving").put("on", false)
-                .put("why", "Can't connect to ${Mesh.label(s.hostId)}" + (c.why?.let { ": $it" } ?: "")))
+                .put("why", c.why?.let { Wording.Hosts.downBecause(host = Mesh.label(s.hostId), why = it) }
+                    ?: Wording.Hosts.down(host = Mesh.label(s.hostId))))
             s.up = false
             return
         }
@@ -188,7 +189,7 @@ object PhoneBrowser {
                 if (served !== s) return@post
                 s.up = r.optString("op") == Op.EMISSION_SERVING
                 s.link.send(JSONObject().put("op", "serving").put("on", s.up)
-                    .apply { if (!s.up) put("why", Msg.Error.from(r).said ?: "the host said no") })
+                    .apply { if (!s.up) put("why", Msg.Error.from(r).said ?: Wording.BotBrowser.hostSaidNo) })
             }
         }
     }
@@ -201,7 +202,7 @@ object PhoneBrowser {
         s.up = false
         calls.entries.removeAll { it.value === c }
         s.link.send(JSONObject().put("op", "serving").put("on", false).put("why", gone.why
-            ?: "another phone shows this Bot's browser now"))
+            ?: Wording.HostErrors.anotherPhone))
     }
 
     /** (while one's open: each little while) The Bot's turn at its tools or not, for its glow. */

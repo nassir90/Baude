@@ -12592,7 +12592,8 @@ class SignalPage(widgets.ExpandStack):
             return "db" if label in (wording.say("databases.database_table"), "Database column", "Database collection",
                                      wording.say("databases.database")) else r.kind
         groups = [("pending", "Looking up")] + [(k, many) for k, (_one, many) in REF_KINDS.items()]
-        groups.insert(groups.index(("symbol", REF_KINDS["symbol"][1])) + 1, ("db", "Database tables and columns"))
+        groups.insert(groups.index(("symbol", REF_KINDS["symbol"][1])) + 1,
+                      ("db", wording.say("signal.database_tables")))
         for kind, many in groups:
             mine = [r for r in refs if group(r) == kind]
             if not mine:

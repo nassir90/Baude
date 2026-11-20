@@ -303,7 +303,7 @@ object Meta {
                         }
                         "result" -> {
                             c.thinking.value = false
-                            if (m.optBoolean("is_error")) c.lines.add(Line("error", m.optString("result").ifBlank { "claude reported an error" }))
+                            if (m.optBoolean("is_error")) c.lines.add(Line("error", m.optString("result").ifBlank { Wording.Meta.claudeError }))
                             shownNow()
                         }
                     }
@@ -368,7 +368,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            if (Meta.chat.lines.isNotEmpty()) Button("Clear") { Meta.clear() }
+            if (Meta.chat.lines.isNotEmpty()) Button(Wording.Common.clear) { Meta.clear() }
         }
         Column(Modifier.weight(1f)) {
             ChatPage(Meta.chat, "Meta", hint = "Ask Meta", attach = false)
@@ -382,7 +382,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
             val given = f.optJSONObject("values")
             when (f.optString("form")) {
                 "spawn_agent" -> NewSession(null, null, done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
-                    given = given, edited = MetaTools::edited, heading = "Spawn an agent")
+                    given = given, edited = MetaTools::edited, heading = Wording.NewSession.spawnAgent)
                 "add_host" -> AddHost(done = done, given = given, edited = MetaTools::edited, added = { submitted() })
                 "new_group" -> NewGroup(given, done = done, made = { submitted() })
             }
@@ -412,8 +412,9 @@ fun MetaRows(text: String) {
             {
                 val (h, sid) = r.optString(0) to r.optString(1)
                 val s = Mesh.session(h, sid)
-                ActionRow(s?.bot?.name?.ifBlank { null } ?: s?.title?.ifBlank { null } ?: "(untitled)",
-                    listOfNotNull(Mesh.label(h), s?.let { shortPath(h, it.cwd.orEmpty()) }).joinToString(" · "),
+                ActionRow(s?.bot?.name?.ifBlank { null } ?: s?.title?.ifBlank { null } ?: Wording.Common.untitled,
+                    listOfNotNull(Mesh.label(h), s?.let { shortPath(h, it.cwd.orEmpty()) },
+                        s?.let { groupOf(h, it) }?.ifEmpty { null }?.let { Wording.MetaChats.groupNamed(name = it) }).joinToString(" · "),
                     onClick = { Meta.opener(h, sid) }, suffix = chevron)
             }
         })
@@ -455,24 +456,25 @@ fun MetaRows(text: String) {
         if (asking) {
             val h = o.optString("host")
             val sid = o.optString("sid")
-            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: "this session"
+            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: Wording.Trash.thisSession
             androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
-                title = { Text("Move “$title” to the trash?") },
-                text = { Text("Its transcript will be moved to the trash on ${Mesh.label(h)}, where you can restore it.") },
-                confirmButton = { Button("Move to Trash", destructive = true) {
+                title = { Text(Wording.Trash.heading(title = title)) },
+                text = { Text(Wording.Trash.body(where = Wording.Trash.onHost(host = Mesh.label(h)))) },
+                confirmButton = { Button(Wording.Trash.move, destructive = true) {
                     asking = false
                     Mesh.ask(h, Msg.Delete(session = sid).json()) { r ->
-                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value = "${Mesh.label(h)} didn't delete it: " + Msg.Error.from(r).said.orEmpty()
+                        if (r.optString("op") == Op.ERROR) Meta.chat.said.value =
+                            Wording.Trash.hostRefused(op = "delete", host = Mesh.label(h), why = Msg.Error.from(r).said.orEmpty())
                     }
                 } },
-                dismissButton = { Button("Cancel") { asking = false } }, containerColor = c.dialog)
+                dismissButton = { Button(Wording.Common.cancel) { asking = false } }, containerColor = c.dialog)
         }
     }
     when (o.optString("setting")) {
         "sidebar_group" -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Group by", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-            Picker(if (HomePrefs.by.value == "date") "Date" else "Folder", "Group by",
-                listOf("Folder" to "folder", "Date" to "date"), HomePrefs.by.value) { HomePrefs.by.value = it; HomePrefs.save() }
+            Text(Wording.Sidebar.groupBy, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+            Picker(if (HomePrefs.by.value == "date") Wording.Sidebar.date else Wording.Common.folder, Wording.Sidebar.groupBy,
+                listOf(Wording.Common.folder to "folder", Wording.Sidebar.date to "date"), HomePrefs.by.value) { HomePrefs.by.value = it; HomePrefs.save() }
         }
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
@@ -491,9 +493,9 @@ fun MetaAction(id: String) {
     val c = LocalBaude.current
     val a = MetaTools.actions.firstOrNull { it.id == id } ?: return
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(if (a.undone.value) a.said + " · undone" else a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
-        if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, "Redo") { MetaTools.button(a, undo = false) }
-        else IconButton(Icons.AutoMirrored.Filled.Undo, "Undo") { MetaTools.button(a, undo = true) }
+        Text(if (a.undone.value) Wording.MetaActions.undone(action = a.said) else a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
+        if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, Wording.Common.redo) { MetaTools.button(a, undo = false) }
+        else IconButton(Icons.AutoMirrored.Filled.Undo, Wording.Common.undo) { MetaTools.button(a, undo = true) }
     }
 }
 
@@ -504,15 +506,15 @@ fun NewGroup(given: JSONObject?, done: () -> Unit, made: () -> Unit) {
     var name by androidx.compose.runtime.remember { mutableStateOf(given?.str("name").orEmpty()) }
     androidx.compose.runtime.LaunchedEffect(name) { MetaTools.edited(JSONObject().put("name", name)) }
     val wrong = MetaTools.wrong("new_group", JSONObject().put("name", name))
-    androidx.compose.material3.AlertDialog(onDismissRequest = done, title = { Text("New group") },
+    androidx.compose.material3.AlertDialog(onDismissRequest = done, title = { Text(Wording.NewSession.newGroup) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("A list of chats of its own, picked in ⋮ → Groups.", style = Type.body, color = c.dim)
-                Field(name, { name = it }, "Its name")
+                Field(name, { name = it }, Wording.MetaApp.itsName)
                 if (name.isNotBlank() && wrong != null) Text(wrong, style = Type.caption, color = c.destructive)
             }
         },
-        confirmButton = { Button("Create", suggested = wrong == null) {
+        confirmButton = { Button(Wording.Common.create, suggested = wrong == null) {
             if (wrong != null) return@Button
             val g = name.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
             HomePrefs.made.add(g)
@@ -520,5 +522,5 @@ fun NewGroup(given: JSONObject?, done: () -> Unit, made: () -> Unit) {
             made()
             done()
         } },
-        dismissButton = { Button("Cancel", onClick = done) }, containerColor = c.dialog)
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) }, containerColor = c.dialog)
 }

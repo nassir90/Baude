@@ -101,7 +101,7 @@ fun sideQuestions(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
                     val said = q.text.toString().trim()
                     q.text.setLength(0)
                     q.thread.add(Line(if (m.optBoolean("is_error")) "error" else "bot",
-                        said.ifEmpty { if (m.optBoolean("is_error")) m.optString("result").ifBlank { "The side question failed." } else "" }))
+                        said.ifEmpty { if (m.optBoolean("is_error")) m.optString("result").ifBlank { Wording.SideQuestions.failed } else "" }))
                     q.status.value = if (m.optBoolean("is_error")) "error" else "done"
                 }
             }
@@ -140,7 +140,7 @@ fun SideQuestionsPage(chat: Chat) {
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") != Op.STARTED || id == null) {
                 q.status.value = "error"
-                q.thread.add(Line("error", "the side question couldn't be asked: " + Msg.Error.from(r).said.orEmpty()))
+                q.thread.add(Line("error", Wording.SideQuestions.notAsked(why = Msg.Error.from(r).said.orEmpty())))
                 return@ask
             }
             q.sid = id
@@ -156,7 +156,7 @@ fun SideQuestionsPage(chat: Chat) {
                 if (q.status.value != "done") AgentStatus(if (q.status.value == "error") "failed" else q.status.value)
                 Text(q.question, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f))
-                IconButton(Icons.AutoMirrored.Filled.ArrowBack, "All side questions") { shown = null }
+                IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.SideQuestions.all) { shown = null }
             }
             Column(Modifier.weight(1f).padding(top = 6.dp).inside(c)) {
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -207,7 +207,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
 fun FilesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val root = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (root == null) return StatusPage(Icons.Filled.Folder, "Files", "No folder yet")
+    if (root == null) return StatusPage(Icons.Filled.Folder, Wording.Lookup.files, "No folder yet")
     var at by remember(root) { mutableStateOf(root) }
     var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
     var error by remember(at) { mutableStateOf<String?>(null) }
@@ -229,14 +229,14 @@ fun FilesPage(hostId: String, sid: String) {
                 Text(shortPath(hostId, at.substringBeforeLast('/')), style = Type.caption, color = c.dim, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
-            if (at != root) IconButton(Icons.Filled.ArrowUpward, "Up a folder") { at = at.substringBeforeLast('/') }
-            IconButton(Icons.Filled.Refresh, "Read the folders again") { entries = null; error = null; again++ }
+            if (at != root) IconButton(Icons.Filled.ArrowUpward, Wording.CodeView.upFolder) { at = at.substringBeforeLast('/') }
+            IconButton(Icons.Filled.Refresh, Wording.CodeView.readFoldersAgain) { entries = null; error = null; again++ }
         }
         Scrolled {
             when {
                 error != null -> Empty(error!!)
                 entries == null -> Empty("Reading it…")
-                else -> BoxedList(entries!!, "Nothing in this folder") { e ->
+                else -> BoxedList(entries!!, Wording.CodeView.emptyFolder) { e ->
                     val path = "$at/${e.name.orEmpty()}"
                     val dir = e.dir == true
                     Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
@@ -273,26 +273,27 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
             if (r.optString("op") == Op.FILE && f.error.isNullOrBlank()) {
                 data = Base64.getDecoder().decode(f.data.orEmpty())
                 cut = f.truncated == true || (f.size?.toLong() ?: 0L) > (data?.size ?: 0)
-            } else why = said(r, f.error).ifBlank { "not text to read here" }
+            } else why = said(r, f.error).ifBlank { Wording.FileView.notText }
         }
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(path.substringAfterLast('/'), style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("on ${Mesh.label(hostId)}" + if (cut) " · its first part" else "", style = Type.caption, color = c.dim)
+                Text(Wording.FileView.onHost(host = Mesh.label(hostId)) + if (cut) " · its first part" else "", style = Type.caption, color = c.dim)
             }
             IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val d = data
             when {
-                why != null -> Empty("$path on ${Mesh.label(hostId)}: $why")
+                why != null -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId), why = why!!))
                 d == null -> Empty("Reading it…")
                 path.substringAfterLast('.').lowercase() in PICTURES -> BitmapFactory.decodeByteArray(d, 0, d.size)?.let {
                     Image(it.asImageBitmap(), path, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
                 } ?: Empty("Not a picture this phone can read")
-                d.take(8192).contains(0.toByte()) -> Empty("$path on ${Mesh.label(hostId)}: not text to read here")
+                d.take(8192).contains(0.toByte()) -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId),
+                    why = Wording.FileView.notText))
                 else -> Text(String(d, Charsets.UTF_8), style = Type.mono, color = c.fg, modifier = Modifier.fillMaxSize()
                     .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(12.dp))
             }
@@ -309,7 +310,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
 fun GitPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val cwd = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (cwd == null) return StatusPage(Icons.Filled.Schedule, "Git", "No folder yet")
+    if (cwd == null) return StatusPage(Icons.Filled.Schedule, Wording.Git.title, "No folder yet")
     var log by remember(cwd) { mutableStateOf<Msg.GitReply?>(null) }
     val commits = remember(cwd) { mutableStateListOf<Msg.Commit>() }
     var why by remember(cwd) { mutableStateOf<String?>(null) }
@@ -332,8 +333,8 @@ fun GitPage(hostId: String, sid: String) {
             IconButton(Icons.Filled.Refresh, "Read the history again") { why = null; log = null; again++ }
         }
         when {
-            why != null -> StatusPage(Icons.Filled.Schedule, "Git", why)
-            log == null -> Empty("Reading the history…")
+            why != null -> StatusPage(Icons.Filled.Schedule, Wording.Git.title, why)
+            log == null -> Empty(Wording.Git.readingHistory)
             else -> Scrolled {
                 val b = log!!.branch
                 b?.name?.ifBlank { null }?.let { name ->
@@ -342,16 +343,16 @@ fun GitPage(hostId: String, sid: String) {
                 b?.upstream?.ifBlank { null }?.let { up ->
                     val a = b.ahead?.toInt() ?: 0
                     val be = b.behind?.toInt() ?: 0
-                    val how = if (a == 0 && be == 0) "up to date" else listOfNotNull(
-                        a.takeIf { it > 0 }?.let { "$it commit${if (it != 1) "s" else ""} ahead" },
-                        be.takeIf { it > 0 }?.let { "$it commit${if (it != 1) "s" else ""} behind" }).joinToString(", ")
-                    Text("Tracks $up: $how", style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 12.dp))
+                    val how = if (a == 0 && be == 0) Wording.Git.upToDate else listOfNotNull(
+                        a.takeIf { it > 0 }?.let { Wording.Git.ahead(n = it) },
+                        be.takeIf { it > 0 }?.let { Wording.Git.behind(n = it) }).joinToString(", ")
+                    Text(Wording.Git.tracks(upstream = up, track = how), style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 12.dp))
                 }
-                BoxedList(commits.toList(), "No commits") { m ->
+                BoxedList(commits.toList(), Wording.Git.noCommits) { m ->
                     ActionRow(m.subject.orEmpty(), "${ago(m.at?.toLong() ?: 0L)} · ${m.author.orEmpty()}" + m.refs.orEmpty().let {
                         if (it.isEmpty()) "" else " · " + it.joinToString(", ") }, onClick = { commit = m.sha.orEmpty() })
                 }
-                if (log!!.more == true) Text("Show more", style = Type.body, color = c.accent, modifier = Modifier
+                if (log!!.more == true) Text(Wording.Git.showMore, style = Type.body, color = c.accent, modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(6.dp)).clickable { more(commits.size) })
             }
         }
@@ -361,15 +362,17 @@ fun GitPage(hostId: String, sid: String) {
 private fun stamped(at: Long): String {
     val d = Date(at * 1000)
     val day = SimpleDateFormat("d", Locale.ENGLISH).format(d).toInt()
-    val suffix = if (day % 100 in 10..20) "th" else when (day % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
-    return SimpleDateFormat("HH:mm EEE ", Locale.ENGLISH).format(d) + "$day$suffix " + SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).format(d)
+    return SimpleDateFormat("HH:mm EEE ", Locale.ENGLISH).format(d) + Wording.Time.dayOfMonth(day = day) + " " + SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).format(d)
 }
 
 private fun ago(at: Long): String {
     val secs = maxOf(0L, System.currentTimeMillis() / 1000 - at)
-    for ((unit, n) in listOf("y" to 365 * 86400L, "mo" to 30 * 86400L, "w" to 7 * 86400L, "d" to 86400L, "h" to 3600L, "m" to 60L))
-        if (secs >= n) return "${secs / n}$unit ago"
-    return "just now"
+    for ((n, said) in listOf<Pair<Long, (Long) -> String>>(365 * 86400L to { Wording.Time.yearsAgo(n = it) },
+        30 * 86400L to { Wording.Time.monthsAgo(n = it) }, 7 * 86400L to { Wording.Time.weeksAgo(n = it) },
+        86400L to { Wording.Time.daysAgo(n = it) }, 3600L to { Wording.Time.hoursAgo(n = it) },
+        60L to { Wording.Time.minutesAgo(n = it) }))
+        if (secs >= n) return said(secs / n)
+    return Wording.Time.justNow
 }
 
 @Composable
@@ -396,7 +399,7 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
         BackHandler { diff = null }
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("$p in ${sha.take(9)}", style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(Wording.Git.pathInCommit(path = p, sha = sha.take(9)), style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 IconButton(Icons.AutoMirrored.Filled.ArrowBack, "The commit") { diff = null }
             }
             Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
@@ -422,11 +425,11 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(sha.take(9), style = Type.title.copy(fontFamily = Type.mono.fontFamily), color = c.fg, modifier = Modifier.weight(1f))
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, "The log", onClick = back)
+            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Git.theLog, onClick = back)
         }
         val k = card
         when {
-            k == null -> Empty("Reading the commit…")
+            k == null -> Empty(Wording.Git.readingCommit)
             !k.error.isNullOrBlank() -> Empty(k.error)
             else -> Scrolled {
                 val msg = k.message.orEmpty()
@@ -439,17 +442,20 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                 val files = k.files.let { a -> (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONArray(it) } }
                 val added = files.sumOf { if (it.isNull(1)) 0 else it.optInt(1) }
                 val removed = files.sumOf { if (it.isNull(2)) 0 else it.optInt(2) }
-                Text("${files.size} file${if (files.size != 1) "s" else ""}  +${"%,d".format(Locale.ENGLISH, added)} −${"%,d".format(Locale.ENGLISH, removed)}", style = Type.caption,
+                Text("${Wording.Git.files(n = files.size)}  ${Wording.Git.added(n = added)} ${Wording.Git.removed(n = removed)}",
+                    style = Type.caption,
                     color = c.dim, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
                 BoxedList(files, "") { f ->
-                    ActionRow(f.optString(0), if (f.isNull(1)) "binary" else "+${f.optInt(1)} −${f.optInt(2)}",
+                    ActionRow(f.optString(0), if (f.isNull(1)) Wording.Git.binary
+                        else "${Wording.Git.added(n = f.optInt(1))} ${Wording.Git.removed(n = f.optInt(2))}",
                         onClick = { diff = f.optString(0) })
                 }
                 val rest = msg.lines().drop(1).joinToString("\n").trim()
                 if (rest.isNotEmpty()) Text(rest, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 12.dp))
                 val on = k.branches.orEmpty()
-                Text(if (on.isEmpty()) "On no branch (rewritten, or only in the reflog)" else "On ${on.take(8).joinToString(", ")}" +
-                    (if (on.size > 8) " and ${on.size - 8} more" else ""),
+                Text(if (on.isEmpty()) Wording.Git.onNoBranch
+                    else if (on.size > 8) Wording.Git.onBranchesMore(branches = on.take(8).joinToString(", "), n = on.size - 8)
+                    else Wording.Git.onBranches(branches = on.joinToString(", ")),
                     style = Type.caption, color = c.dim, modifier = Modifier.padding(12.dp))
             }
         }
@@ -458,11 +464,13 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
 
 // --------------------------------------------------------------------------------------------------------- signal --
 
-private val KINDS = mapOf("file" to "Files", "commit" to "Commits", "branch" to "Branches", "pr" to "Pull requests",
-    "env" to "Env vars", "constant" to "Constants", "symbol" to "Code symbols", "config" to "Config keys",
-    "service" to "Services", "k8s" to "Kubernetes objects", "package" to "Packages", "cli" to "Commands",
-    "external" to "External tools", "tool" to "Tools", "subagent" to "Subagent types", "skill" to "Skills",
-    "route" to "HTTP routes", "db" to "Database tables and columns")
+private val KINDS = mapOf("file" to Wording.Lookup.files, "commit" to Wording.Lookup.commits,
+    "branch" to Wording.Lookup.branches, "pr" to Wording.Lookup.pullRequests, "env" to Wording.Lookup.envVars,
+    "constant" to Wording.Lookup.constants, "symbol" to Wording.Lookup.codeSymbols, "config" to Wording.Lookup.configKeys,
+    "service" to Wording.Lookup.services, "k8s" to Wording.Lookup.kubernetesObjects, "package" to Wording.Lookup.packages,
+    "cli" to Wording.Lookup.commands, "external" to Wording.Lookup.externalTools, "tool" to Wording.Lookup.tools,
+    "subagent" to Wording.Lookup.subagentTypes, "skill" to Wording.Lookup.skills, "route" to Wording.Lookup.httpRoutes,
+    "db" to Wording.Signal.databaseTables)
 
 /** Signal's names for the chat, as Baude's Signal page lists them: those its replies named that the folder's glossary
  * has, by kind, each how it stands (linked, several matches, looking up, not found, stale) and what it is. Read from
@@ -472,7 +480,7 @@ fun SignalPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val s = Mesh.session(hostId, sid)
     val cwd = s?.cwd?.ifBlank { null }
-    if (cwd == null) return StatusPage(Icons.Filled.HelpOutline, "Signal", "No folder yet")
+    if (cwd == null) return StatusPage(Icons.Filled.HelpOutline, Wording.SidePanel.signal, "No folder yet")
     var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
     var filter by remember { mutableStateOf("") }
     var again by remember { mutableStateOf(0) }
@@ -486,7 +494,7 @@ fun SignalPage(hostId: String, sid: String) {
     val g = got
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SearchField(filter, { filter = it }, "Filter names", Modifier.weight(1f))
+            SearchField(filter, { filter = it }, Wording.Signal.filter, Modifier.weight(1f))
             IconButton(Icons.Filled.Refresh, "Read them again") { got = null; again++ }
         }
         when {
@@ -494,14 +502,15 @@ fun SignalPage(hostId: String, sid: String) {
             !g.error.isNullOrBlank() -> Empty(g.error)
             else -> {
                 val refs = g.refs.orEmpty()
-                if (refs.isEmpty()) return@Column StatusPage(Icons.Filled.HelpOutline, "Signal",
-                    "No names yet: the files, commits, env vars and routes in Claude's replies show up here.")
+                if (refs.isEmpty()) return@Column StatusPage(Icons.Filled.HelpOutline, Wording.SidePanel.signal,
+                    Wording.Signal.empty)
                 fun n(st: String) = refs.count { it.status == st }
                 Scrolled {
-                    Text(listOf("resolved" to "linked", "ambiguous" to "with several matches", "pending" to "looking up",
-                        "not_found" to "not found", "stale" to "stale").filter { n(it.first) > 0 }
-                        .joinToString(" · ") { "${n(it.first)} ${it.second}" } +
-                        (g.glossary?.ifBlank { null }?.let { "\nGlossary: $it" } ?: ""), style = Type.caption, color = c.dim,
+                    Text(listOf<Pair<String, (Int) -> String>>("resolved" to { Wording.Signal.linked(n = it) },
+                        "ambiguous" to { Wording.Signal.several(n = it) }, "pending" to { Wording.Signal.lookingUp(n = it) },
+                        "not_found" to { Wording.Signal.notFound(n = it) }, "stale" to { Wording.Signal.stale(n = it) })
+                        .filter { n(it.first) > 0 }.joinToString(" · ") { it.second(n(it.first)) } +
+                        (g.glossary?.ifBlank { null }?.let { "\n" + Wording.Signal.glossary(path = it) } ?: ""), style = Type.caption, color = c.dim,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     val f = filter.trim().lowercase()
                     for ((kind, rows) in refs.filter { f.isEmpty() || it.surface.orEmpty().lowercase().contains(f) }

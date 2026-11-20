@@ -35,7 +35,7 @@ object MetaTools {
     val BUTTONS = mapOf( // (desktop Baude's, trash and host, and the phone's own)
         "trash" to "Move to Trash… a chat (items: its id), to its host's trash; asks first, and can't be undone here",
         "host" to "Open a host (items: its name): the home screen lists its chats, and New session's on it",
-        "send_feedback" to "Send Feedback…", "hosts" to "Hosts: the phone's key, its hosts, the mesh")
+        "send_feedback" to Wording.Fixes.sendFeedback, "hosts" to "Hosts: the phone's key, its hosts, the mesh")
 
     private fun tool(name: String, description: String, required: List<String>, props: JSONObject) =
         JSONObject().put("name", name).put("description", description)
@@ -126,7 +126,7 @@ object MetaTools {
             ?: all.firstOrNull { (_, s) -> s.bot?.name?.ifBlank { null }?.lowercase() == r }
     }
 
-    private fun title(s: Msg.Session) = s.bot?.name?.ifBlank { null }?.let { "Bot $it" } ?: s.title?.ifBlank { null } ?: "(untitled)"
+    private fun title(s: Msg.Session) = s.bot?.name?.ifBlank { null }?.let { "Bot $it" } ?: s.title?.ifBlank { null } ?: Wording.Common.untitled
 
     private fun chats(refs: List<String>): Pair<List<Pair<String, Msg.Session>>, List<String>> =
         refs.mapNotNull(::find).distinctBy { it.first + it.second.id.orEmpty() } to refs.filter { find(it) == null }
@@ -227,7 +227,8 @@ object MetaTools {
 
     /** An action of Meta's undone or done again from its row (Undo, Redo). */
     fun button(a: Action, undo: Boolean) = apply(a, undo) { e ->
-        if (e != null) Meta.chat.said.value = "Couldn't ${if (undo) "undo" else "redo"} ${a.said}: $e" }
+        if (e != null) Meta.chat.said.value = if (undo) Wording.MetaActions.couldntUndo(failed = "${a.said}: $e")
+        else Wording.MetaActions.couldntRedo(action = a.said, why = e) }
 
     // ---- the app's own changes, each checked with its host where it's the host's
 
@@ -307,7 +308,7 @@ object MetaTools {
         "add_host" -> if (Host.parse(values.optString("destination")) == null) "Where ssh goes: user@host (or user@host:port)" else null
         "new_group" -> {
             val n = values.optString("name").split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-            if (n.isEmpty()) "A group needs a name" else if (n in groupNames()) "There's a group $n already" else null
+            if (n.isEmpty()) Wording.NewSession.groupNeedsName else if (n in groupNames()) Wording.NewSession.groupExists(name = n) else null
         }
         "spawn_agent" -> when {
             hostByName(values.optString("host")) == null -> "host: pick one of its choices"
@@ -354,7 +355,8 @@ object MetaTools {
                 setting(n, v)?.let { return no(it) }
                 Meta.under(Line("rows", JSONObject().put("setting", n).toString()))
                 if (from == settingValue(n)) return ok("It's $v already.")
-                val a = act("${if (n == "sidebar_group") "Group by" else "Hosts shown"}: $from → $v", "setting", JSONObject().put("name", n).put("from", from).put("to", v))
+                val a = act(Wording.MetaActions.settingChanged(setting = if (n == "sidebar_group") Wording.Sidebar.groupBy else "Hosts shown",
+                    before = from, after = v), "setting", JSONObject().put("name", n).put("from", from).put("to", v))
                 ok("$n is $v now (action ${a.id}).")
             }
             "show" -> show(args, ok, no)
@@ -379,7 +381,7 @@ object MetaTools {
                 if (to == before) return ok("It's called that already.")
                 rename(h, s.id.orEmpty(), to) { e ->
                     if (e != null) return@rename no("Couldn't rename it: $e")
-                    val a = act("Renamed “$before” to “$to”", "rename", JSONObject().put("host", h).put("sid", s.id.orEmpty())
+                    val a = act(Wording.MetaActions.renamed(before = before, after = to), "rename", JSONObject().put("host", h).put("sid", s.id.orEmpty())
                         .put("from", before).put("to", to))
                     ok("Renamed (action ${a.id}).")
                 }
@@ -439,15 +441,16 @@ object MetaTools {
                 for ((h, s) in found) if (groupOf(h, s) != to) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
                 if (keys.length() == 0) return ok("They're in ${to.ifEmpty { "no group" }} already.")
                 val made = to.isNotEmpty() && to !in groupNames()
-                val a = act("Moved ${found.filter { (h, s) -> groupOf(h, s) != to }.let { m -> if (m.size == 1) "“${title(m[0].second)}”"
-                    else "${m.size} chats" }} to ${if (to.isEmpty()) "no group" else "group $to"}",
+                val a = act(Wording.MetaChats.moved(chats = found.filter { (h, s) -> groupOf(h, s) != to }.let { m ->
+                    if (m.size == 1) Wording.Senders.chat(name = title(m[0].second)) else Wording.MetaChats.chats(n = m.size) },
+                    where = if (to.isEmpty()) Wording.MetaChats.noGroup else Wording.MetaChats.groupNamed(name = to)),
                     "move", JSONObject().put("keys", keys).put("to", to).put("made", made))
                 apply(a, false) { ok("Moved (action ${a.id}).") }
             }
             "make_group" -> {
                 val g = args.optString("name").trim().ifEmpty { return no("A name is needed.") }
                 if (g in groupNames()) return no("There's a group '$g' already.")
-                val a = act("Made group $g", "make_group", JSONObject().put("name", g))
+                val a = act(Wording.MetaChats.madeGroup(name = g), "make_group", JSONObject().put("name", g))
                 apply(a, false) { ok("Made (action ${a.id}).") }
             }
             "rename_group", "delete_group" -> {
@@ -457,7 +460,7 @@ object MetaTools {
                 if (to == g) return ok("It's called that already.")
                 val keys = JSONObject()
                 for ((h, s) in all()) if (groupOf(h, s) == g) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
-                val a = act(if (to.isEmpty()) "Deleted group $g" else "Renamed group $g to $to", "group", JSONObject()
+                val a = act(if (to.isEmpty()) Wording.MetaChats.deletedGroup(name = g) else Wording.MetaChats.renamedGroup(old = g, new = to), "group", JSONObject()
                     .put("keys", keys).put("from", g).put("to", to).put("from_made", g in HomePrefs.made)
                     .put("to_made", to.isNotEmpty() && to in HomePrefs.made))
                 apply(a, false) { ok("${if (to.isEmpty()) "Deleted" else "Renamed"} (action ${a.id}).") }
@@ -466,7 +469,8 @@ object MetaTools {
                 val given = args.optJSONArray("groups").strings().map { if (it == "No group") "" else it }
                 val unknown = given.filter { it.isNotEmpty() && it !in groupNames() }
                 if (unknown.isNotEmpty()) return no("No group ${unknown.joinToString(", ") { "'$it'" }}: app_index groups lists them.")
-                val a = act("Listed " + (if (given.isEmpty()) "every group" else given.joinToString(", ") { it.ifEmpty { "No group" } }),
+                val a = act(if (given.isEmpty()) Wording.MetaChats.listedEvery(what = "group")
+                    else Wording.MetaChats.listed(names = given.joinToString(", ") { it.ifEmpty { "No group" } }),
                     "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)))
                 apply(a, false) { ok("Shown (action ${a.id}).") }
             }
@@ -480,9 +484,11 @@ object MetaTools {
                 archive(pairs, op) { failed ->
                     val went = pairs.filter { (h, sid) -> failed.none { it.startsWith((Mesh.session(h, sid)?.let(::title) ?: sid.take(8)) + ":") } }
                     if (went.isEmpty()) return@archive no("Couldn't: ${failed.joinToString("; ")}")
-                    val a = act((if (op == "archive") "Archived " else "Unarchived ") +
-                        (if (went.size == 1) went[0].let { (h, sid) -> "“${Mesh.session(h, sid)?.let(::title) ?: sid.take(8)}”" }
-                        else "${went.size} chats"), "archive",
+                    val chats = if (went.size == 1) went[0].let { (h, sid) ->
+                        Wording.Senders.chat(name = Mesh.session(h, sid)?.let(::title) ?: sid.take(8)) }
+                        else Wording.MetaChats.chats(n = went.size)
+                    val a = act(if (op == "archive") Wording.MetaChats.archived(chats = chats)
+                        else Wording.MetaChats.unarchived(chats = chats), "archive",
                         JSONObject().put("op", op).put("chats", JSONArray(went.map { JSONArray(listOf(it.first, it.second)) })))
                     ok("${op.replaceFirstChar(Char::uppercase)}d (action ${a.id})." +
                         if (failed.isNotEmpty()) " Not ${op}d: ${failed.joinToString("; ")}." else "")
@@ -528,13 +534,13 @@ object MetaTools {
                     "trash" -> {
                         val (h, s) = item?.let(::find) ?: return no("There's no button trash without items: app_index buttons.")
                         Meta.under(Line("rows", JSONObject().put("button", "trash").put("host", h).put("sid", s.id.orEmpty())
-                            .put("label", "Move “${title(s)}” to Trash…").toString()))
+                            .put("label", Wording.Trash.moveTitle(title = title(s))).toString()))
                     }
                     "host" -> {
                         val h = item?.let { hostByName(it) } ?: return no("No host '${item.orEmpty()}': they're " +
                             Mesh.reached("start").joinToString(", ") { it.second } + ".")
                         Meta.under(Line("rows", JSONObject().put("button", "host").put("host", h)
-                            .put("label", "Open ${Mesh.label(h)}").toString()))
+                            .put("label", Wording.Meta.openItem(name = Mesh.label(h))).toString()))
                     }
                     else -> Meta.under(Line("rows", JSONObject().put("button", rest).put("label", BUTTONS[rest]!!.substringBefore(":")).toString()))
                 }

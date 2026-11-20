@@ -52,7 +52,7 @@ class Tab(val id: String, val web: WebView) {
     val visited = LinkedHashSet<String>() // (the origins it's been to: what sites lists, if they've cookies)
     val title: String get() = web.title?.takeIf { it != web.url && it != "about:blank" } ?: ""
     val url: String get() = web.url ?: ""
-    val label: String get() = web.title?.ifBlank { null } ?: web.url?.ifBlank { null } ?: "New Tab" // (its tab's, as Emission's)
+    val label: String get() = web.title?.ifBlank { null } ?: web.url?.ifBlank { null } ?: Wording.Browser.untitledTab // (its tab's, as Emission's)
 }
 
 /** A tab as its strip shows it. */

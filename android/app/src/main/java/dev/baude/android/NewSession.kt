@@ -71,18 +71,19 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
                 opened(h, id)
                 done()
-            } else error = "${Mesh.label(h)} didn't start it: " + Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" }
+            } else error = Wording.NewSession.hostRefused(host = Mesh.label(h),
+                why = Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" })
         }
     }
     AlertDialog(
         onDismissRequest = done,
-        title = { Text(heading ?: if (host != null) "New session on ${Mesh.label(host)}" else "New session on the network") },
+        title = { Text(heading ?: if (host != null) Wording.NewSession.onHost(host = Mesh.label(host)) else Wording.NewSession.onNetwork) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FormRow("Host") {
+                FormRow(Wording.NewSession.host) {
                     if (host != null) Text(Mesh.label(host), style = Type.body, color = c.fg)
                     else if (up.isEmpty()) Text("None of your hosts is connected", style = Type.body, color = c.dim)
-                    else Picker(at?.let { a -> hostName(a) } ?: "Host", "Host", up.map { hostName(it.first) to it.first }, at) {
+                    else Picker(at?.let { a -> hostName(a) } ?: Wording.NewSession.host, Wording.NewSession.host, up.map { hostName(it.first) to it.first }, at) {
                         at = it
                         cwd = home(it)
                         group = Mesh.conn(it)?.info?.group.orEmpty()
@@ -90,9 +91,9 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                         effort = null
                     }
                 }
-                FormRow("Folder") { Field(cwd, { cwd = it }, "~") }
-                FormRow("Group") { Field(group, { group = it }, "No group") }
-                FormRow("Prompt") {
+                FormRow(Wording.Common.folder) { Field(cwd, { cwd = it }, "~") }
+                FormRow(Wording.NewSession.group) { Field(group, { group = it }, Wording.Sidebar.noGroup) }
+                FormRow(Wording.NewSession.prompt) {
                     Box(Modifier.fillMaxWidth().heightIn(min = 96.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius))
                         .padding(horizontal = 8.dp, vertical = 6.dp)) {
                         BasicTextField(prompt, { prompt = it }, textStyle = Type.body.copy(color = c.fg),
@@ -103,8 +104,8 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                 error?.let { Text(it, style = Type.caption, color = c.destructive) }
             }
         },
-        confirmButton = { Button(if (busy) "Starting…" else "Start", suggested = at != null && !busy) { if (!busy) start() } },
-        dismissButton = { Button("Cancel", onClick = done) },
+        confirmButton = { Button(if (busy) "Starting…" else Wording.NewSession.start, suggested = at != null && !busy) { if (!busy) start() } },
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = c.dialog,
     )
 }
@@ -113,7 +114,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
 private fun hostName(id: String): String {
     val h = Mesh.conn(id)?.info?.host?.ifBlank { null }
     val name = Mesh.label(id)
-    return if (h != null && h != name) "$name ($h)" else name
+    return if (h != null && h != name) Wording.NewSession.hostNamed(name = name, host = h) else name
 }
 
 /** A form's row, as the dialog's grid has it: its dim label at the end of the label column, then what's set. */

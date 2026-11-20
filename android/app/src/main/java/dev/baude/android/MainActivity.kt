@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
         if (now.size < 3) return listOf("Home screen")
         val s = Mesh.session(now[1], now[2])
         return listOfNotNull("Chat: " + (s?.bot?.let { "Bot ${it.name.orEmpty()}" }
-            ?: s?.title?.ifBlank { null } ?: "(untitled)"),
+            ?: s?.title?.ifBlank { null } ?: Wording.Common.untitled),
             "session: ${now[2]}", s?.cwd?.ifBlank { null }?.let { "folder: $it" }, "host: ${Mesh.label(now[1])}")
     }
 

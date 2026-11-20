@@ -9,6 +9,7 @@
     "not_found": "{$n} not found",
     "stale": "{$n} stale",
     "glossary": "Glossary: {$path}",
-    "empty": "No names yet: the files, commits, env vars and routes in Claude's replies show up here."
+    "empty": "No names yet: the files, commits, env vars and routes in Claude's replies show up here.",
+    "database_tables": "Database tables and columns"
   }
 }

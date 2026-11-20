@@ -1353,7 +1353,7 @@ class Server:
                     return reply("error", error="no such message held for it")
                 if msg.get("send"):
                     self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
-                                    h.get("sender"))
+                                    h.get("sender"), h.get("shown"))
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)
                 self.changed()
@@ -1878,17 +1878,18 @@ class Server:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg, sender=None):
+    def take_input(self, conn, s, msg, sender=None, shown=None):
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
-        (wire.said_by), and kept by that uuid (stamp)."""
+        (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
+        answer's)."""
         kind = msg.get("type")
         if kind == "user":
             msg = {**msg, "uuid": msg["uuid"] if wire.is_id(msg.get("uuid") or "") else str(uuid.uuid4())}
         if kind == "user" and wire.clean_sender(sender) is not None:
             message = msg.get("message") or {}
             msg = {**msg, "message": {**message, "content": wire.said_by(sender, message.get("content"))}}
-            self.stamp(s, msg["uuid"], sender)
+            self.stamp(s, msg["uuid"], sender, shown)
         if kind == "user":
             is_codex = models.model_program(s.meta.get("model")) == "codex"
             if is_codex:
@@ -2280,11 +2281,12 @@ class Server:
         self.save(s)
         self.changed()
 
-    def stamp(self, s, said, sender):
-        """(lock held) A message passed to a session from another than its user: who it's from kept by its uuid."""
+    def stamp(self, s, said, sender, shown=None):
+        """(lock held) A message passed to a session from another than its user: who it's from kept by its uuid, and
+        what heads show of it in place of its text, if that's given (shown: a held answer's, its agent's told)."""
         if (sender := wire.clean_sender(sender)) is not None and wire.is_id(said or "") and \
                 (have := self.senders(s)) is not None:
-            self.write_senders(s, {**have, said: sender})
+            self.write_senders(s, {**have, said: {**sender, **({"shown": shown} if isinstance(shown, str) else {})}})
 
     def unstamp(self, s, target):
         """(lock held) A revert made: the message it took back and those after it gone from its sender store. Its own

@@ -288,7 +288,8 @@ fun senderName(s: Msg.Sender): String {
 private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
 
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
- * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top. */
+ * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
+ * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
 @Composable
 fun Said(line: Line, from: Msg.Sender? = null) {
     val c = LocalBaude.current
@@ -297,7 +298,11 @@ fun Said(line: Line, from: Msg.Sender? = null) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
                 Text("from " + senderName(from), style = Type.caption, color = c.dim)
-                SelectionContainer { Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg) }
+                SelectionContainer {
+                    val shown = from.shown
+                    if (shown != null) Prose(SAID_BY.replace(shown, "").trim())
+                    else Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg)
+                }
             }
         }
         else -> SaidLine(line)

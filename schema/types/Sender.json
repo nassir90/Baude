@@ -22,6 +22,10 @@
     "session": {
       "type": "string",
       "description": "Its session's id, on its host."
+    },
+    "shown": {
+      "type": "string",
+      "description": "In a sender store only: what heads show of the message in place of its text (a held answer sent: its shown, its agent having been told more)."
     }
   },
   "required": ["kind"],

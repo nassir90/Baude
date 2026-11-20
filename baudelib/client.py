@@ -294,8 +294,9 @@ class Remote:
             self.fetching.discard(session_id)
             if r.get("op") != "senders" or not isinstance(r.get("senders"), dict):
                 return
-            self.senders[session_id] = (r.get("rev") or 0, {k: c for k, v in r["senders"].items()  # (as this
-                                                            if wire.is_id(k) and (c := wire.clean_sender(v))})  # knows)
+            self.senders[session_id] = (r.get("rev") or 0, {  # (as this knows them, with what's shown of one in
+                k: {**c, **({"shown": v["shown"]} if isinstance(v.get("shown"), str) else {})}  # place of its text)
+                for k, v in r["senders"].items() if wire.is_id(k) and (c := wire.clean_sender(v))})
             done()
         self.request({"op": "senders", "session": session_id}, got)
 

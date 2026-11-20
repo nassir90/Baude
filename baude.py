@@ -15336,7 +15336,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             toast(self, "It can't be sent: this chat's agent couldn't be started")
             return
         h, sid = turn.held, self.session_id
-        sent = self.sender_turn(baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}, h["text"], (), None)
+        sender = baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}
+        if isinstance(h.get("shown"), str):  # (drawn as its host's sender store will have it: what's shown of it)
+            sender = {**sender, "shown": h["shown"]}
+        sent = self.sender_turn(sender, h["text"], (), None)
         turn.sending = sent
         turn.set_visible(False)
         self.show_held()  # (the queue's box, with nothing else in it, gone meanwhile)
@@ -15680,10 +15683,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def sender_turn(self, sender, text, atts, said):
         """A message from sender, its host's sender store says (uuid said), as the chat draws it: SenderTurn, without
-        the line its host put at its head for its agent (wire.said_by). It reverts as yours do, its words left out of
-        your box."""
+        the line its host put at its head for its agent (wire.said_by), and what the store says is shown of it in
+        place of its text if it says (shown: a held answer sent, its agent told more). It reverts as yours do, its
+        words left out of your box."""
         said_text = baudelib.wire.unsaid(text or "").strip()
-        return SenderTurn(self, self.sender_bubble(sender, said_text, atts), said_text, said)
+        drawn = baudelib.wire.unsaid(sender["shown"]).strip() if isinstance(sender.get("shown"), str) else said_text
+        return SenderTurn(self, self.sender_bubble(sender, drawn, atts), said_text, said)
 
     def sender_bubble(self, sender, text, atts=()):
         """A message from sender, not you (its host's sender store's): where yours are, grey (not your accent), as a

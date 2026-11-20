@@ -47,7 +47,7 @@ object PhoneBrowser {
     private val calls = HashMap<String, Connection>() // (a request carried to the browser: the connection it came on)
 
     /** Whether the Bot's host can carry its tools' requests to a phone (a host of yours, or a member of its mesh). */
-    fun offered(hostId: String): Boolean = (Mesh.conn(hostId)?.info?.optInt("version", 1) ?: 1) >= MIN_VERSION
+    fun offered(hostId: String): Boolean = offers(Mesh.conn(hostId)?.info, "emission_serve", MIN_VERSION)
 
     /** The Bot's browser opened here (shown again, if it's open already). */
     fun open(ctx: Context, hostId: String, bot: String, botName: String) {
@@ -184,7 +184,7 @@ object PhoneBrowser {
             s.up = false
             return
         }
-        if ((c.info?.optInt("version", 1) ?: 1) < MIN_VERSION) {
+        if (!offers(c.info, "emission_serve", MIN_VERSION)) {
             s.link.send(JSONObject().put("op", "serving").put("on", false)
                 .put("why", "${Mesh.label(s.hostId)}'s Baude is too old for this: update it"))
             return

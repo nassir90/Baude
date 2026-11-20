@@ -42,6 +42,11 @@ sealed class Place {
     data class Member(val member: String) : Place() {
         override val id: String get() = "mesh:$member"
     }
+
+    /** This phone's own host (PhoneHost), talked to in the app. */
+    object Phone : Place() {
+        override val id: String get() = "phone"
+    }
 }
 
 /** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, "<command> connect" run
@@ -50,7 +55,7 @@ sealed class Place {
  * member, and from then on a tunnel to it, hello first as ever (wire.through). Made again whenever it drops, a little
  * later each time (a member: every RELAY_RETRY_MS while a host lists it, else once one does); not while the host's key
  * isn't one you've trusted (shown, for you to say). */
-class Connection(
+open class Connection(
     private val ctx: Context,
     val place: Place,
     private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
@@ -76,11 +81,11 @@ class Connection(
     @Volatile private var writes: LinkedBlockingQueue<ByteArray>? = null // (sent on a thread of its own: Android
     // allows no network from its main thread)
 
-    fun start() {
+    open fun start() {
         thread(name = "conn-$id", isDaemon = true) { loop() }
     }
 
-    fun stop() {
+    open fun stop() {
         stopped = true
         wake.offer(Unit)
         end()
@@ -170,6 +175,7 @@ class Connection(
             s.connect(15_000)
             (s.openChannel("exec") as ChannelExec).apply { setCommand("${p.host.command} connect") }
         }
+        is Place.Phone -> throw NoRoute("this phone's own host isn't reached over ssh")
         is Place.Member -> {
             val v = route(p.member) ?: throw NoRoute("none of your hosts reaches it now")
             via = v
@@ -228,7 +234,7 @@ class Connection(
                         said = reply.optString("error", "the host said no")
                         end()
                     }
-                    (server?.optInt("version", 1) ?: 1) < MIN_VERSION -> {
+                    !offers(server, "bot", MIN_VERSION) -> {
                         said = "this host's Baude is too old for Bots: update it"
                         end()
                     }
@@ -297,7 +303,7 @@ class Connection(
     }
 
     /** A line to the host process, sent in turn on its own thread (false if there's no connection). */
-    fun send(msg: JSONObject): Boolean {
+    open fun send(msg: JSONObject): Boolean {
         val q = writes ?: return false
         q.put((msg.toString() + "\n").toByteArray(Charsets.UTF_8))
         return true
@@ -305,7 +311,7 @@ class Connection(
 
     /** A request, its reply to then (on this connection's thread), or an error reply if it can't be sent or the
      * connection goes first. */
-    fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
+    open fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
         val req = nextReq.getAndIncrement()
         calls[req] = then
         if (!send(msg.put("req", req))) {

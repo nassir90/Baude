@@ -276,7 +276,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 if (e != null) { asked.remove("effort"); said("Couldn't change the effort: $e") }
             }
         }
-        if (prog == "claude" || prog == "codex") {
+        if (prog == "claude" || prog == "codex" || offers(hostId, "set_permission_mode")) { // (a host that keeps
+            // claude's modes whatever the program: a phone's agents)
             val modes = if (prog == "codex") CODEX_MODES else MODES
             val mode = asked["mode"] ?: s.str("mode") ?: "default"
             Picker(modes.firstOrNull { it.first == mode }?.second ?: mode, "Permission mode", modes.map { it.second to it.first },

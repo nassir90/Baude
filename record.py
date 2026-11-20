@@ -8182,6 +8182,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         show_host_state); and the one picked, by the name it had, while it isn't known."""
         out, seen = [(HERE_HOST, THIS_MACHINE)], {HERE_HOST}
         for r in sorted(network().remotes() if _NETWORK else (), key=lambda r: remote_name(r).lower()):
+            info = r.info or {}  # (one that says it keeps no notebooks: a phone's; one not heard from yet, listed)
+            if info.get("phone") or isinstance(info.get("ops"), list) and "notes" not in info["ops"]:
+                continue
             if (key := host_key(r)) not in seen:
                 seen.add(key)
                 out.append((key, remote_name(r)))

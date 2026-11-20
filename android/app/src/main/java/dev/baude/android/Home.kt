@@ -241,7 +241,7 @@ private fun limit(key: String): Int = when {
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
-         settings: () -> Unit = {}) {
+         settings: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -255,6 +255,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
             Menu(listOf("Settings…" to settings, "Send Feedback…" to feedback))
         })
+        note()
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = hosts)
         for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)} at the moment${conn.why?.let { ": $it" }.orEmpty()}", onClick = hosts)

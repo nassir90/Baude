@@ -2214,6 +2214,45 @@ class QueuedTurn(Gtk.Box):
         self.fade.set_value_to(1.0 if on else 0.0)
         self.fade.play()
 
+class SenderTurn(UserTurn):
+    """A message to the chat from another than you, as its host's sender store says (a Bot, another chat, a subagent's
+    answer held for it): where yours are, grey as a queued one is, with who it's from at its top (the window's
+    sender_bubble), and reverted as yours are, but its words aren't put in your box: what's there is sent after it, or
+    nothing (uuid: the message's, once it's in the chat's transcript)."""
+
+
+class HeldTurn(Gtk.Box):
+    """A message its host held for the chat, not sent (its held: a subagent's answer that came after the chat's host
+    restarted, which doesn't start its agent): under the conversation with the queue, as a queued message is, and
+    with the pointer on its row ✕ (dropped) and ↑ (sent) fade in beside it, as a queued message's do. held: as its
+    host lists it ({id, text, sender, at}); sending: what's drawn as sent while its host's answer's to come; win: its
+    held_drop, held_send."""
+
+    def __init__(self, win, bubble, held):
+        super().__init__(spacing=6, hexpand=True)
+        self.win, self.bubble, self.held, self.sending = win, bubble, held, None
+        bubble.add_css_class("queued-bubble")
+        self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
+                               can_target=False)
+        for icon, tip, act in (("window-close-symbolic", "Delete this held message", win.held_drop),
+                               ("↑", "Send it to the agent: it was held, not sent, as this chat's host restarted "
+                                "while it waited for it", win.held_send)):
+            b = Gtk.Button(child=Gtk.Label(label="↑", css_classes=["queue-arrow"]) if icon == "↑" else
+                           Gtk.Image(icon_name=icon, pixel_size=12), tooltip_text=tip)
+            for c in ("flat", "circular", "revert-turn"):
+                b.add_css_class(c)
+            b.connect("clicked", lambda _b, act=act: act(self))
+            self.buttons.append(b)
+        self.append(self.buttons)
+        self.append(bubble)
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *_: QueuedTurn.show_buttons(self, True))
+        hover.connect("leave", lambda *_: QueuedTurn.show_buttons(self, False))
+        self.add_controller(hover)
+
+    fade = None
+
+
 class Exhausted:
     """A chat whose conversation is more than its model's window holds (ContextUsage.over): "Context Exhausted" said
     over its box, in plain grey, and its send button off (Composer.gate: Enter too, its owner looking), till a model
@@ -7959,6 +7998,38 @@ class ChoiceDropDown(Gtk.DropDown):
             self.set_selected(self.values.index(keep) if keep in self.values else Gtk.INVALID_LIST_POSITION)
         self._quietly(swap)
 
+    def set_dimmed(self, values):
+        """Those values greyed in its list (a host out of reach, say), still there to pick. Its list's rows are its
+        own from the first call: each a label, and the tick on the one picked, as GTK's own are."""
+        self.dimmed = set(values)
+        if getattr(self, "rows", None) is None:
+            self.rows = set()
+            factory = Gtk.SignalListItemFactory()
+            factory.connect("setup", self._row_setup)
+            factory.connect("bind", self._row_bind)
+            factory.connect("unbind", lambda _f, item: self.rows.discard(item))
+            self.set_list_factory(factory)
+            self.connect("notify::selected", lambda *_: [self._row_bind(None, item) for item in list(self.rows)])
+        for item in list(self.rows):
+            self._row_bind(None, item)
+
+    def _row_setup(self, _factory, item):
+        row = Gtk.Box(spacing=6)
+        row.append(Gtk.Label(xalign=0, hexpand=True))
+        row.append(Gtk.Image(icon_name="object-select-symbolic"))
+        item.set_child(row)
+
+    def _row_bind(self, _factory, item):
+        row, at = item.get_child(), item.get_position()
+        if row is None or item.get_item() is None:
+            return
+        self.rows.add(item)
+        label, tick = row.get_first_child(), row.get_last_child()
+        label.set_text(item.get_item().get_string())
+        value = self.values[at] if at < len(self.values) else None
+        (label.add_css_class if value in self.dimmed else label.remove_css_class)("dim-label")
+        tick.set_opacity(1 if at == self.get_selected() else 0)
+
     def select(self, value):
         """Show `value` as selected (appending it if unknown) without firing on_pick."""
         def pick():
@@ -8412,6 +8483,9 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .queue-arrow { font-weight: bold; font-size: 13px; }
 .user-bubble.queued-bubble { background: alpha(@view_fg_color, 0.07); color: alpha(@view_fg_color, 0.55); }  /* (a
    message queued while the agent works: grey, QueuedTurn) */
+.user-bubble.sender-bubble { background: alpha(@view_fg_color, 0.07); }  /* (a message from another than you:
+   grey, as a queued one is, not your accent: SenderTurn; held, grey words too: HeldTurn) */
+.sender-from { font-size: 0.85em; color: alpha(@view_fg_color, 0.6); }
 .tool-card { border: 1px solid @baude_rule; border-radius: {radius.card}; padding: {gap.card-v} {gap.card-h}; }
 .api-error { margin-left: 11px; margin-right: 11px; }  /* (its text where a .tool-card's is: border and padding in) */
 .tool-card.error { border-color: @error_color; }

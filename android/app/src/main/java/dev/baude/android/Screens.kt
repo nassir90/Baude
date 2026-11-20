@@ -104,8 +104,10 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
-            items(chat.lines) { line -> Said(line) }
+            items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
             items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, alwaysOffered(session?.optString("model"))) }
+            val held = session?.optJSONArray("held").list().filter { it.optString("id") !in chat.holding }
+            items(held, key = { "held:" + it.optString("id") }) { h -> Held(chat, h, working) }
             if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -254,8 +256,59 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
     }
 }
 
+/** Who a message is from, as its bubble's head says it (wire.sender_name): "Ada, a Bot on lab-mac". */
+fun senderName(s: org.json.JSONObject): String {
+    val name = s.optString("name")
+    val who = when (s.optString("kind")) {
+        "bot" -> "${name.ifBlank { "a Bot" }}, a Bot"
+        "chat" -> if (name.isBlank()) "a chat" else "“$name”"
+        "subagent" -> if (name.isBlank()) "a subagent" else "subagent “$name”"
+        else -> name.ifBlank { "a host" }
+    }
+    val where = s.optString("host_name")
+    return who + if (where.isNotBlank() && s.optString("kind") != "host") " on $where" else ""
+}
+
+/** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender
+ * store says is another's. */
+private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
+
+/** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
+ * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top. */
 @Composable
-fun Said(line: Line) {
+fun Said(line: Line, from: org.json.JSONObject? = null) {
+    val c = LocalBaude.current
+    when {
+        from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
+                .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
+                Text("from " + senderName(from), style = Type.caption, color = c.dim)
+                SelectionContainer { Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg) }
+            }
+        }
+        else -> SaidLine(line)
+    }
+}
+
+/** A message its host holds for the chat (a subagent's answer after its host restarted), as Baude's queue box shows
+ * one: grey, from whom at its top, ✕ to drop it and ↑ to send it to the agent (once no turn's going). */
+@Composable
+private fun Held(chat: Chat, h: org.json.JSONObject, working: Boolean) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
+        IconButton(Icons.Filled.Close, "Delete this held message") { Mesh.held(chat, h.optString("id"), false) }
+        IconButton(Icons.Filled.ArrowUpward, if (working) "It can be sent once this turn's over" else "Send it to the agent",
+            enabled = !working) { Mesh.held(chat, h.optString("id"), true) }
+        Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
+            .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
+            Text("from " + (h.optJSONObject("sender")?.let(::senderName) ?: "a host"), style = Type.caption, color = c.dim)
+            Text(h.optString("text").trim(), style = Type.body, color = c.dim)
+        }
+    }
+}
+
+@Composable
+private fun SaidLine(line: Line) {
     val c = LocalBaude.current
     when (line.kind) {
         "you" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

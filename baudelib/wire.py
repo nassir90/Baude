@@ -62,7 +62,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema", "wire.schema.json")
 STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
@@ -244,7 +243,22 @@ def _make_class(name, d):
     return cls
 
 
-defs = types.SimpleNamespace(**{name: _make_class(name, d) for name, d in DEFS.items()})
+class _Defs:
+    """Each def's class (defs.Session), made the first time it's asked for: all of them at once would add some 25 ms
+    to every import."""
+
+    def __getattr__(self, name):
+        if name not in DEFS:
+            raise AttributeError(f"no def {name} in the schema")
+        cls = _make_class(name, DEFS[name])
+        setattr(self, name, cls)
+        return cls
+
+    def __dir__(self):
+        return list(DEFS)
+
+
+defs = _Defs()
 
 
 # ---- what's sent, checked

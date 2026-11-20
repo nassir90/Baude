@@ -44,7 +44,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
-from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities: schema/wire.schema.json's, the phone's too)
+from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities, as the phone's: the wire's schema)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
@@ -1293,7 +1293,8 @@ class BotPointer:
     # (nothing done this long: the pointer faded out, in this long; in, this)
     IDLE_S, FADE_S, APPEAR_S = (tokens.seconds(f"pointer.{k}") for k in ("idle", "fade", "appear"))
     GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = (tokens.seconds(f"pointer.{k}") for k in ("glow-in", "glow-out", "glow-hold"))
-    BEHIND = tokens.number("pointer.behind")  # (more than this many steps waiting: glides quicker, so it isn't left behind)
+    BEHIND = tokens.number("pointer.behind")  # (more than this many steps waiting: glides quicker, so it isn't left
+    # behind)
 
     def __init__(self):
         self.at, self.steps, self.step, self.step_t = None, [], None, 0.0
@@ -1437,7 +1438,8 @@ class BotPointer:
 ARROW = tokens.points("pointer.arrow")  # (its tip at 0, 0)
 ARROW_SHADOW = tokens.point("pointer.arrow-shadow")  # (its shadow: this far right and down)
 RING_EDGE, ARROW_EDGE = tokens.px("pointer.ring-edge"), tokens.px("pointer.arrow-edge")  # (lines' widths)
-HINT_EDGE, HINT_HALO = tokens.px("pointer.hint-edge"), tokens.px("pointer.hint-halo")  # (a chevron's; the white round it)
+HINT_EDGE = tokens.px("pointer.hint-edge")  # (a chevron's)
+HINT_HALO = tokens.px("pointer.hint-halo")  # (the white round it)
 
 
 def arrow_at(x, y, scale=1.0):
@@ -3427,7 +3429,8 @@ class Control:
     KEY_GAP_MS = 30  # (between keys, as a person's: kept steady)
     TYPE_GAP_MS = 12  # (between characters typed: xdotool type's own pace)
     LOAD_S = 30  # (a page's load waited for this long at most)
-    SHOT_MAX = wire.CONSTANTS["SHOT_MAX"]  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for more)
+    SHOT_MAX = wire.CONSTANTS["SHOT_MAX"]  # (a screenshot's longest side: about XGA's, as computer use has it; zoom for
+    # more)
     ZOOM_MAX = wire.CONSTANTS["ZOOM_MAX"]  # (a zoom's longest side: what a model sees whole)
     NEAR = 1  # (read_page: what's shown, and this many screens above and below it)
     CAME_LINES, CAME_CHARS = 30, 1500  # (a scroll's answer: at most this much of what came into view)

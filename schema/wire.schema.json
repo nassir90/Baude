@@ -191,11 +191,14 @@
    ]
   },
   "18": {
-   "description": "input's, start's and relay's as, held, senders, a session's held and senders; info's ops (a phone's).",
+   "description": "input's, start's and relay's as, held, senders, a session's held and senders; what a phone's host says (its info's ops and phone, start's bot, its members' dial), with no version of its own.",
    "adds": [
     "HeldMessage",
+    "HostHello.dial",
     "Info.ops",
     "Info.phone",
+    "Member.dial",
+    "MemberInfo.dial",
     "Sender",
     "Session.held",
     "Session.senders",
@@ -1228,6 +1231,11 @@
     "bonjour": {
      "type": "string",
      "description": "Its name on the local network, if it said one."
+    },
+    "dial": {
+     "type": "boolean",
+     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
+     "x-since": 18
     }
    },
    "required": [
@@ -1263,6 +1271,11 @@
     "bonjour": {
      "type": "string",
      "description": "Its name on the local network."
+    },
+    "dial": {
+     "type": "boolean",
+     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
+     "x-since": 18
     },
     "providers": {
      "type": "array",
@@ -1336,6 +1349,11 @@
     "bonjour": {
      "type": "string",
      "description": "Its name on the local network."
+    },
+    "dial": {
+     "type": "boolean",
+     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
+     "x-since": 18
     },
     "providers": {
      "type": "array",

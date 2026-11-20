@@ -5674,7 +5674,8 @@ class PaneSlide(SideSlide):
             self.host.set_position(round(self.open_value()))
 
 
-INSIDE_GAP = tokens.px("gap.inside")  # (the inside, set this far into the frame: from the panes beside it and the window's edge)
+INSIDE_GAP = tokens.px("gap.inside")  # (the inside, set this far into the frame: from the panes beside it and the
+# window's edge)
 
 
 def inside(widget, start=True, end=True, under_bar=False):
@@ -5693,7 +5694,8 @@ def inside(widget, start=True, end=True, under_bar=False):
 
 
 RIDE_GROW = 2  # (px each side drawn of what rides in ExpandStack's square: an outline drawn just outside it)
-EXPAND_MS = tokens.ms("motion.expand")  # (a list's row opened into its page, and closed back into it: ExpandStack. 0: at once)
+EXPAND_MS = tokens.ms("motion.expand")  # (a list's row opened into its page, and closed back into it: ExpandStack. 0:
+# at once)
 
 
 def _lerp(a, b, p):

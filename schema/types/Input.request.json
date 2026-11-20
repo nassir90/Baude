@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A stream-json message for the session's agent (started on it, with --resume, if it isn't running). A user message without a uuid is given one.",
   "properties": {

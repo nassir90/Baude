@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A link made from this host process to where, kept and made again whenever it drops, and used both ways: the mesh.",
   "properties": {

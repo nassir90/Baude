@@ -367,7 +367,7 @@ class ProxiedProc(ClaudeProc):
         reply = ch.reply()
         if not reply or reply.get("op") != "agent_started":
             self._say(f"{info.get('name') or self.member[:8]} didn't run it: "
-                      f"{(reply or {}).get('error') or 'no answer'}")
+                      f"{wire.said(reply) or 'no answer'}")
             ch.close()
             return self._end(1)
         with self.lock:
@@ -806,7 +806,7 @@ def relay(socket_path, run, name, token):
     ch.send({"op": "mcp_relay", "req": 1, "run": run, "name": name, "token": token})
     reply = ch.reply()
     if not reply or reply.get("op") != "relaying":
-        sys.exit(f"mcp-relay: {(reply or {}).get('error') or 'no answer'}")
+        sys.exit(f"mcp-relay: {wire.said(reply) or 'no answer'}")
     ch.keep_alive()
 
     def up():

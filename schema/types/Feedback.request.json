@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Feedback a head with no gh of its own wrote (a phone's), filed as an issue by this host's gh where Send Feedback files it, once for each note.",
   "properties": {

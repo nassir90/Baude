@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "One of an agent's MCP servers (a relay, baude_headless.py mcp-relay): carried to its caller.",
   "properties": {

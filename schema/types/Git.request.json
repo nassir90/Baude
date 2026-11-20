@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A session's folder's git, read only (nothing fetched): log (the host's own checkout's too, for a changelog), card (sha), diff (sha, path?).",
   "properties": {

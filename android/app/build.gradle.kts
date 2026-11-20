@@ -312,6 +312,7 @@ androidComponents {
 abstract class WireSchema : DefaultTask() {
     @get:InputDirectory abstract val typesDir: DirectoryProperty
     @get:InputDirectory abstract val variablesDir: DirectoryProperty
+    @get:InputDirectory abstract val usesDir: DirectoryProperty // (the app's code: each constant it uses is there)
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
     @get:OutputDirectory abstract val resourcesDir: DirectoryProperty
 
@@ -438,19 +439,21 @@ abstract class WireSchema : DefaultTask() {
     }
 
     /** Each file of dir (schema/<folder>), by its name: (its kind, as its file's name says it, or null; its JSON; its
-     * path). Fails, naming the file, for one not named Name.json or Name.kind.json, or JSON that can't be read (lax's
-     * too). */
-    private fun load(dir: File, folder: String): Map<String, Triple<String?, Map<String, Any?>, String>> {
-        val out = LinkedHashMap<String, Triple<String?, Map<String, Any?>, String>>()
+     * path). Others (a README, an editor's backup) are passed over. Fails, naming the file, for a folder in it, one not
+     * named Name.json or Name.kind.json, or JSON that can't be read (lax's too). */
+    private fun load(dir: File, folder: String): Map<String, Triple<String?, Any?, String>> {
+        val out = LinkedHashMap<String, Triple<String?, Any?, String>>()
         for (f in dir.listFiles()!!.filter { !it.name.startsWith(".") }.sortedBy { it.name }) {
             val path = "schema/$folder/${f.name}"
+            if (f.isDirectory) fail("$path: a folder, not a JSON file")
+            if (!f.name.endsWith(".json")) continue
             val m = Regex("([A-Za-z_][A-Za-z0-9_]*)(?:\\.([a-z]+))?\\.json").matchEntire(f.name)
                 ?: fail("$path: not named Name.json or Name.kind.json")
             val name = m.groupValues[1]
             out[name]?.let { fail("$path: ${it.third} is $name too") }
             val text = f.readText()
             about(path) { lax(text) }?.let { fail("$path: $it") }
-            val json = about(path) { map(plain(groovy.json.JsonSlurper().parseText(text))) }
+            val json = about(path) { plain(groovy.json.JsonSlurper().parseText(text)) }
             out[name] = Triple(m.groupValues[2].ifEmpty { null }, json, path)
         }
         return out
@@ -459,8 +462,22 @@ abstract class WireSchema : DefaultTask() {
     @Suppress("UNCHECKED_CAST")
     @TaskAction
     fun write() {
-        val files = load(typesDir.get().asFile, "types")
-        val vars = load(variablesDir.get().asFile, "variables")
+        val loaded = load(typesDir.get().asFile, "types")
+        for ((_, d, path) in loaded.values) { // (an object, each of its properties an object)
+            val p = if (d is Map<*, *>) d["properties"] ?: emptyMap<String, Any?>() else null
+            if (p !is Map<*, *> || p.values.any { it !is Map<*, *> })
+                fail("$path: not a type (an object, each of its properties an object)")
+        }
+        val files = loaded.mapValues { (_, f) -> Triple(f.first, map(f.second), f.third) }
+        val vars = load(variablesDir.get().asFile, "variables").mapValues { (_, f) ->
+            val c = (f.second as? Map<*, *>)?.get("const")
+            if (f.first != null || c !is Number) fail("${f.third}: not a variable (Name.json, an object whose const is a number)")
+            Triple(f.first, map(f.second), f.third)
+        }
+        if ("VERSION" !in vars) fail("schema/variables/VERSION.json: not there") // (the wire's, as a host's hello says it)
+        for (src in usesDir.get().asFile.walk().filter { it.extension == "kt" }) // (each constant the app uses there)
+            for (u in Regex("WireConstants\\.([A-Za-z_][A-Za-z0-9_]*)").findAll(src.readText()).map { it.groupValues[1] })
+                if (u !in vars) fail("schema/variables/$u.json: not there (${src.name} uses WireConstants.$u)")
         val kinds = listOf("request", "reply", "event", "frame") // (what a message is, as its file's name says)
         val defs = files.mapValues { it.value.second }
         val kind = files.filterValues { it.first != null }.mapValues { it.value.first!! }
@@ -474,8 +491,8 @@ abstract class WireSchema : DefaultTask() {
             if (k == null && "op" in props(d)) fail("$path: an op, but no kind in its name (Name.request.json, ...)")
             fun refs(v: Any?): Unit = when (v) {
                 is Map<*, *> -> {
-                    (v["\$ref"] as? String)?.let { r ->
-                        if (!r.endsWith(".json") || r.removeSuffix(".json") !in defs) fail("$path: no type $r") }
+                    if ("\$ref" in v) (v["\$ref"] as? String).let { r ->
+                        if (r == null || !r.endsWith(".json") || r.removeSuffix(".json") !in defs) fail("$path: no type ${v["\$ref"]}") }
                     v.values.forEach { refs(it) }
                 }
                 is List<*> -> v.forEach { refs(it) }
@@ -483,7 +500,6 @@ abstract class WireSchema : DefaultTask() {
             }
             refs(d)
         }
-        for ((k, v, path) in vars.values) if (k != null || "const" !in v) fail("$path: not a variable (Name.json, with a const)")
 
         val out = StringBuilder()
         out.append("package dev.baude.android\n\nimport org.json.JSONArray\nimport org.json.JSONObject\n\n")
@@ -493,7 +509,7 @@ abstract class WireSchema : DefaultTask() {
         out.append("}\n\n")
         out.append("/** The protocol's constants (schema/variables), the wire's version among them. */\nobject WireConstants {\n")
         for ((k, f) in vars) about(f.third) {
-            val v = f.second["const"] as? Number ?: fail("${f.third}: its const isn't a number")
+            val v = f.second["const"] as Number
             out.append(doc(f.second["description"], "    "))
             out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
         }
@@ -709,6 +725,7 @@ abstract class WireSchema : DefaultTask() {
 val wireSchema = tasks.register<WireSchema>("wireSchema") {
     typesDir.set(rootProject.layout.projectDirectory.dir("../schema/types"))
     variablesDir.set(rootProject.layout.projectDirectory.dir("../schema/variables"))
+    usesDir.set(layout.projectDirectory.dir("src/main/java"))
     outputDir.set(layout.buildDirectory.dir("generated/wireSchema"))
     resourcesDir.set(layout.buildDirectory.dir("generated/wireSchemaResources"))
 }

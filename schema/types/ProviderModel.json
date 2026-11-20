@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A model a provider has, as the mesh is told of it (mesh._model).",
   "properties": {

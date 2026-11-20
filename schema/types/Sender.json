@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Who a message to a session is from, if not its user, filled in by the host from what it knows itself (wire.clean_sender: words, cut short).",
   "properties": {

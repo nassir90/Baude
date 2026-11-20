@@ -510,7 +510,6 @@ class Server:
         for meta in kept_sessions(self.state_dir):
             try:
                 self.sessions[meta["id"]] = Session(self, meta)
-                meta.pop("tags", None)  # (an older server kept tags: not read, and gone at its next save)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         self.conns = set()

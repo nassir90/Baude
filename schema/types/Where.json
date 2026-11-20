@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Somewhere wire.reach can go: this machine's host process, one listening on another socket, one over ssh, or a member of the mesh through this machine's.",
   "properties": {

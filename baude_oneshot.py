@@ -28,7 +28,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from baudelib import hosts  # noqa: E402
+from baudelib import hosts, wire  # noqa: E402
 from baudelib.claude import MODES  # noqa: E402
 
 
@@ -134,7 +134,7 @@ def main():
     for msg in ch:
         op = msg.get("op")
         if op == "error" and msg.get("req") is not None:  # (the start, the attach, or something sent: it went nowhere)
-            print(f"baude-oneshot: {msg.get('error')}", file=sys.stderr)
+            print(f"baude-oneshot: {wire.said(msg)}", file=sys.stderr)
             code = 2
             break
         if op in ("started", "attached") and msg.get("req") == 1:

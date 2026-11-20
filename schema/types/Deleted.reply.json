@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "delete's answer (and an event to those attached: nothing to carry on).",
   "properties": {

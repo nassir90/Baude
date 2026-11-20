@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "This connection, from now on, a tunnel to member to's host process (hello first, as ever); error if there's no way to it now.",
   "properties": {

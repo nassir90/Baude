@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author, email, at, committer, message, files, more_files, branches}; diff {sha, path, text, truncated}.",
   "properties": {

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "quit's if_idle: commands are running, so it goes on.",
   "properties": {

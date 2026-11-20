@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "What a host is, as its hello says (and sessions carries).",
   "properties": {
@@ -91,7 +92,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Given by a host that speaks only part of these lines (a phone's): the ops it takes, and what its sessions take that came with a version or a program (start's ephemeral; control requests: control, set_permission_mode, set_model), which a head checks (speaks) instead of its version."
+      "description": "The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model)."
     }
   },
   "required": ["id"],

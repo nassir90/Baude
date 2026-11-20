@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "What @ lists for one of its sessions' folders, made there (lookup.items: its files, branches, Kubernetes objects, what's running on that machine, its pull requests and issues): what there is, at once; waited for while it's made if there's none yet, or with wait.",
   "properties": {

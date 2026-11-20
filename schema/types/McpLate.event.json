@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A call the head answered after it was failed (its connection was gone), as it did run.",
   "properties": {

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "(another host process's) This connection, from now on, a link it's made to here.",
   "properties": {

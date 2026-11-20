@@ -299,7 +299,7 @@ class Mesh:
                 ch.keep_alive()
                 return ch, got
             ch.close()
-            error = (got or {}).get("error")
+            error = wire.said(got)
             if error and "host process is stopping" not in error:
                 return None, error
             if time.monotonic() + AGAIN_S > end:

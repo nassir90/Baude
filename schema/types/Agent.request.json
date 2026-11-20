@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A model of this machine's, run here by its program (apple-claude, pi-claude) as an agent for a chat elsewhere (agentproxy), its tools there.",
   "properties": {

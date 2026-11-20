@@ -488,7 +488,7 @@ class Out:
         reply = ch.reply()
         theirs = _hello_of((reply or {}).get("host"))
         if not reply or reply.get("op") != "joined" or theirs is None or theirs["id"] != peer["id"]:
-            self.error, self.state = (reply or {}).get("error") or "it didn't answer", "dropped"
+            self.error, self.state = wire.said(reply) or "it didn't answer", "dropped"
             ch.close()
             return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
@@ -1384,7 +1384,7 @@ class Proxy:
                     return
                 elif op == "error":
                     if not started:
-                        return fail(502, str(msg.get("error")))
+                        return fail(502, wire.said(msg))
                     return  # (cut short: the client sees the answer end with no last chunk)
             if not started:
                 fail(502, f"{self.mesh.name_of(member)} went")

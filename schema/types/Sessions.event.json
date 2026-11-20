@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Its sessions (newest first; a side question's never), and what it is: subscribe's answer, then again on every change.",
   "properties": {

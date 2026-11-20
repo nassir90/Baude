@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "start's answer, before the prompt's sent (attach: this connection's attached live to it first).",
   "properties": {

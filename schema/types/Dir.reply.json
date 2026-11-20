@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "list_dir's answer: its entries, folders first (.git left out), DIR_LIMIT at most.",
   "properties": {

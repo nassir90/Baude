@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Each one's transcript from where have says the client's copy is, in whole lines; its meta.json whole, if it's changed.",
   "properties": {

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "What a Bot's tools did with the mouse, numbered (seq starts again from 1 with each Emission).",
   "properties": {

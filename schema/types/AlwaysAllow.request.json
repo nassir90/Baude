@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Tools allowed whenever a session's agent asks for them, a head attached or not (kept in memory).",
   "properties": {

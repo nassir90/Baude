@@ -9196,7 +9196,7 @@ class SessionSidebar(Gtk.Box):
 
     def bot_set(self, reply):
         if reply.get("op") == "error":
-            return self.win.note(f"Couldn't update the Bot: {reply.get('error')}")
+            return self.win.note(f"Couldn't update the Bot: {baudelib.wire.said(reply)}")
         self.fill()
 
     def rename(self, info, title):
@@ -9222,7 +9222,7 @@ class SessionSidebar(Gtk.Box):
         """A network session's server answered a rename: listed by its new title here before it next says what it has
         (the title it has there: its claude may have made it its own)."""
         if reply.get("op") != "renamed":
-            toast(self, f"{remote_name(r)} didn't rename it: {reply.get('error')}")
+            toast(self, f"{remote_name(r)} didn't rename it: {baudelib.wire.said(reply)}")
             return
         listed = reply.get("session") or {}
         if listed.get("title") in (None, info.get("title")):  # (its claude's yet to write it: as asked, till it has)
@@ -14751,7 +14751,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                         "effort": effort, "mode": self.mode, "env": claudelib.claude_env(),
                         "group": getattr(self, "draft_group", "")}, timeout=10)
         if reply.get("op") != "started":
-            self.note(f"{THIS_MACHINE}'s host process didn't start a chat: {reply.get('error')}")
+            self.note(f"{THIS_MACHINE}'s host process didn't start a chat: {baudelib.wire.said(reply)}")
             self.update_status()
             return
         self.remote, self.session_id, self.desktop_chat = r, reply["session"]["id"], False
@@ -14787,7 +14787,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             params["prompt"], params["group"] = "", getattr(self, "draft_group", "")
         reply = r.call(params, timeout=10)  # (on the main loop: this machine's socket, an answer in a moment)
         if reply.get("op") != "started":
-            self.note(f"{THIS_MACHINE}'s host process didn't take this chat up: {reply.get('error')}")
+            self.note(f"{THIS_MACHINE}'s host process didn't take this chat up: {baudelib.wire.said(reply)}")
             return None
         listed = reply["session"]
         r.sessions[listed["id"]] = listed  # (listed before it next says what it has)
@@ -15356,7 +15356,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.set_busy(False)
             turn.set_visible(True)
             self.show_held()
-            toast(self, f"Not sent: {answer.get('error') or 'its host said no'}")
+            toast(self, f"Not sent: {baudelib.wire.said(answer) or 'its host said no'}")
         self.proc.held(h["id"], True, done)
 
     def held_drop(self, turn):
@@ -15377,7 +15377,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 return
             turn.set_visible(True)
             self.show_held()
-            toast(self, f"Not deleted: {answer.get('error') or 'its host said no'}")
+            toast(self, f"Not deleted: {baudelib.wire.said(answer) or 'its host said no'}")
         self.remote.request({"op": "held", "session": sid, "id": h["id"]}, done)
 
     def recorded_cwd(self):
@@ -16424,7 +16424,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if self.remote is not None:  # (this machine's host process runs it: there, from its next message on)
             reply = self.remote.call({"op": "set_cwd", "session": self.session_id, "cwd": path}, timeout=10)
             if reply.get("op") != "cwd_set":
-                self.note(f"folder not changed: {reply.get('error')}")
+                self.note(f"folder not changed: {baudelib.wire.said(reply)}")
                 return
             if self.session_id in self.remote.sessions:  # (as it's listed, before it next says so)
                 self.remote.sessions[self.session_id] = {**self.remote.sessions[self.session_id], "cwd": reply["cwd"]}
@@ -19011,7 +19011,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         that host's picked beside New session: Meta's button:host). carry_from: the chat whose box it opens with, if
         that's still the one open (a new conversation for another kind of model: open_remote)."""
         if reply.get("op") != "started":
-            self.note(f"{remote_name(r)} didn't start it: {reply.get('error')}")
+            self.note(f"{remote_name(r)} didn't start it: {baudelib.wire.said(reply)}")
             return
         self.carry_box = (reply["session"]["id"], carry_from) if carry_from else None
         r.sessions[reply["session"]["id"]] = reply["session"]  # (listed before the server next says what it has)
@@ -19042,7 +19042,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         def shown(reply):
             data = base64.b64decode(reply.get("data") or "") if reply.get("op") == "file" else b""
             if reply.get("op") != "file" or reply.get("error") or b"\0" in data[:8192]:
-                self.note(f"{path} on {remote_name(r)}: {reply.get('error') or 'not text to read here'}")
+                self.note(f"{path} on {remote_name(r)}: {baudelib.wire.said(reply) or 'not text to read here'}")
                 return
             self.show_code(path, line, text=data.decode("utf-8", "replace"), note=f"on {remote_name(r)}")
         r.request({"op": "read_file", "path": path}, shown)
@@ -19493,8 +19493,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 allowed = self.allowed_in(self.session_id)
                 allowed.add(name)
                 if self.remote is not None and self.session_id:  # (its host allows it too, a head attached or not:
-                    # added to its list)
-                    self.remote.request({"op": "always_allow", "session": self.session_id, "add": [name]})
+                    # added to its list; refused, not always allowed here either)
+                    def kept(reply, allowed=allowed):
+                        if reply.get("op") == "error":
+                            allowed.discard(name)
+                            self.note(f"{tool_display(name)[0]} isn't always allowed: {baudelib.wire.said(reply)}")
+                    self.remote.request({"op": "always_allow", "session": self.session_id, "add": [name]}, kept)
             proc.asks.pop(rid, None)
             if behavior == "allow":
                 proc.respond(rid, {"behavior": "allow", "updatedInput": inp})

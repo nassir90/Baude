@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "An HTTP request to one of this machine's model providers (an OpenAI-compatible server's: path after its base_url), its answer as it comes.",
   "properties": {

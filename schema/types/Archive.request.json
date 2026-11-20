@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A session archived: its agent stopped, and it's listed only to those subscribed with archived.",
   "properties": {

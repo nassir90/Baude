@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A watched Bot's browser as it is (emission's watch_state).",
   "properties": {

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "The host's sessions, now and on every change, and ping; turn_ended as each of its sessions' turns ends.",
   "properties": {

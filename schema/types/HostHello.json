@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A host process as it says it is on a link (mesh._hello_of).",
   "properties": {

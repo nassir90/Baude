@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "What a session's agent says, as it says it (claude's stream-json); to those attached live. A worktree made again from its branch is told by {type: \"_note\", text}.",
   "properties": {

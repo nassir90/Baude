@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A phone showing a Bot of this host's browser (on), or not now: while it is, the Bot's browser tools' requests here are carried to it (emission_call).",
   "properties": {

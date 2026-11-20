@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A member deactivated here: its links let go of and not made, its joins and tunnels refused.",
   "properties": {

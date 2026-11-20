@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): the same from every host, what was wrong in detail.",
   "properties": {

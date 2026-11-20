@@ -15,8 +15,8 @@ given as None that its op doesn't let be null is left out; one with an op or a f
 turn's end is only said on stderr); a message passed on (a tunnel's) goes as it came. A request a host takes is looked
 at too (refusal): an op it doesn't take is answered "unsupported operation", fields that aren't as the schema has them
 "invalid data type", each an error with a code of its own (UNSUPPORTED, INVALID) and what was wrong (detail), the same
-from every host, the phone's too: what a head shows, rather than asking first whether a host takes something.
-$BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what doesn't fit.
+from every host, the phone's too, and what a head shows. $BAUDE_WIRE_STRICT=1 checks the types of what's sent and read
+as well, and says on stderr what doesn't fit.
 
 A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
 request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
@@ -72,7 +72,6 @@ SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__fil
 STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
 KINDS = ("request", "reply", "event", "frame")  # (what a message is, as its file's name says: a request a host takes)
 _FILE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\.([a-z]+))?\.json")
-_REF = re.compile(r'"\$ref": "([^"]*)"')
 
 
 class SchemaError(Exception):
@@ -80,58 +79,85 @@ class SchemaError(Exception):
     key twice in one object, a $ref to no type, say."""
 
 
+def _pairs(kv):
+    """An object as json reads it: ValueError for a key that's there twice (not the last one taken)."""
+    obj = {}
+    for k, v in kv:
+        if k in obj:
+            raise ValueError(f"{k!r} is there twice in one object")
+        obj[k] = v
+    return obj
+
+
 def _load(folder):
-    """Each file in schema/<folder>, by its name: {name: (its kind, as its file's name says it, or None; its JSON;
-    its path)}."""
-    out = {}
-    for f in sorted(os.listdir(os.path.join(SCHEMA_DIR, folder))):
+    """Each JSON file in schema/<folder>, by its name: {name: (its kind, as its file's name says it, or None; its JSON;
+    its path)}. Others (a README, an editor's backup) are passed over; a folder in it isn't."""
+    out, root = {}, os.path.join(SCHEMA_DIR, folder)
+    for f in sorted(os.listdir(root)):
+        path = f"schema/{folder}/{f}"
         if f.startswith("."):
             continue
-        path = f"schema/{folder}/{f}"
-
-        def pairs(kv):  # (a key twice in one object: an error, not the last one taken)
-            obj = {}
-            for k, v in kv:
-                if k in obj:
-                    raise SchemaError(f"{path}: {k!r} is there twice in one object")
-                obj[k] = v
-            return obj
+        if os.path.isdir(os.path.join(root, f)):
+            raise SchemaError(f"{path}: a folder, not a JSON file")
+        if not f.endswith(".json"):
+            continue
         if (m := _FILE.fullmatch(f)) is None:
             raise SchemaError(f"{path}: not named Name.json or Name.kind.json")
         if m[1] in out:
             raise SchemaError(f"{path}: {out[m[1]][2]} is {m[1]} too")
         try:
-            with open(os.path.join(SCHEMA_DIR, folder, f), "rb") as fh:
-                out[m[1]] = (m[2], json.load(fh, object_pairs_hook=pairs), path)
+            with open(os.path.join(root, f), "rb") as fh:
+                out[m[1]] = (m[2], json.load(fh, object_pairs_hook=_pairs), path)
         except ValueError as e:
             raise SchemaError(f"{path}: {e}") from None
     return out
 
 
+def _refs(schema):
+    """Each $ref in a schema, wherever it is in it."""
+    if isinstance(schema, dict):
+        if "$ref" in schema:
+            yield schema["$ref"]
+        for v in schema.values():
+            yield from _refs(v)
+    elif isinstance(schema, list):
+        for v in schema:
+            yield from _refs(v)
+
+
 def _check(types, variables):
-    """SchemaError, naming the file, for a kind that isn't one of KINDS, a message without an op const, an entity
-    with an op, a $ref to no type, or a variable without a const."""
+    """SchemaError, naming the file, for a type that isn't an object with an object for each of its properties, a kind
+    that isn't one of KINDS, a message without an op const, an entity with an op, a $ref to no type, or a variable
+    whose const isn't a number."""
     for kind, d, path in types.values():
-        if not isinstance(d, dict):
-            raise SchemaError(f"{path}: not an object")
-        op = d.get("properties", {}).get("op")
+        props = d.get("properties", {}) if isinstance(d, dict) else None
+        if not isinstance(props, dict) or not all(isinstance(p, dict) for p in props.values()):
+            raise SchemaError(f"{path}: not a type (an object, each of its properties an object)")
         if kind is not None and kind not in KINDS:
             raise SchemaError(f"{path}: {kind} isn't one of {', '.join(KINDS)}")
-        if kind is not None and not isinstance((op or {}).get("const"), str):
+        if kind is not None and not isinstance(props.get("op", {}).get("const"), str):
             raise SchemaError(f"{path}: a message with no op const")
-        if kind is None and op is not None:
+        if kind is None and "op" in props:
             raise SchemaError(f"{path}: an op, but no kind in its name (Name.request.json, ...)")
-        for ref in _REF.findall(json.dumps(d)):
-            if _name(ref) not in types or not ref.endswith(".json"):
+        for ref in _refs(d):
+            if not isinstance(ref, str) or not ref.endswith(".json") or _name(ref) not in types:
                 raise SchemaError(f"{path}: no type {ref}")
     for kind, v, path in variables.values():
-        if kind is not None or "const" not in v:
-            raise SchemaError(f"{path}: not a variable (Name.json, with a const)")
+        const = v.get("const") if isinstance(v, dict) else None
+        if kind is not None or not isinstance(const, (int, float)) or isinstance(const, bool):
+            raise SchemaError(f"{path}: not a variable (Name.json, an object whose const is a number)")
 
 
 def _name(ref):
     """The type a $ref names (its file's name: Session.json)."""
     return ref.removesuffix(".json")
+
+
+class _Constants(dict):
+    """The variables' consts, by name: SchemaError, naming its file, for one that isn't there."""
+
+    def __missing__(self, name):
+        raise SchemaError(f"schema/variables/{name}.json: not there")
 
 
 _types, _variables = _load("types"), _load("variables")
@@ -143,7 +169,7 @@ OPS = {}  # (an op: its messages, a request's and its answer's, say)
 for _n in MESSAGES:
     OPS.setdefault(DEFS[_n]["properties"]["op"]["const"], []).append(_n)
 VARIABLES = {name: v for name, (_kind, v, _path) in _variables.items()}  # (each constant: its const, what it is)
-CONSTANTS = {name: v["const"] for name, v in VARIABLES.items()}
+CONSTANTS = _Constants({name: v["const"] for name, v in VARIABLES.items()})
 del _types, _variables, _n
 
 
@@ -157,7 +183,7 @@ def _ref(schema):
     return None
 
 
-VERSION = CONSTANTS["VERSION"]  # (said in hello, for a person to read: never compared)
+VERSION = CONSTANTS["VERSION"]  # (said in hello, for a person to read)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
 PING_S = CONSTANTS["PING_S"]      # a subscriber hears from the server at least this often
@@ -169,8 +195,7 @@ SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
 
 
 def takes(info, op):
-    """Does a host take op, as far as a head can tell before asking: no only for one whose hello lists the ops it
-    takes (a phone's), without it. Any other's answer says (refused(UNSUPPORTED))."""
+    """Does a host take op, as its hello says: no only for one that lists the ops it takes (a phone's) without it."""
     ops = (info or {}).get("ops")
     return not isinstance(ops, list) or op in ops
 
@@ -807,7 +832,7 @@ def _hello(ch, timeout, what):
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()
-        raise OSError((reply or {}).get("error") or f"{what} isn't a Baude host")
+        raise OSError(said(reply) or f"{what} isn't a Baude host")
     ch.sock.settimeout(None)
     return ch, reply.get("server") or {}
 
@@ -913,7 +938,7 @@ def through(ch, host, timeout=5.0, as_=None):
     reply = ch.reply()
     if not reply or reply.get("op") != "relayed":
         ch.close()
-        raise OSError(said(reply) if reply else "the host process here didn't answer")
+        raise OSError(said(reply) or "the host process here didn't answer")
     return _hello(ch, max(timeout, 10.0), host)
 
 

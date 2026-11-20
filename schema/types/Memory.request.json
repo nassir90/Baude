@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A Bot's memory (the file its agent keeps it in, on the host), after writing text if it's given: refused (error, with the memory as the Bot left it) if the Bot's written it since base_mtime.",
   "properties": {

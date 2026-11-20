@@ -491,8 +491,13 @@ object Mesh {
         val msg = JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
             .put("request_id", ask.rid).put("response", response))
         if (always) {
-            allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
-            c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) {}
+            val mine = allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.apply { add(ask.tool) }
+            c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
+                if (r.optString("op") == Op.ERROR) main.post {
+                    mine.remove(ask.tool)
+                    chat.said.value = "Couldn't always allow ${ask.tool}: " + Msg.Error.from(r).said.orEmpty()
+                }
+            }
         }
         c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
             if (r.optString("op") == Op.ERROR) main.post {

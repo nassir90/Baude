@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "description": "A session's agent given the mesh's tools (baudelib.meshtools), or not, from its next start; a Bot's has them always.",
   "properties": {

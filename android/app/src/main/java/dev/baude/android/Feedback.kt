@@ -80,7 +80,7 @@ object Outbox {
 
     /** Every note not filed yet tried again (through its host, or, that one away long enough, another). */
     fun again() {
-        val up = Mesh.reached(Since.FEEDBACK).map { it.first }.filter { h -> Mesh.hosts.any { it.id == h } }
+        val up = Mesh.reached("feedback").map { it.first }.filter { h -> Mesh.hosts.any { it.id == h } }
         for (o in notes()) {
             if (o.has("filed")) { java.io.File(dir(), "${o.optString("id")}.json").delete(); continue } // (from before)
             val was = o.optString("host")
@@ -113,7 +113,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     var failed by remember { mutableStateOf<String?>(null) }
     var showContext by rememberSaveable { mutableStateOf(false) }
     Mesh.tick.value
-    val up = Mesh.reached(Since.FEEDBACK).filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours that files it)
+    val up = Mesh.reached("feedback").filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours that files it)
     var picked by rememberSaveable { mutableStateOf<String?>(null) }
     val host = picked?.takeIf { p -> up.any { it.first == p } } ?: up.firstOrNull()?.first
     var target by remember { mutableStateOf<String?>(null) }

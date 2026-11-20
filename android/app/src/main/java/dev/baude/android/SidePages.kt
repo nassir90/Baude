@@ -164,7 +164,7 @@ fun SideQuestionsPage(chat: Chat) {
     }
     Scrolled {
         Box(Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
-            AskBox("Ask a side question", enabled = offers(hostId, Since.EPHEMERAL) && Mesh.session(hostId, chat.sid) != null, ::start)
+            AskBox("Ask a side question", enabled = offers(hostId, "ephemeral") && Mesh.session(hostId, chat.sid) != null, ::start)
         }
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
@@ -201,7 +201,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
 fun FilesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val root = Mesh.session(hostId, sid)?.str("cwd")
-    if (!offers(hostId, Since.LIST_DIR)) return StatusPage(Icons.Filled.Folder, "Files", tooOld(hostId, "list its folders for a phone"))
+    if (!offers(hostId, "list_dir")) return StatusPage(Icons.Filled.Folder, "Files", tooOld(hostId, "list its folders for a phone"))
     if (root == null) return StatusPage(Icons.Filled.Folder, "Files", "No folder yet")
     var at by remember(root) { mutableStateOf(root) }
     var entries by remember(at) { mutableStateOf<List<JSONObject>?>(null) }
@@ -301,7 +301,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
 fun GitPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val cwd = Mesh.session(hostId, sid)?.str("cwd")
-    if (!offers(hostId, Since.GIT)) return StatusPage(Icons.Filled.Schedule, "Git", tooOld(hostId, "read its git for a phone"))
+    if (!offers(hostId, "git")) return StatusPage(Icons.Filled.Schedule, "Git", tooOld(hostId, "read its git for a phone"))
     if (cwd == null) return StatusPage(Icons.Filled.Schedule, "Git", "No folder yet")
     var log by remember(cwd) { mutableStateOf<JSONObject?>(null) }
     val commits = remember(cwd) { mutableStateListOf<JSONObject>() }
@@ -451,7 +451,7 @@ fun SignalPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val s = Mesh.session(hostId, sid)
     val cwd = s?.str("cwd")
-    if (!offers(hostId, Since.SIGNAL_NAMES)) return StatusPage(Icons.Filled.HelpOutline, "Signal", tooOld(hostId, "list Signal's names for a phone"))
+    if (!offers(hostId, "signal_names")) return StatusPage(Icons.Filled.HelpOutline, "Signal", tooOld(hostId, "list Signal's names for a phone"))
     if (cwd == null) return StatusPage(Icons.Filled.HelpOutline, "Signal", "No folder yet")
     var got by remember(cwd, sid) { mutableStateOf<JSONObject?>(null) }
     var filter by remember { mutableStateOf("") }

@@ -56,8 +56,10 @@ class PhoneSession(val meta: JSONObject) {
 object PhoneHost {
     /** The ops it takes, and the control requests its agents take that a program's mightn't (hello's ops:
      * wire.speaks). */
-    val OPS = WireHosts.PHONE // (the wire's schema's x-hosts: what a phone takes)
-    private val CONTROLS = OPS.filter { it in WireHosts.FEATURES }.toSet() // (OPS' that aren't ops: the
+    val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
+        "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
+        "read_file", "catalogue", "list_dir", "senders", "ephemeral", "control", "set_permission_mode", "set_model")
+    private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
     lateinit var ctx: Context
@@ -227,8 +229,11 @@ object PhoneHost {
             head.send(o)
         }
         synchronized(lock) { heads.add(head) }
+        if (op == Op.PING) return
+        // (an op it doesn't take, or fields not as the wire's schema has them: its two refusals, as any host's)
+        (if (op !in OPS || op in CONTROLS) WireCheck.refused(WireCheck.UNSUPPORTED, req) else WireCheck.refusal(msg))
+            ?.let { return head.send(it) }
         when (op) {
-            Op.PING -> return
             Op.HELLO -> return reply(Op.HELLO, "server" to info())
             Op.SUBSCRIBE -> {
                 head.subscribed = true
@@ -236,8 +241,6 @@ object PhoneHost {
                 return reply(Op.SESSIONS, "sessions" to listing(head.archived), "server" to info())
             }
         }
-        if (op !in OPS || op in CONTROLS) return reply(Op.ERROR, "error" to "unknown op '$op' (${name} is a phone: it takes " +
-            "${(OPS - CONTROLS).joinToString()})")
         if (op == Op.START) return start(head, msg, ::reply)
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
         if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(if (msg.isNull("path")) "" else msg.optString("path")))

@@ -2,17 +2,16 @@
 The same lines could go over stdin and stdout: Channel takes any pair of binary files, a socket's or a pipe's.
 
 What may be said is schema/wire.schema.json's (JSON Schema, draft 2020-12), read as this is imported: each message
-(its op, its fields, what each is, the version it came with), the entities in them (a session, a host's info, the
-mesh's records), the protocol's constants, and the versions' history. The Android app's build makes Kotlin of the same
-file. Its reference, as this module's help shows it below, is made from it (docs()); defs has a class for each of its
-messages and entities (Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Every
-message sent goes through it: one with an op or a field it doesn't have isn't sent, and an error goes for its request
-in its place (as for one that isn't JSON), said on stderr; a message passed on (a tunnel's) goes as it came.
-$BAUDE_WIRE_STRICT=1 checks each one's types as well, those read too, and says on stderr what doesn't fit.
-
-VERSION is the schema's last version, and since() and speaks() what a host takes, by the version an op or field came
-with (or its hello's ops, where it lists them). A version claimed twice, or one whose ops and fields aren't those its
-history says it brought, is an error as this is imported: two changes can't both be the same version unseen.
+(its op, its fields, what each is), the entities in them (a session, a host's info, the mesh's records), the
+protocol's constants and its version (VERSION). The Android app's build makes Kotlin of the same file. Its reference,
+as this module's help shows it below, is made from it (docs()); defs has a class for each of its messages and entities
+(Hello, Session, ...): what one's built with that the schema doesn't have is never sent. Every message sent goes
+through it: one with an op or a field it doesn't have isn't sent, and an error goes for its request in its place (as
+for one that isn't JSON), said on stderr; a message passed on (a tunnel's) goes as it came. A request a host takes is
+looked at too (refusal): an op it doesn't take is answered "unsupported operation", fields that aren't as the schema
+has them "invalid data type", each an error with a code of its own (UNSUPPORTED, INVALID), the same from every host,
+the phone's too. $BAUDE_WIRE_STRICT=1 checks the types of what's sent and read as well, and says on stderr what
+doesn't fit.
 
 A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
 request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
@@ -101,82 +100,36 @@ def _ref(schema):
     return None
 
 
-def _versioned():
-    """Every op, entity and field with the version it came with (x-since; none: 1): op, op.field, Entity,
-    Entity.field. An op's lines must agree on its."""
-    out = {}
-    for name, d in DEFS.items():
-        key = d["properties"]["op"]["const"] if name in MESSAGES else name
-        if (v := d.get("x-since", 1)) != out.get(key, v):
-            raise SchemaError(f"{key}'s lines say it came with versions {out[key]} and {v}")
-        out[key] = v
-        for f, p in d["properties"].items():
-            if f != "op":
-                out[f"{key}.{f}"] = max(p.get("x-since", 1), v)
-    return out
-
-
 def _check_schema():
-    """VERSION, once the schema's been checked: each version claimed once (as _load sees), 1 to the last with none
-    left out, and each one's adds those, and only those, whose x-since is it; every def a line or an entity, every
-    $ref one of them."""
-    history = SCHEMA["x-versions"]
-    numbers = sorted(int(v) for v in history)
-    if numbers != list(range(1, len(numbers) + 1)):
-        raise SchemaError(f"x-versions isn't 1 to {len(numbers)}: {numbers}")
-    since = _versioned()
-    for v in numbers[1:]:
-        said = set(history[str(v)].get("adds") or ())
-        have = {k for k, n in since.items() if n == v and not (k.count(".") and since[k.split(".")[0]] == v)}
-        if said != have:
-            raise SchemaError(f"version {v}'s history says it added {sorted(said - have)} that don't say it, and "
-                              f"not {sorted(have - said)} that do: is it claimed twice?")
-    if past := [k for k, n in since.items() if n > numbers[-1]]:
-        raise SchemaError(f"these came with a version past {numbers[-1]}, the last there is: {past}")
+    """Every def a line or an entity, every $ref one of them (a key twice in one object: _load's)."""
     for name, d in DEFS.items():
         if name in MESSAGES and "x-op" not in d or name not in MESSAGES and "x-op" in d:
             raise SchemaError(f"{name} is a line but not in oneOf, or the other way round")
     for ref in re.findall(r'"\$ref": "#/\$defs/([^"]+)"', json.dumps(DEFS)):
         if ref not in DEFS:
             raise SchemaError(f"no def {ref}")
-    return numbers[-1], since
 
 
-VERSION, SINCE = _check_schema()
-FEATURES = SCHEMA["x-features"]  # (what a host may take that isn't an op: by the name its ops list it by)
-LISTED = {f["field"]: name for name, f in FEATURES.items() if "field" in f}  # (an op's field: its feature's name)
-for _name, _f in FEATURES.items():
-    if _name in OPS or ("field" in _f) == ("since" in _f) or "field" in _f and _f["field"] not in SINCE:
-        raise SchemaError(f"x-features' {_name} is an op, or isn't a field or a version of its own")
-HOSTS = {name: h["ops"] for name, h in SCHEMA["x-hosts"].items()}  # (hosts that speak only part of the wire: theirs)
-for _name, _ops in HOSTS.items():
-    if bad := [o for o in _ops if o not in OPS and o not in FEATURES]:
-        raise SchemaError(f"x-hosts' {_name} takes {bad}, which are neither ops nor features")
+_check_schema()
+VERSION = SCHEMA["x-version"]
 CONSTANTS = {k: c["value"] for k, c in SCHEMA["x-constants"].items()}
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
 PING_S = CONSTANTS["PING_S"]      # a subscriber hears from the server at least this often
 SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long without a word
 OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: the tunnel's this long to open)
+UNSUPPORTED = "unsupported_operation"  # (the schema's own refusals: their codes, and what each says)
+INVALID = "invalid_data_type"
+SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
 
 
-def since(key):
-    """The version an op ("git"), an op's field ("start.ephemeral"), an entity or its field ("Session.held"), or a
-    feature ("set_model") came with. KeyError for one the schema hasn't."""
-    if key in FEATURES:
-        f = FEATURES[key]
-        return f["since"] if "since" in f else SINCE[f["field"]]
-    return SINCE[key]
-
-
-def speaks(info, key):
-    """Does a host take key (as since() has it): as its hello's ops say, where it lists them (a host that speaks only
-    part of these lines: a phone's), by the op's name, or the feature's an op's field is listed by (else its op's);
-    else by its version."""
+def speaks(info, op, version=1):
+    """Does a host take op: as its hello's ops say, where it lists them (a host that speaks only part of these lines: a
+    phone's); else by its version, the one that brought op."""
     ops = (info or {}).get("ops")
     if isinstance(ops, list):
-        return LISTED.get(key, key if key in FEATURES else key.split(".")[0]) in ops
-    return ((info or {}).get("version") or 1) >= since(key)
+        return op in ops
+    return ((info or {}).get("version") or 1) >= version
 
 
 # ---- the classes
@@ -361,19 +314,44 @@ def check(msg):
     return c(msg)
 
 
-def problems(msg):
-    """Everything about a message that isn't as the schema has it, types too ($BAUDE_WIRE_STRICT's): [what, ...]."""
+def problems(msg, kinds=None):
+    """Everything about a message that isn't as the schema has it, types too ($BAUDE_WIRE_STRICT's): [what, ...];
+    kinds: as one of its op's lines of those kinds only (x-kind: request, ...)."""
     if not isinstance(msg, dict) or msg.get("op") not in OPS:
         return [check(msg) or "not a message"]
     best = None
     for name in OPS[msg["op"]]:
+        if kinds is not None and DEFS[name]["x-kind"] not in kinds:
+            continue
         found = []
         _validate(DEFS[name], msg, msg["op"], found)
         if not found:
             return []
         if best is None or len(found) < len(best):
             best = found
-    return best
+    return best or []
+
+
+TAKEN = frozenset(DEFS[n]["x-op"] for n in MESSAGES if DEFS[n]["x-kind"] in ("request", "both"))  # (a host's ops)
+
+
+def refused(code, req=None):
+    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host."""
+    return {"op": "error", "req": req, "error": SAID[code], "code": code}
+
+
+def refusal(msg, takes=TAKEN):
+    """What a request a host takes (one of takes' ops, as a request's line has it) is answered with if it can't be:
+    refused(UNSUPPORTED) for an op it doesn't take, refused(INVALID) for fields that aren't as the schema has them;
+    None for one it takes as it is. What's wrong, said on stderr."""
+    req = msg.get("req") if isinstance(msg, dict) else None
+    if not isinstance(msg, dict) or msg.get("op") not in takes:
+        _say(f"refused: no op {msg.get('op') if isinstance(msg, dict) else None!r} here")
+        return refused(UNSUPPORTED, req)
+    if bad := problems(msg, ("request", "both")):
+        _say(f"refused: {bad[0]}")
+        return refused(INVALID, req)
+    return None
 
 
 _TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "object": dict, "array": list,
@@ -425,8 +403,7 @@ def _say(what):
 
 
 def docs():
-    """The wire's reference, made from the schema: each op's lines and fields, the entities, the constants, the
-    versions."""
+    """The wire's reference, made from the schema: each op's lines and fields, the entities and the constants."""
     def kind(p):
         if (ref := _ref(p)) is not None:
             return ref + ("?" if "anyOf" in p else "")
@@ -443,25 +420,21 @@ def docs():
         for f, p in d["properties"].items():
             if f in ("op", "req"):
                 continue
-            v = f" (version {p['x-since']})" if p.get("x-since") else ""
-            out.append(f"{indent}{f}: {kind(p)}{v}. {p.get('description', '')}")
+            out.append(f"{indent}{f}: {kind(p)}. {p.get('description', '')}")
         return out
 
     lines = ["", "The wire's reference (schema/wire.schema.json):", ""]
     for name in MESSAGES:
         d = DEFS[name]
-        v = f", version {d['x-since']}" if d.get("x-since") else ""
-        lines.append(f"    {d['x-op']} ({d['x-kind']}{v}): {d.get('description', '')}")
+        lines.append(f"    {d['x-op']} ({d['x-kind']}): {d.get('description', '')}")
         lines += fields(d, "        ")
     lines += ["", "Entities:"]
     for name, d in DEFS.items():
         if name not in MESSAGES:
-            v = f", version {d['x-since']}" if d.get("x-since") else ""
-            lines.append(f"    {name}{v}: {d.get('description', '')}")
+            lines.append(f"    {name}: {d.get('description', '')}")
             lines += fields(d, "        ")
     lines += ["", "Constants:"] + [f"    {k} = {c['value']} ({c['unit']}): {c['description']}"
                                    for k, c in SCHEMA["x-constants"].items()]
-    lines += ["", "Versions:"] + [f"    {v}: {h['description']}" for v, h in SCHEMA["x-versions"].items()]
     return "\n".join(lines) + "\n"
 
 
@@ -487,16 +460,15 @@ class Channel:
         return cls(sock.makefile("rb"), sock.makefile("wb"), sock)
 
     def send(self, msg, passed=False):
-        """False once the other end's gone. A message the schema hasn't (its op, a field: check), or that can't be
-        written as JSON, goes as an error, for its request. passed: one passed on as it came (a tunnel's), not
-        looked at."""
+        """False once the other end's gone. A message the schema hasn't (its op, a field: check) goes as INVALID's
+        error, one that can't be written as JSON as an error, for its request. passed: one passed on as it came (a
+        tunnel's), not looked at."""
         if isinstance(msg, Def):
             msg = msg.to_wire()
         if not passed:
             if (bad := check(msg)) is not None:
                 _say(f"not sent: {bad}")
-                req = msg.get("req") if isinstance(msg, dict) else None
-                msg = {"op": "error", "req": req, "error": f"not sent: {bad}"}
+                msg = refused(INVALID, msg.get("req") if isinstance(msg, dict) else None)
             elif STRICT:
                 for p in problems(msg):
                     _say(f"sent: {p}")

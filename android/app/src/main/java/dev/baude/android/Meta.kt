@@ -199,7 +199,7 @@ object Meta {
     fun send(text: String) {
         val h = host.value ?: return
         val c = chat
-        if (!offers(h, Since.APP_TOOLS)) {
+        if (!offers(h, "app_tools")) {
             c.said.value = tooOld(h, "run Meta for a phone")
             return
         }
@@ -342,7 +342,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
     val c = LocalBaude.current
     Mesh.tick.value
     Meta.version.value
-    val up = Mesh.reached(Since.APP_TOOLS)
+    val up = Mesh.reached("app_tools")
     androidx.compose.runtime.LaunchedEffect(up, chatHost) { // (a host it's on kept, even while it's away: its session
         if (Meta.host.value == null)                          // waits for the phone there)
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
@@ -467,7 +467,7 @@ fun MetaRows(text: String) {
         }
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-            val up = Mesh.reached(Since.SUBSCRIBE)
+            val up = Mesh.reached("subscribe")
             Picker(HomePrefs.host.value.let { if (it == "all") "All hosts" else Mesh.label(it) }, "Hosts shown",
                 listOf("All hosts" to "all") + up.map { it.second to it.first }, HomePrefs.host.value) {
                 HomePrefs.host.value = it; HomePrefs.save()

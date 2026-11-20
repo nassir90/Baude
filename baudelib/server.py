@@ -1108,6 +1108,8 @@ class Server:
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
         if op == "ping":
             return None
+        if (refused := wire.refusal(msg)) is not None:  # (an op no host takes, or fields not as the schema has them)
+            return conn.send(refused)
         if self.stopped.is_set():  # (going: nothing more started, nothing more sent to a claude it's stopping)
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
@@ -1406,7 +1408,7 @@ class Server:
                 if "refused" in mem:
                     return reply("error", error=mem.pop("refused"), session=s.id, **mem)
                 return reply("memory", session=s.id, **mem)
-        return reply("error", error=f"unknown op {op!r}")
+        return conn.send(wire.refused(wire.UNSUPPORTED, req))
 
     def run_routine(self, s, r, schedule=True):
         """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for

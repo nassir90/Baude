@@ -2,217 +2,8 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/nassir90/Baude/schema/wire.schema.json",
  "title": "Baude's wire",
- "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-since: the wire version an op, entity or field came with (none: 1). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). x-features: what a host may take that isn't an op of its own (its sessions' programs' control requests, an op's field), by the name a host's ops list it by. x-hosts: hosts that speak only part of the wire, and what they take. baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
- "x-versions": {
-  "1": {
-   "description": "The first (#98-#123): every op and field with no later version."
-  },
-  "2": {
-   "description": "adopt, ephemeral, env, info's init.",
-   "adds": [
-    "Info.init",
-    "attach.env",
-    "start.adopt",
-    "start.env",
-    "start.ephemeral"
-   ]
-  },
-  "3": {
-   "description": "The mesh: link, unlink, join, relay, infer.",
-   "adds": [
-    "HostHello",
-    "Info.mesh",
-    "Info.providers",
-    "Member",
-    "MemberInfo",
-    "MeshView",
-    "OutLink",
-    "Proxy",
-    "Record",
-    "data",
-    "infer",
-    "infer_data",
-    "infer_end",
-    "infer_head",
-    "join",
-    "joined",
-    "link",
-    "linking",
-    "mesh",
-    "open",
-    "opened",
-    "relay",
-    "relayed",
-    "unlink",
-    "unlinked"
-   ]
-  },
-  "4": {
-   "description": "deactivate, activate.",
-   "adds": [
-    "MeshView.inactive",
-    "activate",
-    "activated",
-    "deactivate",
-    "deactivated"
-   ]
-  },
-  "5": {
-   "description": "catalogue.",
-   "adds": [
-    "catalogue"
-   ]
-  },
-  "6": {
-   "description": "notes, Record's notebooks.",
-   "adds": [
-    "Info.notes",
-    "Notebook",
-    "notes"
-   ]
-  },
-  "7": {
-   "description": "Links straight to members learned of through others, info's mesh found.",
-   "adds": [
-    "FoundLink",
-    "MeshView.found",
-    "join.straight"
-   ]
-  },
-  "8": {
-   "description": "bot, bot_picture, memory: Bots.",
-   "adds": [
-    "BotFields",
-    "BotListing",
-    "Session.bot",
-    "bot",
-    "bot_picture",
-    "bot_set",
-    "memory"
-   ]
-  },
-  "9": {
-   "description": "mesh_tools, a session's spawned_by and mesh_tools.",
-   "adds": [
-    "Session.mesh_tools",
-    "Session.spawned_by",
-    "mesh_tools",
-    "mesh_tools_set",
-    "start.spawned_by"
-   ]
-  },
-  "10": {
-   "description": "emission, a Bot's browser here.",
-   "adds": [
-    "BotRef",
-    "emission"
-   ]
-  },
-  "11": {
-   "description": "emission_watch, emission_watch_say, a Bot's browser watched.",
-   "adds": [
-    "Tab",
-    "WatchSay",
-    "WatchState",
-    "emission_frame",
-    "emission_watch",
-    "emission_watch_end",
-    "emission_watch_say",
-    "emission_watching"
-   ]
-  },
-  "12": {
-   "description": "routines, run_routine.",
-   "adds": [
-    "Clock",
-    "Routine",
-    "routines",
-    "run_routine"
-   ]
-  },
-  "13": {
-   "description": "waits_on, start's start_key, a session's waits_on and start_key, info's mesh gone.",
-   "adds": [
-    "Gone",
-    "MeshView.gone",
-    "Session.start_key",
-    "WaitTarget",
-    "start.start_key",
-    "waits_on"
-   ]
-  },
-  "14": {
-   "description": "A session's acting, emission_watch's state's now and pointer.",
-   "adds": [
-    "PageNow",
-    "PointerEvent",
-    "Session.acting",
-    "WatchState.now",
-    "WatchState.pointer"
-   ]
-  },
-  "15": {
-   "description": "always_allow's add, attach's always_allow added, a session's always_allow.",
-   "adds": [
-    "Session.always_allow",
-    "always_allow.add",
-    "attach.always_allow"
-   ]
-  },
-  "16": {
-   "description": "emission_serve, emission_call, emission_answer, emission_unserved, a session's on_phone: a Bot's browser on a phone.",
-   "adds": [
-    "Session.on_phone",
-    "emission_answer",
-    "emission_call",
-    "emission_serve",
-    "emission_serving",
-    "emission_unserved"
-   ]
-  },
-  "17": {
-   "description": "feedback, filed by this host's gh; start's app_tools and grace, attach's app_tools, list_dir, git, signal_names.",
-   "adds": [
-    "Branch",
-    "Commit",
-    "DirEntry",
-    "SignalRef",
-    "attach.app_tools",
-    "dir",
-    "feedback",
-    "feedback_filed",
-    "feedback_target",
-    "git",
-    "list_dir",
-    "mcp_late",
-    "signal_names",
-    "start.app_tools",
-    "start.grace"
-   ]
-  },
-  "18": {
-   "description": "input's, start's and relay's as, held, senders, a session's held and senders; what a phone's host says (its info's ops and phone, start's bot, its members' dial), with no version of its own.",
-   "adds": [
-    "HeldMessage",
-    "HostHello.dial",
-    "Info.ops",
-    "Info.phone",
-    "Member.dial",
-    "MemberInfo.dial",
-    "Sender",
-    "Session.held",
-    "Session.senders",
-    "WaitTarget.title",
-    "held",
-    "input.as",
-    "open.sender",
-    "relay.as",
-    "senders",
-    "start.as",
-    "start.bot"
-   ]
-  }
- },
+ "description": "What Baude's heads and hosts say to each other: one JSON object a line (UTF-8, ending in a newline), each with an op. A line is one of the messages below (x-op: its op; x-kind: request, a head's to a host, its req coming back on the reply; reply; event, a host's unasked; frame, on a mesh link; both, either way). x-open: an object whose fields aren't the wire's own (claude's stream-json, a tool's call). x-version: the wire's version, as a host's hello says it. baudelib/wire.py reads this as it's imported and builds its message classes from it; the Android app's build makes Kotlin of it.",
+ "x-version": 18,
  "x-constants": {
   "PING_S": {
    "value": 5,
@@ -293,61 +84,6 @@
    "value": 72,
    "unit": "JPEG quality",
    "description": "A watched browser's frames' (emission_frame)."
-  }
- },
- "x-features": {
-  "control": {
-   "since": 1,
-   "description": "Control requests to a session's agent (input's msg a control_request: interrupt, set_model, ...), as its program takes them."
-  },
-  "set_permission_mode": {
-   "since": 1,
-   "description": "The control request that changes a session's permission mode, where its program takes it (claude's, codex's; a phone's agents')."
-  },
-  "set_model": {
-   "since": 1,
-   "description": "The control request that changes a session's model."
-  },
-  "ephemeral": {
-   "field": "start.ephemeral",
-   "description": "start's ephemeral: a side question."
-  },
-  "app_tools": {
-   "field": "start.app_tools",
-   "description": "start's (and attach's) app_tools: a head's own tools for its session's agent."
-  }
- },
- "x-hosts": {
-  "phone": {
-   "description": "A phone's host (the Android app's PhoneHost), which speaks only part of the wire: what its hello lists as its ops.",
-   "ops": [
-    "hello",
-    "ping",
-    "subscribe",
-    "start",
-    "attach",
-    "detach",
-    "input",
-    "stop",
-    "transcript",
-    "subagents",
-    "rename",
-    "archive",
-    "unarchive",
-    "delete",
-    "always_allow",
-    "bot",
-    "bot_picture",
-    "memory",
-    "read_file",
-    "catalogue",
-    "list_dir",
-    "senders",
-    "ephemeral",
-    "control",
-    "set_permission_mode",
-    "set_model"
-   ]
   }
  },
  "oneOf": [
@@ -805,8 +541,7 @@
    "required": [
     "name"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "Sender": {
    "type": "object",
@@ -841,8 +576,7 @@
    "required": [
     "kind"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "HeldMessage": {
    "type": "object",
@@ -878,8 +612,7 @@
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "Session": {
    "type": "object",
@@ -1025,18 +758,15 @@
        "type": "null"
       }
      ],
-     "description": "A Bot's; null for a chat.",
-     "x-since": 8
+     "description": "A Bot's; null for a chat."
     },
     "acting": {
      "type": "boolean",
-     "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking.",
-     "x-since": 14
+     "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."
     },
     "on_phone": {
      "type": "boolean",
-     "description": "A Bot's browser is on a phone now.",
-     "x-since": 16
+     "description": "A Bot's browser is on a phone now."
     },
     "fork_from": {
      "type": [
@@ -1047,7 +777,6 @@
     },
     "spawned_by": {
      "description": "Who started it (a chat's mesh tools: start's spawned_by).",
-     "x-since": 9,
      "x-open": true
     },
     "start_key": {
@@ -1055,34 +784,29 @@
       "string",
       "null"
      ],
-     "description": "Its start's start_key, if it was given one.",
-     "x-since": 13
+     "description": "Its start's start_key, if it was given one."
     },
     "held": {
      "type": "array",
      "items": {
       "$ref": "#/$defs/HeldMessage"
      },
-     "description": "Messages held for it, oldest first.",
-     "x-since": 18
+     "description": "Messages held for it, oldest first."
     },
     "senders": {
      "type": "integer",
-     "description": "Its sender store's revision (0 for none): what a head's copy is checked against.",
-     "x-since": 18
+     "description": "Its sender store's revision (0 for none): what a head's copy is checked against."
     },
     "mesh_tools": {
      "type": "boolean",
-     "description": "Its agent has the mesh's tools (a Bot's always).",
-     "x-since": 9
+     "description": "Its agent has the mesh's tools (a Bot's always)."
     },
     "always_allow": {
      "type": "array",
      "items": {
       "type": "string"
      },
-     "description": "The tools allowed whenever it asks for them, sorted.",
-     "x-since": 15
+     "description": "The tools allowed whenever it asks for them, sorted."
     },
     "asks": {
      "type": "array",
@@ -1234,15 +958,13 @@
     },
     "dial": {
      "type": "boolean",
-     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
-     "x-since": 18
+     "description": "false: it can't be linked to, only from (a phone, with no sshd)."
     }
    },
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "MemberInfo": {
    "type": "object",
@@ -1274,8 +996,7 @@
     },
     "dial": {
      "type": "boolean",
-     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
-     "x-since": 18
+     "description": "false: it can't be linked to, only from (a phone, with no sshd)."
     },
     "providers": {
      "type": "array",
@@ -1288,8 +1009,7 @@
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Record": {
    "type": "object",
@@ -1319,8 +1039,7 @@
     "id",
     "seq"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Member": {
    "type": "object",
@@ -1352,8 +1071,7 @@
     },
     "dial": {
      "type": "boolean",
-     "description": "false: it can't be linked to, only from (a phone, with no sshd).",
-     "x-since": 18
+     "description": "false: it can't be linked to, only from (a phone, with no sshd)."
     },
     "providers": {
      "type": "array",
@@ -1377,8 +1095,7 @@
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Where": {
    "type": "object",
@@ -1462,8 +1179,7 @@
      "description": "Not deactivated."
     }
    },
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "FoundLink": {
    "type": "object",
@@ -1497,8 +1213,7 @@
      "description": "What's wrong."
     }
    },
-   "additionalProperties": false,
-   "x-since": 7
+   "additionalProperties": false
   },
   "Proxy": {
    "type": "object",
@@ -1513,8 +1228,7 @@
      "description": "What it's asked with."
     }
    },
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Gone": {
    "type": "object",
@@ -1529,8 +1243,7 @@
      "description": "Its name."
     }
    },
-   "additionalProperties": false,
-   "x-since": 13
+   "additionalProperties": false
   },
   "MeshView": {
    "type": "object",
@@ -1566,28 +1279,24 @@
      "items": {
       "type": "string"
      },
-     "description": "The ids of members deactivated here.",
-     "x-since": 4
+     "description": "The ids of members deactivated here."
     },
     "found": {
      "type": "array",
      "items": {
       "$ref": "#/$defs/FoundLink"
      },
-     "description": "Links straight to members learned of through others.",
-     "x-since": 7
+     "description": "Links straight to members learned of through others."
     },
     "gone": {
      "type": "array",
      "items": {
       "$ref": "#/$defs/Gone"
      },
-     "description": "Members reached lately, not now (not one deactivated here).",
-     "x-since": 13
+     "description": "Members reached lately, not now (not one deactivated here)."
     }
    },
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Info": {
    "type": "object",
@@ -1649,7 +1358,6 @@
       "null"
      ],
      "description": "What a session's program last said to initialize, with every model it can run in it.",
-     "x-since": 2,
      "x-open": true
     },
     "commit": {
@@ -1675,31 +1383,26 @@
      "items": {
       "$ref": "#/$defs/Provider"
      },
-     "description": "This machine's model providers (with base_url).",
-     "x-since": 3
+     "description": "This machine's model providers (with base_url)."
     },
     "mesh": {
      "$ref": "#/$defs/MeshView",
-     "description": "The members it reaches and the links it's made.",
-     "x-since": 3
+     "description": "The members it reaches and the links it's made."
     },
     "notes": {
      "description": "Record's notebooks here, as written last (notes.stamp).",
-     "x-since": 6,
      "x-open": true
     },
     "phone": {
      "type": "boolean",
-     "description": "A phone's host.",
-     "x-since": 18
+     "description": "A phone's host."
     },
     "ops": {
      "type": "array",
      "items": {
       "type": "string"
      },
-     "description": "Given by a host that speaks only part of these lines (a phone's, x-hosts): the ops it takes, and the features (x-features) its sessions take, which a head checks (speaks) instead of its version.",
-     "x-since": 18
+     "description": "Given by a host that speaks only part of these lines (a phone's): the ops it takes, and what its sessions take that came with a version or a program (start's ephemeral; control requests: control, set_permission_mode, set_model), which a head checks (speaks) instead of its version."
     }
    },
    "required": [
@@ -1726,8 +1429,7 @@
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 10
+   "additionalProperties": false
   },
   "BotFields": {
    "type": "object",
@@ -1748,8 +1450,7 @@
    "required": [
     "name"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "WaitTarget": {
    "type": "object",
@@ -1790,15 +1491,13 @@
     },
     "title": {
      "type": "string",
-     "description": "The chat's title.",
-     "x-since": 18
+     "description": "The chat's title."
     }
    },
    "required": [
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 13
+   "additionalProperties": false
   },
   "Routine": {
    "type": "object",
@@ -1860,8 +1559,7 @@
    "required": [
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 12
+   "additionalProperties": false
   },
   "Clock": {
    "type": "object",
@@ -1879,8 +1577,7 @@
      "description": "Seconds from UTC."
     }
    },
-   "additionalProperties": false,
-   "x-since": 12
+   "additionalProperties": false
   },
   "SubagentFile": {
    "type": "object",
@@ -1934,8 +1631,7 @@
      "description": "git ignores it."
     }
    },
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Commit": {
    "type": "object",
@@ -1976,8 +1672,7 @@
      "description": "Its first line."
     }
    },
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Branch": {
    "type": "object",
@@ -2006,8 +1701,7 @@
      "description": "Commits behind it."
     }
    },
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "SignalRef": {
    "type": "object",
@@ -2040,8 +1734,7 @@
      "x-open": true
     }
    },
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Notebook": {
    "type": "object",
@@ -2066,8 +1759,7 @@
      "description": "Its pages."
     }
    },
-   "additionalProperties": false,
-   "x-since": 6
+   "additionalProperties": false
   },
   "PageNow": {
    "type": "object",
@@ -2098,8 +1790,7 @@
      "description": "It can go forward."
     }
    },
-   "additionalProperties": false,
-   "x-since": 14
+   "additionalProperties": false
   },
   "PointerEvent": {
    "type": "object",
@@ -2152,8 +1843,7 @@
    "required": [
     "seq"
    ],
-   "additionalProperties": false,
-   "x-since": 14
+   "additionalProperties": false
   },
   "Tab": {
    "type": "object",
@@ -2188,8 +1878,7 @@
      "x-open": true
     }
    },
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "WatchState": {
    "type": "object",
@@ -2255,20 +1944,17 @@
        "type": "null"
       }
      ],
-     "description": "The tab in front.",
-     "x-since": 14
+     "description": "The tab in front."
     },
     "pointer": {
      "type": "array",
      "items": {
       "$ref": "#/$defs/PointerEvent"
      },
-     "description": "What the Bot's tools last did with the mouse, its last 8, oldest first.",
-     "x-since": 14
+     "description": "What the Bot's tools last did with the mouse, its last 8, oldest first."
     }
    },
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "WatchSay": {
    "type": "object",
@@ -2287,8 +1973,7 @@
      "description": "The pane's height."
     }
    },
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "GoneFolder": {
    "type": "object",
@@ -2388,7 +2073,7 @@
   },
   "Error": {
    "type": "object",
-   "description": "Anything wrong, with the request's req.",
+   "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): those two say nothing more, the same from every host.",
    "x-op": "error",
    "x-kind": "reply",
    "properties": {
@@ -2406,6 +2091,13 @@
     "error": {
      "type": "string",
      "description": "What's wrong."
+    },
+    "code": {
+     "enum": [
+      "unsupported_operation",
+      "invalid_data_type"
+     ],
+     "description": "One of the schema's own refusals."
     },
     "plain": {
      "type": "boolean",
@@ -2731,7 +2423,6 @@
     },
     "spawned_by": {
      "description": "Who started it (a chat's mesh tools).",
-     "x-since": 9,
      "x-open": true
     },
     "system": {
@@ -2780,49 +2471,41 @@
     },
     "ephemeral": {
      "type": "boolean",
-     "description": "A side question's, forked from fork_from (or fresh), keeping nothing, never listed, gone with its last head.",
-     "x-since": 2
+     "description": "A side question's, forked from fork_from (or fresh), keeping nothing, never listed, gone with its last head."
     },
     "adopt": {
      "type": "string",
-     "description": "A conversation claude has here already, by its id, made the host's.",
-     "x-since": 2
+     "description": "A conversation claude has here already, by its id, made the host's."
     },
     "env": {
      "type": "object",
      "additionalProperties": {
       "type": "string"
      },
-     "description": "A head on this machine's environment for the session's agent (kept in memory only).",
-     "x-since": 2
+     "description": "A head on this machine's environment for the session's agent (kept in memory only)."
     },
     "start_key": {
      "type": "string",
-     "description": "An id the client picks, kept and listed, so it can tell whether a start whose answer it lost was taken.",
-     "x-since": 13
+     "description": "An id the client picks, kept and listed, so it can tell whether a start whose answer it lost was taken."
     },
     "app_tools": {
      "type": "array",
      "items": {
       "type": "string"
      },
-     "description": "Names of MCP servers this head runs itself, for an agent here: each relayed back to it over this connection (mcp_open, mcp, mcp_close), allowed without asking.",
-     "x-since": 17
+     "description": "Names of MCP servers this head runs itself, for an agent here: each relayed back to it over this connection (mcp_open, mcp, mcp_close), allowed without asking."
     },
     "grace": {
      "type": "number",
-     "description": "Seconds an ephemeral session waits for its head to come back (GRACE_MAX_S at most; else EPHEMERAL_S).",
-     "x-since": 17
+     "description": "Seconds an ephemeral session waits for its head to come back (GRACE_MAX_S at most; else EPHEMERAL_S)."
     },
     "as": {
      "type": "string",
-     "description": "As input's, for the prompt.",
-     "x-since": 18
+     "description": "As input's, for the prompt."
     },
     "bot": {
      "$ref": "#/$defs/BotFields",
-     "description": "A Bot made of it as it starts (a phone's host takes it; picture left out).",
-     "x-since": 18
+     "description": "A Bot made of it as it starts (a phone's host takes it; picture left out)."
     }
    },
    "required": [
@@ -2892,24 +2575,21 @@
     },
     "app_tools": {
      "type": "boolean",
-     "description": "The session's app_tools (start's) carried to this connection from now.",
-     "x-since": 17
+     "description": "The session's app_tools (start's) carried to this connection from now."
     },
     "always_allow": {
      "type": "array",
      "items": {
       "type": "string"
      },
-     "description": "Tools added to those allowed whenever it asks.",
-     "x-since": 15
+     "description": "Tools added to those allowed whenever it asks."
     },
     "env": {
      "type": "object",
      "additionalProperties": {
       "type": "string"
      },
-     "description": "As start's.",
-     "x-since": 2
+     "description": "As start's."
     }
    },
    "required": [
@@ -3102,8 +2782,7 @@
     },
     "as": {
      "type": "string",
-     "description": "The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders).",
-     "x-since": 18
+     "description": "The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders)."
     }
    },
    "required": [
@@ -3175,8 +2854,7 @@
     "session",
     "id"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "HeldReply": {
    "type": "object",
@@ -3204,8 +2882,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "SendersOp": {
    "type": "object",
@@ -3233,8 +2910,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "SendersReply": {
    "type": "object",
@@ -3273,8 +2949,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 18
+   "additionalProperties": false
   },
   "Stop": {
    "type": "object",
@@ -3433,8 +3108,7 @@
      "items": {
       "type": "string"
      },
-     "description": "These added to them (before 15, tools replaced them).",
-     "x-since": 15
+     "description": "These added to them (before 15, tools replaced them)."
     }
    },
    "required": [
@@ -3874,8 +3548,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "BotSetReply": {
    "type": "object",
@@ -3902,8 +3575,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "BotPicture": {
    "type": "object",
@@ -3931,8 +3603,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "BotPictureReply": {
    "type": "object",
@@ -3968,8 +3639,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "Memory": {
    "type": "object",
@@ -4008,8 +3678,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "MemoryReply": {
    "type": "object",
@@ -4055,8 +3724,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 8
+   "additionalProperties": false
   },
   "MeshTools": {
    "type": "object",
@@ -4088,8 +3756,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 9
+   "additionalProperties": false
   },
   "MeshToolsSet": {
    "type": "object",
@@ -4116,8 +3783,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 9
+   "additionalProperties": false
   },
   "WaitsOnOp": {
    "type": "object",
@@ -4153,8 +3819,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 13
+   "additionalProperties": false
   },
   "WaitsOnReply": {
    "type": "object",
@@ -4182,8 +3847,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 13
+   "additionalProperties": false
   },
   "Routines": {
    "type": "object",
@@ -4220,8 +3884,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 12
+   "additionalProperties": false
   },
   "RoutinesReply": {
    "type": "object",
@@ -4260,8 +3923,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 12
+   "additionalProperties": false
   },
   "RunRoutine": {
    "type": "object",
@@ -4293,8 +3955,7 @@
     "op",
     "session"
    ],
-   "additionalProperties": false,
-   "x-since": 12
+   "additionalProperties": false
   },
   "ReadFile": {
    "type": "object",
@@ -4396,8 +4057,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Dir": {
    "type": "object",
@@ -4439,8 +4099,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Git": {
    "type": "object",
@@ -4495,8 +4154,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "GitReply": {
    "type": "object",
@@ -4615,8 +4273,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "SignalNames": {
    "type": "object",
@@ -4651,8 +4308,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "SignalNamesReply": {
    "type": "object",
@@ -4693,8 +4349,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Feedback": {
    "type": "object",
@@ -4736,8 +4391,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "FeedbackFiled": {
    "type": "object",
@@ -4775,8 +4429,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "FeedbackTarget": {
    "type": "object",
@@ -4803,8 +4456,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "Catalogue": {
    "type": "object",
@@ -4835,8 +4487,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 5
+   "additionalProperties": false
   },
   "CatalogueReply": {
    "type": "object",
@@ -4878,8 +4529,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 5
+   "additionalProperties": false
   },
   "Notes": {
    "type": "object",
@@ -4921,8 +4571,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 6
+   "additionalProperties": false
   },
   "NotesReply": {
    "type": "object",
@@ -4974,8 +4623,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 6
+   "additionalProperties": false
   },
   "Link": {
    "type": "object",
@@ -5002,8 +4650,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Linking": {
    "type": "object",
@@ -5029,8 +4676,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Unlink": {
    "type": "object",
@@ -5061,8 +4707,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Unlinked": {
    "type": "object",
@@ -5089,8 +4734,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Deactivate": {
    "type": "object",
@@ -5121,8 +4765,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 4
+   "additionalProperties": false
   },
   "Activate": {
    "type": "object",
@@ -5153,8 +4796,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 4
+   "additionalProperties": false
   },
   "Deactivated": {
    "type": "object",
@@ -5181,8 +4823,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 4
+   "additionalProperties": false
   },
   "Activated": {
    "type": "object",
@@ -5209,8 +4850,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 4
+   "additionalProperties": false
   },
   "Join": {
    "type": "object",
@@ -5235,15 +4875,13 @@
     },
     "straight": {
      "type": "boolean",
-     "description": "A link straight to a member learned of through others (refused by one that's unlinked it).",
-     "x-since": 7
+     "description": "A link straight to a member learned of through others (refused by one that's unlinked it)."
     }
    },
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Joined": {
    "type": "object",
@@ -5270,8 +4908,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Relay": {
    "type": "object",
@@ -5296,15 +4933,13 @@
     },
     "as": {
      "type": "string",
-     "description": "The id of one of this host's chats whose mesh tools open it: what's sent through it is from that chat.",
-     "x-since": 18
+     "description": "The id of one of this host's chats whose mesh tools open it: what's sent through it is from that chat."
     }
    },
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Relayed": {
    "type": "object",
@@ -5330,8 +4965,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "MeshFrame": {
    "type": "object",
@@ -5354,8 +4988,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Open": {
    "type": "object",
@@ -5385,15 +5018,13 @@
     },
     "sender": {
      "$ref": "#/$defs/Sender",
-     "description": "Who what's sent through it is from (relay's as).",
-     "x-since": 18
+     "description": "Who what's sent through it is from (relay's as)."
     }
    },
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Opened": {
    "type": "object",
@@ -5417,14 +5048,13 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Close": {
    "type": "object",
    "description": "A tunnel closed, from either end; or (agent) the program's stdin closed.",
    "x-op": "close",
-   "x-kind": "frame",
+   "x-kind": "both",
    "properties": {
     "op": {
      "const": "close",
@@ -5475,8 +5105,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Infer": {
    "type": "object",
@@ -5523,8 +5152,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Files": {
    "type": "object",
@@ -5594,8 +5222,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "InferData": {
    "type": "object",
@@ -5623,8 +5250,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "InferEnd": {
    "type": "object",
@@ -5647,8 +5273,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 3
+   "additionalProperties": false
   },
   "Agent": {
    "type": "object",
@@ -5979,8 +5604,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 17
+   "additionalProperties": false
   },
   "McpRelay": {
    "type": "object",
@@ -6090,8 +5714,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 10
+   "additionalProperties": false
   },
   "EmissionReply": {
    "type": "object",
@@ -6119,8 +5742,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 10
+   "additionalProperties": false
   },
   "EmissionWatch": {
    "type": "object",
@@ -6155,8 +5777,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "EmissionWatching": {
    "type": "object",
@@ -6179,8 +5800,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "EmissionFrame": {
    "type": "object",
@@ -6224,8 +5844,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "EmissionWatchEnd": {
    "type": "object",
@@ -6248,8 +5867,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "EmissionWatchSay": {
    "type": "object",
@@ -6276,8 +5894,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 11
+   "additionalProperties": false
   },
   "EmissionServe": {
    "type": "object",
@@ -6319,8 +5936,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 16
+   "additionalProperties": false
   },
   "EmissionServing": {
    "type": "object",
@@ -6351,8 +5967,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 16
+   "additionalProperties": false
   },
   "EmissionUnserved": {
    "type": "object",
@@ -6376,8 +5991,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 16
+   "additionalProperties": false
   },
   "EmissionCall": {
    "type": "object",
@@ -6406,8 +6020,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 16
+   "additionalProperties": false
   },
   "EmissionAnswer": {
    "type": "object",
@@ -6443,8 +6056,7 @@
    "required": [
     "op"
    ],
-   "additionalProperties": false,
-   "x-since": 16
+   "additionalProperties": false
   }
  }
 }

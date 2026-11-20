@@ -412,7 +412,7 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     val pick = HomePrefs.host.value
     val ids = (Mesh.hosts.map { it.id } + Mesh.sessions.keys).distinct()
-        .filter { Mesh.conn(it)?.info == null || offers(it, Since.SUBSCRIBE) }
+        .filter { Mesh.conn(it)?.info == null || offers(it, "subscribe") }
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically) {

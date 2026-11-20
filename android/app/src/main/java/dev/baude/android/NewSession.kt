@@ -38,7 +38,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
-    val up = Mesh.reached(Since.START)
+    val up = Mesh.reached("start")
     var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
         ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
     fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.optString("home")?.ifBlank { null } } ?: "~"

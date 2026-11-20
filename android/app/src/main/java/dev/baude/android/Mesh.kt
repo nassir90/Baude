@@ -40,7 +40,7 @@ data class Contact(val hostId: String, val session: JSONObject) {
 fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
     !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
         m.startsWith("agent/") || m.startsWith("mlx-")) ||
-    hostId != null && Mesh.conn(hostId)?.info?.has("ops") == true && offers(hostId, Since.AlwaysAllow.ADD)
+    hostId != null && Mesh.conn(hostId)?.info?.has("ops") == true && offers(hostId, "always_allow")
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
@@ -349,10 +349,10 @@ object Mesh {
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): JSONObject? = sessions[hostId]?.firstOrNull { it.optString("id") == sid }
 
-    /** Every connection that's up, as a host or a member of the mesh, that takes what's given (offers): (id, label),
-     * your hosts first. */
-    fun reached(takes: Feature? = null): List<Pair<String, String>> = conns.values
-        .filter { it.state == "up" && (takes == null || offers(it.id, takes)) }
+    /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (offers): (id,
+     * label), your hosts first. */
+    fun reached(op: String? = null): List<Pair<String, String>> = conns.values
+        .filter { it.state == "up" && (op == null || offers(it.id, op)) }
         .sortedWith(compareBy({ it.place is Place.Member }, { label(it.id).lowercase() })).map { it.id to label(it.id) }
 
     /** Another connection to where hostId is, for a watch of its own (it doesn't subscribe): started; stop it when
@@ -491,7 +491,7 @@ object Mesh {
         if (always) {
             val all = alwaysAllowed(chat) + ask.tool
             allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.add(ask.tool)
-            val req = if (offers(c.info, Since.AlwaysAllow.ADD)) Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool))
+            val req = if (offers(c.info, "always_allow")) Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool))
             else Msg.AlwaysAllow(session = chat.sid, tools = all.sorted()) // (added to its list; an older host's replaced:
             c.request(req.json()) {}                                       // all that's known here)
         }

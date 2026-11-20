@@ -304,13 +304,14 @@ androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeTokens, BaudeTokens::outputDir) }
 }
 
-/** schema/wire.schema.json, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names, Since's
- * versions (each op's and field's, as Feature), WireConstants, and Msg's classes, one for each message and entity,
- * built with their fields and made JSON (json) or read from it (from). The build fails if the schema's versions don't
- * add up (a version claimed twice, one whose history isn't what's marked with it), as wire.py's import does. */
+/** schema/wire.schema.json, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names,
+ * WireConstants (the wire's version with them), Msg's classes, one for each message and entity, built with their fields
+ * and made JSON (json) or read from it (from), and WireCheck, what's sent and what a host's asked looked at as
+ * wire.py's check and refusal do. The schema itself goes in the app as a resource, for WireCheck's types. */
 abstract class WireSchema : DefaultTask() {
     @get:InputFile abstract val schema: RegularFileProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:OutputDirectory abstract val resourcesDir: DirectoryProperty
 
     private fun plain(v: Any?): Any? = when (v) {
         is Map<*, *> -> v.entries.associateTo(LinkedHashMap<String, Any?>()) { it.key as String to plain(it.value) }
@@ -374,34 +375,7 @@ abstract class WireSchema : DefaultTask() {
         fun props(d: Map<String, Any?>) = map(d["properties"]).mapValues { map(it.value) }
         fun op(d: Map<String, Any?>) = props(d)["op"]?.get("const") as String
 
-        // (every op, entity and field with the version it came with, checked against the history, as wire.py does)
-        val since = LinkedHashMap<String, Int>()
-        for ((name, d) in defs) {
-            val key = if (name in messages) op(d) else name
-            val v = (d["x-since"] as Number?)?.toInt() ?: 1
-            since[key]?.let { if (it != v) throw GradleException("wire schema: $key's lines say versions $it and $v") }
-            since[key] = v
-            for ((f, p) in props(d)) if (f != "op") since["$key.$f"] = maxOf((p["x-since"] as Number?)?.toInt() ?: 1, v)
-        }
-        val history = map(s["x-versions"]).mapValues { map(it.value) }
-        val numbers = history.keys.map { it.toInt() }.sorted()
-        if (numbers != (1..numbers.size).toList()) throw GradleException("wire schema: x-versions isn't 1 to ${numbers.size}")
-        for (v in numbers.drop(1)) {
-            val said = (history["$v"]!!["adds"] as List<String>?).orEmpty().toSet()
-            val have = since.filter { (k, n) -> n == v && !('.' in k && since[k.substringBefore('.')] == v) }.keys
-            if (said != have) throw GradleException("wire schema: version $v's history says it added ${said - have} that " +
-                "don't say it, and not ${have - said} that do: is it claimed twice?")
-        }
-        val version = numbers.last()
-        val features = map(s["x-features"]).mapValues { map(it.value) }
-        val listedBy = features.filterValues { "field" in it }.entries.associate { (n, f) -> f["field"] as String to n }
-        for ((n, f) in features) if (n in since || ("field" in f) == ("since" in f) || "field" in f && f["field"] !in since)
-            throw GradleException("wire schema: x-features' $n is an op, or isn't a field or a version of its own")
-        val hosts = map(s["x-hosts"]).mapValues { (map(it.value)["ops"] as List<*>).map { o -> o as String } }
-        for ((n, ops) in hosts) ops.filter { it !in since && it !in features }.takeIf { it.isNotEmpty() }?.let {
-            throw GradleException("wire schema: x-hosts' $n takes $it, which are neither ops nor features") }
-        since.filterValues { it > version }.keys.takeIf { it.isNotEmpty() }?.let {
-            throw GradleException("wire schema: these came with a version past $version: $it") }
+        val version = (s["x-version"] as Number).toInt()
 
         val out = StringBuilder()
         out.append("package dev.baude.android\n\nimport org.json.JSONArray\nimport org.json.JSONObject\n\n")
@@ -409,38 +383,8 @@ abstract class WireSchema : DefaultTask() {
         out.append("/** The wire's ops. */\nobject Op {\n")
         for (o in messages.map { op(defs[it]!!) }.distinct()) out.append("    const val ${upper(o)} = \"$o\"\n")
         out.append("}\n\n")
-        out.append("/** Something a host takes: from a version on, or, where its hello lists its ops, if it lists it (by listed, " +
-            "the op's name or a feature's). */\n")
-        out.append("class Feature(val key: String, val since: Int, val listed: String)\n\n")
-        fun listed(k: String) = listedBy[k] ?: k.substringBefore('.')
-        out.append("/** The version each op (START) and entity (SESSION) came with, and their fields (Start.EPHEMERAL). */\n")
-        out.append("object Since {\n    const val VERSION = $version\n")
-        val names = HashSet<String>()
-        for ((k, v) in since) if ('.' !in k) {
-            if (!names.add(upper(k))) throw GradleException("wire schema: two of its names are ${upper(k)} in Kotlin")
-            out.append("    val ${upper(k)} = Feature(\"$k\", $v, \"${listed(k)}\")\n")
-        }
-        for ((n, f) in features) {
-            if (!names.add(upper(n))) throw GradleException("wire schema: two of its names are ${upper(n)} in Kotlin")
-            val v = (f["since"] as Number?)?.toInt() ?: since[f["field"] as String]!!
-            out.append(doc(f["description"], "    "))
-            out.append("    val ${upper(n)} = Feature(\"${f["field"] ?: n}\", $v, \"$n\")\n")
-        }
-        for (owner in since.keys.filter { '.' !in it }) {
-            val obj = owner.split("_").joinToString("") { w -> w.replaceFirstChar { it.uppercase() } }
-            if (!names.add(obj)) throw GradleException("wire schema: two of its names are $obj in Kotlin")
-            out.append("\n    object $obj {\n")
-            for ((k, v) in since) if (k.substringBefore('.') == owner && '.' in k)
-                out.append("        val ${upper(k.substringAfter('.'))} = Feature(\"$k\", $v, \"${listed(k)}\")\n")
-            out.append("    }\n")
-        }
-        out.append("}\n\n")
-        out.append("/** Hosts that speak only part of the wire: what each takes, as its hello lists its ops. */\nobject WireHosts {\n")
-        for ((n, ops) in hosts) out.append("    val ${upper(n)} = listOf(${ops.joinToString { "\"$it\"" }})\n")
-        out.append("    /** What a host may take that isn't an op (x-features), by the name its ops list it by. */\n")
-        out.append("    val FEATURES = setOf(${features.keys.joinToString { "\"$it\"" }})\n")
-        out.append("}\n\n")
-        out.append("/** The protocol's constants. */\nobject WireConstants {\n")
+        out.append("/** The protocol's constants, and the wire's version (as a host's hello says it). */\nobject WireConstants {\n")
+        out.append("    const val VERSION = $version\n")
         for ((k, c) in map(s["x-constants"])) {
             val v = map(c)["value"]
             out.append(doc("${map(c)["description"]} (${map(c)["unit"]})", "    "))
@@ -476,6 +420,11 @@ abstract class WireSchema : DefaultTask() {
             out.append("        \"$o\" to ${shape(fields, inner)},\n")
         }
         out.append("    )\n\n")
+        val requests = messages.filter { defs[it]!!["x-kind"] in setOf("request", "both") }
+        out.append("    /** The ops a host takes, and their request lines. */\n")
+        out.append("    val TAKEN = setOf(${requests.map { op(defs[it]!!) }.distinct().joinToString { "\"$it\"" }})\n")
+        out.append("    private val REQUESTS = mapOf(${requests.groupBy { op(defs[it]!!) }.entries.joinToString {
+            "\"${it.key}\" to listOf(${it.value.joinToString { n -> "\"$n\"" }})" }})\n\n")
         out.append("""    fun problem(msg: JSONObject): String? {
         val op = msg.optString("op")
         val shape = OPS[op] ?: return "no op '${'$'}op' in the schema"
@@ -499,6 +448,86 @@ abstract class WireSchema : DefaultTask() {
         is JSONObject -> within(at, ENTITIES.getValue(name), v)
         is JSONArray -> (0 until v.length()).firstNotNullOfOrNull { entity("${'$'}at[${'$'}it]", name, v.opt(it)) }
         else -> null
+    }
+
+    const val UNSUPPORTED = "unsupported_operation" // (the schema's own refusals: their codes, and what each says)
+    const val INVALID = "invalid_data_type"
+    private val SAID = mapOf(UNSUPPORTED to "unsupported operation", INVALID to "invalid data type")
+
+    /** One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host. */
+    fun refused(code: String, req: Any?): JSONObject = JSONObject().put("op", Op.ERROR)
+        .apply { if (req != null && req != JSONObject.NULL) put("req", req) }.put("error", SAID.getValue(code)).put("code", code)
+
+    /** What a request a host takes (one of takes' ops, as a request's line has it) is answered with if it can't be:
+     * refused(UNSUPPORTED) for an op it doesn't take, refused(INVALID) for fields not as the schema has them; null for
+     * one it takes as it is (wire.refusal). */
+    fun refusal(msg: JSONObject, takes: Set<String> = TAKEN): JSONObject? {
+        val op = msg.optString("op")
+        if (op !in takes) {
+            android.util.Log.w("wire", "refused: no op '" + op + "' here")
+            return refused(UNSUPPORTED, msg.opt("req"))
+        }
+        val bad = invalid(msg) ?: return null
+        android.util.Log.w("wire", "refused: " + bad)
+        return refused(INVALID, msg.opt("req"))
+    }
+
+    private val schema: JSONObject by lazy {
+        JSONObject(WireCheck::class.java.getResourceAsStream("/wire.schema.json")!!.bufferedReader().use { it.readText() })
+    }
+    private val defs: JSONObject by lazy { schema.getJSONObject("\${'$'}defs") }
+
+    /** What of a request isn't as its op's request lines have it, types too; null if one of them fits. */
+    fun invalid(msg: JSONObject): String? {
+        var first: String? = null
+        for (name in REQUESTS[msg.optString("op")].orEmpty()) {
+            val bad = valid(defs.getJSONObject(name), msg, msg.optString("op")) ?: return null
+            if (first == null) first = bad
+        }
+        return first ?: "no request " + msg.optString("op")
+    }
+
+    private fun valid(s: JSONObject, v: Any?, at: String): String? {
+        val ref = s.optString("\${'$'}ref")
+        if (ref.isNotEmpty()) return valid(defs.getJSONObject(ref.substringAfterLast('/')), v, at)
+        s.optJSONArray("anyOf")?.let { a ->
+            return if ((0 until a.length()).any { valid(a.getJSONObject(it), v, at) == null }) null
+            else at + ": none of what it may be"
+        }
+        if (s.has("const") && v != s.get("const")) return at + ": not " + s.get("const")
+        s.optJSONArray("enum")?.let { e -> if ((0 until e.length()).none { e.get(it) == v }) return at + ": not one of " + e }
+        if (s.has("type")) {
+            val kinds = s.optJSONArray("type")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(s.getString("type"))
+            if (kinds.none { fits(it, v) }) return at + ": not " + kinds.joinToString("/")
+        }
+        if (s.optBoolean("x-open")) return null
+        if (v is JSONObject) {
+            val props = s.optJSONObject("properties")
+            if (props != null) {
+                s.optJSONArray("required")?.let { r ->
+                    for (i in 0 until r.length()) if (!v.has(r.getString(i))) return at + "." + r.getString(i) + ": missing" }
+                for (k in v.keys()) {
+                    val p = props.optJSONObject(k)
+                    if (p != null) valid(p, v.opt(k), at + "." + k)?.let { return it }
+                    else if (s.opt("additionalProperties") == false) return at + "." + k + ": no such field"
+                }
+            } else s.optJSONObject("additionalProperties")?.let { each ->
+                for (k in v.keys()) valid(each, v.opt(k), at + "[" + k + "]")?.let { return it } }
+        }
+        if (v is JSONArray) s.optJSONObject("items")?.let { each ->
+            for (i in 0 until v.length()) valid(each, v.opt(i), at + "[" + i + "]")?.let { return it } }
+        return null
+    }
+
+    private fun fits(kind: String, v: Any?) = when (kind) {
+        "string" -> v is String
+        "integer" -> v is Int || v is Long || v is java.math.BigInteger
+        "number" -> v is Number
+        "boolean" -> v is Boolean
+        "object" -> v is JSONObject
+        "array" -> v is JSONArray
+        "null" -> v == null || v == JSONObject.NULL
+        else -> true
     }
 }
 
@@ -529,16 +558,22 @@ abstract class WireSchema : DefaultTask() {
         val dir = outputDir.get().asFile.resolve("dev/baude/android")
         dir.mkdirs()
         dir.resolve("WireSchema.kt").writeText(out.toString())
+        resourcesDir.get().asFile.mkdirs()
+        schema.get().asFile.copyTo(resourcesDir.get().asFile.resolve("wire.schema.json"), overwrite = true)
     }
 }
 
 val wireSchema = tasks.register<WireSchema>("wireSchema") {
     schema.set(rootProject.layout.projectDirectory.file("../schema/wire.schema.json"))
     outputDir.set(layout.buildDirectory.dir("generated/wireSchema"))
+    resourcesDir.set(layout.buildDirectory.dir("generated/wireSchemaResources"))
 }
 
 androidComponents {
-    onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(wireSchema, WireSchema::outputDir) }
+    onVariants { variant ->
+        variant.sources.java?.addGeneratedSourceDirectory(wireSchema, WireSchema::outputDir)
+        variant.sources.resources?.addGeneratedSourceDirectory(wireSchema, WireSchema::resourcesDir)
+    }
 }
 
 dependencies {

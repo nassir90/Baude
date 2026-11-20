@@ -60,8 +60,7 @@ SCHEMAS = {
 }
 
 
-SAYS = wire.since("senders")  # (a host from this version on says who a message is from itself, from input's as:
-# older ones, said here)
+SAYS = 18  # (a host from this version on says who a message is from itself, from input's as: older ones, said here)
 
 
 def _channel(where, timeout=10, as_=None):
@@ -197,7 +196,7 @@ class Mesh:
             busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
             offset = self.request(where, {"op": "transcript", "session": session, "offset": 0, "limit": 1})["size"] \
                 if wait else 0  # (its chat as far as it's written before this: what's said to it is after)
-            sent = said_to(session, text, self.me, None if wire.speaks(info, "senders") else self.sender())
+            sent = said_to(session, text, self.me, None if wire.speaks(info, "senders", SAYS) else self.sender())
             ch.send(sent)
         except BaseException:
             ch.close()
@@ -265,7 +264,7 @@ class Mesh:
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
                         req, skip, said = again or said_to(session, text, self.me, None if wire.speaks(
-                            ch.info, "senders") else self.sender()), 0, []
+                            ch.info, "senders", SAYS) else self.sender()), 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -370,13 +369,12 @@ class Mesh:
         while True:
             try:
                 ch, info = self.again(where, end)
-                asked = params if wire.speaks(info, "senders") or not self.me else \
+                asked = params if wire.speaks(info, "senders", SAYS) or not self.me else \
                     {**params, "prompt": wire.said_by(self.sender(), params["prompt"])}  # (an older host: said here)
             except OSError as e:
                 raise OSError(f"{a.get('host') or 'this host'} wasn't reached within {BACK_S} s: {e}") from None
             if dropped:
-                if not wire.speaks(info, "start.start_key"):  # (it lists no start_key: whether it took it can't be
-                    # told)
+                if not wire.speaks(info, "start", 13):  # (it lists no start_key: whether it took it can't be told)
                     ch.close()
                     raise ValueError("the host went before it answered")
                 if (sid := self._started(where, params["start_key"])) is not None:  # (taken before it went)

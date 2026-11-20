@@ -18,13 +18,14 @@ import kotlin.concurrent.thread
 const val PING_MS = WireConstants.PING_S * 1000L     // (each end says something at least this often)
 const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the other end's taken for gone)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
+const val MIN_VERSION = 8     // (wire's version 8: Bots)
 const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
-/** msg as it may go: one the wire's schema hasn't (an op, a field: WireCheck) goes as an error, for its request, in
- * its place, said in the log, as wire.py's Channel.send has it. */
+/** msg as it may go: one the wire's schema hasn't (an op, a field: WireCheck) goes as its INVALID error, for its
+ * request, in its place, said in the log, as wire.py's Channel.send has it. */
 fun checked(msg: JSONObject): JSONObject {
     val bad = WireCheck.problem(msg) ?: return msg
     android.util.Log.w("wire", "not sent: $bad")
-    return Msg.Error(req = msg.opt("req") as? Number, error = "not sent: $bad").json()
+    return WireCheck.refused(WireCheck.INVALID, msg.opt("req"))
 }
 
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
@@ -241,7 +242,7 @@ open class Connection(
                         said = reply.optString("error", "the host said no")
                         end()
                     }
-                    !offers(server, Since.BOT) -> {
+                    !offers(server, "bot", MIN_VERSION) -> {
                         said = "this host's Baude is too old for Bots: update it"
                         end()
                     }

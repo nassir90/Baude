@@ -91,7 +91,8 @@ object Meta {
         val lines = ArrayList<String>()
         lines.add("Baude for Android · ${Mesh.hosts.size} host(s) added")
         lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }}")
-        for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") })) {
+        for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") } +
+                listOf("phone" to Mesh.label("phone")))) { // (this phone's own agents too)
             val conn = Mesh.conn(id)
             lines.add("host $label: ${conn?.state ?: "not connected"}")
             for (s in Mesh.sessions[id].orEmpty().filter { !it.optBoolean("draft") }.take(60)) {

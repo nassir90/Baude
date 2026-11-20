@@ -30,16 +30,17 @@ data class Contact(val hostId: String, val session: JSONObject) {
     val said: Double get() = session.optDouble("said", session.optDouble("updated", 0.0))
     val state: String get() = session.optString("state", "stopped")
     val asking: Boolean get() = (session.optJSONArray("asks")?.length() ?: 0) > 0
-    // (this phone's own agents: as claude's)
-    val alwaysOffered: Boolean get() = hostId == "phone" || alwaysOffered(session.optString("model"))
+    val alwaysOffered: Boolean get() = alwaysOffered(session.optString("model"), hostId)
     val pictureKey: String get() = "$hostId/$id/${session.optJSONObject("bot")?.opt("picture")}"
 }
 
-/** Whether "always allow" is offered for what a chat asks, as Baude offers it: for Claude Code's models only
- * (another program's asks each call: models.model_program). */
-fun alwaysOffered(m: String?): Boolean = m == null ||
+/** Whether "always allow" is offered for what a chat asks, as Baude offers it: for Claude Code's models (another
+ * program's asks each call: models.model_program); or, whatever its program, where its host lists the ops it takes
+ * and always_allow's one of them (a phone's agents, which keep it as claude's). */
+fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
     !(m.startsWith("codex/") || m == "apple" || m.startsWith("ollama/") || m.startsWith("openai/") ||
-        m.startsWith("agent/") || m.startsWith("mlx-"))
+        m.startsWith("agent/") || m.startsWith("mlx-")) ||
+    hostId != null && Mesh.conn(hostId)?.info?.has("ops") == true && offers(hostId, "always_allow")
 
 /** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a

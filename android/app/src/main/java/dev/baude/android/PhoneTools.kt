@@ -117,7 +117,7 @@ object PhoneTools {
         "mcp__mesh__hosts" -> hosts()
         "mcp__mesh__chats" -> chats(input)
         "mcp__mesh__read_chat" -> readChat(input)
-        "mcp__mesh__message_chat" -> message(input)
+        "mcp__mesh__message_chat" -> message(s, input)
         else -> "No such tool: $name" to true
     }
 
@@ -269,14 +269,20 @@ object PhoneTools {
         return lines.joinToString("\n\n") { (if (it.kind == "you") "User: " else "It: ") + it.text }.take(RESULT_MAX) to false
     }
 
-    private fun message(input: JSONObject): Pair<String, Boolean> {
+    /** A message to a chat, from this agent: to this phone's own, with input's as; to another host's, on a tunnel
+     * opened as from this agent, so its host stamps it so, as a desktop agent's message is (else, with no link to
+     * it, on this phone's connection, from its user). */
+    private fun message(s: PhoneSession, input: JSONObject): Pair<String, Boolean> {
         val sid = input.optString("session")
         val p = owner(sid, input.optString("host")) ?: return "No chat $sid in reach" to true
         val text = input.optString("text").ifBlank { return "Nothing to say" to true }
         val before = sessionsOf(p).firstOrNull { it.optString("id") == sid }?.optLong("size", 0) ?: 0
         val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", text))))
-        val r = ask(p.conn, JSONObject().put("op", "input").put("session", sid).put("msg", msg))
+        val req = JSONObject().put("op", "input").put("session", sid).put("msg", msg)
+        val r = if (p.conn.place is Place.Phone) ask(p.conn, req.put("as", s.id))
+            else PhoneLink.request(p.id, PhoneHost.chatSender(s.id), req).takeIf { !it.optBoolean("unreached") }
+                ?: ask(p.conn, req)
         if (r.optString("op") == "error") return "${p.name} didn't take it: ${r.optString("error")}" to true
         if (!input.optBoolean("wait", true)) return "Sent to ${p.name}" to false
         val until = System.currentTimeMillis() + 1000L * input.optInt("timeout_s", WAIT_S).coerceIn(5, WAIT_MAX_S)

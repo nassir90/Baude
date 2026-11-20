@@ -231,6 +231,54 @@ object PhoneLink {
         }
     }
 
+    /** One request to a member's host process on a tunnel of its own, opened from here as from sender (a chat of
+     * this phone's: what's sent through it is from that chat, as the far host stamps it: wire.py's Senders): its reply,
+     * or an error one if there's no way to it (no link of the phone's reaches it), or it didn't answer. */
+    fun request(to: String, sender: JSONObject?, msg: JSONObject, ms: Long = 30_000): JSONObject {
+        fun no(why: String) = JSONObject().put("op", "error").put("error", why).put("unreached", true)
+        val link = route(to) ?: return no("no link of this phone's reaches it")
+        val n = link.next.getAndIncrement()
+        val end = Asking()
+        link.outs[n] = end
+        link.wire.send(JSONObject().put("op", "open").put("t", n).put("to", to).put("ttl", TTL).put("from", PhoneHost.id)
+            .apply { if (sender != null) put("sender", sender) })
+        try {
+            val error = try {
+                end.ready.get(OPEN_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {
+                "it didn't answer"
+            }
+            if (error != null) return no(error)
+            link.wire.send(JSONObject().put("op", "data").put("t", n).put("msg", JSONObject(msg.toString()).put("req", 1)))
+            return try {
+                end.reply.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {
+                JSONObject().put("op", "error").put("error", "it didn't answer")
+            }
+        } finally {
+            if (link.outs.remove(n) != null) link.wire.send(JSONObject().put("op", "close").put("t", n))
+        }
+    }
+
+    /** A tunnel's end opened from here for one request: ready once it's open (null) or closed (why), reply its
+     * answer. */
+    private class Asking : End {
+        val ready = java.util.concurrent.CompletableFuture<String?>()
+        val reply = java.util.concurrent.CompletableFuture<JSONObject>()
+        override fun deliver(msg: JSONObject) {
+            if (msg.optString("op") != "ping") reply.complete(msg)
+        }
+        override fun opened() {
+            ready.complete(null)
+        }
+        override fun closed(error: String?) {
+            ready.complete(error ?: "the tunnel was closed")
+            reply.complete(JSONObject().put("op", "error").put("error", error ?: "the tunnel was closed"))
+        }
+    }
+
+    private const val TTL = 16 // (mesh.TTL: hosts a tunnel's passed through at most)
+
     /** A member's name, as its record says it (its id's first 8 if there's none). */
     fun nameOf(member: String): String = records[member]?.first?.optJSONObject("info")?.optString("name")?.ifBlank { null }
         ?: Mesh.states.values.toList().firstOrNull { it.info?.optString("id") == member }?.info?.optString("name")?.ifBlank { null }

@@ -14708,7 +14708,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if reply.get("op") != "started":  # (the host's to fork: taken up, the chat here still only viewed)
                 self.note(f"the side question couldn't be asked: {reply.get('error')}")
                 return None, False
-        if r is None or not baudelib.wire.speaks(r.info, "ephemeral", 2):
+        if r is None or not baudelib.wire.speaks(r.info, "ephemeral", 2):  # (a phone's lists it, its ops)
             self.note("Daemon is older than Baude: restart it to ask a side question" if r is not None and r.mine else
                       f"{remote_name(r) if r else THIS_MACHINE}'s host process can't ask a side question" +
                       ("" if r is not None and isinstance(r.info.get("ops"), list) else ": restart it"))

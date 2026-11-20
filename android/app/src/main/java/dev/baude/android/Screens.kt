@@ -96,10 +96,13 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         }
     }
     val list = rememberLazyListState()
-    // (to the end: what it said last, or what it asks, a tall one's foot too; what it's writing, as it grows)
+    // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
+    // as it grows; scrolled up to read, left where it is)
+    var follow by remember(chat) { mutableStateOf(true) }
+    LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
     LaunchedEffect(chat.lines.size, chat.asks.size, chat.streaming.value.length / 120) {
         val n = list.layoutInfo.totalItemsCount
-        if (n > 0) {
+        if (n > 0 && follow) {
             list.animateScrollToItem(n - 1)
             list.scrollBy(1e6f)
         }
@@ -112,7 +115,8 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
             if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
             items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
-                Asked(chat, ask, at == "phone" || alwaysOffered(session?.optString("model")), name)
+                Asked(chat, ask, alwaysOffered(session?.optString("model"), at),
+                    if (session?.optJSONObject("bot") != null) name else "Claude") // (a Bot's question: its name's)
             }
             val held = session?.optJSONArray("held").list().filter { it.optString("id") !in chat.holding }
             items(held, key = { "held:" + it.optString("id") }) { h -> Held(chat, h, working) }

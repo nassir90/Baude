@@ -58,9 +58,10 @@ object PhoneHost {
      * wire.speaks). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
-        "read_file", "catalogue", "senders", "control", "set_permission_mode", "set_model")
-    private val CONTROLS = setOf("control", "set_permission_mode", "set_model") // (OPS' that are control requests, not
-    // ops: control, any a claude takes, answered as a host answers them for an agent between turns)
+        "read_file", "catalogue", "list_dir", "senders", "ephemeral", "control", "set_permission_mode", "set_model")
+    private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
+    // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
+    // start's ephemeral)
     lateinit var ctx: Context
     @Volatile var id = ""
     @Volatile var name = "Phone"
@@ -83,6 +84,8 @@ object PhoneHost {
             name = deviceName()
             root = File(ctx.filesDir, "phone")
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
+            File(root, "ephemeral").deleteRecursively() // (side questions from before: gone with the app, as with their heads)
+            File(root, "ephemeral").mkdirs()
             for (f in File(root, "sessions").listFiles().orEmpty().filter { it.name.endsWith(".json") }) {
                 try {
                     val meta = JSONObject(f.readText())
@@ -188,12 +191,27 @@ object PhoneHost {
     }
 
     private fun gone(head: Head) {
-        synchronized(lock) {
+        val left = synchronized(lock) {
             heads.remove(head)
             for (s in sessions.values) {
                 s.viewers.remove(head)
                 s.live.remove(head)
             }
+            sessions.values.filter { it.meta.optBoolean("ephemeral") && it.viewers.isEmpty() }
+        }
+        left.forEach { drop(it) }
+    }
+
+    /** A side question (ephemeral) whose last head's gone: stopped, and gone with what it kept, as a host drops one. */
+    private fun drop(s: PhoneSession) {
+        stopTurn(s)
+        synchronized(lock) {
+            if (sessions[s.id] !== s) return
+            s.deleted = true
+            sessions.remove(s.id)
+            transcript(s).delete()
+            sendersFile(s).delete()
+            if (s.meta.optBoolean("own_folder")) s.folder.deleteRecursively()
         }
     }
 
@@ -222,6 +240,7 @@ object PhoneHost {
             "${(OPS - CONTROLS).joinToString()})")
         if (op == "start") return start(head, msg, ::reply)
         if (op == "read_file") return reply("file", *readFile(msg))
+        if (op == "list_dir") return reply("dir", *listDir(if (msg.isNull("path")) "" else msg.optString("path")))
         if (op == "catalogue") return reply("catalogue", *catalogue(if (msg.isNull("cwd")) "" else msg.optString("cwd")))
         val s = synchronized(lock) { sessions[msg.optString("session")] }
             ?: return reply("error", "error" to "no session ${msg.optString("session")}")
@@ -235,9 +254,13 @@ object PhoneHost {
                 }
                 reply("attached", "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()))
             }
-            "detach" -> synchronized(lock) {
-                s.viewers.remove(head)
-                s.live.remove(head)
+            "detach" -> {
+                val last = synchronized(lock) {
+                    s.viewers.remove(head)
+                    s.live.remove(head)
+                    s.meta.optBoolean("ephemeral") && s.viewers.isEmpty()
+                }
+                if (last) drop(s)
             }
             "input" -> {
                 input(head, s, msg.optJSONObject("msg") ?: JSONObject(), sentBy(head, msg))
@@ -250,8 +273,8 @@ object PhoneHost {
             "transcript" -> reply("transcript", "session" to s.id, *lines(transcript(s), msg.optLong("offset", 0),
                 msg.optInt("limit", 0)))
             "subagents" -> reply("subagents", "session" to s.id, "files" to JSONArray(), "more" to false)
-            "senders" -> reply("senders", "session" to s.id, "senders" to JSONObject(senders(s).toString()),
-                "rev" to s.meta.optInt("senders"))
+            "senders" -> senders(s)?.let { reply("senders", "session" to s.id, "senders" to JSONObject(it.toString()),
+                "rev" to s.meta.optInt("senders")) } ?: reply("error", "error" to "its sender store couldn't be read")
             "rename" -> {
                 live(s) {
                     s.meta.put("title", (if (msg.isNull("title")) "" else msg.optString("title")).trim().take(200).ifBlank { null } ?: JSONObject.NULL)
@@ -328,21 +351,34 @@ object PhoneHost {
      * (Inference's value; none given, the first of them, as a host runs its own default). ask_timeout, ask_default and
      * spawned_by as a host's start has them (a subagent: Auto at most, meshtools.SUBAGENT_MODES). */
     private fun start(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
-        val refused = listOf("fork_from", "ephemeral", "adopt").firstOrNull { msg.has(it) && !msg.isNull(it) && msg.opt(it) != false }
-        if (refused != null) return reply("error", arrayOf("error" to "an agent on $name can't be started so ($refused)", "plain" to true))
+        if (msg.has("adopt") && !msg.isNull("adopt"))
+            return reply("error", arrayOf("error" to "an agent on $name can't take up a conversation it doesn't have", "plain" to true))
         if (msg.has("ask_default") && !msg.isNull("ask_default") && msg.optString("ask_default") !in setOf("deny", "allow"))
             return reply("error", arrayOf("error" to "ask_default is deny or allow"))
         fun str(k: String) = if (msg.isNull(k)) "" else msg.optString(k) // (JSON's null: none given, not "null")
-        val served = (if (str("model").isBlank()) Inference.found().firstOrNull() else Inference.of(str("model")))
+        // (a fork: a copy of one of its agents' conversations, under an id of its own; ephemeral, a side question's,
+        // in Plan, kept nowhere and gone with its last head)
+        val ephemeral = msg.optBoolean("ephemeral")
+        val src = str("fork_from").takeIf(::isId)?.let { f ->
+            session(f) ?: return reply("error", arrayOf("error" to "no conversation here to fork: $f"))
+        }
+        val served = (if (str("model").isNotBlank()) Inference.of(str("model"))
+            else src?.meta?.optJSONObject("infer")?.let { Served.of(it) } ?: Inference.found().firstOrNull())
             ?: return reply("error", arrayOf("error" to "$name can't run ${str("model").ifBlank { "a model" }}: its agents " +
                 "run the models the mesh's machines serve over an API, and none does now", "plain" to true))
         val sid = UUID.randomUUID().toString()
-        val botName = msg.optJSONObject("bot")?.optString("name")?.trim()?.take(64)?.ifBlank { null }
-        val slug = (botName ?: "chat").lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(24).ifBlank { "chat" }
-        val folder = File(root, "agents/$slug-${sid.take(8)}").apply { mkdirs() } // (named as you'd say it: Baude
-        // lists a folder's chats under its name)
+        val botName = msg.optJSONObject("bot")?.optString("name")?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
+        val slug = (botName ?: if (src != null) "fork" else "chat").lowercase().replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-').take(24).ifBlank { "chat" }
+        val folder = when { // (named as you'd say it: Baude lists a folder's chats under its name)
+            ephemeral && src != null -> src.folder // (a side question looks where its chat is)
+            ephemeral -> File(root, "ephemeral/$sid-files").apply { mkdirs() }
+            else -> File(root, "agents/$slug-${sid.take(8)}").apply {
+                if (src != null) src.folder.copyRecursively(this, overwrite = true) else mkdirs() // (a fork: its own copy)
+            }
+        }
         val spawnedBy = str("spawned_by").takeIf(::isId)
-        val asked = str("mode").takeIf { m -> MODES.any { it.first == m } } ?: "default"
+        val asked = if (ephemeral) "plan" else str("mode").takeIf { m -> MODES.any { it.first == m } } ?: "default"
         val prompt = str("prompt")
         val meta = JSONObject().put("id", sid).put("cwd", folder.path).put("model", served.value)
             .put("infer", served.json()).put("title", str("title").trim().ifBlank { null } ?: JSONObject.NULL)
@@ -354,9 +390,24 @@ object PhoneHost {
             .put("ask_default", if (str("ask_default") == "allow") "allow" else "deny")
             .put("bot", if (botName != null) JSONObject().put("name", botName).put("since", now()) else JSONObject.NULL)
             .put("start_key", str("start_key").takeIf(::isId) ?: JSONObject.NULL)
+            .put("fork_from", src?.id ?: JSONObject.NULL).put("ephemeral", ephemeral)
+            .put("own_folder", !(ephemeral && src != null))
+        if (src != null && !ephemeral) meta.put("title", str("title").trim().ifBlank { null }
+            ?: src.meta.opt("title") ?: JSONObject.NULL)
         val s = PhoneSession(meta)
-        if (botName != null) File(folder, MEMORY).writeText("")
+        if (botName != null && !File(folder, MEMORY).exists()) File(folder, MEMORY).writeText("")
         synchronized(lock) {
+            if (src != null) { // (its conversation, and who its messages from others are from, copied)
+                val f = transcript(src)
+                if (f.exists()) transcript(s).writeText(f.readLines().joinToString("") { row ->
+                    (try { JSONObject(row).put("sessionId", sid).toString() } catch (_: Exception) { row }) + "\n"
+                })
+                senders(src)?.let { have ->
+                    s.senders = JSONObject(have.toString())
+                    if (have.length() > 0) sendersFile(s).writeText(have.toString())
+                }
+                s.meta.put("senders", src.meta.optInt("senders")).put("prompts", src.meta.optInt("prompts"))
+            }
             sessions[sid] = s
             save(s)
             if (msg.optBoolean("attach")) {
@@ -364,7 +415,7 @@ object PhoneHost {
                 s.live.add(head)
             }
         }
-        reply("started", arrayOf("session" to listing(s), "forked" to false))
+        reply("started", arrayOf("session" to listing(s), "forked" to (src != null)))
         if (prompt.isNotBlank()) input(head, s, JSONObject().put("type", "user").put("message", textMessage(prompt)),
             sentBy(head, msg))
         changed()
@@ -623,7 +674,7 @@ object PhoneHost {
         changed()
     }
 
-    fun transcript(s: PhoneSession) = File(root, "transcripts/${s.id}.jsonl")
+    fun transcript(s: PhoneSession) = File(root, (if (s.meta.optBoolean("ephemeral")) "ephemeral/" else "transcripts/") + "${s.id}.jsonl")
 
     /** (lock held) A record of its transcript, as Claude Code writes one (what heads read), added to the conversation
      * kept for its model too: its uuid; null for an agent deleted. */
@@ -672,7 +723,7 @@ object PhoneHost {
     }
 
     private fun save(s: PhoneSession) {
-        if (s.deleted) return
+        if (s.deleted || s.meta.optBoolean("ephemeral")) return // (a side question's: kept nowhere)
         val f = File(root, "sessions/${s.id}.json")
         val tmp = File(f.path + ".new")
         tmp.writeText(s.meta.toString())
@@ -740,7 +791,8 @@ object PhoneHost {
     }
 
     private fun listing(archived: Boolean): JSONArray = synchronized(lock) {
-        JSONArray(sessions.values.filter { archived || !it.meta.optBoolean("archived") }.map { listing(it) }
+        JSONArray(sessions.values.filter { (archived || !it.meta.optBoolean("archived")) && !it.meta.optBoolean("ephemeral") }
+            .map { listing(it) }
             .sortedByDescending { it.optDouble("said") })
     }
 
@@ -766,21 +818,28 @@ object PhoneHost {
 
     // ---- who a message is from, if not its user (wire.py's Senders)
 
-    private fun sendersFile(s: PhoneSession) = File(root, "senders/${s.id}.json")
+    private fun sendersFile(s: PhoneSession) = if (s.meta.optBoolean("ephemeral")) File(root, "ephemeral/${s.id}.senders.json")
+        else File(root, "senders/${s.id}.json")
 
-    /** (lock held, or not: read once) Its sender store: {uuid: sender}. */
-    private fun senders(s: PhoneSession): JSONObject = synchronized(lock) {
-        s.senders ?: (try {
-            JSONObject(sendersFile(s).readText())
-        } catch (_: Exception) {
-            JSONObject()
-        }).also { s.senders = it }
+    /** Its sender store, {uuid: sender} (read the first time it's wanted); null if it's there and can't be read (read
+     * again the next time, and never written over meanwhile), as server.senders has it. */
+    private fun senders(s: PhoneSession): JSONObject? = synchronized(lock) {
+        s.senders ?: run {
+            val f = sendersFile(s)
+            if (!f.exists()) return@run JSONObject().also { s.senders = it }
+            try {
+                JSONObject(f.readText()).also { s.senders = it }
+            } catch (_: Exception) {
+                android.util.Log.w("baude", "${s.id}: its sender store couldn't be read")
+                null
+            }
+        }
     }
 
     /** (lock held) A message passed to an agent from another than its user: who it's from kept by its uuid, the
      * store's revision moved on. */
     private fun stamp(s: PhoneSession, uuid: String, sender: JSONObject) {
-        val have = senders(s).put(uuid, sender)
+        val have = senders(s)?.put(uuid, sender) ?: return // (unreadable: never written over)
         sendersFile(s).writeText(have.toString())
         s.meta.put("senders", s.meta.optInt("senders") + 1)
         save(s)
@@ -800,7 +859,7 @@ object PhoneHost {
     }
 
     /** One of this phone's agents as a message from it is from: a Bot by its name, else by its title. */
-    private fun chatSender(sid: String): JSONObject? {
+    fun chatSender(sid: String): JSONObject? {
         val s = session(sid) ?: return null
         val bot = s.meta.optJSONObject("bot")?.optString("name")
         return cleanSender(JSONObject().put("kind", if (bot != null) "bot" else "chat")
@@ -859,6 +918,23 @@ object PhoneHost {
         val limit = msg.optInt("limit", FILE_LIMIT).coerceIn(1, FILE_LIMIT)
         val data = f.inputStream().use { it.readNBytes(limit + 1) }
         return arrayOf("path" to path, "size" to f.length(), "data" to Base64.getEncoder().encodeToString(data))
+    }
+
+    /** A folder in one of its agents' folders, as a host's list_dir has it: {path, entries: [{name, dir, size?,
+     * ignored}], more}, folders first. */
+    private fun listDir(path: String): Array<Pair<String, Any?>> {
+        val dir = File(path).takeIf { path.startsWith("/") }?.canonicalFile
+        val ok = dir != null && synchronized(lock) {
+            sessions.values.any { dir == it.folder.canonicalFile || dir.path.startsWith(it.folder.canonicalPath + File.separator) }
+        }
+        if (!ok) return arrayOf("path" to path, "entries" to JSONArray(), "error" to "not in one of its sessions' folders")
+        val all = dir!!.listFiles().orEmpty().filter { it.name != ".git" }
+            .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        val entries = JSONArray(all.take(DIR_LIMIT).map { f ->
+            JSONObject().put("name", f.name).put("dir", f.isDirectory).put("ignored", false)
+                .apply { if (!f.isDirectory) put("size", f.length()) }
+        })
+        return arrayOf("path" to path, "entries" to entries, "more" to (all.size > DIR_LIMIT))
     }
 
     /** What @ lists for one of its agents' folders, as a host's catalogue (lookup.items' shape): its files. */
@@ -941,6 +1017,7 @@ object PhoneHost {
     private const val NL: Byte = 10 // (a newline)
     private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
     private const val CATALOGUE_LIMIT = 5000
+    private const val DIR_LIMIT = 2000 // (hostfiles.DIR_LIMIT)
     private const val PICTURE_MAX = 2 shl 20 // (server.BOT_PICTURE_MAX)
     private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)
     const val MEMORY = "memory.md" // (a Bot's memory, in its own folder: its file tools edit it)

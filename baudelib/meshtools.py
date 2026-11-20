@@ -196,7 +196,7 @@ class Mesh:
             busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
             offset = self.request(where, {"op": "transcript", "session": session, "offset": 0, "limit": 1})["size"] \
                 if wait else 0  # (its chat as far as it's written before this: what's said to it is after)
-            sent = said_to(session, text, self.me, self.sender() if (info.get("version") or 0) < SAYS else None)
+            sent = said_to(session, text, self.me, None if wire.speaks(info, "senders", SAYS) else self.sender())
             ch.send(sent)
         except BaseException:
             ch.close()
@@ -263,8 +263,8 @@ class Mesh:
                             return {"session": session, "answer": cut([chat["answer"]]), "error": False}
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
-                        req, skip, said = again or said_to(session, text, self.me, self.sender() if (
-                            ch.version or 0) < SAYS else None), 0, []
+                        req, skip, said = again or said_to(session, text, self.me, None if wire.speaks(
+                            ch.info, "senders", SAYS) else self.sender()), 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -302,12 +302,12 @@ class Mesh:
 
     def reattach(self, where, session, end):
         """(channel, attached) for a session whose host went, once it's back (till end, monotonic; one stopping,
-        waited for too): attached live again (the channel's version, its host's). (None, what's wrong) if it isn't, or
+        waited for too): attached live again (the channel's info, its host's hello's: its version or ops). (None, what's wrong) if it isn't, or
         the session's not there."""
         while True:
             try:
                 ch, info = self.again(where, end)
-                ch.version = info.get("version")
+                ch.info = info
                 ch.sock.settimeout(30)
                 ch.send({"op": "attach", "session": session, "live": True, "answers": False, "req": 1})
                 got = ch.reply()
@@ -369,7 +369,7 @@ class Mesh:
         while True:
             try:
                 ch, info = self.again(where, end)
-                asked = params if (info.get("version") or 0) >= SAYS or not self.me else \
+                asked = params if wire.speaks(info, "senders", SAYS) or not self.me else \
                     {**params, "prompt": wire.said_by(self.sender(), params["prompt"])}  # (an older host: said here)
             except OSError as e:
                 raise OSError(f"{a.get('host') or 'this host'} wasn't reached within {BACK_S} s: {e}") from None

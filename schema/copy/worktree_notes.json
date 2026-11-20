@@ -1,0 +1,6 @@
+{
+  "description": "What a chat notes of its worktree: one that was removed, made again from its branch.",
+  "messages": {
+    "remade": "worktree {$name} was removed: made again from its branch {$branch}"
+  }
+}

@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
 from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities, as the phone's: the wire's schema)
+from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
@@ -2335,11 +2336,11 @@ class Chrome:
     window of Baude's (browserpane), driven its own way."""
 
     def __init__(self, profile):
-        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")
-        self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
-        self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
-        self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address")
-        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Tab (⌘T)")
+        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=wording.say("browser.back"))
+        self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text=wording.say("browser.forward"))
+        self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=wording.say("browser.reload"))
+        self.entry = Gtk.Entry(hexpand=True, placeholder_text=wording.say("browser.address"))
+        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text=wording.say("browser.new_tab_shortcut"))
         self.who = Gtk.MenuButton(label=profile, tooltip_text="Profile")
         self.bar = Adw.HeaderBar()
         for w in (self.back, self.fwd, self.reload):
@@ -2424,7 +2425,7 @@ class Window(Adw.ApplicationWindow):
             macos.route_events(MacWeb.take_event)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
-        self.banner = Adw.Banner(button_label="Show")
+        self.banner = Adw.Banner(button_label=wording.say("common.show"))
         self.banner.connect("button-clicked", lambda *_: self.show_download())
         self.shown_path, self.banner_gen = None, 0
         self.body = body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -2728,7 +2729,7 @@ class Window(Adw.ApplicationWindow):
                                                              f"who.p{i}")
         menu.append_section(None, people)
         if bot_section.get_n_items():
-            menu.append_section("Bots", bot_section)
+            menu.append_section(wording.say("common.bots"), bot_section)
         more = Gio.Menu()
         bots = [p for p in listed if p.get("bot") and p["id"] != self.profile_id]
         mine = next((p for p in listed if p["id"] == self.profile_id), {})
@@ -2750,10 +2751,10 @@ class Window(Adw.ApplicationWindow):
         self.who.set_menu_model(self.profile_menu())
 
     def ask_name(self, heading, body, verb, start, then):
-        entry = Gtk.Entry(placeholder_text="Name", activates_default=True, text=start)
+        entry = Gtk.Entry(placeholder_text=wording.say("lookup.name"), activates_default=True, text=start)
         dlg = Adw.AlertDialog(heading=heading, body=body, extra_child=entry, default_response="ok",
                               close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("ok", verb)
         dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
 
@@ -2770,7 +2771,8 @@ class Window(Adw.ApplicationWindow):
 
     def ask_profile(self):
         self.ask_name("New Profile", "A profile keeps its own cookies and logins: sign in once, and it stays signed "
-                      "in.", "Add", "", lambda name: (add_profile(name), self.switch_profile(name)))
+                      "in.", wording.say("common.add"), "",
+                      lambda name: (add_profile(name), self.switch_profile(name)))
 
     def ask_copy(self):
         """Sign-ins (the cookies of sites chosen) copied from this profile into a Bot's own: it's signed in there as
@@ -2800,8 +2802,8 @@ class Window(Adw.ApplicationWindow):
             dlg = Adw.AlertDialog(heading="Copy Sign-ins to a Bot", body=f"Copy your sign-ins for the chosen sites "
                                   f"from “{self.profile}” to the Bot.", extra_child=box,
                                   default_response="copy", close_response="cancel")
-            dlg.add_response("cancel", "Cancel")
-            dlg.add_response("copy", "Copy")
+            dlg.add_response("cancel", wording.say("common.cancel"))
+            dlg.add_response("copy", wording.say("common.copy"))
             dlg.set_response_appearance("copy", Adw.ResponseAppearance.SUGGESTED)
 
             def answered(_d, r):
@@ -2841,15 +2843,16 @@ class Window(Adw.ApplicationWindow):
             rename_profile(self.profile, name)
             self.profile = name
             self.refresh_profiles()
-        self.ask_name("Rename Profile", "Its cookies and logins stay with it.", "Rename", self.profile, rename)
+        self.ask_name("Rename Profile", "Its cookies and logins stay with it.", wording.say("common.rename"),
+                      self.profile, rename)
 
     def ask_remove(self):
         name = self.profile
         dlg = Adw.AlertDialog(heading=f"Remove “{name}”?",
                               body="Its cookies, logins and the sites' data it keeps are deleted. This can't be undone.",
                               default_response="cancel", close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("remove", "Remove")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("remove", wording.say("common.remove"))
         dlg.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
         dlg.connect("response", once(lambda _d, r: r == "remove" and self.remove_profile(name)))
         self.present_dialog(dlg)
@@ -2940,7 +2943,7 @@ class Window(Adw.ApplicationWindow):
 
     def say(self, heading, body):
         dlg = Adw.AlertDialog(heading=heading, body=body)
-        dlg.add_response("ok", "OK")
+        dlg.add_response("ok", wording.say("common.ok"))
         self.present_dialog(dlg)
 
     def host_of(self, web):
@@ -2986,8 +2989,8 @@ class Window(Adw.ApplicationWindow):
             entry = Gtk.Entry(text=text or "", activates_default=True)
             dlg.set_extra_child(entry)
         if kind != "alert":
-            dlg.add_response("cancel", "Cancel")
-        dlg.add_response("ok", "OK")
+            dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("ok", wording.say("common.ok"))
         dlg.set_default_response("ok")
         if kind == "alert":
             dlg.set_close_response("ok")
@@ -3005,17 +3008,19 @@ class Window(Adw.ApplicationWindow):
                          host=host, realm=realm, failed_before=bool(failed_before))
         if self.agent:
             return pid
-        user = Gtk.Entry(placeholder_text="User name", activates_default=True)
-        password = Gtk.PasswordEntry(placeholder_text="Password", activates_default=True, show_peek_icon=True)
+        user = Gtk.Entry(placeholder_text=wording.say("browser.user_name"), activates_default=True)
+        password = Gtk.PasswordEntry(placeholder_text=wording.say("browser.password"), activates_default=True,
+                                     show_peek_icon=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.append(user)
         box.append(password)
-        body = (f"“{realm}” on " if realm else "") + host + " asks you to sign in."
+        body = wording.say("browser.sign_in_realm", host=host, realm=realm) if realm else \
+            wording.say("browser.sign_in", host=host)
         if failed_before:
             body = "That didn't work. " + body
         dlg = Adw.AlertDialog(heading="Sign In", body=body, extra_child=box, default_response="ok",
                               close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("ok", "Sign In")
         dlg.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         dlg.prompt_id = pid
@@ -3057,7 +3062,7 @@ class Window(Adw.ApplicationWindow):
         name = os.path.basename(path)
         self.downloads.append({"name": name, "path": None if why else path, **({"error": why} if why else {})})
         self.banner.set_title(f"Couldn't download {name}: {why}" if why else f"Saved {name} to Downloads")
-        self.banner.set_button_label(None if why else "Show")
+        self.banner.set_button_label(None if why else wording.say("common.show"))
         self.shown_path = None if why else path
         self.banner.set_revealed(True)
         self.banner_gen += 1
@@ -3079,7 +3084,7 @@ class Window(Adw.ApplicationWindow):
     def open(self, url, opener=None):
         tab = Tab(self, url, opener)
         page = self.view.append(tab.place)
-        page.set_title("New Tab")
+        page.set_title(wording.say("browser.untitled_tab"))
         self.tabs[page] = tab
         self.view.set_selected_page(page)
         return tab
@@ -3166,7 +3171,7 @@ class Window(Adw.ApplicationWindow):
             tab.web.follow()
             now = tab.web.state()
             if now != tab.last:
-                page.set_title(now["title"] or now["url"] or "New Tab")
+                page.set_title(now["title"] or now["url"] or wording.say("browser.untitled_tab"))
                 page.set_loading(now["loading"])
                 if tab is self.current():
                     self.show_state(tab, now)
@@ -4384,14 +4389,19 @@ def main():
     p.add_argument("--name", help="the Bot's name, with --bot")
     p.add_argument("--agent", action="store_true", help="for the Bot's tools: out of sight, gone when idle")
     inst = p.add_mutually_exclusive_group()
-    inst.add_argument("--install", action="store_true", help="add Emission to your list of apps (per user) and exit")
-    inst.add_argument("--uninstall", action="store_true", help="remove Emission from your list of apps and exit")
+    where = wording.say("install.applications") if sys.platform == "darwin" else \
+        wording.say("install.application_menu")
+    inst.add_argument("--install", action="store_true",
+                      help=wording.say("install.install_help", app="Emission", where=where))
+    inst.add_argument("--uninstall", action="store_true",
+                      help=wording.say("install.uninstall_help", app="Emission", where=where))
     a = p.parse_args()
     if a.install:
-        print("\n".join(f"installed {path}" for path in install()))
+        print("\n".join(wording.say("install.installed", path=path) for path in install()))
         return 0
     if a.uninstall:
-        print("\n".join(f"removed {path}" for path in uninstall()) or "Emission was not installed")
+        print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
+              or wording.say("install.not_installed", app="Emission"))
         return 0
     if a.agent and not a.bot:
         p.error("--agent is for a Bot's Emission: --bot too")

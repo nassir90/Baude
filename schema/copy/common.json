@@ -20,6 +20,17 @@
     "remove": "Remove",
     "add": "Add",
     "done": "Done",
-    "rename": "Rename…"
+    "ok": "OK",
+    "show": "Show",
+    "create": "Create",
+    "delete": "Delete",
+    "delete_ellipsis": "Delete…",
+    "bots": "Bots",
+    "model": "Model",
+    "folder": "Folder",
+    "untitled": "(untitled)",
+    "try_again": "Try again",
+    "rename_ellipsis": "Rename…",
+    "rename": "Rename"
   }
 }

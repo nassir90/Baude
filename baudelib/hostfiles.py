@@ -144,7 +144,7 @@ def git(server, msg):
     if what == "card":
         head, err = _git(cwd, "show", "-s", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%B", sha)
         if head is None:
-            return {"what": what, "error": f"No commit {sha} here"}
+            return {"what": what, "error": wording.say("git.no_commit", sha=sha)}
         p = head.split("\x1f", 6)
         stat, _ = _git(cwd, "show", "--format=", "--numstat", sha)
         files = []

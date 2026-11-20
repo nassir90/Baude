@@ -1,0 +1,16 @@
+{
+  "description": "A Bot's memory, on the side panel's Memory page (Baude's) and the Android app's: its notes, read and saved.",
+  "messages": {
+    "title": "Memory",
+    "cant_connect": "Can't connect to the host.",
+    "couldnt_load": "Couldn't load the memory.",
+    "shown_when_back": "It's shown once the host is back.",
+    "last_saved": "{$said} Showing the last saved copy.",
+    "no_memory": "No memory yet",
+    "empty_text": "Notes the Bot keeps. You can edit them.",
+    "no_reason": "no reason given",
+    "not_saved": "Not saved yet: can't connect to the host",
+    "conflict": "The Bot changed the same lines. Its version is shown as changes to accept or reject.",
+    "couldnt_save": "Couldn't save: {$why}"
+  }
+}

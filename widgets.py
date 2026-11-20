@@ -4656,7 +4656,7 @@ class MainTabs(Gtk.Box):
             acts.add_action(copy)
             if rename is not None:
                 can, ask = rename
-                menu.append(wording.say("common.rename"), "tab.rename")
+                menu.append(wording.say("common.rename_ellipsis"), "tab.rename")
                 named = Gio.SimpleAction(name="rename")
                 named.connect("activate", lambda *_: self.menu_page is not None and ask(tab_child(self.menu_page)))
                 acts.add_action(named)

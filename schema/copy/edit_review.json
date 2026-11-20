@@ -1,0 +1,7 @@
+{
+  "description": "A proposed edit's controls where it's shown waiting, on a page of notes and in a Bot's memory: accept it or reject it.",
+  "messages": {
+    "accept_tip": "Accept (Tab)",
+    "reject_tip": "Reject (Esc)"
+  }
+}

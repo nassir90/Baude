@@ -25,10 +25,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
-from baudelib import emissionlink, wire  # noqa: E402
+from baudelib import emissionlink, wire, wording  # noqa: E402
 from baudelib.client import UNREACHED  # noqa: E402
 
-PAGE = "Browser"
+PAGE = wording.say("bot_browser.title")
 PING_S = 5  # (a host process takes a connection that's said nothing in wire.SILENT_S for gone)
 TYPE_MS = 60  # (characters typed this close together: sent as one)
 SCROLL_MS = 50  # (a wheel's or a trackpad's turns this close together: one scroll)
@@ -116,7 +116,7 @@ class Stream:
         ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
             if msg.get("op") == "error":
-                raise OSError(wire.said(msg) or "its host said no")
+                raise OSError(wire.said(msg) or wording.say("bot_browser.host_said_no"))
             if msg.get("op") == "emission_watch_end":
                 return
             if msg.get("op") == "emission_frame":
@@ -228,7 +228,8 @@ class Asks:
                         got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
                 if got is None:
                     r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
-                    got = r.get("result") if r.get("op") == "emission" else {"error": wire.said(r) or "no answer"}
+                    got = r.get("result") if r.get("op") == "emission" else \
+                        {"error": wire.said(r) or wording.say("agent_proxy.no_answer")}
             except (OSError, ValueError) as e:
                 got = {"error": str(e)}
             GLib.idle_add(lambda g=got, a=answered: a(g) and False)
@@ -760,11 +761,6 @@ class Presence(Gtk.Widget):
 GLOW_TEXTURES = {}  # ((its pixels' width and height, the accent, the scale): the glow's texture, made once for each)
 
 
-DOING = {"click": "click", "close_tab": "close the tab", "drag": "drag", "hover": "hover", "key": "press the key",
-         "navigate": "open the page", "new_tab": "open a tab", "scroll": "scroll", "select_tab": "switch tabs",
-         "type": "type", "answer_prompt": "answer"}  # (what a call's error says it couldn't do)
-
-
 class BrowserPane(Gtk.Box):
     """The Browser page: the open Bot's browser on a host (its chat's, or another it uses), watched while shown. bound:
     the BrowserWindow it's in instead (one Bot's, whatever chat's open: an Emission window's bars, not the panel's)."""
@@ -785,7 +781,8 @@ class BrowserPane(Gtk.Box):
         self.phoned = False  # (its browser on a phone, as its host lists it: said here, not watched)
         open_home(win.get_application(), lambda bot: (
             (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
-        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
+        self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic",
+                                          tooltip_text=wording.say("bot_browser.read_only"))
         self.read_only.add_css_class("flat")
         self.read_only.connect("toggled", lambda b: self.read_only_set(b.get_active()))
         self.native = Gtk.Button(icon_name="video-display-symbolic", tooltip_text="Restart as Native (its pages reload)",
@@ -804,7 +801,8 @@ class BrowserPane(Gtk.Box):
         self.prompts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6)
         self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, hexpand=True, vexpand=True,
                                    focusable=True)
-        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="No pages open", vexpand=True)
+        self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title=wording.say("bot_browser.no_pages"),
+                                     vexpand=True)
         self.body = Gtk.Stack(vexpand=True)
         self.body.add_named(self.status, "status")
         self.body.add_named(self.picture, "page")
@@ -839,15 +837,16 @@ class BrowserPane(Gtk.Box):
     def panel_bars(self, over):
         """The side panel's: one bar (back, forward, reload, the address, the host, a new tab, Restart as Native, out
         in a window, read-only), the tabs under it while there's more than one."""
-        bar = Gtk.Box(spacing=2, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)  # (all of it in the
-        self.back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back")           # panel's width)
-        self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Forward")
-        self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Reload")
+        bar = Gtk.Box(spacing=2, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
+        self.back = Gtk.Button(icon_name="go-previous-symbolic",  # (all of it in the panel's width)
+                               tooltip_text=wording.say("browser.back"))
+        self.fwd = Gtk.Button(icon_name="go-next-symbolic", tooltip_text=wording.say("browser.forward"))
+        self.reload = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=wording.say("browser.reload"))
         for b, url in ((self.back, "back"), (self.fwd, "forward"), (self.reload, "reload")):
             b.add_css_class("flat")
             b.connect("clicked", lambda _b, u=url: self.ask({"op": "navigate", "url": u, "tab": self.tab()}))
             bar.append(b)
-        self.address = Gtk.Entry(hexpand=True, placeholder_text="Search or type an address", width_chars=4,
+        self.address = Gtk.Entry(hexpand=True, placeholder_text=wording.say("browser.address"), width_chars=4,
                                  width_request=ADDRESS_PX)  # (its least: ADDRESS_PX, not GTK's own wider one)
         self.address.connect("activate", lambda e: e.get_text().strip() and self.ask(
             {"op": "navigate", "url": e.get_text().strip(), "tab": self.tab()}))
@@ -855,7 +854,7 @@ class BrowserPane(Gtk.Box):
         self.gap = Gtk.Box(hexpand=True, visible=False)  # (the address's room, while it's out)
         bar.append(self.gap)
         bar.append(self.host_pick)
-        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New tab")
+        self.new = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text=wording.say("browser.new_tab"))
         self.new.add_css_class("flat")
         self.new.connect("clicked", lambda *_: self.ask({"op": "new_tab", "url": "about:blank"}))
         bar.append(self.new)
@@ -980,7 +979,7 @@ class BrowserPane(Gtk.Box):
         else:
             self.prompts.set_visible(True)
             if self.body.get_visible_child_name() == "out":
-                self.say_status("No pages open", "")
+                self.say_status(wording.say("bot_browser.no_pages"), "")
                 self.body.set_visible_child_name("status")
 
     def disembody(self, on):
@@ -1032,7 +1031,7 @@ class BrowserPane(Gtk.Box):
         if can_host(self.remote) and ours and not off and self.sid != self.here_busy:
             return self.show_here()
         self.native.set_visible(can_host(self.remote))
-        self.say_status("Connecting…", "")
+        self.say_status(wording.say("bot_browser.connecting"), "")
         self.pointer_seen = None  # (its moves before this watch: not played)
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
@@ -1048,9 +1047,9 @@ class BrowserPane(Gtk.Box):
         self.phoned = True
         for w in self.drives:
             w.set_sensitive(False)
-        self.status.set_title("On a phone")
-        self.status.set_description(f"{self.name or 'The Bot'}'s browser is on a phone now, and shown there. It's "
-                                    "back here once the phone closes it.")
+        self.status.set_title(wording.say("bot_browser.on_phone_title"))
+        self.status.set_description(wording.say("bot_browser.on_phone",
+                                                bot=self.name or wording.say("bot_browser.the_bot")))
         self.body.set_visible_child_name("status")
 
     def stop(self, keep=False):
@@ -1079,16 +1078,16 @@ class BrowserPane(Gtk.Box):
 
     def ended(self, why):
         self.stream = None
-        again = "It restarts in a moment, or when you come back to this window." if self.bound is not None else \
-            "It restarts when you open this page again."
+        again = wording.say("bot_browser.restarts_soon") if self.bound is not None else \
+            wording.say("bot_browser.restarts_on_open")
         if self.bound is not None:  # (in front: tried again soon, as it is when it's come back to)
             GLib.timeout_add_seconds(RETRY_S, lambda: self.bound.is_active() and self.watch_again() and False)
         if why and self.picture.get_paintable() is None:  # (it never showed: why, in its place)
-            self.say_status("Couldn't open the browser", why)
+            self.say_status(wording.say("bot_browser.couldnt_open"), why)
         else:
-            self.say_status("The browser stopped", again)
+            self.say_status(wording.say("bot_browser.stopped"), again)
         self.said.set_tooltip_text(why or None)
-        self.said.set_label("The browser stopped. " + again)
+        self.said.set_label(wording.say("bot_browser.stopped_again", again=again))
         self.said.set_visible(self.picture.get_paintable() is not None)  # (the last page still shown: said under it,
         # as the status isn't)
 
@@ -1115,7 +1114,7 @@ class BrowserPane(Gtk.Box):
             here.force = True
         elif here is None or here.win is None:
             here = HERE[self.sid] = Here(self.win.get_application(), self.sid, self.name, force=True)
-        self.say_status("Connecting…", "")
+        self.say_status(wording.say("bot_browser.connecting"), "")
         sid = self.sid
         here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
 
@@ -1126,7 +1125,7 @@ class BrowserPane(Gtk.Box):
         here = HERE.get(sid)
         if here is None:
             here = HERE[sid] = Here(self.win.get_application(), sid, self.name)
-        self.say_status("Connecting…", "")
+        self.say_status(wording.say("bot_browser.connecting"), "")
         here.when_ready(lambda h: sid == self.sid and self.get_mapped() and self.here_ready(h))
 
     def here_ready(self, here):
@@ -1264,7 +1263,7 @@ class BrowserPane(Gtk.Box):
         if first:  # (watched from now: the glow as its turn is, a tool call under way already, say)
             self.presence_check()
         self.body.set_visible_child_name("page")
-        if self.said.get_label().startswith("The browser stopped"):
+        if self.said.get_label().startswith(wording.say("bot_browser.stopped")):
             self.said.set_visible(False)
         shown()  # (on screen: the next may come)
 
@@ -1288,11 +1287,12 @@ class BrowserPane(Gtk.Box):
                 self.tabs.remove(c)
             for t in tabs:
                 pick = Gtk.ToggleButton(active=t.get("selected", False), tooltip_text=t.get("url") or "")
-                pick.set_child(Gtk.Label(label=(t.get("title") or t.get("url") or "New tab")[:28], ellipsize=3))
+                pick.set_child(Gtk.Label(label=(t.get("title") or t.get("url") or wording.say("browser.new_tab"))[:28],
+                                         ellipsize=3))
                 pick.add_css_class("flat")
                 pick.connect("clicked", lambda b, tid=t["tab"], on=bool(t.get("selected")): (
                     b.set_active(on), self.ask({"op": "select_tab", "tab": tid})))  # (shown picked once it is)
-                close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close tab")
+                close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("bot_browser.close_tab"))
                 close.add_css_class("flat")
                 close.connect("clicked", lambda _b, tid=t["tab"]: self.ask({"op": "close_tab", "tab": tid}))
                 tab = Gtk.Box()  # (its name, and its close button beside it)
@@ -1341,7 +1341,7 @@ class BrowserPane(Gtk.Box):
                 page = self.mirrored.get(t.get("tab"))
                 if page is None:
                     page = self.mirrored[t.get("tab")] = self.mirror.append(Gtk.Box())
-                page.set_title(t.get("title") or t.get("url") or "New Tab")
+                page.set_title(t.get("title") or t.get("url") or wording.say("browser.untitled_tab"))
                 page.set_tooltip(t.get("url") or "")
                 page.set_loading(bool(t.get("loading")))
                 if self.mirror.get_page_position(page) != i:  # (in the order they're in there)
@@ -1379,22 +1379,25 @@ class BrowserPane(Gtk.Box):
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=4)
             card.add_css_class("card")
             kind = p.get("kind")
-            text = {"sign_in": f"{p.get('host') or 'A site'} asks to sign in" + (
-                f" (“{p['realm']}”)" if p.get("realm") else ""), "files": "The page asks for files to upload"}.get(
-                kind, p.get("message") or "")
+            host = p.get('host') or wording.say("browser.a_site")
+            text = {"sign_in": wording.say("browser.sign_in_realm", host=host, realm=p['realm']) if p.get("realm") else
+                    wording.say("browser.sign_in", host=host),
+                    "files": wording.say("bot_browser.asks_for_files")}.get(kind, p.get("message") or "")
             card.append(Gtk.Label(label=text, wrap=True, xalign=0, margin_start=8, margin_end=8, margin_top=6))
             fields = {}
             if kind == "prompt":
                 fields["text"] = Gtk.Entry(text=p.get("default") or "")
             elif kind == "sign_in":
-                fields["user"] = Gtk.Entry(placeholder_text="User name")
-                fields["password"] = Gtk.PasswordEntry(placeholder_text="Password", show_peek_icon=True)
+                fields["user"] = Gtk.Entry(placeholder_text=wording.say("browser.user_name"))
+                fields["password"] = Gtk.PasswordEntry(placeholder_text=wording.say("browser.password"),
+                                                       show_peek_icon=True)
             for f in fields.values():
                 f.set_margin_start(8)
                 f.set_margin_end(8)
                 card.append(f)
             row = Gtk.Box(spacing=6, halign=Gtk.Align.END, margin_end=8, margin_bottom=6)
-            for label, accept in (("Cancel", False), ("OK", True)) if kind != "alert" else (("OK", True),):
+            for label, accept in ((wording.say("common.cancel"), False), (wording.say("common.ok"), True)) \
+                    if kind != "alert" else ((wording.say("common.ok"), True),):
                 b = Gtk.Button(label=label)
                 if accept:
                     b.add_css_class("suggested-action")
@@ -1424,11 +1427,11 @@ class BrowserPane(Gtk.Box):
                 return
             why = r.get("error") if isinstance(r, dict) else None
             if why:
-                self.said.set_label("Can't connect to the browser." if why in UNREACHED else
-                                    f"Couldn't {DOING.get(call.get('op'), 'do that')}.")
+                self.said.set_label(wording.say("bot_browser.cant_connect") if why in UNREACHED else
+                                    wording.say("bot_browser.couldnt_do", op=call.get('op')))
                 self.said.set_tooltip_text(why)
                 self.said.set_visible(True)
-            elif not self.said.get_label().startswith("The browser stopped"):
+            elif not self.said.get_label().startswith(wording.say("bot_browser.stopped")):
                 self.said.set_visible(False)
             if done:
                 done(r)

@@ -1,0 +1,21 @@
+{
+  "description": "What Baude's and Record's windows show alike: the ☰ menu, the Settings dialog, the title's tooltip, the Feedback tab, and asking to restart for an update.",
+  "messages": {
+    "settings_title": "Settings",
+    "settings": "Settings…",
+    "size": "Size",
+    "show_in": "Show in {$where}",
+    "ongoing_feedback": "Ongoing Feedback",
+    "copy_transcript": "Copy Transcript for an Issue",
+    "transcript_copied": "Transcript copied",
+    "kubernetes_menu": "Kubernetes…",
+    "database_schemas": "Database Schemas…",
+    "kubernetes": "Kubernetes",
+    "feedback_tab_tip": "The feedback on Baude, and where each stands",
+    "rename_tip": "Rename: right-click the {$thing} in the sidebar, or F2",
+    "restart_now_heading": "Restart now?",
+    "restart_now": "Restart Now",
+    "blocker_dialog": "a dialog open",
+    "blocker_using": "you, using this window"
+  }
+}

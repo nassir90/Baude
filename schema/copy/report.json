@@ -1,0 +1,13 @@
+{
+  "description": "The copied transcript's header (Copy Transcript for an Issue) and the context a Feedback note carries: text pasted into an issue.",
+  "messages": {
+    "app": "App",
+    "copied": "Copied",
+    "the_chat": "the chat",
+    "folder_line": "- folder: {$folder}",
+    "capture_databases": "databases",
+    "mode": "Mode",
+    "context": "Context",
+    "nothing_said": "(nothing said yet)"
+  }
+}

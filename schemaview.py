@@ -40,6 +40,7 @@ from widgets import (  # noqa: E402,F401
     FIND_RGB, Fade, WorkerPool, ZOOM_STEP, ellipsize_dropdown, find_attrs, inside,
     paned_grip, view_bar, _scales,
 )
+from baudelib import wording  # noqa: E402
 
 
 # --------------------------------------------------------- database schemas --
@@ -129,10 +130,9 @@ def db_find(table=None, column=None, hint=""):
     try:
         servers = pg_servers_cached()
     except RuntimeError as e:
-        return {"hits": [], "best": None, "error": f"Docker isn't reachable: {e}"}
+        return {"hits": [], "best": None, "error": wording.say("databases.docker_unreachable", why=e)}
     if not servers:
-        return {"hits": [], "best": None, "error": "No Postgres server is running (in Docker, or in a local "
-                                                   "Kubernetes cluster)."}
+        return {"hits": [], "best": None, "error": wording.say("databases.no_postgres")}
     by_container = {s["container"]: s for s in servers}
     if table:
         def places(index):
@@ -154,8 +154,10 @@ def db_find(table=None, column=None, hint=""):
             if (table and name == table and (not column or has_column)) or (not table and has_column):
                 hits.append((by_container[c], db, ns, name))
     if not hits:
-        what = (f"a table {table}" + (f" with a column {column}" if column else "")) if table else f"a column {column}"
-        return {"hits": [], "best": None, "error": f"No running database has {what}."}
+        said = (wording.say("databases.no_db_table_column", table=table, column=column) if column else
+                wording.say("databases.no_db_table", table=table)) if table else \
+            wording.say("databases.no_db_column", column=column)
+        return {"hits": [], "best": None, "error": said}
     words = [w for w in re.split(r"[^a-z0-9]+", hint.lower()) if w]
     parts = [w for w in re.split(r"[/_.-]", hint.lower()) if w]
     named = [h for h in hits if h[1].lower() in words or any(h[1].lower() in part for part in parts)]
@@ -480,8 +482,10 @@ class SchemaCanvas(Gtk.Widget):
         """A card: its text laid out once (Pango), its size from the widest row."""
         head = self.create_pango_layout(None)
         head.set_markup(f"<b>{html.escape(t['name'])}</b>", -1)
-        sub = self.create_pango_layout(f"{t['rows']:,} rows" if t["kind"] in ("r", "p") else
-                                       {"v": "view", "m": "materialized view", "f": "foreign table"}.get(t["kind"], ""))
+        sub = self.create_pango_layout(wording.say("databases.rows", n=t['rows']) if t["kind"] in ("r", "p") else
+                                       {"v": wording.say("databases.view"),
+                                        "m": wording.say("databases.materialized_view"),
+                                        "f": wording.say("databases.foreign_table")}.get(t["kind"], ""))
         rows = []
         for col in t["columns"]:
             name = self.create_pango_layout(col["name"])
@@ -893,19 +897,20 @@ class SchemaView(Gtk.Box):
         self.dbs, self.namespace, self.hint, self.syncing = {}, "public", "", False
         self.generation = self.rows_generation = 0  # (the last schema and rows asked for: older ones aren't shown)
         bar = view_bar()
-        title = Gtk.Label(label="Database schema")
+        title = Gtk.Label(label=wording.say("databases.title"))
         title.add_css_class("heading")
         bar.append(title)
         self.server_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 34)
         self.db_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 26)
         self.ns_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 18)
-        for dd, tip in ((self.server_dd, "Server (container)"), (self.db_dd, "Database"), (self.ns_dd, "Schema")):
+        for dd, tip in ((self.server_dd, wording.say("databases.server_tip")),
+                        (self.db_dd, wording.say("databases.database")), (self.ns_dd, wording.say("databases.schema_tip"))):
             dd.set_tooltip_text(tip)
             dd.connect("notify::selected", self.on_pick)
             bar.append(dd)
         # Find (Ctrl+F): tables and columns by name, every match highlighted; Enter (Ctrl+G) for the next one,
         # Shift+Enter (Ctrl+Shift+G) for the one before, Esc to clear it (then to close the view)
-        self.find = Gtk.SearchEntry(placeholder_text="Search", width_chars=22)
+        self.find = Gtk.SearchEntry(placeholder_text=wording.say("glossary.search"), width_chars=22)
         self.match_at = -1  # (which of the canvas' matches is shown)
         self.find.connect("search-changed", lambda e: self.find_changed(e.get_text()))
         self.find.connect("activate", lambda e: self.next_match(1))
@@ -920,21 +925,23 @@ class SchemaView(Gtk.Box):
         bar.append(self.find)
         spacer = Gtk.Box(hexpand=True)
         bar.append(spacer)
-        self.code_btn = Gtk.Button(label="Definition", visible=False, tooltip_text="Show where the code defines it")
+        self.code_btn = Gtk.Button(label=wording.say("databases.definition"), visible=False,
+                                   tooltip_text=wording.say("databases.definition_tip"))
         self.code_btn.connect("clicked", lambda *_: self.show_definition())
         bar.append(self.code_btn)
-        self.rows_btn = Gtk.Button(label="Rows", sensitive=False, tooltip_text="The selected table's first rows")
+        self.rows_btn = Gtk.Button(label=wording.say("databases.rows_button"), sensitive=False,
+                                   tooltip_text=wording.say("databases.rows_tip"))
         self.rows_btn.connect("clicked", lambda *_: self.canvas.selected is not None and
                               self.load_rows(self.canvas.cards[self.canvas.selected]["table"]))
         bar.append(self.rows_btn)
-        for icon, tip, fn in (("zoom-out-symbolic", "Zoom out (Ctrl+−, or Ctrl+scroll)", lambda: self.zoom(-1)),
-                              ("zoom-in-symbolic", "Zoom in (Ctrl++)", lambda: self.zoom(+1)),
-                              ("zoom-fit-best-symbolic", "Fit everything (Ctrl+0)", lambda: self.zoom(0))):
+        for icon, tip, fn in (("zoom-out-symbolic", wording.say("databases.zoom_out_tip"), lambda: self.zoom(-1)),
+                              ("zoom-in-symbolic", wording.say("databases.zoom_in_tip"), lambda: self.zoom(+1)),
+                              ("zoom-fit-best-symbolic", wording.say("databases.fit_tip"), lambda: self.zoom(0))):
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip)
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())
             bar.append(btn)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close (Esc)")
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
         close.add_css_class("circular")
         close.connect("clicked", lambda *_: self.close())
         bar.append(close)
@@ -954,7 +961,7 @@ class SchemaView(Gtk.Box):
         self.rows_title = Gtk.Label(xalign=0, hexpand=True)
         self.rows_title.add_css_class("heading")
         rows_head.append(self.rows_title)
-        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Hide the rows")
+        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("databases.hide_rows"))
         hide.add_css_class("flat")
         hide.connect("clicked", lambda *_: self.rows_box.set_visible(False))
         rows_head.append(hide)
@@ -980,7 +987,7 @@ class SchemaView(Gtk.Box):
         self.code_btn.set_visible(code is not None)
         self.set_visible(True)
         self.grab_focus()
-        self.say("Looking for Postgres servers…")
+        self.say(wording.say("databases.looking_for_servers"))
         self.fade.hold()
         DB_POOL.submit(self._discover)
 
@@ -1000,8 +1007,10 @@ class SchemaView(Gtk.Box):
                 return
             if self.focus_name or self.focus_column:
                 n = sum(map(len, dbs.values()))
-                GLib.idle_add(self.say, f"Looking for {self.focus_name or 'a column ' + self.focus_column} in {n} "
-                                        f"databases on {len(servers)} servers…")
+                GLib.idle_add(self.say, wording.say("databases.looking_for_table", table=self.focus_name, n=n,
+                                                    servers=len(servers)) if self.focus_name else
+                              wording.say("databases.looking_for_column", column=self.focus_column, n=n,
+                                          servers=len(servers)))
             found = self._find(servers, dbs) if (self.focus_name or self.focus_column) else None
             GLib.idle_add(self._discovered, servers, dbs, found, None)
         except RuntimeError as e:
@@ -1019,7 +1028,7 @@ class SchemaView(Gtk.Box):
 
     def _discovered(self, servers, dbs, found, error):
         if error or not servers:
-            self.say(error or "No Postgres server is running (in Docker, or in a local Kubernetes cluster).")
+            self.say(error or wording.say("databases.no_postgres"))
             self.fade.done()
             return False
         self.servers, self.dbs = servers, dbs
@@ -1034,7 +1043,8 @@ class SchemaView(Gtk.Box):
             self.load(s, db, ns, name)
         else:
             if self.focus_name or self.focus_column:
-                self.say(f"No database here has a table {self.focus_name or 'with a column ' + self.focus_column}.")
+                self.say(wording.say("databases.no_table_here", table=self.focus_name) if self.focus_name else
+                         wording.say("databases.no_column_here", column=self.focus_column))
             s = servers[0]
             dbl = [d for d in dbs.get(s["container"], []) if d != "postgres"] or dbs.get(s["container"], [])
             if dbl:
@@ -1060,7 +1070,7 @@ class SchemaView(Gtk.Box):
             self.db_dd.set_selected(names.index(database))
         self.syncing = False
         if not quiet:
-            self.say(f"Reading {db_label(database)}…")
+            self.say(wording.say("databases.reading", database=db_label(database)))
         t0 = time.monotonic()
 
         def work():
@@ -1098,9 +1108,10 @@ class SchemaView(Gtk.Box):
         self.canvas.set_schema(tables, links)
         self.namespace = ns
         n_links = len(links)
-        when = f" · read in {took:.2f} s" if took else ""
-        self.summary = (f"{db_label(self.database)} · {ns} · {len(tables)} tables · "
-                        f"{n_links} foreign key{'s' * (n_links != 1)} · read-only{when}")
+        self.summary = " · ".join([db_label(self.database), ns, wording.say("databases.tables", n=len(tables)),
+                                   wording.say("databases.foreign_keys", n=n_links),
+                                   wording.say("databases.read_only")] +
+                                  [wording.say("databases.read_in", seconds=f"{took:.2f}")] * bool(took))
         self.show_summary()
         GLib.idle_add(self._frame, table)
 
@@ -1160,7 +1171,7 @@ class SchemaView(Gtk.Box):
             self.show_summary()
             return
         if not matches:
-            self.say("0 out of 0")
+            self.say(wording.say("glossary.count", matched=0, total=0))
             return
         exact = next((n for n, (i, row) in enumerate(matches)
                       if row is None and self.canvas.cards[i]["table"]["name"].lower() == q), 0)
@@ -1177,7 +1188,7 @@ class SchemaView(Gtk.Box):
         i, row = matches[self.match_at]
         self.canvas.mark_column = self.canvas.cards[i]["rows"][row][0]["name"] if row is not None else None
         self.canvas.focus(i)
-        self.say(f"{self.match_at + 1} out of {len(matches)}")
+        self.say(wording.say("glossary.count", matched=self.match_at + 1, total=len(matches)))
 
     def find_table(self, text, quiet=False):
         text = text.strip().lower()
@@ -1187,7 +1198,7 @@ class SchemaView(Gtk.Box):
         if hit is not None:
             self.canvas.focus(hit)
         elif not quiet:
-            self.say(f"No table like {text} in {self.namespace}")
+            self.say(wording.say("databases.no_table_like", text=text, schema=self.namespace))
 
     ZOOM_STEP = 1.2  # (React Flow's zoomIn and zoomOut)
 
@@ -1218,7 +1229,7 @@ class SchemaView(Gtk.Box):
         server, database = self.server, self.database
         gen = self.rows_generation = self.rows_generation + 1
         self.rows_fade.hold()
-        self.rows_title.set_label(f"{table['schema']}.{table['name']}: reading…")
+        self.rows_title.set_label(f"{table['schema']}.{table['name']}: " + wording.say("databases.reading_rows"))
         self.rows_box.set_visible(True)
         if self.split.get_position() <= 0 or self.split.get_position() > (self.get_height() or 800) - 120:
             self.split.set_position(int((self.get_height() or 800) * 0.6))
@@ -1236,7 +1247,7 @@ class SchemaView(Gtk.Box):
             return False  # another table's were asked for meanwhile
         cols = [c["name"] for c in table["columns"]]
         self.rows_title.set_label(f"{table['schema']}.{table['name']}: " + (error or
-                                  f"first {len(rows)} rows (read-only; secret-looking columns hidden)"))
+                                  wording.say("databases.first_rows", n=len(rows))))
         grid = Gtk.Grid(column_spacing=0, row_spacing=0, margin_start=12, margin_end=12, margin_bottom=12)
         grid.add_css_class("md-table")
         for c, name in enumerate(cols):

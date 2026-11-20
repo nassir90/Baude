@@ -1,0 +1,20 @@
+{
+  "description": "The forms for a new session on a host, a new group, and a new host.",
+  "messages": {
+    "host_refused": "{$host} didn't start it: {$why}",
+    "host_placeholder": "user@host, or an ssh alias",
+    "add_host": "Add a host",
+    "host_named": "{$name} ({$host})",
+    "host": "Host",
+    "group": "Group",
+    "prompt": "Prompt",
+    "spawn_agent": "Spawn an agent",
+    "on_host": "New session on {$host}",
+    "on_network": "New session on the network",
+    "start": "Start",
+    "new_group": "New group",
+    "group_needs_name": "A group needs a name",
+    "group_exists": "There's a group {$name} already",
+    "group_body": "A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group puts it there"
+  }
+}

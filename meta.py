@@ -604,7 +604,7 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                 parts.append(f"## {who}" + (f" · {when}" if when else "") + "\n" + "\n".join(out))
     except OSError as err:
         parts.append(f"(transcript not read: {err})")
-    return capped_report(head, parts or ["(nothing said yet)"], most)
+    return capped_report(head, parts or [wording.say("report.nothing_said")], most)
 
 
 def earlier_said(messages, limit=EARLIER_LIMIT, where=lambda m: ""):
@@ -2492,14 +2492,15 @@ class MetaChat(Gtk.Box):
             shown = self.ctx.label.get_text().removeprefix("context").strip(" :—")
             context = "no session yet" if agent is None else shown or "not said by its session yet"
         picked = model()
-        return [("App", f"{self.APP} ({NAME})"), ("Model", f"{model_name(value)} ({value})"),
+        return [(wording.say("report.app"), f"{self.APP} ({NAME})"),
+                (wording.say("common.model"), f"{model_name(value)} ({value})"),
                 ("Next message", f"{model_name(picked)} ({picked}), picked since" if picked != value else ""),
                 ("Runs on", agent.runs if agent is not None else ""),
                 ("Effort", EFFORT_LABELS.get(level, level) if level else "default"),
                 ("Code mode", said_value(bool(coded))), ("Runs commands", said_value(bool(commands))),
-                ("Mode", agent.started_mode if agent is not None else ""),
-                ("Context", context), ("Tools", ", ".join(dict.fromkeys(tools))),
-                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+                (wording.say("report.mode"), agent.started_mode if agent is not None else ""),
+                (wording.say("report.context"), context), (wording.say("lookup.tools"), ", ".join(dict.fromkeys(tools))),
+                (wording.say("report.copied"), time.strftime("%Y-%m-%d %H:%M:%S %z"))]
 
     def report(self, most=None):
         """The conversation as text for an issue (report_text), what's being said now too; None if nothing's been."""

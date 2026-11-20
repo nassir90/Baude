@@ -1,0 +1,8 @@
+{
+  "description": "A host's file opened to read: its caption, and what's said when it can't be shown.",
+  "messages": {
+    "unreadable": "{$path} on {$host}: {$why}",
+    "not_text": "not text to read here",
+    "on_host": "on {$host}"
+  }
+}

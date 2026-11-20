@@ -1,0 +1,18 @@
+{
+  "description": "The side panel's pages, and its Subagents and Processes pages' rows.",
+  "messages": {
+    "subagents": "Subagents",
+    "processes": "Processes",
+    "side_questions": "Side questions",
+    "artifacts": "Artifacts",
+    "signal": "Signal",
+    "no_subagents": "No subagents yet",
+    "all_subagents": "All subagents",
+    "no_processes": "No background processes",
+    "stop_process": "Stop this process",
+    "no_artifacts": "No artifacts yet",
+    "subagent": "Subagent",
+    "tool_uses": ".input {$n :number} .match $n one {{{$n} tool use}} * {{{$n} tool uses}}",
+    "tokens": "{$n} tokens"
+  }
+}

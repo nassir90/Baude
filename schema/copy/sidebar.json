@@ -1,0 +1,25 @@
+{
+  "description": "The session sidebar: its groups, menus and rows, Baude's and the Android app's Home.",
+  "messages": {
+    "new_session": "New session",
+    "search": "Search sessions",
+    "group_by": "Group by",
+    "date": "Date",
+    "groups": "Groups",
+    "show_all": "Show All",
+    "group_by_tip": "Group by, and which groups are listed",
+    "no_group": "No group",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "older": "Older",
+    "unknown_folder": "Unknown folder",
+    "archived": "Archived",
+    "folder_on_host": "{$folder} on {$host}",
+    "new_session_in": "New session in {$folder}",
+    "new_session_in_on": "New session in {$folder}, on {$host}",
+    "held": "held",
+    "bot": "Bot",
+    "through": "through {$via}",
+    "add_host": "Add Host…"
+  }
+}

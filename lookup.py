@@ -1184,10 +1184,10 @@ def pg_query(server, database, sql):
         try:
             p = subprocess.run(cmd, input=sql, capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as e:
-            raise RuntimeError(f"kubectl: {e}") from e
+            raise RuntimeError(wording.say("kube.kubectl_error", error=e)) from e
         if p.returncode:
             lines = (p.stderr or p.stdout).strip().splitlines()
-            raise RuntimeError(lines[-1] if lines else f"kubectl exited with {p.returncode}")
+            raise RuntimeError(lines[-1] if lines else wording.say("kube.kubectl_exited", code=p.returncode))
         return p.stdout
     return _docker("exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on", server["container"],
                    *psql, stdin=sql)

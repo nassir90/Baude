@@ -1,0 +1,14 @@
+{
+  "description": "The side panel's Signal page: the names in Claude's replies, looked up.",
+  "messages": {
+    "filter": "Filter names",
+    "search_again": "Search again for the names not found",
+    "linked": "{$n} linked",
+    "several": "{$n} with several matches",
+    "looking_up": "{$n} looking up",
+    "not_found": "{$n} not found",
+    "stale": "{$n} stale",
+    "glossary": "Glossary: {$path}",
+    "empty": "No names yet: the files, commits, env vars and routes in Claude's replies show up here."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "Side questions (/btw): the side panel's page and what's said when one fails.",
+  "messages": {
+    "all": "All side questions",
+    "ask_tip": "Ask ({$key})\nNew line: Enter",
+    "not_asked": "the side question couldn't be asked: {$why}",
+    "failed": "The side question failed."
+  }
+}

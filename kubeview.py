@@ -45,6 +45,7 @@ from widgets import (  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
+from baudelib import wording  # noqa: E402
 
 
 # ---------------------------------------------------------- kubernetes --
@@ -83,7 +84,8 @@ def kube_diagnose(said, signin=None):
     signin = signin or {}
     profile = signin.get("profile")
     if m := re.search(r"The config profile \(([^)]+)\) could not be found", text):
-        return {"title": f"AWS profile {m[1]} isn't set up", "why": m[0], "fix": f"aws configure sso --profile {m[1]}"}
+        return {"title": wording.say("kube.aws_profile_missing", profile=m[1]), "why": m[0],
+                "fix": f"aws configure sso --profile {m[1]}"}
     login = f"aws sso login --profile {profile}" if profile else "aws sso login"
 
     def first(pattern, last=False):  # (the plugin's line; with last, kubectl's own, which ends what it wrote)
@@ -92,39 +94,41 @@ def kube_diagnose(said, signin=None):
         return (hits[-1] if last else hits[0]) if hits else None
     if why := first(r"Token has expired and refresh failed|SSO session .*(expired|invalid)|Error loading SSO Token|"
                     r"UnauthorizedSSOTokenError|sso.*expired"):
-        return {"title": "AWS sign-in expired", "why": why, "fix": login}
+        return {"title": wording.say("kube.aws_expired"), "why": why, "fix": login}
     if why := first(r"Unable to locate credentials|ExpiredToken|security token included in the request is (expired|"
                     r"invalid)"):
-        return {"title": "No valid AWS credentials", "why": why, "fix": login}
+        return {"title": wording.say("kube.aws_no_credentials"), "why": why, "fix": login}
     if why := first(r"Reauthentication|gcloud auth login|problem refreshing your current auth tokens"):
-        return {"title": "Google Cloud sign-in expired", "why": why.split(" (err: ")[-1], "fix": "gcloud auth login"}
+        return {"title": wording.say("kube.gcloud_expired"), "why": why.split(" (err: ")[-1],
+                "fix": "gcloud auth login"}
     if why := first(r"AADSTS\d+|az login|kubelogin"):
-        return {"title": "Azure sign-in expired", "why": why[why.find("AADSTS"):] if "AADSTS" in why else why,
+        return {"title": wording.say("kube.azure_expired"), "why": why[why.find("AADSTS"):] if "AADSTS" in why else why,
                 "fix": "az login"}
     if m := re.search(r"exec: executable (\S+) not found", text):
-        return {"title": f"{m[1]} isn't installed",
-                "why": f"kubectl signs in to this cluster with {m[1]}, which isn't on Baude's PATH "
-                       f"({os.environ.get('PATH', '')})", "fix": None}
+        return {"title": wording.say("kube.not_installed", program=m[1]),
+                "why": wording.say("kube.not_on_path", program=m[1], path=os.environ.get('PATH', '')), "fix": None}
     if why := first(r"cannot support interactive mode|standard input is not a terminal"):
-        return {"title": "Signing in needs a terminal", "why": why,
+        return {"title": wording.say("kube.needs_terminal"), "why": why,
                 "fix": f"kubectl --context {signin['context']} get namespaces" if signin.get("context") else None}
     if why := first(r"must be logged in to the server|provide credentials|\(Unauthorized\)", last=True):
-        return {"title": "The cluster didn't accept your credentials", "why": why,
+        return {"title": wording.say("kube.credentials_refused"), "why": why,
                 "fix": login if signin.get("command") == "aws" else None}
     if why := first(r"\(Forbidden\)|is forbidden:", last=True):
-        return {"title": "Not allowed", "why": why.removeprefix("Error from server (Forbidden): "), "fix": None}
+        return {"title": wording.say("kube.not_allowed"), "why": why.removeprefix("Error from server (Forbidden): "),
+                "fix": None}
     if why := first(r"x509:|certificate", last=True):
-        return {"title": "The cluster's certificate isn't trusted", "why": why, "fix": None}
+        return {"title": wording.say("kube.untrusted_certificate"), "why": why, "fix": None}
     if why := first(r"was refused|connection refused", last=True):
         here = re.search(r"(127\.0\.0\.1|localhost|\[::1\]|host\.docker\.internal)[:/]", why)  # (a cluster on this machine)
-        return {"title": "The cluster isn't running" if here else "Can't reach the cluster", "why": why, "fix": None}
+        return {"title": wording.say("kube.not_running") if here else wording.say("kube.unreachable"), "why": why,
+                "fix": None}
     if why := first(r"no such host|i/o timeout|Unable to connect to the server|timed out|network is unreachable",
                     last=True):
-        return {"title": "Can't reach the cluster", "why": why, "fix": None}
+        return {"title": wording.say("kube.unreachable"), "why": why, "fix": None}
     if m := re.search(r"exec: executable (\S+) failed with exit code \d+", text):  # (a plugin that said nothing known)
-        return {"title": f"Signing in with {m[1]} failed", "why": next((l for l in lines if "exec:" not in l),
-                                                                        lines[-1]), "fix": None}
-    return {"title": "kubectl failed", "why": lines[-1] if lines else "", "fix": None}
+        return {"title": wording.say("kube.signin_failed", program=m[1]),
+                "why": next((l for l in lines if "exec:" not in l), lines[-1]), "fix": None}
+    return {"title": wording.say("kube.kubectl_failed"), "why": lines[-1] if lines else "", "fix": None}
 
 
 def kube_signin(context):
@@ -354,26 +358,31 @@ def kube_container_look(cs, now):
     past KUBE_RESTARTED_RECENTLY_S), "bad" (crashed or failed: CrashLoopBackOff, an image that won't pull, exited
     with an error) or "done" (exited 0: an init container, a job's)."""
     if not cs:
-        return "starting", "not started yet"
+        return "starting", wording.say("kube.not_started")
     state = cs.get("state") or {}
     restarts = cs.get("restartCount") or 0
-    times = f" ({restarts} restart{'s' * (restarts != 1)})" if restarts else ""
+
+    def times(look):
+        return wording.say("kube.with_restarts", look=look, n=restarts) if restarts else look
     if "running" in state:
         if not cs.get("ready"):
-            return "starting", "running, not ready yet" + times
+            return "starting", times(wording.say("kube.running_not_ready"))
         ended = kube_seconds(_ks(cs, "lastState", "terminated", "finishedAt"), now)
         if ended is not None and ended < KUBE_RESTARTED_RECENTLY_S:
-            return "restarted", f"running, ready, restarted {kube_fmt_age(ended)} ago, at {full_time(now - ended)}" + times
-        return "ok", "running, ready" + times
+            return "restarted", times(wording.say("kube.running_restarted", ago=kube_fmt_age(ended),
+                                                  at=full_time(now - ended)))
+        return "ok", times(wording.say("kube.running_ready"))
     if "terminated" in state:
         t = state["terminated"]
         if not t.get("exitCode") and t.get("reason") in (None, "Completed"):
-            return "done", "completed"
-        return "bad", f"terminated: {t.get('reason') or 'Error'}" + \
-            (f" (exit code {t['exitCode']})" if t.get("exitCode") else "") + times
+            return "done", wording.say("kube.completed")
+        reason = t.get('reason') or 'Error'
+        return "bad", times(wording.say("kube.terminated_code", reason=reason, code=t['exitCode']) if t.get("exitCode")
+                            else wording.say("kube.terminated", reason=reason))
     reason = (state.get("waiting") or {}).get("reason") or ""
     bad = kube_status_tone(reason) == "bad" or reason.startswith("Invalid")  # (InvalidImageName too)
-    return ("bad" if bad else "starting"), (f"waiting: {reason}" if reason else "waiting") + times
+    return ("bad" if bad else "starting"), \
+        times(wording.say("kube.waiting_for", reason=reason) if reason else wording.say("kube.waiting"))
 
 
 def kube_containers(pod, now):
@@ -598,12 +607,14 @@ def _endpoints(o, c):
         ports = [str(p.get("port")) for p in sub.get("ports") or []] or [""]
         for a in sub.get("addresses") or []:
             out += [f"{a.get('ip')}:{p}" if p else a.get("ip", "") for p in ports]
-    return ", ".join(out[:6]) + (f" and {len(out) - 6} more" if len(out) > 6 else "")
+    return wording.say("kube.list_and_more", list=", ".join(out[:6]), n=len(out) - 6) if len(out) > 6 else \
+        ", ".join(out)
 
 
 def _slice_endpoints(o, c):
     ips = [ip for e in o.get("endpoints") or [] for ip in e.get("addresses") or []]
-    return ", ".join(ips[:6]) + (f" and {len(ips) - 6} more" if len(ips) > 6 else "")
+    return wording.say("kube.list_and_more", list=", ".join(ips[:6]), n=len(ips) - 6) if len(ips) > 6 else \
+        ", ".join(ips)
 
 
 def _subjects(o, c):
@@ -1021,7 +1032,8 @@ KUBE_SECTIONS = [
         kube_page("CronJobs", "cronjobs", True, [
             K_NAME, K_NS, kube_col("Schedule", lambda o, c: _ks(o, "spec", "schedule", default="")),
             kube_col("Timezone", lambda o, c: _ks(o, "spec", "timeZone", default="")),
-            kube_col("Suspended", lambda o, c: "Yes" if _ks(o, "spec", "suspend") else "No"),
+            kube_col("Suspended", lambda o, c: wording.say("kube.yes") if _ks(o, "spec", "suspend") else
+                     wording.say("kube.no")),
             kube_col("Active", lambda o, c: str(len(_ks(o, "status", "active", default=[]) or [])),
                      lambda o, c: len(_ks(o, "status", "active", default=[]) or [])),
             _age_col("Last schedule", ("status", "lastScheduleTime")), K_AGE], "cronjobs.batch"),
@@ -1121,7 +1133,7 @@ KUBE_SECTIONS = [
         kube_page("Storage Classes", "storageclasses", False, [
             K_NAME, kube_col("Provisioner", lambda o, c: o.get("provisioner", "")),
             kube_col("Reclaim Policy", lambda o, c: o.get("reclaimPolicy", "")),
-            kube_col("Default", lambda o, c: "Yes" if (_km(o).get("annotations") or {}).get(
+            kube_col("Default", lambda o, c: wording.say("kube.yes") if (_km(o).get("annotations") or {}).get(
                 "storageclass.kubernetes.io/is-default-class") == "true" else ""), K_AGE],
             "storageclasses.storage.k8s.io")]),
     ("Namespaces", [kube_page("Namespaces", "namespaces", False, [
@@ -1347,8 +1359,8 @@ class KubeSquares(Gtk.Widget):
     def set_containers(self, containers):
         """containers: kube_containers' [(name, look, words, init)]."""
         self.looks = [look for _n, look, _w, _i in containers]
-        self.set_tooltip_text("\n".join(f"{name}{' (init)' * init}: {words}" for name, _l, words, init in containers)
-                              or None)
+        self.set_tooltip_text("\n".join((wording.say("kube.init_container", name=name) if init else name) + ": " + words
+                                        for name, _l, words, init in containers) or None)
         self.queue_resize()
 
     def do_measure(self, orientation, _for_size):
@@ -1407,16 +1419,17 @@ class KubeView(Gtk.Box):
         self.log_tail = self.log_pod = None
         self.log_containers, self.log_following = [], True
         bar = view_bar()
-        title = Gtk.Label(label="Kubernetes")
+        title = Gtk.Label(label=wording.say("window.kubernetes"))
         title.add_css_class("heading")
         bar.append(title)
         self.context_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 32)
-        self.context_dd.set_tooltip_text("Context (from your kubeconfig)")
+        self.context_dd.set_tooltip_text(wording.say("kube.context_tip"))
         self.context_dd.connect("notify::selected", self.on_pick)
         bar.append(self.context_dd)
         # the namespaces shown: a check each, any set of them at once (Freelens' multi-select), or all of them
-        self.ns_label = Gtk.Label(label="All namespaces", ellipsize=Pango.EllipsizeMode.END, max_width_chars=24)
-        self.ns_all = Gtk.CheckButton(label="All namespaces")
+        self.ns_label = Gtk.Label(label=wording.say("kube.all_namespaces"), ellipsize=Pango.EllipsizeMode.END,
+                                  max_width_chars=24)
+        self.ns_all = Gtk.CheckButton(label=wording.say("kube.all_namespaces"))
         self.ns_all.connect("toggled", lambda b: self.syncing or self.show_namespaces([]))
         self.ns_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         pick = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -1426,17 +1439,18 @@ class KubeView(Gtk.Box):
                                        propagate_natural_height=True, propagate_natural_width=True,
                                        max_content_height=420))
         self.ns_btn = Gtk.MenuButton(child=self.ns_label, always_show_arrow=True, popover=Gtk.Popover(child=pick),
-                                     tooltip_text="Namespaces shown (any of them at once)")
+                                     tooltip_text=wording.say("kube.namespaces_tip"))
         bar.append(self.ns_btn)
-        self.search = Gtk.SearchEntry(placeholder_text="Filter", width_chars=22, tooltip_text="Filter (Ctrl+F)")
+        self.search = Gtk.SearchEntry(placeholder_text=wording.say("kube.filter"), width_chars=22,
+                                     tooltip_text=wording.say("kube.filter_tip"))
         self.search.connect("search-changed", lambda *_: self.refilter())
         self.search.connect("stop-search", lambda e: e.set_text("") if e.get_text() else self.escape())  # (Esc in it)
         bar.append(self.search)
         bar.append(Gtk.Box(hexpand=True))
-        self.refresh_btn = RefreshButton(tooltip_text="Read it again")
+        self.refresh_btn = RefreshButton(tooltip_text=wording.say("fixes.read_again"))
         self.refresh_btn.connect("clicked", lambda *_: self.load())
         bar.append(self.refresh_btn)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close (Esc)")
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
         close.add_css_class("circular")
         close.connect("clicked", lambda *_: self.close())
         bar.append(close)
@@ -1490,7 +1504,7 @@ class KubeView(Gtk.Box):
         self.details_title = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
         self.details_title.add_css_class("heading")
         head.append(self.details_title)
-        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Hide")
+        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("kube.hide"))
         hide.add_css_class("flat")
         hide.connect("clicked", lambda *_: self.hide_details())
         head.append(hide)
@@ -1540,23 +1554,23 @@ class KubeView(Gtk.Box):
         box.append(self.error_why)
         self.error_fix = Gtk.Label(selectable=True, xalign=0)
         self.error_fix.add_css_class("mono")
-        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy")
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"))
         copy.add_css_class("flat")
         copy.connect("clicked", lambda *_: (self.get_clipboard().set(self.error_fix.get_label()),
-                                            toast(self.win, "Copied: run it in a terminal, then Try again")))
+                                            toast(self.win, wording.say("kube.copied_try_again"))))
         self.error_fix_row = Gtk.Box(spacing=4, halign=Gtk.Align.CENTER)
         self.error_fix_row.add_css_class("kube-error-fix")
         self.error_fix_row.append(self.error_fix)
         self.error_fix_row.append(copy)
         box.append(self.error_fix_row)
-        again = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
+        again = Gtk.Button(label=wording.say("common.try_again"), halign=Gtk.Align.CENTER)
         again.add_css_class("pill")
         again.connect("clicked", lambda *_: self.try_again())
         box.append(again)
         self.error_said = Gtk.Label(selectable=True, xalign=0, yalign=0, wrap=True,
                                     wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.error_said.add_css_class("mono")
-        self.error_more = Gtk.Expander(label="kubectl's output", child=Gtk.ScrolledWindow(
+        self.error_more = Gtk.Expander(label=wording.say("kube.kubectl_output"), child=Gtk.ScrolledWindow(
             child=self.error_said, propagate_natural_height=True, max_content_height=220,
             hscrollbar_policy=Gtk.PolicyType.NEVER))
         box.append(self.error_more)
@@ -1594,25 +1608,24 @@ class KubeView(Gtk.Box):
         self.logs_state.add_css_class("caption")
         head.append(self.logs_state)
         self.logs_container = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 28)
-        self.logs_container.set_tooltip_text("Container")
+        self.logs_container.set_tooltip_text(wording.say("kube.container"))
         self.logs_container.connect("notify::selected", lambda *_: self.syncing or self.tail_logs())
         head.append(self.logs_container)
-        self.logs_previous = Gtk.ToggleButton(label="Previous",
-                                              tooltip_text="Its previous run's log (one that crashed, say), instead of "
-                                                           "this one's")
+        self.logs_previous = Gtk.ToggleButton(label=wording.say("kube.previous"),
+                                              tooltip_text=wording.say("kube.previous_tip"))
         self.logs_previous.connect("toggled", lambda *_: self.syncing or self.tail_logs())
         self.logs_follow = Gtk.ToggleButton(icon_name="go-bottom-symbolic", active=True,
-                                            tooltip_text="Follow: keep to the newest line (scrolling up stops it, "
-                                                         "scrolling to the end again goes on)")
+                                            tooltip_text=wording.say("kube.follow_tip"))
         self.logs_follow.connect("toggled", lambda b: self.syncing or self.follow_logs(b.get_active()))
         wrap = Gtk.ToggleButton(icon_name=themed_icon("text-wrap-symbolic", "format-justify-fill-symbolic"),
-                                tooltip_text="Wrap long lines", active=bool(load_settings().get("kube_log_wrap")))
+                                tooltip_text=wording.say("code_view.wrap"),
+                                active=bool(load_settings().get("kube_log_wrap")))
         wrap.connect("toggled", lambda b: (self.logs.set_wrap(b.get_active()),
                                            save_settings(kube_log_wrap=b.get_active())))
         self.logs.set_wrap(wrap.get_active())
-        find = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text="Find (Ctrl+F)")
+        find = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text=wording.say("code_view.find_tip"))
         find.connect("clicked", lambda *_: self.logs.open_search())
-        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close the logs (stops following them)")
+        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("kube.close_logs"))
         hide.connect("clicked", lambda *_: self.hide_logs())
         for b in (self.logs_previous, self.logs_follow, wrap, find, hide):
             b.add_css_class("flat")
@@ -1683,8 +1696,8 @@ class KubeView(Gtk.Box):
         self.set_visible(True)
         self.grab_focus()
         if not names:
-            where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or "~/.kube/config (there is none)"
-            self.say(f"No kubeconfig context to show: {where}.")
+            where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
+            self.say(wording.say("kube.no_context", where=where))
             return
         last = load_settings().get("kube_context")
         current = next((c["name"] for c in self.contexts if c.get("current")), None)
@@ -1758,7 +1771,7 @@ class KubeView(Gtk.Box):
         self.ns_by_context[name] = list(self.ns_shown)
         self.fill_namespaces()
         save_settings(kube_context=name)
-        self.say(f"Connecting to {name}…")
+        self.say(wording.say("kube.connecting", context=name))
         self.hide_details()
         self.hide_logs()  # (another cluster's: not its pod's)
         self.stop_watch()  # (the other cluster's)
@@ -1812,7 +1825,8 @@ class KubeView(Gtk.Box):
                 row.set_visible(served and row.section not in self.folded)
             else:  # (kinds this cluster doesn't serve: dimmed)
                 row.set_sensitive(served)
-                row.set_tooltip_text(None if served else f"{self.context} doesn't serve {row.page['title']}")
+                row.set_tooltip_text(None if served else wording.say("kube.not_served", context=self.context,
+                                                                     kind=row.page['title']))
         self.show_heads()
         unserved = not getattr(self.page_rows.get(id(self.page)), "served", True)
         if unserved:
@@ -1874,12 +1888,13 @@ class KubeView(Gtk.Box):
         self.syncing = was
         self.ns_label.set_label(self.ns_summary())
         self.ns_btn.set_tooltip_text(", ".join(self.ns_shown) if len(self.ns_shown) > 2 else
-                                     "Namespaces shown (any of them at once)")
+                                     wording.say("kube.namespaces_tip"))
 
     def ns_summary(self):
         """The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces."""
         n = self.ns_shown
-        return "All namespaces" if not n else ", ".join(n) if len(n) <= 2 else f"{len(n)} namespaces"
+        return wording.say("kube.all_namespaces") if not n else ", ".join(n) if len(n) <= 2 else \
+            wording.say("kube.n_namespaces", n=len(n))
 
     def show_namespaces(self, names):
         """Show these namespaces' objects (in the order picked), or every namespace's ([]): picked from the list, a
@@ -1910,7 +1925,7 @@ class KubeView(Gtk.Box):
         """Show what controls an object (a pod's Controlled By, clicked): a ReplicaSet's Deployment, a Job's CronJob,
         when it has one; its page, with it selected (its YAML beside the table)."""
         context = self.context
-        self.say(f"Finding {kind}/{name}…")
+        self.say(wording.say("kube.finding", kind=kind, name=name))
 
         def work():
             k, n = kind, name
@@ -1935,7 +1950,7 @@ class KubeView(Gtk.Box):
                    None)
         if row is None:
             self.update_status()
-            self.set_note(f"{kind}/{name}: no page here for {kind}")
+            self.set_note(wording.say("kube.no_page", kind=kind, name=name))
             return False
         if ns and row.page["namespaced"] and self.ns_shown and ns not in self.ns_shown:
             self.show_namespaces(self.ns_shown + [ns])
@@ -1960,7 +1975,7 @@ class KubeView(Gtk.Box):
         gen = self.generation = self.generation + 1
         self.loading = True
         if not quiet:
-            self.say(f"Reading {page['title'].lower()} on {context}…")
+            self.say(wording.say("kube.reading", kind=page['title'].lower(), context=context))
             self.refresh_btn.set_loading(True)
 
         def work():
@@ -2033,9 +2048,9 @@ class KubeView(Gtk.Box):
         if code and not w.seen:
             self.watch_fails += 1
             if self.watch_fails >= 3:
-                why = kube_diagnose(said)["title"].lower() if said else f"kubectl exited with {code}"
-                self.set_note(f"can't watch {page['title'].lower()} ({why}): "
-                              f"read every {KUBE_REFRESH_S} s instead")
+                why = kube_diagnose(said)["title"].lower() if said else wording.say("kube.kubectl_exited", code=code)
+                self.set_note(wording.say("kube.cant_watch", kind=page['title'].lower(), why=why,
+                                          seconds=KUBE_REFRESH_S))
                 return
         GLib.timeout_add(5000 if code and not w.seen else 1000,
                          lambda: self.watch is None and self.watch_page(gen, page) and False)
@@ -2068,7 +2083,8 @@ class KubeView(Gtk.Box):
                     break
             else:
                 if owner:
-                    self.set_note(f"{owner[0]} isn't in {page['title'].lower()} on {self.context}")
+                    self.set_note(wording.say("kube.owner_missing", owner=owner[0], kind=page['title'].lower(),
+                                              context=self.context))
 
     def _loaded(self, gen, page, columns, rows, ctx, items=()):
         if gen != self.generation:
@@ -2083,8 +2099,8 @@ class KubeView(Gtk.Box):
         self.watch_page(gen, page)
         if page is KUBE_PODS or page["resource"] == "nodes":
             got = ctx["metrics"] if page is KUBE_PODS else ctx["node_metrics"]
-            self.metrics_note = f"CPU and memory from the metrics API, every {KUBE_REFRESH_S} s" if got is not None \
-                else "no metrics API on this cluster (CPU and memory N/A)"
+            self.metrics_note = wording.say("kube.metrics", seconds=KUBE_REFRESH_S) if got is not None \
+                else wording.say("kube.no_metrics")
         else:
             self.metrics_note = ""
         self.update_status()
@@ -2158,7 +2174,7 @@ class KubeView(Gtk.Box):
             if isinstance(w, Gtk.Button):
                 self.find_label(w.get_child(), text)
                 w.ns = text
-                w.set_tooltip_text(f"Only {text}'s" if text else None)
+                w.set_tooltip_text(wording.say("kube.only_namespace", namespace=text) if text else None)
                 return
             if isinstance(w, KubeSquares):
                 w.set_containers(kube_containers(item.get_item().obj["raw"], time.time()))
@@ -2192,8 +2208,9 @@ class KubeView(Gtk.Box):
 
         def setup(_f, item):
             box = Gtk.Box(spacing=2, halign=Gtk.Align.END)
-            logs = Gtk.Button(icon_name="baude-logs-symbolic", tooltip_text="Logs", action_name="kube.logs")
-            more = Gtk.MenuButton(icon_name="view-more-symbolic", tooltip_text="Delete…")
+            logs = Gtk.Button(icon_name="baude-logs-symbolic", tooltip_text=wording.say("kube.logs"),
+                              action_name="kube.logs")
+            more = Gtk.MenuButton(icon_name="view-more-symbolic", tooltip_text=wording.say("common.delete_ellipsis"))
             for b in (logs, more):
                 b.add_css_class("flat")
                 b.add_css_class("kube-row-btn")
@@ -2206,7 +2223,8 @@ class KubeView(Gtk.Box):
             logs, more = box.get_first_child(), box.get_last_child()
             logs.set_action_target_value(key)
             menu = Gio.Menu()
-            for label, action in (("Delete", "kube.delete"), ("Force delete", "kube.force-delete")):
+            for label, action in ((wording.say("common.delete"), "kube.delete"),
+                                  (wording.say("kube.force_delete"), "kube.force-delete")):
                 entry = Gio.MenuItem.new(label, None)
                 entry.set_action_and_target_value(action, key)
                 menu.append_item(entry)
@@ -2240,11 +2258,13 @@ class KubeView(Gtk.Box):
             return
         n, total = self.selection.get_n_items(), self.store.get_n_items()
         what = self.table_page["title"].lower()
-        bits = [self.note and self.note[1] > time.monotonic() and self.note[0],
-                f"{n} {what}" + (f" of {total}" if n != total else "") +
-                (f" in {self.ns_summary()}" if self.ns_shown and self.table_page["namespaced"] else ""),
-                self.context, self.watch is not None and "live", self.metrics_note,
-                "read-only but for the deletes you confirm"]
+        shown = wording.say("kube.count_of", n=n, what=what, total=total) if n != total else \
+            wording.say("kube.count", n=n, what=what)
+        if self.ns_shown and self.table_page["namespaced"]:
+            shown = wording.say("kube.in_namespaces", shown=shown, namespaces=self.ns_summary())
+        bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown,
+                self.context, self.watch is not None and wording.say("kube.live"), self.metrics_note,
+                wording.say("kube.read_only")]
         self.say(" · ".join(b for b in bits if b))
 
     # ---- an object: its YAML; a namespace or a custom resource's definition, opened
@@ -2268,7 +2288,8 @@ class KubeView(Gtk.Box):
         if page["source"] == "secrets":  # (only its keys' names: its values are never read)
             keys = obj["raw"].get("keys") or []
             self.details.load(f"# Secret {obj['namespace']}/{obj['name']} ({obj['raw'].get('type', '')})\n"
-                              f"# Its values aren't shown.\nkeys:\n" + "".join(f"  - {k}\n" for k in keys), "secret.yaml")
+                              "# " + wording.say("kube.secret_values_hidden") + "\nkeys:\n" +
+                              "".join(f"  - {k}\n" for k in keys), "secret.yaml")
             return
         if page["source"] == "helm":
             self.details.load(json.dumps(obj["raw"], indent=2), "release.json")
@@ -2366,7 +2387,7 @@ class KubeView(Gtk.Box):
         pod = obj["raw"]
         self.log_containers = [(name, init) for name, _l, _w, init in kube_containers(pod, time.time())]
         if not self.log_containers:
-            self.set_note(f"{obj['name']} has no containers to show logs of")
+            self.set_note(wording.say("kube.no_containers", pod=obj['name']))
             return
         names = [n for n, _i in self.log_containers]
         default = (_km(pod).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
@@ -2375,7 +2396,8 @@ class KubeView(Gtk.Box):
         self.log_pod = (self.context, obj["namespace"], obj["name"])
         self.logs_title.set_label(f"{obj['name']} · {obj['namespace']}")
         self.syncing = True
-        self.logs_container.set_model(Gtk.StringList.new([n + " (init)" * init for n, init in self.log_containers]))
+        self.logs_container.set_model(Gtk.StringList.new([wording.say("kube.init_container", name=n) if init else n
+                                                          for n, init in self.log_containers]))
         self.logs_container.set_selected(pick)
         self.logs_previous.set_active(False)
         self.syncing = False
@@ -2400,9 +2422,9 @@ class KubeView(Gtk.Box):
         try:
             self.log_tail = KubeLogTail(args, self._log_text, self._log_end)
         except OSError as e:
-            self.logs_state.set_label(f"kubectl: {e}")
+            self.logs_state.set_label(wording.say("kube.kubectl_error", error=e))
             return
-        self.logs_state.set_label("its previous run" if previous else "following")
+        self.logs_state.set_label(wording.say("kube.previous_run") if previous else wording.say("kube.following"))
 
     def stop_logs(self):
         if self.log_tail is not None:
@@ -2433,9 +2455,9 @@ class KubeView(Gtk.Box):
             return
         self.log_tail = None
         if code:
-            self.logs_state.set_label(f"kubectl exited with {code}")
+            self.logs_state.set_label(wording.say("kube.kubectl_exited", code=code))
         elif not self.logs_previous.get_active():
-            self.logs_state.set_label("ended (its container stopped)")
+            self.logs_state.set_label(wording.say("kube.ended"))
 
     def follow_logs(self, on):
         """Keep to the newest line as lines come (on), or stay where you've scrolled to."""
@@ -2470,20 +2492,20 @@ class KubeView(Gtk.Box):
         server = next((c.get("server") for c in self.contexts if c["name"] == context), None)
         obj = self.pod_obj(key)
         owners = (_km(obj["raw"]).get("ownerReferences") or []) if obj else []
-        body = [f"In namespace {ns}, on {context}."]
+        body = [wording.say("kube.in_namespace", namespace=ns, context=context)]
         if not kube_local(server):
-            body.append(f"This is a remote cluster: {context}'s API server isn't on this machine.")
+            body.append(wording.say("kube.remote_cluster", context=context))
         if force:
-            body.append("Force delete doesn't wait for the pod to stop: the cluster forgets it at once, while its "
-                        "containers may go on running on their node for a while.")
+            body.append(wording.say("kube.force_delete_body"))
         else:
-            body.append("Its containers are stopped, given their grace period to finish.")
-        body.append(f"It's controlled by {owners[0].get('kind')} {owners[0].get('name')}, which may start another "
-                    "in its place." if owners else "No controller owns it: nothing will start it again.")
-        dlg = Adw.AlertDialog(heading=f"{'Force delete' if force else 'Delete'} pod {name}?", body="\n\n".join(body),
+            body.append(wording.say("kube.delete_body"))
+        body.append(wording.say("kube.controlled_by", kind=owners[0].get('kind'), name=owners[0].get('name'))
+                    if owners else wording.say("kube.no_controller"))
+        dlg = Adw.AlertDialog(heading=wording.say("kube.force_delete_heading", name=name) if force else
+                              wording.say("kube.delete_heading", name=name), body="\n\n".join(body),
                               default_response="cancel", close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("delete", "Force Delete" if force else "Delete")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("delete", wording.say("kube.force_delete_response") if force else wording.say("common.delete"))
         dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
         dlg.connect("response", lambda _d, r: r == "delete" and self.delete_pod(context, ns, name, force))
         self.dialog = dlg
@@ -2492,13 +2514,14 @@ class KubeView(Gtk.Box):
     def delete_pod(self, context, ns, name, force):
         """Delete it (confirmed), off the main thread: what kubectl said goes in the status line, and the list is
         read again."""
-        self.set_note(f"{'Force deleting' if force else 'Deleting'} pod {name}…")
+        self.set_note(wording.say("kube.force_deleting", name=name) if force else
+                      wording.say("kube.deleting", name=name))
 
         def work():
             try:
-                said = kube_delete_pod(context, ns, name, force) or f'pod "{name}" deleted'
+                said = kube_delete_pod(context, ns, name, force) or wording.say("kube.deleted", name=name)
             except RuntimeError as e:
-                said = f"couldn't delete pod {name}: {e}"
+                said = wording.say("kube.delete_failed", name=name, why=e)
             GLib.idle_add(self._deleted, context, said)
         KUBE_POOL.submit(work)
 

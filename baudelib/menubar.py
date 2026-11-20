@@ -50,7 +50,7 @@ def say(listing):
     shown = sorted(running, key=lambda s: ({"waiting": 0, "working": 1}.get(s["state"], 2), -(s.get("said") or 0)))
     words = {"waiting": wording.say("host_menu.asking"), "working": wording.say("host_menu.working"),
              "idle": wording.say("host_menu.waiting_for_you")}
-    return title, [line], [((s.get("title") or wording.say("host_menu.untitled"))[:48], words[s["state"]])
+    return title, [line], [((s.get("title") or wording.say("common.untitled"))[:48], words[s["state"]])
                            for s in shown[:12]]
 
 

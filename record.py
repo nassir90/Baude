@@ -70,6 +70,7 @@ import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside th
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 from baudelib import tokens  # noqa: E402  (its measures, Baude's: schema/tokens)
+from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
 from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification, transcript_model  # noqa: E402  (a background task's ending, as said;
@@ -1096,7 +1097,7 @@ def short_dir(d):
         return ""
     home = os.path.expanduser("~")
     if "scratch-workspaces" in d:
-        return "No folder"
+        return wording.say("chats.no_folder_desktop")
     return "~" + d[len(home):] if d.startswith(home) else d
 
 
@@ -1942,9 +1943,11 @@ class ChatNames(lookup.SearchSpace):
             self.chats, self.at, self.reading = chats, time.time(), False
 
     def make_items(self):
-        return [{"surface": c["title"], "canonical": "", "icon": "claude", "what": "Chat", "kind": "chat",
-                 "at": c["used"], "ago": (ago := widgets.time_ago(c["used"])),  # (under the pointer: widgets.time_tip)
-                 "where": (where := short_dir(c["cwd"]) if c["cwd"] else "no folder"), "summary": f"{where} · {ago}",
+        return [{"surface": c["title"], "canonical": "", "icon": "claude", "what": wording.say("chats.chat"),
+                 "kind": "chat", "at": c["used"],
+                 "ago": (ago := widgets.time_ago(c["used"])),  # (under the pointer: widgets.time_tip)
+                 "where": (where := short_dir(c["cwd"]) if c["cwd"] else wording.say("chats.no_folder")),
+                 "summary": f"{where} · {ago}",
                  "path": c["path"], "line": None, "entry": None, "faint": False} for c in self.chats]
 
     def items(self):
@@ -2806,8 +2809,9 @@ class EditControls(Gtk.Box):
         self.layout = _Overhang(3)
         self.set_layout_manager(self.layout)
         self.buttons = []
-        for icon, tip, css, accept in (("object-select-symbolic", "Accept (Tab)", "edit-accept", True),
-                                       ("window-close-symbolic", "Reject (Esc)", "edit-reject", False)):
+        for icon, tip, css, accept in (
+                ("object-select-symbolic", wording.say("edit_review.accept_tip"), "edit-accept", True),
+                ("window-close-symbolic", wording.say("edit_review.reject_tip"), "edit-reject", False)):
             btn = Gtk.Button(tooltip_text=tip, focus_on_click=False, can_focus=False)
             btn.set_child(Gtk.Image(icon_name=icon))
             btn.add_css_class("edit-control")
@@ -3934,8 +3938,10 @@ class DiaryEditor(Gtk.Box, FindInText):
     def _say_which(self):
         if self.title_hits:
             at = self.on_title if self.on_title is not None else len(self.title_hits) + self.match_index
-            more = "+" if len(self.matches) >= self.MATCH_LIMIT else ""
-            self.search_count.set_label(f"{at + 1} of {len(self.title_hits) + len(self.matches)}{more}")
+            total = len(self.title_hits) + len(self.matches)
+            self.search_count.set_label(wording.say("find.match_of_more", at=at + 1, total=total)
+                                        if len(self.matches) >= self.MATCH_LIMIT else
+                                        wording.say("find.match_of", at=at + 1, total=total))
 
     def _paint_title(self):
         """The title's matches shaded as the text's are (it's an entry: no tags), the current one more."""
@@ -4505,11 +4511,12 @@ class DiaryEditor(Gtk.Box, FindInText):
         if linking:
             note = f"{matched} page{'s' if matched != 1 else ''}" if matched else "No page named that yet"
         elif space is None:
-            note = "Nothing found"
+            note = wording.say("meta.nothing_found")
         else:
             if self.waiting is None:  # (catalogued afresh if it's old: listed again once it's in)
                 self.waiting = space.refresh(self._catalogued)
-            note = f"{matched} found" if matched else "Nothing found" if self.win.read_folders() else \
+            note = wording.say("meta.found", n=matched) if matched else wording.say("meta.nothing_found") \
+                if self.win.read_folders() else \
                 "Nothing found · open a chat for its folder's names"
         it = self.buf.get_iter_at_offset(self.token[0])
         loc = self.view.char_rect(it)
@@ -5190,7 +5197,8 @@ class PagesList(Gtk.Box):
         menu = Gio.Menu()
         sections = [(("New Page…", "pages.new-under"),)]
         if row.page != HOME:
-            sections.append((("Rename…", "pages.rename"), ("Delete…", "pages.delete")))
+            sections.append(((wording.say("common.rename_ellipsis"), "pages.rename"),
+                             (wording.say("common.delete_ellipsis"), "pages.delete")))
         for items in sections:
             section = Gio.Menu()
             for label_, action in items:
@@ -5216,8 +5224,8 @@ class PagesList(Gtk.Box):
         d = Adw.AlertDialog(heading="New page", body=f"Under {under}" if under else "")
         e = Gtk.Entry(activates_default=True)
         d.set_extra_child(e)
-        d.add_response("cancel", "Cancel")
-        d.add_response("ok", "Add")
+        d.add_response("cancel", wording.say("common.cancel"))
+        d.add_response("ok", wording.say("common.add"))
         d.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         d.set_default_response("ok")
         d.connect("response", lambda _d, r: r == "ok" and (typed := e.get_text().strip()) and
@@ -5764,7 +5772,7 @@ class Reader(Gtk.Box):
         """What a right click on a passage picked offers (widgets.ChatSelection); elsewhere, the label's own menu."""
         if not any(self._there(p) and self._meets(p, label, at - 1, at + 1) for p in self.picks):
             return None
-        return [("Copy", self.copy_passages), ("Copy citation link", self.copy_citations)]
+        return [(wording.say("common.copy"), self.copy_passages), ("Copy citation link", self.copy_citations)]
 
     def citation(self, p):
         """A passage picked as a link to it, to put in the notes (citation_link)."""
@@ -6208,7 +6216,9 @@ class RecordChat(meta.MetaChat):
             nb = self._book(p.get("notebook"))
             said = f"waiting in {full_name(nb)}" if nb is not None else "waiting in a notebook that's gone"
             if nb is not None:
-                btn = Gtk.Button(label="Open", tooltip_text=f"Open {full_name(nb)}", valign=Gtk.Align.CENTER)
+                btn = Gtk.Button(label=wording.say("common.open"),
+                                 tooltip_text=wording.say("meta.open_item", name=full_name(nb)),
+                                 valign=Gtk.Align.CENTER)
                 btn.add_css_class("flat")
                 btn.add_css_class("meta-batch")
                 btn.connect("clicked", lambda *_: self.open_edit(p))
@@ -6652,7 +6662,7 @@ class RecordChat(meta.MetaChat):
             chat = self._chat(ref)
             ago = f" · {widgets.time_ago(chat['used'])}" if chat.get("used") else ""
             rows.append({"icon": "baude-claude-symbolic", "title": chat["title"],
-                         "subtitle": (short_dir(chat.get("cwd")) or "no folder") + ago,
+                         "subtitle": (short_dir(chat.get("cwd")) or wording.say("chats.no_folder")) + ago,
                          "open": lambda path=chat["path"]: self.win.open_chat(path)})
         return rows
 
@@ -6694,7 +6704,7 @@ class RecordChat(meta.MetaChat):
         nb = self.notebook
         if nb is None:
             raise ValueError(f"No {book().lower()} is open.")
-        name = Gtk.Entry(activates_default=True, placeholder_text="Its name")
+        name = Gtk.Entry(activates_default=True, placeholder_text=wording.say("meta_app.its_name"))
         tops = "(the top)"
         under = Gtk.DropDown.new_from_strings([tops, *sorted(nb["pages"], key=lambda p: (p != HOME, p.lower()))])
         text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=6, bottom_margin=6, left_margin=8,
@@ -6736,7 +6746,7 @@ class RecordChat(meta.MetaChat):
         return meta.Form("New page", box, [("name", "the page's own name", name),
                                            ("under", "the page it goes under, or (the top)", under),
                                            ("text", "what it says, in Markdown (or empty)", text)],
-                         check, submit, verb="Add")
+                         check, submit, verb=wording.say("common.add"))
 
     def open_page(self, notebook, page):
         if notebook is not self.win.current:
@@ -6754,7 +6764,7 @@ class RecordChat(meta.MetaChat):
             key = next((k for k, n in hosts if n.lower() == str(items[0]).strip().lower()), None)
             if key is None:
                 raise ValueError(f"No host {items[0]!r}: they're {', '.join(n for _k, n in hosts)}.")
-            btn = Gtk.Button(label=f"Open {dict(hosts)[key]}")
+            btn = Gtk.Button(label=wording.say("meta.open_item", name=dict(hosts)[key]))
             btn.add_css_class("suggested-action")
             btn.connect("clicked", lambda *_: self.win.pick_host(key))
             return btn
@@ -6951,7 +6961,7 @@ class RecordChat(meta.MetaChat):
         if nb is self.notebook:
             self.win.tabs.close(("note", page))
         nb["pages"].pop(page, None)
-        a = self._pages_act(turn, f"Deleted {short_page(page)}" +
+        a = self._pages_act(turn, wording.say("meta_app.deleted", what=short_page(page)) +
                             ("" if nb is self.notebook else f" from {full_name(nb)}{self._on(key)}"), before,
                             marks=[("page", page_key(nb, page), "removed")], moved_in=nb, on=[nb])
         self.pages_changed({})
@@ -7292,11 +7302,11 @@ class Settings(Adw.PreferencesDialog):
     takes at once (Code Font from the next start) and is kept."""
 
     def __init__(self, win):
-        super().__init__(title="Settings")
+        super().__init__(title=wording.say("window.settings_title"))
         page = widgets.settings_page()
         page.add(meta.settings_group(win.chat))  # (Baude's too, and the same settings)
         group = Adw.PreferencesGroup()
-        group.add(widgets.settings_switch("Full-width text", None, "win.fullwidth"))
+        group.add(widgets.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
         group.add(markup_row(win))
         group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
@@ -7310,16 +7320,19 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
-        group.add(widgets.settings_switch(f"Show in {'Applications' if sys.platform == 'darwin' else 'application menu'}",
+        group.add(widgets.settings_switch(wording.say("window.show_in", where=apps_place()),
                                           applist.launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
                                           "win.launcher"))
         page.add(group)
-        sizes = Adw.PreferencesGroup(title="Size")  # (the text's and the icons' are Baude's too)
-        sizes.add(widgets.settings_size("Text Scale", None, widgets.scale_setting("text_scale"),
+        sizes = Adw.PreferencesGroup(title=wording.say("window.size"))  # (the text's and the icons' are Baude's too)
+        sizes.add(widgets.settings_size(wording.say("meta_settings.text_scale"), None,
+                                        widgets.scale_setting("text_scale"),
                                         lambda s: win.set_scale("text_scale", s), key="text_scale"))
-        sizes.add(widgets.settings_size("Icon Scale", None, widgets.scale_setting("icon_scale"),
+        sizes.add(widgets.settings_size(wording.say("meta_settings.icon_scale"), None,
+                                        widgets.scale_setting("icon_scale"),
                                         lambda s: win.set_scale("icon_scale", s), key="icon_scale"))
-        sizes.add(widgets.settings_size("Global Scale", None, win.store.zoom_default,  # (the zoom ⌘0 goes back to)
+        sizes.add(widgets.settings_size(wording.say("meta_settings.global_scale"), None,
+                                        win.store.zoom_default,  # (the zoom ⌘0 goes back to)
                                         win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"))
         page.add(sizes)
 
@@ -7338,7 +7351,8 @@ class Settings(Adw.PreferencesDialog):
             self.export_rows.append(row)
         page.add(group)
         group = Adw.PreferencesGroup()
-        for title, action in (("Send Feedback…", "win.feedback"), ("Ongoing Feedback", "win.fixes")):
+        for title, action in ((wording.say("fixes.send_feedback"), "win.feedback"),
+                              (wording.say("window.ongoing_feedback"), "win.fixes")):
             row = Adw.ButtonRow(title=title, end_icon_name="go-next-symbolic")
             row.connect("activated", go, action)
             group.add(row)
@@ -7478,24 +7492,25 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
         menu.append(widgets.COPY_LINK, "win.copylink")
-        menu.append("Copy Transcript for an Issue", "win.copyreport")
+        menu.append(wording.say("window.copy_transcript"), "win.copyreport")
         view = Gio.Menu()
-        view.append("Full-width text", "win.fullwidth")
+        view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in (("Kubernetes…", "kube"), ("Databases…", "db")):
+        for title, page in ((wording.say("window.kubernetes_menu"), "kube"),
+                            (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
         menu.append_section(None, tools)
         app_menu = Gio.Menu()
-        item = Gio.MenuItem.new("Settings…", "win.settings")
+        item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
-        app_menu.append("Changelog", "win.changelog")
-        item = Gio.MenuItem.new("Send Feedback…", "win.feedback")
+        app_menu.append(wording.say("changelog.title"), "win.changelog")
+        item = Gio.MenuItem.new(wording.say("fixes.send_feedback"), "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
-        app_menu.append("Ongoing Feedback", "win.fixes")
-        app_menu.append(f"Restart {noun()}", "win.restart")
+        app_menu.append(wording.say("window.ongoing_feedback"), "win.fixes")
+        app_menu.append(wording.say("code_apart.restart_app", app=noun()), "win.restart")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
@@ -7757,9 +7772,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         why = ["a question being answered"] if self.chat.ask is not None else []
         bar = getattr(self, "capture_bar", None)
         if self.get_visible_dialog() is not None or (bar is not None and bar.get_reveal_child()):
-            why.append("a dialog open")
+            why.append(wording.say("window.blocker_dialog"))
         if not update.quiet(self):
-            why.append("you, using this window")
+            why.append(wording.say("window.blocker_using"))
         return why
 
     def update_waiting(self, waiting):
@@ -7775,10 +7790,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                                    "commits": update.new_commits(u.started, u.ready, u.root)})
         if self.chat.ask is None:
             return go()
-        dlg = Adw.AlertDialog(heading="Restart now?", body="The question being answered is stopped.",
-                              default_response="cancel", close_response="cancel")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("go", "Restart Now")
+        dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"),
+                              body="The question being answered is stopped.", default_response="cancel",
+                              close_response="cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("go", wording.say("window.restart_now"))
         dlg.set_response_appearance("go", Adw.ResponseAppearance.DESTRUCTIVE)
         dlg.connect("response", lambda _d, r: r == "go" and go())
         dlg.present(self)
@@ -7907,7 +7923,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
+                 self.kube: wording.say("window.kubernetes"), self.schema: wording.say("report.capture_databases"),
+                 self.lightbox: wording.say("images.unnamed")}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):
                 areas[child.view] = f"notes: {child.page}"
@@ -7921,8 +7938,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         t, folders, chat = self.current or {}, self.read_folders(), self.chat_read() or {}
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
-                f"- folder: {folders[0] if folders else '-'}", f"- Record: {os.path.realpath(__file__)}",
-                *feedback.report_lines([("the chat", self.report), ("Meta", self.chat.report)])]
+                wording.say("report.folder_line", folder=folders[0] if folders else '-'),
+                f"- Record: {os.path.realpath(__file__)}",
+                *feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])]
 
     def report(self, most=None):
         """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
@@ -7931,16 +7949,19 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         chat = (self.reader.chat if self.reader is not None else None) or {}
         if not (path := chat.get("path")) or not os.path.exists(path):
             return None
-        head = [("App", "Record"), ("Chat", f"{os.path.splitext(os.path.basename(path))[0]} ({chat.get('title') or '-'})"),
-                ("Model", transcript_model(path) or ""), ("Folder", chat.get("cwd") or ""),
-                ("Copied", time.strftime("%Y-%m-%d %H:%M:%S %z"))]
+        head = [(wording.say("report.app"), "Record"),
+                (wording.say("chats.chat"),
+                 f"{os.path.splitext(os.path.basename(path))[0]} ({chat.get('title') or '-'})"),
+                (wording.say("common.model"), transcript_model(path) or ""),
+                (wording.say("common.folder"), chat.get("cwd") or ""),
+                (wording.say("report.copied"), time.strftime("%Y-%m-%d %H:%M:%S %z"))]
         return meta.transcript_report(head, path, most=most)
 
     def copy_report(self):
         if (text := self.report()) is None:
             return widgets.toast(self, "No chat open")
         self.get_clipboard().set(text)
-        widgets.toast(self, "Transcript copied")
+        widgets.toast(self, wording.say("window.transcript_copied"))
 
     def apply_full_width(self, on):
         """☰ → Full-width text, as Baude's: the chat read and the diary across the whole pane, not a column. (Adw.Clamp
@@ -7974,7 +7995,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         extras = Gtk.CheckButton(label="Include glossary and chats", tooltip_text=(
             "What's shown of the chats named in its notes, and what's been looked up in their folders"))
         d.set_extra_child(extras)
-        d.add_response("cancel", "Cancel")
+        d.add_response("cancel", wording.say("common.cancel"))
         d.add_response("ok", "Export…")
         d.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         d.set_default_response("ok")
@@ -8075,8 +8096,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         """A notebook's menu (right-click on it): Rename… and Delete…, for the one clicked (it's selected first)."""
         self.notebook_list.select_row(row)
         menu = Gio.Menu()
-        menu.append("Rename…", "win.rename")
-        menu.append("Delete…", "win.delete")
+        menu.append(wording.say("common.rename_ellipsis"), "win.rename")
+        menu.append(wording.say("common.delete_ellipsis"), "win.delete")
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
         pop.set_parent(row)
         rect = Gdk.Rectangle()
@@ -8135,7 +8156,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         nothing there)."""
         self.title_label.set_text(full_name(self.current) if self.current else "")
         self.title_label.set_tooltip_text(
-            f"Rename: right-click the {book().lower()} in the sidebar, or F2" if self.current else None)
+            wording.say("window.rename_tip", thing=book().lower()) if self.current else None)
 
     def _selected(self, _lb, row):
         self._show(row.notebook if row else None)
@@ -8284,8 +8305,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if reply.get("op") == "busy":
                 n = len(reply.get("sessions") or []) or 1
                 if not waited:
-                    self.toast(f"Restarting the daemon once {n} session{'s finish' if n > 1 else ' finishes'} running "
-                               "a command")
+                    self.toast(wording.say("hosts.restart_waiting", n=n))
                 GLib.timeout_add_seconds(5, lambda: self.restart_host(then, waited + 5) and False)
                 return
             end = time.monotonic() + 15
@@ -8308,7 +8328,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                 self.toast(f"The daemon didn't start again: {widgets.pretty_path(baudelib.hosts.log_path())} may say why")
                 return
             network().here()  # (its socket's there: no need to wait for the next look)
-            self.toast("Daemon restarted")
+            self.toast(wording.say("hosts.daemon_restarted"))
             if then is not None:
                 then()
         threading.Thread(target=start, daemon=True, name="start-host").start()
@@ -8338,14 +8358,18 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return None
         r, name = self.host_remote(key), dict(self.note_hosts()).get(key, store.host_name)
         if r is None:
-            return f"Looking for {name} on the network…"
+            return wording.say("hosts.looking", host=name)
         if not r.deactivated and (said := r.said_stopping(name)) is not None:  # (stopping: said as it goes)
             return said
         if self.reachable(r):
             return None
-        why = f": {r.error}" if r.error else ""  # (why it's out of reach, as the last try to reach it said)
-        return f"{name} is deactivated" if r.deactivated else f"Can't connect to {name} at the moment{why}" \
-            if r.state == "dead" else f"Looking for {name} on the network…"
+        if r.deactivated:
+            return wording.say("hosts.deactivated", host=name)
+        if r.state != "dead":
+            return wording.say("hosts.looking", host=name)
+        if r.error:  # (why it's out of reach, as the last try to reach it said)
+            return wording.say("hosts.down_because", host=name, why=r.error)
+        return wording.say("hosts.down", host=name)
 
     def show_host_state(self):
         """The host shown isn't there (or is deactivated): said in the note over the left bar, its notebooks as
@@ -8362,10 +8386,11 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             return
         menu = Gio.Menu()
         if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
-            item = Gio.MenuItem.new("Host Command…", None)
+            item = Gio.MenuItem.new(wording.say("hosts.command"), None)
             item.set_action_and_target_value("win.host_command", GLib.Variant.new_string(host_key(r)))
             menu.append_item(item)
-        item = Gio.MenuItem.new("Activate" if r.deactivated else "Deactivate", None)
+        item = Gio.MenuItem.new(wording.say("hosts.activate") if r.deactivated else wording.say("hosts.deactivate"),
+                                None)
         item.set_action_and_target_value("win.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
         menu.append_item(item)
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
@@ -8391,11 +8416,13 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if (r := self.host_remote(key)) is None:
             return None
         entry = Gtk.Entry(text=r.command or "", activates_default=True, width_chars=36,
-                          placeholder_text=r.where.get("command") or f"{baudelib.wire.SSH_COMMAND}, on its PATH")
-        dlg = Adw.AlertDialog(heading=f"Baude on {remote_name(r)}", extra_child=entry, default_response="save",
-                              close_response="cancel", body=f"The command ssh runs on {r.host}, with connect after it")
-        dlg.add_response("cancel", "Cancel")
-        dlg.add_response("save", "Save")
+                          placeholder_text=r.where.get("command") or wording.say("hosts.command_placeholder",
+                                                                                    command=baudelib.wire.SSH_COMMAND))
+        dlg = Adw.AlertDialog(heading=wording.say("hosts.command_heading", host=remote_name(r)), extra_child=entry,
+                              default_response="save", close_response="cancel",
+                              body=wording.say("hosts.command_body", host=r.host))
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("save", wording.say("common.save"))
         dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
         dlg.connect("response", lambda _d, res: res == "save" and network().set_command(r, entry.get_text().strip()))
         dlg.present(self)
@@ -8479,7 +8506,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             if reply.get("op") != "notes" or reply.get("error"):
                 store.loading.discard(key)
                 self.toast(f"{remote_name(r)}'s {book(plural=True).lower()} weren't listed: " +
-                           (baudelib.client.wire.said(reply) or "no answer"))
+                           (baudelib.client.wire.said(reply) or wording.say("agent_proxy.no_answer")))
                 return
             books = [b for b in reply.get("notebooks") or () if isinstance(b, dict) and isinstance(b.get("id"), str)
                      and isinstance(b.get("pages"), dict)]
@@ -8516,7 +8543,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             self.sends[key] -= 1
             if reply.get("op") != "notes" or reply.get("error"):
                 if store.unsent.get(key) is None:
-                    self.toast(f"{remote_name(r)} didn't save the change: {baudelib.client.wire.said(reply) or 'no answer'}")
+                    self.toast(f"{remote_name(r)} didn't save the change: "
+                               f"{baudelib.client.wire.said(reply) or wording.say('agent_proxy.no_answer')}")
                 store.failed(key, changes)
                 store.unsent[key] = self.sent[key]
                 self.list_again.discard(key)  # (listed again as it comes back, or the window does: not at once)
@@ -8581,7 +8609,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         else:
             self.select(blank["id"])
         self.open_note(HOME)
-        self.rename(f"New {book()}", "Create")
+        self.rename(f"New {book()}", wording.say("common.create"))
 
     def drop_blank(self, notebook):
         """One made with New and left blank, gone to another from: let go of (a blank one isn't kept)."""
@@ -8599,17 +8627,17 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         """☰ → Open a Chat… (or Read's button): a Claude Code chat picked, read on the Read tab (open_chat)."""
         ChatDialog(lambda s: self.open_chat(s["path"])).present(self)
 
-    def rename(self, heading="Rename", doing="Rename"):
+    def rename(self, heading=None, doing=None):
         if not self.current:
             return
         notebook = self.current
-        d = Adw.AlertDialog(heading=heading)
+        d = Adw.AlertDialog(heading=heading or wording.say("common.rename"))
         e = Gtk.Entry(text=base_name(notebook["name"]), activates_default=True, hexpand=True)
         box = Gtk.Box(spacing=6)
         box.append(e)
         d.set_extra_child(box)
-        d.add_response("cancel", "Cancel")
-        d.add_response("ok", doing)
+        d.add_response("cancel", wording.say("common.cancel"))
+        d.add_response("ok", doing or wording.say("common.rename"))
         d.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         d.set_default_response("ok")
 
@@ -8629,8 +8657,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         notebook = self.current
         d = Adw.AlertDialog(heading=f"Delete {full_name(notebook)}?",
                             body=f"Its notes ({len(notebook['pages'])} pages) go with it.")
-        d.add_response("cancel", "Cancel")
-        d.add_response("delete", "Delete")
+        d.add_response("cancel", wording.say("common.cancel"))
+        d.add_response("delete", wording.say("common.delete"))
         d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
 
         def done(_d, r):
@@ -8654,7 +8682,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if (home := self.tabs.get(("note", HOME))) is not None:
             home.reload()
         toast = Adw.Toast(title=f"“{term}” added to {TO_LEARN}", timeout=4)
-        toast.set_button_label("Open")
+        toast.set_button_label(wording.say("common.open"))
         toast.connect("button-clicked", lambda *_: self.open_note(HOME))
         self._toast(toast)
 
@@ -8987,8 +9015,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         d = Adw.AlertDialog(heading="Rename chat")
         e = Gtk.Entry(text=chat.get("title") or "", activates_default=True, hexpand=True)
         d.set_extra_child(e)
-        d.add_response("cancel", "Cancel")
-        d.add_response("ok", "Rename")
+        d.add_response("cancel", wording.say("common.cancel"))
+        d.add_response("ok", wording.say("common.rename"))
         d.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         d.set_default_response("ok")
         d.connect("response", lambda _d, r: r == "ok" and (title := " ".join(e.get_text().split())) and
@@ -9059,8 +9087,9 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
     def open_fixes(self, select=True):
         """☰ → Ongoing Feedback, as Baude's: the feedback on Baude and Record and where each stands, in a tab of its own
         (fixview.FixesPage), opened or shown."""
-        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self, os.environ.get("RECORD_CLAUDE")), "Feedback",
-                              icon="mail-send-symbolic", tooltip="The feedback on Baude, and where each stands",
+        return self.tabs.open(("fixes",), lambda: fixview.FixesPage(self, os.environ.get("RECORD_CLAUDE")),
+                              wording.say("feedback.title"), icon="mail-send-symbolic",
+                              tooltip=wording.say("window.feedback_tab_tip"),
                               select=select)
 
     def reopen_tab(self, key, line):
@@ -9204,8 +9233,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         if notebook is None or name == HOME:
             return
         d = Adw.AlertDialog(heading=f"Delete {short_page(name)}?")
-        d.add_response("cancel", "Cancel")
-        d.add_response("delete", "Delete")
+        d.add_response("cancel", wording.say("common.cancel"))
+        d.add_response("delete", wording.say("common.delete"))
         d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
 
         def done(_d, r):
@@ -9347,6 +9376,11 @@ def themed_icon():
 
 def launch_command():
     return [sys.executable, os.path.realpath(__file__)]
+
+
+def apps_place():
+    """The list of apps install() puts Record in, as the platform names it."""
+    return wording.say("install.applications") if sys.platform == "darwin" else wording.say("install.application_menu")
 
 
 def install():
@@ -9525,14 +9559,17 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="record", description="Read AI prose with a peer who knows what you know.")
     ap.add_argument("--chat", help="a Claude Code transcript (.jsonl) to read")
-    ap.add_argument("--install", action="store_true", help="add Record to your applications (per user)")
-    ap.add_argument("--uninstall", action="store_true", help="remove it from them")
+    ap.add_argument("--install", action="store_true",
+                    help=wording.say("install.install_help", app="Record", where=apps_place()))
+    ap.add_argument("--uninstall", action="store_true",
+                    help=wording.say("install.uninstall_help", app="Record", where=apps_place()))
     args = ap.parse_args()
     if args.install:
-        print("Installed:", install())
+        print(wording.say("install.installed", path=install()))
         return 0
     if args.uninstall:
-        print("Removed:", ", ".join(uninstall()) or "nothing (not installed)")
+        print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
+              or wording.say("install.not_installed", app="Record"))
         return 0
     chat = os.path.realpath(args.chat) if args.chat else None
     request = {"chat": chat} if chat else {}

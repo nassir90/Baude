@@ -10,6 +10,7 @@ and shows the chat, its tool calls and every session on the machine.
 | | |
 |---|---|
 | ![Markdown](docs/screenshots/30-markdown-gallery-light.png)<br>Markdown | ![Signal links](docs/screenshots/37b-signal-link-kinds-light.png)<br>Signal links |
+| ![Compaction](docs/screenshots/compaction-light.png)<br>Where Claude compacted the chat | ![Mesh subagents](docs/screenshots/mesh-subagents-light.png)<br>Subagents and messages across the mesh |
 
 Code is set in JetBrains Mono, at the size that matches the text around it. Settings → Code Font picks another:
 the open fonts in [fonts/](fonts/README.md) (SIL Open Font License), or macOS's SF Mono and Menlo.
@@ -54,6 +55,16 @@ grown), "Context Exhausted" shows over its box, the box off, and the context bar
 the window's, till a model with a bigger window is picked or the chat's cleared; Baude's chats do the same. Code mode
 has it act by writing up to 10 lines of Python against the app's tools (`meta.py`). Ctrl+M (Control on macOS too),
 from anywhere in the window, shows it and puts the focus in its box; pressed again while it's open, it closes it.
+
+## Bots
+
+A chat on a host made a Bot (right-click → Make Bot…) gets a name and a picture, and is listed at the top of the
+sidebar. Its agent is given its name and its memory each time it starts; the Memory page shows the Bot's changes to
+its memory, to accept or reject. Routines start it on a schedule, and it has a browser of its own (see Emission).
+
+| | |
+|---|---|
+| ![Bots](docs/screenshots/bots-memory-light.png)<br>Bots, and a Bot's memory | ![Routines](docs/screenshots/bot-routines-light.png)<br>A Bot's routines |
 
 ## Codex backend (draft)
 
@@ -118,6 +129,15 @@ python3 baude.py --install   # add Baude to your application menu
 python3 record.py            # Record
 ```
 
+Record, the second app, keeps notebooks of wiki pages in your own words, with Meta beside them, and reads a Claude
+Code chat beside your notes.
+
+![Record](docs/screenshots/record-light.png)
+
+## Android
+
+[android/](android/README.md) is Baude for your phone: the chats on your hosts and your Bots, over ssh or Tailscale.
+
 ## Emission
 
 `emission.py` is Baude's browser, a window of its own for now: tabs, back and forward, an address bar that searches
@@ -131,6 +151,10 @@ virtual one of its own, with `xvfb-run` installed (package `xvfb`).
 ```bash
 python3 emission.py [URL] [--profile NAME]
 ```
+
+| | |
+|---|---|
+| ![Emission](docs/screenshots/emission-dark.png)<br>Emission | ![A Bot's browser](docs/screenshots/bot-browser-window-light.png)<br>A Bot's browser in its own window, its pointer and glow |
 
 A Bot has a browser of its own: its tools (`mcp__emission__…`) drive its own Emission profile, on any host of the
 mesh. On each host its profile is its own there, made when it's first used and named after the Bot. The host process
@@ -173,6 +197,8 @@ chat started on that host. From the command line, `baude_headless.py link DEST`,
 and `--member ID` reaches a member of the mesh in place of `--host`. Right-click a host → Deactivate, and it's left out:
 it isn't reached from here, nor let reach here, and it's grayed with its chats, till you Activate it (or
 `baude_headless.py deactivate DEST`, `activate DEST`).
+
+![A message from another host's Bot](docs/screenshots/mesh-message-from-bot-dark.png)
 
 Heads start the host process when they need it, so there's nothing to run by hand. With no head attached and no link to
 another host it does nothing: no timers, a session's claude stopped once it's been idle half an hour, and the process

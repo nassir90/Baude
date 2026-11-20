@@ -172,26 +172,28 @@ class BotPointer {
         }
     }
 
-    companion object {
-        val GLIDE_S = 0.16 to 0.65
-        const val PRESS_S = 0.14
-        const val RING_S = 0.5
-        const val HINT_S = 0.6
-        const val IDLE_S = 6.0
-        const val FADE_S = 0.35
-        const val APPEAR_S = 0.15
-        const val GLOW_IN_S = 0.35
-        const val GLOW_OUT_S = 0.8
-        const val GLOW_HOLD_S = 0.5
-        const val BEHIND = 6
+    companion object { // (schema/tokens' pointer, as emission's is)
+        val GLIDE_S = Tokens.Pointer.glideShortestS to Tokens.Pointer.glideLongestS
+        const val PRESS_S = Tokens.Pointer.pressS
+        const val RING_S = Tokens.Pointer.ringS
+        const val HINT_S = Tokens.Pointer.hintS
+        const val IDLE_S = Tokens.Pointer.idleS
+        const val FADE_S = Tokens.Pointer.fadeS
+        const val APPEAR_S = Tokens.Pointer.appearS
+        const val GLOW_IN_S = Tokens.Pointer.glowInS
+        const val GLOW_OUT_S = Tokens.Pointer.glowOutS
+        const val GLOW_HOLD_S = Tokens.Pointer.glowHoldS
+        const val BEHIND = Tokens.Pointer.behind
 
         // (emission's shapes, in the page's points: its pointer, its tip at 0, 0, and its shadow; lines' widths)
-        val ARROW = listOf(0.0 to 0.0, 0.0 to 21.0, 5.5 to 16.1, 9.1 to 24.0, 12.5 to 22.6, 9.0 to 14.9, 16.1 to 14.9)
-        val ARROW_SHADOW = 0.6 to 1.6
-        const val RING_EDGE = 2.5f
-        const val ARROW_EDGE = 1.6f
-        const val GLOW_STRENGTH = 0.72
-        const val GLOW_REACH = 80.0
+        val ARROW = Tokens.Pointer.arrow
+        val ARROW_SHADOW = Tokens.Pointer.arrowShadow
+        val RING_EDGE = Tokens.Pointer.ringEdge.toFloat()
+        val ARROW_EDGE = Tokens.Pointer.arrowEdge.toFloat()
+        val HINT_EDGE = Tokens.Pointer.hintEdge.toFloat()
+        val HINT_HALO = Tokens.Pointer.hintHalo.toFloat()
+        const val GLOW_STRENGTH = Tokens.Pointer.glowStrength
+        const val GLOW_REACH = Tokens.Pointer.glowReach
 
         fun dist(a: Pair<Double, Double>, b: Pair<Double, Double>) = hypot(a.first - b.first, a.second - b.second)
 
@@ -304,10 +306,10 @@ class PointerOverlay(ctx: Context, private val accent: Int) : View(ctx) {
                 path.lineTo((bx + ux * 3).toFloat(), (by + uy * 3).toFloat())
                 path.lineTo((bx - ux * 4 - px * 7).toFloat(), (by - uy * 4 - ux * 7).toFloat())
             }
-            line.strokeWidth = 5f
+            line.strokeWidth = BotPointer.HINT_HALO
             line.color = withAlpha(android.graphics.Color.WHITE, ha * a)
             canvas.drawPath(path, line)
-            line.strokeWidth = 2.8f
+            line.strokeWidth = BotPointer.HINT_EDGE
             line.color = withAlpha(accent, ha * a)
             canvas.drawPath(path, line)
         }

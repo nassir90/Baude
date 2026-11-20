@@ -52,9 +52,9 @@ import org.json.JSONObject
 fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     val c = LocalBaude.current
     Mesh.tick.value // (a host's state, or the agents', changed: drawn again)
-    var deleting by remember { mutableStateOf<JSONObject?>(null) }
+    var deleting by remember { mutableStateOf<Msg.Session?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var picturing by remember { mutableStateOf<JSONObject?>(null) } // (the agent whose picture's being picked)
+    var picturing by remember { mutableStateOf<Msg.Session?>(null) } // (the agent whose picture's being picked)
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         val s = picturing ?: return@rememberLauncherForActivityResult
@@ -80,7 +80,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
             }
 
             PanelHeading("Agents")
-            val agents = Mesh.sessions["phone"].orEmpty().filter { !it.optBoolean("archived") }
+            val agents = Mesh.sessions["phone"].orEmpty().filter { it.archived != true }
             Panel(rows = true) {
                 if (agents.isEmpty()) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("No agents on this phone yet.", style = Type.body, color = c.dim)
@@ -88,22 +88,22 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                 }
                 agents.forEachIndexed { i, s ->
                     if (i > 0) Rule()
-                    val name = s.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: "Agent"
-                    Row(Modifier.fillMaxWidth().clickable { open(s.optString("id")) }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                    val name = s.bot?.name?.ifBlank { null } ?: "Agent"
+                    Row(Modifier.fillMaxWidth().clickable { open(s.id.orEmpty()) }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        val contact = Mesh.contact("phone", s.optString("id"))
+                        val contact = Mesh.contact("phone", s.id.orEmpty())
                         androidx.compose.runtime.LaunchedEffect(contact?.pictureKey) { contact?.let { Mesh.picture(it) } }
-                        Box(Modifier.clip(CircleShape).clickable(enabled = !s.isNull("bot")) { // (a Bot's picture: picked)
+                        Box(Modifier.clip(CircleShape).clickable(enabled = s.bot != null) { // (a Bot's picture: picked)
                             picturing = s
                             pick.launch("image/*")
                         }) { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }
                         Spacer(Modifier.width(Gap.avatarGap))
                         Column(Modifier.weight(1f)) {
                             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            val what = (if (s.isNull("title")) "" else s.optString("title")).ifBlank { modelSaid(s.optString("model")) }
+                            val what = s.title.orEmpty().ifBlank { modelSaid(s.model.orEmpty()) }
                             Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        StatusDot(s.optString("state"), (s.optJSONArray("asks")?.length() ?: 0) > 0)
+                        StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
                         IconButton(Icons.Filled.Delete, "Delete") { deleting = s }
                     }
                 }
@@ -157,13 +157,13 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
         }
     }
     deleting?.let { s ->
-        val name = s.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: "this agent"
+        val name = s.bot?.name?.ifBlank { null } ?: "this agent"
         AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Move $name to the Trash?") },
             text = { Text("Its chat, its memory and the files in its folder go to this phone's trash, under Trash here, " +
                 "where you can put it back.") },
             confirmButton = {
                 Button("Move to Trash", destructive = true) {
-                    Mesh.conn("phone")?.request(JSONObject().put("op", "delete").put("session", s.optString("id"))) {}
+                    Mesh.conn("phone")?.request(Msg.Delete(session = s.id.orEmpty()).json()) {}
                     deleting = null
                 }
             },
@@ -184,10 +184,10 @@ private fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArr
 }
 
 /** A Bot's picture set, as Baude's Bot Settings sets one (bot, its picture with it). */
-private fun setPicture(s: JSONObject, png: ByteArray) {
-    val bot = s.optJSONObject("bot") ?: return
-    Mesh.conn("phone")?.request(JSONObject().put("op", "bot").put("session", s.optString("id")).put("bot", JSONObject()
-        .put("name", bot.optString("name")).put("picture", java.util.Base64.getEncoder().encodeToString(png)))) {}
+private fun setPicture(s: Msg.Session, png: ByteArray) {
+    val bot = s.bot ?: return
+    Mesh.conn("phone")?.request(Msg.Bot(session = s.id.orEmpty(), bot = Msg.BotFields(
+        name = bot.name.orEmpty(), picture = java.util.Base64.getEncoder().encodeToString(png))).json()) {}
 }
 
 /** A new agent on this phone: its name, the model that serves it (of those the mesh serves), and what it's to do
@@ -243,12 +243,12 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
                 making = true
                 said = null
                 val main = Handler(Looper.getMainLooper())
-                Mesh.conn("phone")?.request(JSONObject().put("op", "start").put("model", model).put("mode", mode)
-                    .put("bot", JSONObject().put("name", name.trim())).put("prompt", prompt.trim())) { r ->
+                Mesh.conn("phone")?.request(Msg.Start(model = model, mode = mode, bot = Msg.BotFields(name = name.trim()),
+                    prompt = prompt.trim()).json()) { r ->
                     main.post {
                         making = false
-                        if (r.optString("op") == "started") made(r.optJSONObject("session")?.optString("id") ?: "")
-                        else said = r.optString("error", "It couldn't be made")
+                        if (r.optString("op") == Op.STARTED) made(Msg.Started.from(r).session?.id ?: "")
+                        else said = Msg.Error.from(r).said ?: "It couldn't be made"
                     }
                 }
             }

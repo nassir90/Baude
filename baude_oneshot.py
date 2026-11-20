@@ -98,12 +98,13 @@ def main():
     else:
         away = args.host or args.member
         cwd = args.cwd if not args.cwd or args.cwd.startswith(("/", "~")) or away else os.path.abspath(args.cwd)
-        ch.send({"op": "start", "prompt": prompt or "", "cwd": cwd, "model": args.model, "effort": args.effort,
+        start = {"op": "start", "prompt": prompt or "", "cwd": cwd, "model": args.model, "effort": args.effort,
                  "mode": args.mode, "group": args.group, "title": args.title, "system": args.system,
                  "add_dirs": [os.path.abspath(os.path.expanduser(d)) if not away else d for d in args.add_dir],
                  "allowed_tools": args.allow, "disallowed_tools": args.deny, "fork_from": args.fork_from,
                  "ask_timeout": args.ask_timeout, "ask_default": args.ask_default, "attach": True,
-                 "answers": answers, "req": 1})
+                 "answers": answers, "req": 1}
+        ch.send({k: v for k, v in start.items() if v is not None})  # (what's not given left out)
         owed[0] += bool((prompt or "").strip())
         prompt = None  # (sent with it)
     sid, code = args.resume, None

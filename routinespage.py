@@ -10,6 +10,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
+from baudelib import wire  # noqa: E402
+
 PAGE = "Routines"
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -96,7 +98,7 @@ class RoutinesPage(Gtk.Box):
                 return
             if r.get("op") == "error":
                 self.said.set_label(f"Couldn't {doing} the routines." if doing == "load" else f"Couldn't {doing} the routine.")
-                self.said.set_tooltip_text(r.get("error") or None)
+                self.said.set_tooltip_text(wire.said(r) or None)
                 self.said.set_visible(True)
                 return
             self.said.set_visible(False)

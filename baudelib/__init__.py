@@ -6,4 +6,5 @@
 - server: the host process: Claude Code sessions started and steered on its socket, here or over ssh
 - client: a server as Baude sees it: its sessions, a transcript mirrored, a session steered (RemoteProc)
 - selfupdate: kept up to date from git (Baude's and Record's updater's, and the host process's own)
+- tokens: Baude's design tokens (schema/tokens), light and dark: what the CSS and the drawing are made of
 """

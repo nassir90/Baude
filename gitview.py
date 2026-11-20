@@ -43,6 +43,7 @@ from widgets import (  # noqa: E402,F401
 )
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
+from baudelib import tokens  # noqa: E402  (a diff's green and red: schema/tokens)
 
 
 def _gh_json(*args, timeout=20):
@@ -117,6 +118,10 @@ GIT_LANES = ("#3584e4", "#2ec27e", "#e66100", "#9141ac", "#c88800", "#e01b24", "
 
 
 GIT_CHAT = "#7f77dd"     # a commit this chat made: its dot
+
+
+GIT_ADDED, GIT_REMOVED = (tokens.color_hex(f"diff.{k}", "light") for k in ("added", "removed"))  # lines put in, and
+# taken out: their counts' colours (the light theme's, light and dark)
 
 
 GIT_CHIP_CHARS = 24      # a branch's name in a log row's chip, at most (longer: its start … its end)
@@ -1964,7 +1969,8 @@ class GitPage(Gtk.Stack):
         added = sum(a or 0 for _p, a, _r in files)
         removed = sum(r or 0 for _p, _a, r in files)
         total = sel_label(f"<b>{len(files)} file{'s' * (len(files) != 1)}</b>  "
-                          f'<span foreground="#26a269">+{added:,}</span> <span foreground="#c01c28">−{removed:,}</span>'
+                          f'<span foreground="{GIT_ADDED}">+{added:,}</span> '
+                          f'<span foreground="{GIT_REMOVED}">−{removed:,}</span>'
                           + (f'  <span alpha="70%">against first parent {e(d["parents"][0][:7])}</span>'
                              if len(d["parents"]) > 1 else ""))
         body.append(total)
@@ -1979,8 +1985,8 @@ class GitPage(Gtk.Stack):
                 rowbox.append(name)
                 n = Gtk.Label()
                 n.add_css_class("caption")
-                n.set_markup("binary" if a is None else
-                             f'<span foreground="#26a269">+{a}</span> <span foreground="#c01c28">−{r}</span>')
+                n.set_markup("binary" if a is None else f'<span foreground="{GIT_ADDED}">+{a}</span> '
+                             f'<span foreground="{GIT_REMOVED}">−{r}</span>')
                 rowbox.append(n)
                 rowbox.append(GitDelta(a or 0, r or 0, biggest))
                 row = Gtk.ListBoxRow(activatable=True, child=rowbox)
@@ -2072,8 +2078,8 @@ class GitDelta(Gtk.Widget):
     def do_snapshot(self, snap):
         w, h = self.get_width(), self.get_height()
         green, red, rest = Gdk.RGBA(), Gdk.RGBA(), self.get_color()
-        green.parse("#26a269")
-        red.parse("#c01c28")
+        green.parse(GIT_ADDED)
+        red.parse(GIT_REMOVED)
         rest.alpha = 0.12
         snap.append_color(rest, Graphene.Rect().init(0, 0, w, h))
         a = w * self.added / self.biggest
@@ -2093,5 +2099,6 @@ def git_delta_markup(c):
     """A log row's change: · +12 −3 in 2 files (nothing for a commit that changed nothing)."""
     if not c["files"]:
         return ""
-    return (f' · <span foreground="#26a269">+{c["added"]:,}</span> <span foreground="#c01c28">−{c["removed"]:,}</span>'
+    return (f' · <span foreground="{GIT_ADDED}">+{c["added"]:,}</span> '
+            f'<span foreground="{GIT_REMOVED}">−{c["removed"]:,}</span>'
             f' in {c["files"]} file{"s" * (c["files"] != 1)}')

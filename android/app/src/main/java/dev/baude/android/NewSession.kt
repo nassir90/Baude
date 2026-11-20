@@ -41,9 +41,9 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     val up = Mesh.reached("start")
     var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
         ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
-    fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.optString("home")?.ifBlank { null } } ?: "~"
+    fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.home?.ifBlank { null } } ?: "~"
     var cwd by remember { mutableStateOf(given?.str("folder") ?: home(at)) }
-    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { Mesh.conn(it)?.info?.optString("group") }.orEmpty()) }
+    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { Mesh.conn(it)?.info?.group }.orEmpty()) }
     var prompt by remember { mutableStateOf(given?.str("prompt").orEmpty()) }
     var model by remember { mutableStateOf<String?>(given?.str("agent")?.let { a -> // (Meta's spawn_agent: its agent)
         at?.let { h -> models(h).firstOrNull { it.name.equals(a, true) || it.value == a }?.value } }) }
@@ -59,19 +59,19 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
         val h = at ?: return
         busy = true
         error = null
-        val msg = JSONObject().put("op", "start").put("prompt", prompt.trim()).put("cwd", cwd.trim().ifBlank { "~" })
-            .put("mode", mode).put("group", group.trim())
+        val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode,
+            group = group.trim()).json()
         model?.let { msg.put("model", it) }
         effort?.let { msg.put("effort", it) }
         if (prompt.isBlank()) msg.put("draft", true)
         Mesh.ask(h, msg) { r ->
             busy = false
-            val id = r.optJSONObject("session")?.optString("id")
-            if (r.optString("op") == "started" && id != null) {
+            val id = Msg.Started.from(r).session?.id
+            if (r.optString("op") == Op.STARTED && id != null) {
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
                 opened(h, id)
                 done()
-            } else error = r.optString("error").ifBlank { "the host said no" }
+            } else error = Msg.Error.from(r).said.orEmpty().ifBlank { "the host said no" }
         }
     }
     AlertDialog(
@@ -85,7 +85,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                     else Picker(at?.let { a -> hostName(a) } ?: "Host", "Host", up.map { hostName(it.first) to it.first }, at) {
                         at = it
                         cwd = home(it)
-                        group = Mesh.conn(it)?.info?.optString("group").orEmpty()
+                        group = Mesh.conn(it)?.info?.group.orEmpty()
                         model = null
                         effort = null
                     }
@@ -111,7 +111,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
 
 /** A host as the New session dialog lists it: "name (host)". */
 private fun hostName(id: String): String {
-    val h = Mesh.conn(id)?.info?.optString("host")?.ifBlank { null }
+    val h = Mesh.conn(id)?.info?.host?.ifBlank { null }
     val name = Mesh.label(id)
     return if (h != null && h != name) "$name ($h)" else name
 }

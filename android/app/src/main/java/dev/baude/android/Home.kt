@@ -342,6 +342,7 @@ private fun SessionRow(item: Item, onClick: () -> Unit) {
         val bot = item.bot?.optString("name")?.ifBlank { null }
         Text(bot ?: title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f))
+        HeldTag(s)
         StatusDot(s.optString("state"), (s.optJSONArray("asks")?.length() ?: 0) > 0 || s.optString("state") == "waiting")
     }
 }
@@ -363,8 +364,18 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
             val what = item.s.str("title")
             if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        HeldTag(item.s)
         StatusDot(contact.state, contact.asking)
     }
+}
+
+/** A row's "held" mark (Baude's held_tag): its host holds messages for the chat, to send or delete in it. */
+@Composable
+private fun HeldTag(s: org.json.JSONObject) {
+    val c = LocalBaude.current
+    if ((s.optJSONArray("held")?.length() ?: 0) == 0) return
+    Text("held", style = Type.caption, color = c.dim, modifier = Modifier.clip(RoundedCornerShape(4.dp))
+        .background(c.raised).padding(horizontal = 5.dp))
 }
 
 /** A flat button with an icon and a label, as the sidebar's New session (widgets.sidebar_action). */

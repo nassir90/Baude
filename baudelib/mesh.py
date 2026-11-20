@@ -1080,6 +1080,8 @@ class Mesh:
     def open_here(self, link, f):
         """open from a link: served here, if it's to here; else passed on toward the member it's to."""
         t, to, ttl, origin = f.get("t"), f.get("to"), f.get("ttl"), f.get("from")
+        sender = wire.clean_sender(f.get("sender")) if isinstance(f.get("sender"), dict) else None  # (who what's
+        # sent through it is from: the chat on origin its relay named, as origin has it)
         if not isinstance(t, int):
             return
         key = ("in", t)
@@ -1092,7 +1094,8 @@ class Mesh:
             end.link, end.key, end.origin = link, key, origin if wire.is_id(origin) else None
             with self.lock:
                 link.tunnels[key] = end
-            threading.Thread(target=self.server.serve, args=(theirs,), daemon=True, name="tunnel-served").start()
+            threading.Thread(target=self.server.serve, args=(theirs, end.origin, end.origin and sender), daemon=True,
+                             name="tunnel-served").start()
             link.tsend(key, {"op": "opened"})
             threading.Thread(target=end.pump, daemon=True, name="tunnel-in").start()
             return
@@ -1104,10 +1107,12 @@ class Mesh:
         with self.lock:
             link.tunnels[key] = Passed(self, ahead, okey)
             ahead.tunnels[okey] = Passed(self, link, key)
-        ahead.tsend(okey, {"op": "open", "to": to, "ttl": ttl - 1, **({"from": origin} if wire.is_id(origin) else {})})
+        ahead.tsend(okey, {"op": "open", "to": to, "ttl": ttl - 1, **({"from": origin} if wire.is_id(origin) else {}),
+                           **({"sender": sender} if sender else {})})
 
-    def connect(self, end, to):
-        """A tunnel opened from here to member to, for end (a Here): None once it's there, else what's wrong."""
+    def connect(self, end, to, sender=None):
+        """A tunnel opened from here to member to, for end (a Here): None once it's there, else what's wrong. sender:
+        who what's sent through it is from (a chat here: Server.chat_sender)."""
         if not wire.is_id(to):
             return "no such host"
         if to == self.id:
@@ -1121,7 +1126,8 @@ class Mesh:
         end.link, end.key, end.to = ahead, key, to
         with self.lock:
             ahead.tunnels[key] = end
-        ahead.tsend(key, {"op": "open", "to": to, "ttl": TTL, "from": self.id})
+        ahead.tsend(key, {"op": "open", "to": to, "ttl": TTL, "from": self.id,
+                          **({"sender": sender} if sender else {})})
         if not end.up.wait(OPEN_S):
             if self.forget(ahead, key) is not None:
                 ahead.tsend(key, {"op": "close"})
@@ -1129,10 +1135,13 @@ class Mesh:
         return end.error
 
     def relay(self, ch, msg):
-        """relay {to} on a connection to this host process's socket: that connection, from now on, a tunnel to the
-        member to (once relayed's said), run on this thread till either end's done."""
+        """relay {to, as?} on a connection to this host process's socket: that connection, from now on, a tunnel to the
+        member to (once relayed's said), run on this thread till either end's done; as: what's sent through it is from
+        that chat here, as this host has it."""
         end = Here(self, ch)
-        if (error := self.connect(end, msg.get("to"))) is not None:
+        with self.server.lock:
+            sender = self.server.chat_sender(msg.get("as"))
+        if (error := self.connect(end, msg.get("to"), sender)) is not None:
             end.out.close()
             ch.send({"op": "error", "req": msg.get("req"), "error": error})
             return

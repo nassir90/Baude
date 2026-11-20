@@ -80,6 +80,11 @@ class Chat(hostId: String, sid: String) {
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
+    val senders = mutableStateMapOf<String, JSONObject>() // (a message's uuid: who it's from, if not you, as its
+    // host's sender store has it: wire's Senders)
+    var sendersRev = 0L                       // (the store's revision fetched: what its host lists is checked against)
+    val holding = mutableStateListOf<String>() // (held messages being sent or dropped: not shown meanwhile)
+    var fetchingSenders = false
     val artifacts = mutableStateListOf<Artifact>() // (what it published, newest first: the Artifacts page)
     val agents = mutableStateListOf<Subagent>()    // (the subagents it started, newest first: the Subagents page)
     val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
@@ -376,7 +381,11 @@ object Mesh {
                     }
                     if (catchUp.remove(c.id) && before != null) missed(c, before, now)
                     asked(c, before, now)
-                    open?.let { if (it.hostId == c.id) read(it) } // (its first read, or what it missed)
+                    open?.let {
+                        if (it.hostId != c.id) return@let
+                        senders(it) // (who its messages from others are from, if its host's store is newer)
+                        read(it) // (its first read, or what it missed)
+                    }
                 }
                 "turn_ended" -> ended(c, msg)
                 "emission_call" -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
@@ -521,11 +530,17 @@ object Mesh {
 
     fun openChat(at: String, sid: String): Chat {
         val hostId = moved[at] ?: at // (a member's, its machine a host of yours since: that host's)
-        open?.let { if (it.hostId == hostId && it.sid == sid) return it }
+        open?.let {
+            if (it.hostId == hostId && it.sid == sid) {
+                senders(it) // (who its messages from others are from, if its host's store is newer)
+                return it
+            }
+        }
         close()
         val chat = Chat(hostId, sid)
         open = chat
         attach(chat)
+        senders(chat)
         read(chat)
         NotificationManagerCompat.from(app).cancel(sid.hashCode())
         return chat
@@ -558,6 +573,27 @@ object Mesh {
                 if (open !== chat) return@post
                 chat.asks.clear()
                 chat.asks.addAll(asks)
+            }
+        }
+    }
+
+    /** The chat's sender store fetched from its host, if it lists a newer one than is here: who its messages from
+     * others than you are from, by their uuids. A message is drawn as another's only if it's there, never by what it
+     * says. */
+    fun senders(chat: Chat) {
+        val c = conns[chat.hostId] ?: return
+        val listed = sessions[chat.hostId]?.firstOrNull { it.optString("id") == chat.sid }?.optLong("senders", 0) ?: 0
+        if (listed == chat.sendersRev || chat.fetchingSenders) return
+        chat.fetchingSenders = true
+        c.request(JSONObject().put("op", "senders").put("session", chat.sid)) { r ->
+            val got = r.optJSONObject("senders")
+            main.post {
+                chat.fetchingSenders = false
+                if (r.optString("op") != "senders" || got == null) return@post
+                chat.sendersRev = r.optLong("rev", listed)
+                val now = got.keys().asSequence().mapNotNull { k -> got.optJSONObject(k)?.let { k to it } }.toMap()
+                chat.senders.keys.retainAll(now.keys)
+                chat.senders.putAll(now)
             }
         }
     }
@@ -686,6 +722,24 @@ object Mesh {
             return
         }
         kotlin.concurrent.thread(name = "send", isDaemon = true) { build(chat, c, text, files) }
+    }
+
+    /** A message its host holds for the chat (its held: a subagent's answer that came after its host restarted) sent to
+     * its agent (send: ↑) or dropped (✕), as Baude's held_send and held_drop do: by its host, at once, kept if it can't
+     * be, and why said. */
+    fun held(chat: Chat, id: String, send: Boolean) {
+        val c = conns[chat.hostId]
+        if (c == null || id in chat.holding) return
+        chat.holding.add(id)
+        chat.said.value = null
+        c.request(JSONObject().put("op", "held").put("session", chat.sid).put("id", id).put("send", send)) { r ->
+            main.post {
+                chat.holding.remove(id)
+                if (r.optString("op") == "error")
+                    chat.said.value = (if (send) "Not sent: " else "Not deleted: ") + r.optString("error")
+                else read(chat)
+            }
+        }
     }
 
     /** The message made (base64 and all, off the main thread) and sent. */
@@ -852,10 +906,28 @@ fun parse(text: String, cutFirst: Boolean, sidechain: Boolean = false): List<Lin
             continue
         }
         val uuid = if (o.isNull("uuid")) null else o.optString("uuid").ifBlank { null }
+        if (!sidechain) queued(o, type)?.let { out.add(it) } // (a message sent while a turn ran: transcripts.queued_item)
         record(o, type, uuid, out, sidechain)
         if (uuid != null) out.add(Line("record", "", uuid)) // (where it ends: a revert to it cuts there)
     }
     return out
+}
+
+/** A message sent while a turn ran, as Claude Code keeps it (an attachment, queued_command), by its own uuid
+ * (source_uuid: what it was sent with, what its sender's kept by); null for any other record. */
+private fun queued(o: JSONObject, type: String): Line? {
+    if (type != "attachment" || o.optBoolean("isSidechain")) return null
+    val a = o.optJSONObject("attachment") ?: return null
+    if (a.optString("type") != "queued_command" || a.optBoolean("isMeta") ||
+        a.optString("commandMode", "prompt") != "prompt" ||
+        a.optJSONObject("origin")?.optString("kind") == "task-notification") return null
+    val text = when (val p = a.opt("prompt")) {
+        is String -> p
+        is JSONArray -> p.list().filter { it.optString("type") == "text" }.joinToString("\n\n") { it.optString("text") }
+        else -> ""
+    }.let { LEADING_REMINDERS.replace(it, "").trim() }
+    if (text.isEmpty()) return null
+    return Line("you", text, a.optString("source_uuid").ifBlank { o.optString("uuid") }.ifBlank { null })
 }
 
 /** The lines one record shows (none, for most). */

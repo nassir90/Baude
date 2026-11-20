@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Where what this phone's host says goes: this app's own head, or a tunnel from the mesh. */
 abstract class Head {
+    open val origin: String? get() = null // (a tunnel's: the member it came from, as the mesh said)
+    open val sender: JSONObject? get() = null // (a tunnel's: who what's sent through it is from, as its relay named)
     @Volatile var subscribed = false
     @Volatile var archived = false
     @Volatile var answers = true // (what its agents ask, answered by it, as attach says: ask_timeout's wait runs on without)
@@ -39,7 +41,9 @@ class PhoneSession(val meta: JSONObject) {
     @Volatile var deleted = false
     @Volatile var stopModel: (() -> Unit)? = null // (the model call going on, let go of: its host stops generating)
     val folder: File get() = File(meta.getString("cwd"))
+    /** Messages sent at a turn, taken after it: {message, uuid} each. */
     val queued: JSONArray get() = meta.optJSONArray("queued") ?: JSONArray().also { meta.put("queued", it) }
+    var senders: JSONObject? = null // (its sender store, {uuid: sender}, once it's read: PhoneHost.senders)
 }
 
 /** This phone as a host of the mesh: agents, each a Bot (a name, and a memory in its folder), whose loop and tools run
@@ -54,7 +58,7 @@ object PhoneHost {
      * wire.speaks). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
-        "read_file", "catalogue", "control", "set_permission_mode", "set_model")
+        "read_file", "catalogue", "senders", "control", "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model") // (OPS' that are control requests, not
     // ops: control, any a claude takes, answered as a host answers them for an agent between turns)
     lateinit var ctx: Context
@@ -78,7 +82,7 @@ object PhoneHost {
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
             name = deviceName()
             root = File(ctx.filesDir, "phone")
-            for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash")) File(root, d).mkdirs()
+            for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
             for (f in File(root, "sessions").listFiles().orEmpty().filter { it.name.endsWith(".json") }) {
                 try {
                     val meta = JSONObject(f.readText())
@@ -113,7 +117,7 @@ object PhoneHost {
                 .put("is_error", true)
         })), null)
         record(s, "user", textMessage(PhoneAgent.STOPPED), null)
-        for (m in s.queued.list()) record(s, "user", m, null)
+        for (q in s.queued.list()) record(s, "user", q.optJSONObject("message") ?: continue, q.optString("uuid").ifBlank { null })
         s.meta.remove("queued")
         s.meta.put("turn", false).put("cut", now())
         save(s)
@@ -236,7 +240,7 @@ object PhoneHost {
                 s.live.remove(head)
             }
             "input" -> {
-                input(head, s, msg.optJSONObject("msg") ?: JSONObject())
+                input(head, s, msg.optJSONObject("msg") ?: JSONObject(), sentBy(head, msg))
                 if (req != null) reply("accepted", "session" to s.id)
             }
             "stop" -> {
@@ -246,6 +250,8 @@ object PhoneHost {
             "transcript" -> reply("transcript", "session" to s.id, *lines(transcript(s), msg.optLong("offset", 0),
                 msg.optInt("limit", 0)))
             "subagents" -> reply("subagents", "session" to s.id, "files" to JSONArray(), "more" to false)
+            "senders" -> reply("senders", "session" to s.id, "senders" to JSONObject(senders(s).toString()),
+                "rev" to s.meta.optInt("senders"))
             "rename" -> {
                 live(s) {
                     s.meta.put("title", (if (msg.isNull("title")) "" else msg.optString("title")).trim().take(200).ifBlank { null } ?: JSONObject.NULL)
@@ -359,7 +365,8 @@ object PhoneHost {
             }
         }
         reply("started", arrayOf("session" to listing(s), "forked" to false))
-        if (prompt.isNotBlank()) input(head, s, JSONObject().put("type", "user").put("message", textMessage(prompt)))
+        if (prompt.isNotBlank()) input(head, s, JSONObject().put("type", "user").put("message", textMessage(prompt)),
+            sentBy(head, msg))
         changed()
     }
 
@@ -369,18 +376,22 @@ object PhoneHost {
     /** What a head sends an agent: a message of yours (a turn, or taken after the one going on), an answer to what it
      * asked, or one of claude's control requests (initialize: what it runs; interrupt: its turn stopped; the rest, as
      * a host answers them for an agent that isn't running: nothing to change). */
-    private fun input(head: Head, s: PhoneSession, msg: JSONObject) {
+    private fun input(head: Head, s: PhoneSession, msg: JSONObject, sender: JSONObject? = null) {
         when (msg.optString("type")) {
             "user" -> {
-                val message = msg.optJSONObject("message") ?: return
+                var message = msg.optJSONObject("message") ?: return
+                // (a uuid each, as a host gives one: who it's from kept by it, if it's not from its user: Senders)
+                val uuid = msg.optString("uuid").takeIf(::isId) ?: UUID.randomUUID().toString()
+                if (sender != null) message = JSONObject(message.toString()).put("content", saidBy(sender, message.opt("content")))
                 synchronized(lock) {
                     if (s.deleted) return
+                    if (sender != null) stamp(s, uuid, sender)
                     if (s.busy) {
-                        s.queued.put(message)
+                        s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
                         save(s)
                         return
                     }
-                    begin(s, listOf(message), msg.optString("uuid").ifBlank { null })
+                    begin(s, listOf(message to uuid))
                 }
             }
             "control_response" -> {
@@ -441,12 +452,12 @@ object PhoneHost {
     }
 
     /** (lock held) A turn begun: the messages kept in its transcript, and its agent run on a thread of its own. */
-    private fun begin(s: PhoneSession, messages: List<JSONObject>, uuid: String?) {
-        for ((i, m) in messages.withIndex()) {
-            record(s, "user", m, if (i == 0) uuid else null)
+    private fun begin(s: PhoneSession, messages: List<Pair<JSONObject, String>>) {
+        for ((m, uuid) in messages) {
+            record(s, "user", m, uuid)
             s.meta.put("prompts", s.meta.optInt("prompts") + 1)
         }
-        if (s.meta.isNull("title")) firstWords(messages.first())?.let { s.meta.put("title", it) }
+        if (s.meta.isNull("title")) firstWords(messages.first().first)?.let { s.meta.put("title", it) }
         s.meta.put("said", now()).put("turn", true).put("draft", false).remove("cut")
         save(s)
         s.busy = true
@@ -592,11 +603,11 @@ object PhoneHost {
             s.acting = false
             s.asks.clear()
             s.stopModel = null
-            val next = s.queued.list()
+            val next = s.queued.list().mapNotNull { q -> q.optJSONObject("message")?.let { it to q.optString("uuid") } }
             s.meta.remove("queued")
-            if (stopped) for (m in next) record(s, "user", m, null) // (sent as it was stopped: kept as said, not taken)
+            if (stopped) for ((m, uuid) in next) record(s, "user", m, uuid) // (sent as it was stopped: said, not taken)
             if (next.isNotEmpty() && !stopped && !s.deleted && sessions[s.id] === s) {
-                begin(s, next, null)
+                begin(s, next)
             } else {
                 s.busy = false
                 if (!s.deleted) {
@@ -721,6 +732,7 @@ object PhoneHost {
             .put("acting", s.acting && s.busy && s.asks.isEmpty()).put("fork_from", JSONObject.NULL)
             .put("spawned_by", s.meta.opt("spawned_by") ?: JSONObject.NULL).put("start_key", s.meta.opt("start_key") ?: JSONObject.NULL)
             .put("mesh_tools", true).put("always_allow", JSONArray(s.alwaysAllow.sorted()))
+            .put("held", JSONArray()).put("senders", s.meta.optInt("senders"))
             .put("asks", JSONArray(s.asks.entries.map { (rid, m) ->
                 val r = m.optJSONObject("request") ?: JSONObject()
                 JSONObject().put("request_id", rid).put("tool", r.optString("tool_name")).put("input", r.optJSONObject("input"))
@@ -751,6 +763,90 @@ object PhoneHost {
     fun session(sid: String): PhoneSession? = synchronized(lock) { sessions[sid] }
 
     private fun picture(s: PhoneSession) = File(root, "pictures/${s.id}")
+
+    // ---- who a message is from, if not its user (wire.py's Senders)
+
+    private fun sendersFile(s: PhoneSession) = File(root, "senders/${s.id}.json")
+
+    /** (lock held, or not: read once) Its sender store: {uuid: sender}. */
+    private fun senders(s: PhoneSession): JSONObject = synchronized(lock) {
+        s.senders ?: (try {
+            JSONObject(sendersFile(s).readText())
+        } catch (_: Exception) {
+            JSONObject()
+        }).also { s.senders = it }
+    }
+
+    /** (lock held) A message passed to an agent from another than its user: who it's from kept by its uuid, the
+     * store's revision moved on. */
+    private fun stamp(s: PhoneSession, uuid: String, sender: JSONObject) {
+        val have = senders(s).put(uuid, sender)
+        sendersFile(s).writeText(have.toString())
+        s.meta.put("senders", s.meta.optInt("senders") + 1)
+        save(s)
+        changed()
+    }
+
+    /** Who a request passing a message in (input, start) is from, as server.sent_by has it: through a tunnel, the
+     * chat its relay named (else the one its as names) on the member it came from; here, the agent of this phone's its
+     * as names; null for the agent's user. */
+    private fun sentBy(head: Head, msg: JSONObject): JSONObject? {
+        val asId = (if (msg.isNull("as")) "" else msg.optString("as")).takeIf(::isId)
+        val origin = head.origin ?: return asId?.let { chatSender(it) }
+        val said = head.sender ?: asId?.let { JSONObject().put("kind", "chat").put("session", it) } ?: return null
+        val name = PhoneLink.nameOf(origin)
+        return cleanSender(JSONObject(said.toString()).put("host", origin)
+            .put("host_name", if (name == origin.take(8)) said.optString("host_name") else name))
+    }
+
+    /** One of this phone's agents as a message from it is from: a Bot by its name, else by its title. */
+    private fun chatSender(sid: String): JSONObject? {
+        val s = session(sid) ?: return null
+        val bot = s.meta.optJSONObject("bot")?.optString("name")
+        return cleanSender(JSONObject().put("kind", if (bot != null) "bot" else "chat")
+            .put("name", bot ?: s.meta.opt("title")?.toString()).put("host", id).put("host_name", name).put("session", sid))
+    }
+
+    /** wire.clean_sender: {kind, name, host, host_name, session}, words, cut short; null if it isn't one. */
+    fun cleanSender(o: JSONObject?): JSONObject? {
+        o ?: return null
+        val out = JSONObject()
+        for (k in listOf("name", "host", "host_name", "session")) {
+            val v = if (o.isNull(k)) "" else o.optString(k)
+            if (v.isNotBlank()) out.put(k, v.trim().split(Regex("\\s+")).joinToString(" ").take(120))
+        }
+        return out.put("kind", o.optString("kind").takeIf { it in setOf("bot", "chat", "subagent", "host") } ?: "host")
+    }
+
+    /** wire.sender_name: who a sender is, as a message from it's headed. */
+    private fun senderName(s: JSONObject): String {
+        val n = s.optString("name")
+        val who = when (s.optString("kind")) {
+            "bot" -> "${n.ifBlank { "a Bot" }}, a Bot"
+            "chat" -> if (n.isNotBlank()) "“$n”" else "a chat"
+            "subagent" -> if (n.isNotBlank()) "subagent “$n”" else "a subagent"
+            else -> n.ifBlank { "a host" }
+        }
+        val where = s.optString("host_name")
+        return who + if (where.isNotBlank() && s.optString("kind") != "host") " on $where" else ""
+    }
+
+    /** wire.said_by: a message's content as from sender, for its agent: a tag at its head says so. (Heads draw who
+     * it's from from the store, never from this.) */
+    private fun saidBy(sender: JSONObject, content: Any?): Any {
+        fun esc(v: String, quote: Boolean) = v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .let { if (quote) it.replace("\"", "&quot;").replace("'", "&#x27;") else it }
+        val attrs = sender.keys().asSequence().joinToString("") { k -> " $k=\"${esc(sender.optString(k), true)}\"" }
+        val head = "<baude-sender$attrs>A message from ${esc(senderName(sender), false)}, not from your user</baude-sender>\n\n"
+        if (content is String) return head + content
+        val blocks = (content as? JSONArray)?.let { JSONArray(it.toString()) } ?: JSONArray()
+        val at = (0 until blocks.length()).firstOrNull { blocks.optJSONObject(it)?.optString("type") == "text" }
+            ?: return JSONArray().put(JSONObject().put("type", "text").put("text", head.trimEnd())).apply {
+                for (i in 0 until blocks.length()) put(blocks.get(i))
+            }
+        blocks.getJSONObject(at).put("text", head + blocks.getJSONObject(at).optString("text"))
+        return blocks
+    }
 
     /** A file in one of its agents' folders, as a host's read_file serves one in a session's folder:
      * {path, size, data (base64), error?}. */
@@ -788,7 +884,8 @@ object PhoneHost {
         s.meta.put("trashed", now()).remove("queued")
         File(bin, "meta.json").writeText(s.meta.toString())
         File(root, "sessions/${s.id}.json").delete()
-        for ((from, name) in listOf(transcript(s) to "transcript.jsonl", s.folder to "folder", picture(s) to "picture")) {
+        for ((from, name) in listOf(transcript(s) to "transcript.jsonl", s.folder to "folder", picture(s) to "picture",
+                sendersFile(s) to "senders.json")) {
             if (from.exists() && from.renameTo(File(bin, name))) went.add(File(bin, name).path)
         }
         return went
@@ -817,6 +914,7 @@ object PhoneHost {
             File(bin, "transcript.jsonl").renameTo(transcript(s))
             File(bin, "folder").renameTo(s.folder)
             File(bin, "picture").renameTo(picture(s))
+            File(bin, "senders.json").renameTo(sendersFile(s))
             synchronized(lock) {
                 sessions[s.id] = s
                 save(s)

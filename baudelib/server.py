@@ -194,9 +194,11 @@ def _read_json(path):
 class Conn:
     """A client's connection: what it's sent goes out on a thread of its own, so a slow one holds nobody up."""
 
-    def __init__(self, channel):
+    def __init__(self, channel, origin=None, sender=None):
         self.channel, self.out = channel, queue.Queue()
         self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
+        self.origin, self.sender = origin, sender  # (a tunnel's: the member it came from; the chat there its relay
+        # named, as that member has it: what's sent through it is from)
         self.archived = False  # (subscribed to archived sessions too)
         self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
         self.writer.start()
@@ -232,6 +234,8 @@ class Session:
         self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
         self.codex_queue = []     # Codex runs each follow-up as a separate turn.
         self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
+        self.reverting = {}       # request id sent on -> the message a revert takes back (what it drops of Senders)
+        self.senders = None       # (its sender store as it's kept, {uuid: sender}, once it's read: Server.senders)
         self.routes = {}          # request id sent on -> (conn, its own request id or the server's callback, undo)
         self.scan = self.info = self.stat = None  # the transcript: scan_session's state and info, (size, mtime)
         self.agents = None        # its subagents' files, as last looked at: {name: (size, mtime_ns)}
@@ -368,6 +372,9 @@ class Session:
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "start_key": self.meta.get("start_key"),
+                "held": [{"id": h["id"], "text": h["text"], "sender": h.get("sender"), "at": h.get("at")}
+                         for h in self.meta.get("held") or []],
+                "senders": self.meta.get("senders") or 0,
                 "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
@@ -694,7 +701,8 @@ class Server:
             program = models.program(s.meta.get("model"))["name"]
             names = {s.meta.get("cli_id") or s.id, s.id}
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None,
-                 bot_dir(self.state_dir, s.id)]  # (a Bot's, or a chat's that was one: its memory and its picture)
+                 bot_dir(self.state_dir, s.id),  # (a Bot's, or a chat's that was one: its memory and its picture)
+                 self.senders_path(s.id)]  # (who its messages were from, with them)
         pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
         if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)
             paths += [os.path.join(pi, n) for n in sorted(os.listdir(pi)) if any(i in n for i in names)]
@@ -802,12 +810,14 @@ class Server:
 
     def answer_wait(self, s, w):
         """A wait of a session's agent (waits_on's: a subagent's answer, or a chat's) that this host's stop cut short:
-        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that sent to the
-        session as its user's message, which carries it on. Stopped again meanwhile: kept, for the next start."""
+        followed till it's over (meshtools.Mesh.follow: the answer, or what's become of it), and that held for the
+        session (held), from that chat, till a head sends it or drops it: its claude isn't started for it. Stopped
+        again meanwhile: kept, for the next start."""
         with self.lock:
             self.following.add((s.id, w["session"]))
         try:
-            got = meshtools.Mesh(socket=self.socket_path).follow(w)
+            got = meshtools.Mesh(s.id, self.socket_path).follow(w)  # (as from this chat: what it asked, if it's sent
+            # again, is from it, its relay and its input's as)
         except Exception as e:  # (said to the session as the call would have said it, its host named)
             got = {"session": w["session"], "answer": None, "error": f"{type(e).__name__}: {e}",
                    **meshtools.Mesh(socket=self.socket_path).named(
@@ -818,13 +828,16 @@ class Server:
                 return
             waits = [x for x in s.meta.get("waits_on") or [] if x["session"] != w["session"]]
             s.meta["waits_on"] = waits or None
+            host = got.get("host") or w.get("host") or self.me["id"]
+            named = self.mesh.name_of(host)  # (its name as this host has it, if the answer didn't say)
+            sender = wire.clean_sender({"kind": "chat" if w.get("kind") == "chat" else "subagent",
+                                        "name": w.get("title"), "host": host, "session": w["session"],
+                                        "host_name": got.get("host_name") or (named if named != host[:8] else None)})
+            s.meta["held"] = (s.meta.get("held") or []) + [{
+                "id": str(uuid.uuid4()), "text": meshtools.told(w, got), "sender": sender, "at": time.time()}]
             self.save(s)
-            self.log(f"{s.id}: the answer it waited on from {w['session']} sent to it")
-            try:
-                self.take_input(None, s, {"type": "user", "message": {"role": "user", "content": [
-                    {"type": "text", "text": meshtools.told(w, got)}]}})
-            except OSError as e:  # (its folder gone, say)
-                self.log(f"{s.id}: couldn't be sent it: {e}")
+            self.log(f"{s.id}: the answer it waited on from {w['session']} held for it")
+            self.changed()
 
     def drop_waits(self, s):
         """(lock held) Its agent's waits (waits_on) let go of, but those answered for it (answer_wait): its turn's
@@ -935,10 +948,12 @@ class Server:
         os.close(self.lock_file)
         self.closed.set()
 
-    def serve(self, sock):
+    def serve(self, sock, origin=None, sender=None):
+        """A connection served (a tunnel's through the mesh: origin, the member it came from; sender, who what's sent
+        through it is from, as that member said: Conn's)."""
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
-        conn = Conn(ch)
+        conn = Conn(ch, origin, sender)
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -1231,8 +1246,9 @@ class Server:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
-        if op == "input" and self.makes_folder(msg.get("msg") or {}):  # (its worktree removed: made again first, not
-            self.restore_folder(conn, msg.get("session"))               # under the lock, which git would hold up)
+        if op == "input" and self.makes_folder(msg.get("msg") or {}) or op == "held" and msg.get("send"):
+            self.restore_folder(conn, msg.get("session"))  # (its worktree removed: made again first, not under the
+            # lock, which git would hold up)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")
@@ -1264,7 +1280,7 @@ class Server:
                 self.drop_ephemeral(s, meant=True)
                 return None
             if op == "input":
-                self.take_input(conn, s, msg.get("msg") or {})
+                self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
                 if s.proc is not None:
@@ -1304,6 +1320,10 @@ class Server:
                 s.deleting = True
                 threading.Thread(target=self.delete, args=(s, reply), daemon=True, name="delete").start()
                 return None
+            if op == "senders":
+                if (have := self.senders(s)) is None:
+                    return reply("error", error="its sender store couldn't be read: see the host's log")
+                return reply("senders", session=s.id, senders=dict(have), rev=s.meta.get("senders") or 0)
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))
@@ -1313,6 +1333,19 @@ class Server:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
+                # at once: kept if it can't be)
+                held = s.meta.get("held") or []
+                h = next((h for h in held if h.get("id") == msg.get("id")), None)
+                if h is None:
+                    return reply("error", error="no such message held for it")
+                if msg.get("send"):
+                    self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
+                                    h.get("sender"))
+                s.meta["held"] = [x for x in held if x is not h] or None
+                self.save(s)
+                self.changed()
+                return reply("held", session=s.id)
             if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
                 on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
                 if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):
@@ -1323,6 +1356,7 @@ class Server:
                                   "kind": "chat" if on.get("kind") == "chat" else "subagent",
                                   "text": on["text"] if isinstance(on.get("text"), str) else None,
                                   "offset": on["offset"] if isinstance(on.get("offset"), int) else 0,
+                                  "title": on["title"][:200] if isinstance(on.get("title"), str) else None,
                                   "until": float(on["until"]) if isinstance(on.get("until"), (int, float)) else 0})
                 s.meta["waits_on"] = waits or None
                 self.save(s)
@@ -1631,19 +1665,22 @@ class Server:
                 s.viewers.add(conn)
                 s.live.add(conn)
             try:
-                if meta["prompt"].strip():
+                if src is not None:  # (who its messages were from goes with the copy of them)
+                    self.copy_senders(src, s)
+                if meta["prompt"].strip():  # (from a chat whose mesh tools started it, if they did: input's as)
                     self.ensure_proc(s)
-                    self.send_user(s, meta["prompt"])
+                    self.send_user(s, meta["prompt"], self.sent_by(conn, params) if conn is not None else None)
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
                 if s.app_tools is not None:
                     s.app_tools.end()
                 del self.sessions[s.id]
                 if s.proc is not None:
                     s.proc.kill()
-                try:
-                    os.remove(os.path.join(self.state_dir, "sessions", f"{s.id}.json"))
-                except OSError:
-                    pass
+                for kept in (os.path.join(self.state_dir, "sessions", f"{s.id}.json"), self.senders_path(s.id)):
+                    try:  # (nor who its prompt was from)
+                        os.remove(kept)
+                    except OSError:
+                        pass
                 raise
             if conn is not None:
                 conn.send({"op": "started", "req": req, "session": s.listing(), "forked": bool(src)})
@@ -1816,16 +1853,29 @@ class Server:
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
 
-    def send_user(self, s, content):
-        s.proc.user(content)
-        self.keep(s, "user", {"role": "user", "content": content})
+    def send_user(self, s, content, sender=None):
+        """(lock held) A session's first message (start's prompt), from sender if it isn't its user's (take_input)."""
+        said = str(uuid.uuid4())  # (its program keeps it: who it's from kept by it, stamp)
+        if wire.clean_sender(sender) is not None:
+            content = wire.said_by(sender, content)
+            self.stamp(s, said, sender)
+        s.proc.user(content, uuid=said)
+        self.keep(s, "user", {"role": "user", "content": content}, said)
         s.busy, s.used = True, time.time()
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg):
-        """(lock held) What a client sends its claude."""
+    def take_input(self, conn, s, msg, sender=None):
+        """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
+        program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
+        (wire.said_by), and kept by that uuid (stamp)."""
         kind = msg.get("type")
+        if kind == "user":
+            msg = {**msg, "uuid": msg["uuid"] if wire.is_id(msg.get("uuid") or "") else str(uuid.uuid4())}
+        if kind == "user" and wire.clean_sender(sender) is not None:
+            message = msg.get("message") or {}
+            msg = {**msg, "message": {**message, "content": wire.said_by(sender, message.get("content"))}}
+            self.stamp(s, msg["uuid"], sender)
         if kind == "user":
             is_codex = models.model_program(s.meta.get("model")) == "codex"
             if is_codex:
@@ -1922,6 +1972,8 @@ class Server:
             s.rewinds[on], index, count, before = found
             msg = {**msg, "request": {**request, "baude_prompt_index": index, "baude_prompt_count": count,
                                       "baude_kept": before}}  # (Apple's, its session made again from them)
+        if sub == "rewind_conversation":  # (once it's made, who what it drops was from goes too: unstamp)
+            s.reverting[on] = request.get("target_message_uuid")
         s.routes[on] = (conn, rid, undo)
         proc.send({**msg, "request_id": on})
         self.changed()
@@ -1951,11 +2003,14 @@ class Server:
                     s.waiting_init = []
                 elif rid in s.routes:
                     conn, theirs, undo = s.routes.pop(rid)
+                    rewound = r.get("subtype") == "success" and (r.get("response") or {}).get("rewound")
                     if rid in s.rewinds:  # (a revert its program made: marked in the transcript kept here)
                         last = s.rewinds.pop(rid)
-                        if r.get("subtype") == "success" and (r.get("response") or {}).get("rewound"):
+                        if rewound:
                             self.keep_rewind(s, last)
                             s.queued = []  # (sent after it, at the turn it stopped: gone with it)
+                    if (target := s.reverting.pop(rid, None)) and rewound:
+                        self.unstamp(s, target)
                     applied = (r.get("response") or {}).get("applied") if r.get("subtype") == "success" else None
                     if isinstance(applied, dict):  # (get_settings: what claude runs with, its own defaults too: kept,
                         for key in ("model", "effort"):  # for when it's asked again and isn't running)
@@ -2155,6 +2210,95 @@ class Server:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n")
 
+    # ---- who a session's messages are from, if not its user (wire's Senders): kept by their uuids beside it
+    def chat_sender(self, sid):
+        """(lock held) One of this host's chats as a message from it is from: a Bot by its name, else by its title, on
+        this host; None if there's no such chat here."""
+        s = self.sessions.get(sid) if wire.is_id(sid or "") else None
+        if s is None:
+            return None
+        listed = s.listing()
+        bot = (listed.get("bot") or {}).get("name")
+        return wire.clean_sender({"kind": "bot" if bot else "chat", "name": bot or listed.get("title"),
+                                  "host": self.me["id"], "host_name": self.me["name"], "session": sid})
+
+    def sent_by(self, conn, msg):
+        """(lock held) Who a request passing a message in (input, start) is from, as this host knows it: through a
+        tunnel, the chat its relay named (else the one its as names) on the member it came from; on this host, the
+        chat of this host's its as names; None for the session's user."""
+        if conn.origin is not None:
+            said = conn.sender or ({"kind": "chat", "session": msg["as"]} if wire.is_id(msg.get("as") or "") else None)
+            if said is None:
+                return None
+            name = self.mesh.name_of(conn.origin)
+            return wire.clean_sender({**said, "host": conn.origin,
+                                      "host_name": said.get("host_name") if name == conn.origin[:8] else name})
+        return self.chat_sender(msg.get("as"))
+
+    def senders_path(self, sid):
+        return os.path.join(self.state_dir, "senders", f"{sid}.json")
+
+    def senders(self, s):
+        """(lock held) Its sender store, {uuid: sender} in the order kept (read the first time it's wanted); None if
+        it's there and can't be read (said in the log; read again the next time, never written over meanwhile)."""
+        if s.senders is None:
+            try:
+                with open(self.senders_path(s.id), encoding="utf-8") as f:
+                    got = json.load(f)
+            except FileNotFoundError:
+                got = {}
+            except (OSError, ValueError) as e:
+                self.log(f"{s.id}: its sender store couldn't be read: {e}")
+                return None
+            if not isinstance(got, dict):
+                self.log(f"{s.id}: its sender store isn't one")
+                return None
+            s.senders = {k: v for k, v in got.items() if wire.is_id(k) and isinstance(v, dict)}
+        return s.senders
+
+    def write_senders(self, s, senders):
+        """(lock held) Its sender store as it is now, written whole, and listed as changed (its revision)."""
+        s.senders = senders
+        if s.meta.get("ephemeral") or s.deleted or s.deleting:
+            return
+        if senders or os.path.exists(self.senders_path(s.id)):
+            _write_json(self.senders_path(s.id), senders)
+        s.meta["senders"] = (s.meta.get("senders") or 0) + 1
+        self.save(s)
+        self.changed()
+
+    def stamp(self, s, said, sender):
+        """(lock held) A message passed to a session from another than its user: who it's from kept by its uuid."""
+        if (sender := wire.clean_sender(sender)) is not None and wire.is_id(said or "") and \
+                (have := self.senders(s)) is not None:
+            self.write_senders(s, {**have, said: sender})
+
+    def unstamp(self, s, target):
+        """(lock held) A revert made: the message it took back and those after it gone from its sender store. Its own
+        order says which, if it's one of the store's (they're kept as they're sent); else its transcript does, read
+        on a thread of its own, not under the lock (what's stamped meanwhile, after the revert, stays)."""
+        if not (have := self.senders(s)):
+            return
+        if target in have:
+            keys = list(have)
+            self.write_senders(s, {k: have[k] for k in keys[:keys.index(target)]})
+            return
+        path, among = s.transcript(), set(have)
+        if not path:
+            return
+
+        def read():
+            gone = transcripts.from_record(path, target, among)
+            with self.lock:
+                if gone and not s.deleted and self.sessions.get(s.id) is s and (now := self.senders(s)) is not None:
+                    self.write_senders(s, {k: v for k, v in now.items() if k not in gone})
+        threading.Thread(target=read, daemon=True, name="unstamp").start()
+
+    def copy_senders(self, src, s):
+        """(lock held) A fork's sender store: its source's, as the copy of its conversation has the same messages."""
+        if (have := self.senders(src)):  # (None: unreadable, nothing copied)
+            self.write_senders(s, dict(have))
+
     def keep_rewind(self, s, last):
         """(lock held) A revert its program made, in a session whose transcript is the server's: marked there as claude
         marks its own (rewind_conversation), so what comes after the record it keeps last is read as gone."""
@@ -2196,6 +2340,7 @@ class Server:
         """(lock held) What was asked of a session's claude that's gone: no answer's coming (the server's own requests
         are done without one)."""
         routes, s.routes = s.routes, {}
+        s.reverting = {}
         for _conn, theirs, _undo in routes.values():
             if callable(theirs):
                 theirs(False)

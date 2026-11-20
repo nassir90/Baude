@@ -163,7 +163,7 @@ object PhoneLink {
         fun closed(error: String?)
     }
 
-    private class Tunnel(val link: Link, val t: Int) : Head(), End {
+    private class Tunnel(val link: Link, val t: Int, override val origin: String?, override val sender: JSONObject?) : Head(), End {
         override fun send(msg: JSONObject) = link.wire.send(JSONObject().put("op", "data").put("r", t).put("msg", msg))
         override fun deliver(msg: JSONObject) = PhoneHost.take(this, msg)
         override fun closed(error: String?) = PhoneHost.take(this, null)
@@ -230,6 +230,11 @@ object PhoneLink {
             }
         }
     }
+
+    /** A member's name, as its record says it (its id's first 8 if there's none). */
+    fun nameOf(member: String): String = records[member]?.first?.optJSONObject("info")?.optString("name")?.ifBlank { null }
+        ?: Mesh.states.values.toList().firstOrNull { it.info?.optString("id") == member }?.info?.optString("name")?.ifBlank { null }
+        ?: member.take(8)
 
     /** The members its links reach now, as a host process works it out (mesh.Mesh.reroute): breadth first from the
      * hosts it's linked to, through links both ends' records list. (A record a host still has of one that's gone,
@@ -346,7 +351,9 @@ object PhoneLink {
                 link.ins.remove(t)?.closed(null) // (a number used again: the tunnel that had it is gone)
                 val to = f.optString("to")
                 if (to == PhoneHost.id) {
-                    link.ins[t] = Tunnel(link, t)
+                    // (who what's sent through it is from: the member it came from, and the chat its relay named)
+                    link.ins[t] = Tunnel(link, t, f.optString("from").takeIf(::isId),
+                        f.optJSONObject("sender")?.let { PhoneHost.cleanSender(it) })
                     link.wire.send(JSONObject().put("op", "opened").put("r", t))
                     return
                 }
@@ -360,7 +367,10 @@ object PhoneLink {
                 link.ins[t] = Passed(ahead, true, n)
                 ahead.outs[n] = Passed(link, false, t)
                 ahead.wire.send(JSONObject().put("op", "open").put("t", n).put("to", to).put("ttl", ttl - 1)
-                    .apply { f.optString("from").takeIf(::isId)?.let { put("from", it) } })
+                    .apply {
+                        f.optString("from").takeIf(::isId)?.let { put("from", it) }
+                        f.optJSONObject("sender")?.let { put("sender", it) }
+                    })
             }
             "opened" -> link.outs[f.optInt("r", -1)]?.opened()
             "data" -> {

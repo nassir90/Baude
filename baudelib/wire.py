@@ -24,7 +24,7 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        program's writing to it)
     start {prompt, cwd, model, effort, mode, group, title?, attach?, answers?, spawned_by?, system?, add_dirs?,
            allowed_tools?, disallowed_tools?, fork_from?, ask_timeout?, ask_default?, draft?, ephemeral?, adopt?,
-           env?, start_key?, app_tools?, grace?}
+           env?, start_key?, app_tools?, grace?, as?}
                                                     -> started {session, forked}, before the prompt's sent: attach,
                                                        and this
                                                        connection's attached live to it first. system: more for
@@ -72,10 +72,24 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        grace: (version 17) seconds an ephemeral session waits for its
                                                        head to come back (a day at most; else EPHEMERAL_S), its idle
                                                        claude not stopped meanwhile (it keeps nothing)
+                                                       as: (version 18) as input's, for the prompt
     detach {session}
-    input {session, msg}                            -> accepted {session}, given a req (a stream-json message for
+    input {session, msg, as?}                       -> accepted {session}, given a req (a stream-json message for
                                                        the session's claude: started on it, with --resume, if it
-                                                       isn't running)
+                                                       isn't running). A user message without a uuid is given one
+                                                       (its program keeps it: Senders). as: (version 18) the id of
+                                                       one of this host's chats whose mesh tools send it
+                                                       (baudelib.meshtools): it's from that chat, not the session's
+                                                       user, so the host says so to its agent (said_by) and keeps
+                                                       who it's from (Senders); through a tunnel, from the chat its
+                                                       relay named, else this one on the member it came from
+    held {session, id, send?}                       -> held {session}: (version 18) a message held for the session
+                                                       (its held: one its host had for it while nobody was there to
+                                                       say whether it should go, a subagent's answer after a restart,
+                                                       say) dropped, or sent (send) as input would send it, from
+                                                       its sender
+    senders {session}                               -> senders {session, senders: {uuid: sender}, rev}: (version 18)
+                                                       its messages from others than its user (Senders)
     stop {session, restart?}                        -> stopped {session} (its claude: the next message resumes it;
                                                        restart: those attached aren't told it went)
     set_cwd {session, cwd}                          -> cwd_set {session, cwd}: the folder its claude runs in, from its
@@ -128,14 +142,16 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        the mesh's tools (baudelib.meshtools), or not, from its next
                                                        start; a Bot's has them always
     waits_on {session, on: {session, host, kind,     -> waits_on {session}: (version 13) the session's agent waits on
-              text, offset, until}, done?}             another chat's answer (on: that chat, on member host, None for
+              text, offset, until, title?}, done?}     another chat's answer (on: that chat, on member host, None for
                                                        this host; kind "subagent" or "chat", text what it was asked,
                                                        offset its transcript's size as it was asked, until when the
-                                                       wait ends, epoch seconds), or done: no longer.
-                                                       Kept with the session (not listed) while its turn goes on: if
-                                                       this host stops meanwhile, which stops its agent, it follows
-                                                       the wait once it's started again and sends the session what the
-                                                       wait would have given, as its user's message
+                                                       wait ends, epoch seconds, title the chat's), or done: no
+                                                       longer. Kept with the session (not listed) while its turn goes
+                                                       on: if this host stops meanwhile, which stops its agent, it
+                                                       follows the wait once it's started again, and what the wait
+                                                       would have given is held for the session (held), from that
+                                                       chat (sender), till a head sends it or drops it (version 18;
+                                                       13: sent to it as its user's message)
     emission_watch {bot: {id, name}, max_w?, max_h?} -> emission_watching, then emission_frame {frame, w, h, jpeg} or
                                                        {state}, many, till emission_watch_end: (version 11) a Bot's
                                                        browser here watched (Baude's Browser pane). Its state also
@@ -190,9 +206,12 @@ A client's requests (a "req" it picks comes back on the reply):
                                                        inactive); activate, taken up again
     join {host}                                     -> joined {host}: (another host process's) this connection,
                                                        from now on, a link it's made to here (mesh.py)
-    relay {to}                                      -> relayed {to}: this connection, from now on, a tunnel to
+    relay {to, as?}                                 -> relayed {to}: this connection, from now on, a tunnel to
                                                        member to's host process (hello first, as ever); error if
-                                                       there's no way to it now
+                                                       there's no way to it now. as: (version 18) the id of one of
+                                                       this host's chats whose mesh tools open it: what's sent
+                                                       through it is from that chat (input's as), as this host has
+                                                       it (its Bot's name or its title), on this host
     infer {provider, method, path, headers, body}   -> infer_head {status, headers}, infer_data {data (base64)}...,
                                                        infer_end: an HTTP request to one of this machine's model
                                                        providers (an OpenAI-compatible server's: path after its
@@ -207,8 +226,8 @@ A session's worktree that's gone is made again from its branch as a message or a
 it are told so by its claude's message {type: "_note", text}.
 
 A session is {id, title, cwd, model, effort, mode, group, created, said, updated, size, state, prompts, archived,
-subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow}: its id a UUID the server made as it started it
-(claude's --session-id; what it's resumed by), state "working"
+subagents, asks, cli_id, commands, cut, bot, start_key, acting, always_allow, held, senders}: its id a UUID the server
+made as it started it (claude's --session-id; what it's resumed by), state "working"
 (at a turn), "waiting" (asking permission), "idle" (claude running, between turns) or "stopped" (no claude running),
 archived whether it's archived, subagents the mtime of its subagents' newest file (0 for none: what a client's copy
 is checked against), asks what
@@ -225,7 +244,17 @@ a Bot's {name, since (epoch seconds), picture (its mtime, None for none)}, None 
 its start's, if it was given one (version 13). acting: whether its turn is at its tools (version 14): from a tool
 call's start in what its agent says till text starts after it, the turn ends or its agent goes; only while it's
 "working" (not while it asks permission). always_allow: (version 15) the tools allowed whenever it asks for them,
-sorted.
+sorted. held: (version 18) messages held for it, oldest first, [{id, text, sender, at (epoch seconds)}]. senders:
+(version 18) its sender store's revision (0 for none: Senders), what a head's copy is checked against.
+
+Senders (version 18). A message passed to a session from another than its user (input's as, a held message sent, a
+subagent's task) has a uuid its program keeps: Claude Code's as its transcript record's, pi's on its session entry
+(pi-claude's /baude-uuid), the host's own transcript's for the others (Server.keep). Its host keeps who it's from,
+by that uuid, beside the session (its state folder's senders/<session>.json), and heads draw a message as from
+another only if it's there, never from its text: the tag said_by puts at the head of its text is for its agent.
+A sender is {kind ("bot", "chat", "subagent", "host"), name, host (its host's id), host_name, session}, filled in by
+the host from what it knows itself. The store goes as its session's transcript goes: copied to a fork, trashed with
+it, and what a revert drops (its message and those after it) gone from it too.
 
 A session listed by a server on this machine says where its transcript is ("transcript": a path, or None), so what's
 on the same machine reads it there rather than fetching a copy.
@@ -261,7 +290,7 @@ import subprocess
 import threading
 import time
 
-VERSION = 17  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
+VERSION = 18  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh: link, unlink, join, relay, infer;
 # 4: deactivate, activate; 5: catalogue; 6: notes, Record's notebooks; 7: links straight to members learned of through
 # others, info's mesh found; 8: bot, bot_picture, memory: Bots; 9: mesh_tools, a session's spawned_by and mesh_tools;
 # 10: emission, a Bot's browser here; 11: emission_watch, emission_watch_say, a Bot's browser watched;
@@ -269,7 +298,8 @@ VERSION = 17  # (1: #98-#123; 2: adopt, ephemeral, env, info's init; 3: the mesh
 # gone; 14: a session's acting, emission_watch's state's now and pointer; 15: always_allow's add, attach's
 # always_allow added, a session's always_allow; 16: emission_serve, emission_call, emission_answer,
 # emission_unserved, a session's on_phone: a Bot's browser on a phone; 17: feedback, filed by this host's gh; start's
-# app_tools and grace, attach's app_tools, list_dir, git, signal_names)
+# app_tools and grace, attach's app_tools, list_dir, git, signal_names;
+# 18: input's, start's and relay's as, held, senders, a session's held and senders)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
 STATES = ("working", "waiting", "idle", "stopped")
 PING_S = 5      # a subscriber hears from the server at least this often
@@ -536,11 +566,11 @@ def connect_ssh(dest, command=None, strict=False, timeout=25.0):
 OPEN_S = 20  # (a member of the mesh, reached through it: the tunnel's this long to open)
 
 
-def through(ch, host, timeout=5.0):
+def through(ch, host, timeout=5.0, as_=None):
     """(channel, info) past hello for member host of the mesh, on a channel to a host process in it: relay, then
-    hello through the tunnel. OSError if there's no way to it."""
+    hello through the tunnel (as_: relay's as). OSError if there's no way to it."""
     ch.sock.settimeout(max(timeout, OPEN_S + 5))  # (the host process's own wait, OPEN_S, ends first, and says why)
-    ch.send({"op": "relay", "to": host, "req": 0})
+    ch.send({"op": "relay", "to": host, "req": 0, **({"as": as_} if as_ else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "relayed":
         ch.close()
@@ -550,9 +580,9 @@ def through(ch, host, timeout=5.0):
     return _hello(ch, max(timeout, 10.0), host)
 
 
-def connect_mesh(host, path=None, timeout=5.0):
+def connect_mesh(host, path=None, timeout=5.0, as_=None):
     """A Channel to member host of the mesh, through this machine's host process (socket_path(), or the one at
-    path)."""
+    path); as_: relay's as."""
     path = path or socket_path()
     own_socket(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -562,11 +592,12 @@ def connect_mesh(host, path=None, timeout=5.0):
     except OSError:
         sock.close()
         raise
-    return through(Channel.over(sock), host, timeout)
+    return through(Channel.over(sock), host, timeout, as_)
 
 
-def reach(where, timeout=5.0):
-    """(channel, info) for a host process wherever it is (where: see this module's docstring)."""
+def reach(where, timeout=5.0, as_=None):
+    """(channel, info) for a host process wherever it is (where: see this module's docstring); as_: through the
+    mesh, relay's as (on this machine, a request's own says it)."""
     via = (where or {}).get("via")
     if via == "local":
         return connect_local(None, timeout)
@@ -575,7 +606,7 @@ def reach(where, timeout=5.0):
     if via == "ssh":
         return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")), max(timeout, 3.0))
     if via == "mesh":
-        return connect_mesh(where["host"], where.get("path"), timeout)
+        return connect_mesh(where["host"], where.get("path"), timeout, as_)
     raise OSError(f"nowhere to reach: {where!r}")
 
 
@@ -587,6 +618,59 @@ def is_where(where):
     return via == "local" or via == "unix" and isinstance(where.get("path"), str) or \
         via == "ssh" and is_dest(where.get("dest")) and isinstance(where.get("command") or "", str) or \
         via == "mesh" and is_id(where.get("host")) and isinstance(where.get("path") or "", str)
+
+
+SENDER_KINDS = ("bot", "chat", "subagent", "host")  # (who a message to a session is from, if not its user: said_by)
+_SENDER = re.compile(r'\A<baude-sender((?: [a-z_]+="[^"<>]*")*)>[^<]*</baude-sender>(?:\n\n|\n|\Z)')
+
+
+def clean_sender(sender):
+    """A sender as it's kept and said ({kind, name, host, host_name, session}: words, cut short), or None if it isn't
+    one."""
+    if not isinstance(sender, dict):
+        return None
+    out = {k: " ".join(str(sender[k]).split())[:120] for k in ("name", "host", "host_name", "session")
+           if isinstance(sender.get(k), str) and sender[k].strip()}
+    out["kind"] = sender.get("kind") if sender.get("kind") in SENDER_KINDS else "host"
+    return out
+
+
+def sender_name(sender):
+    """Who a sender is, as a message from it's headed: "Ada, a Bot on lab-mac", "subagent “List” on C"."""
+    name, where = sender.get("name") or "", sender.get("host_name")
+    kind = sender.get("kind")
+    who = {"bot": f"{name or 'a Bot'}, a Bot", "chat": f"“{name}”" if name else "a chat",
+           "subagent": f"subagent “{name}”" if name else "a subagent", "host": name or "a host"}.get(
+        kind, name or "another")  # (a kind of a newer host's: by its name)
+    return who + (f" on {where}" if where and kind != "host" else "")
+
+
+def said_by(sender, content):
+    """A user message's content (text, or blocks) as from sender, not the session's user, for its agent: its first
+    line says so, in a tag, then a blank line and what was said. (Heads draw who it's from from the host's sender
+    store, never from this.)"""
+    import html
+    sender = clean_sender(sender)
+    if sender is None:
+        return content
+    attrs = "".join(f' {k}="{html.escape(v, quote=True)}"' for k, v in sender.items())
+    head = (f"<baude-sender{attrs}>A message from {html.escape(sender_name(sender), quote=False)}, not from your user"
+            f"</baude-sender>\n\n")
+    if isinstance(content, str):
+        return head + content
+    blocks = list(content or [])
+    at = next((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text"), None)
+    if at is None:
+        return [{"type": "text", "text": head.rstrip()}] + blocks
+    blocks[at] = {**blocks[at], "text": head + (blocks[at].get("text") or "")}
+    return blocks
+
+
+def unsaid(text):
+    """A message's text without the tag said_by put at its head (one the sender store says is from another, as it's
+    drawn; what a mesh tool sent, as it finds it again)."""
+    m = _SENDER.match(text or "")
+    return text if m is None else text[m.end():]
 
 
 def is_local(where):

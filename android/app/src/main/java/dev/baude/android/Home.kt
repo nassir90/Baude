@@ -240,7 +240,8 @@ private fun limit(key: String): Int = when {
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by date and pick
  * groups. */
 @Composable
-fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {}) {
+fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
+         settings: () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -252,7 +253,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         Bar("Baude", end = {
             IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
-            Menu(listOf("Send Feedback…" to feedback))
+            Menu(listOf("Settings…" to settings, "Send Feedback…" to feedback))
         })
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
         if (Mesh.key.value == null || Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = hosts)

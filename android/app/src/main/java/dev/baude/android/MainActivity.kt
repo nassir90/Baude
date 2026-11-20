@@ -50,8 +50,10 @@ class MainActivity : ComponentActivity() {
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
+                    "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
-                        feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) })
+                        feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
+                        settings = { go(listOf("settings")) })
                 }
                 HostKeyAsk()
             }

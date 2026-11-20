@@ -848,6 +848,8 @@ object Mesh {
      * its asks (tag: its own, taken back once it's answered). On the lock screen, only which Bot wrote or is asking:
      * what it said shows once the phone's unlocked. */
     private fun post(contact: Contact, text: String, tag: String?) {
+        Settings.load(app)
+        if (!Settings.notify.value) return // (Settings → Notifications off)
         if (Build.VERSION.SDK_INT >= 33 &&
             app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return

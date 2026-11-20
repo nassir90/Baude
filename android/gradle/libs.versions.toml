@@ -8,6 +8,10 @@ lifecycle = "2.9.1"
 composeBom = "2025.06.01"
 # (savedstate's serialization, at the version the offline build has: Gradle takes the higher)
 kotlinxSerialization = "1.9.0"
+# (the screenshot rig's, as nassir90/busbet's tfi-app has them: renders on the JVM, no emulator)
+robolectric = "4.17"
+roborazzi = "1.76.0"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -21,6 +25,9 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 
 kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "kotlinxSerialization" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

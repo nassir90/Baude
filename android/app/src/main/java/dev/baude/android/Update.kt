@@ -35,7 +35,8 @@ import java.util.concurrent.Executors
 /** Kept up to date from the Baude site, as Baude is from git (update.py): FEED, the site's word on its latest build
  * (build_shots.py's baude-android.json: its versionCode, the APK beside it, its size and sha256), looked at as the
  * app starts, each time it's back in front (CHECK_MS apart at most) and every hour in the background (UpdateJob). A
- * newer build's downloaded by itself on a network that isn't metered (on one that is, once Update's tapped), checked
+ * newer build's downloaded by itself on a network that isn't metered (on one that is, once Update's tapped, unless
+ * Settings → Download updates on metered networks is on), checked
  * (its size and sha256 as the feed says, this app's package at the feed's version, signed as this one is) and only
  * then offered: Update at the home screen's foot, as Baude's sidebar has it, and a notification (once a build) if it
  * came while the app wasn't in front. One that can't be installed over this one is said there instead, and not
@@ -272,7 +273,9 @@ object Update {
             main.post { if (state.value == "") state.value = "found" } // (Update: tried again now)
             return
         }
-        if (!user && !wanted && app.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered) {
+        dev.baude.android.Settings.load(app)
+        if (!user && !wanted && !dev.baude.android.Settings.meteredUpdates.value &&
+            app.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered) {
             main.post { if (state.value == "") state.value = "found" }
             return
         }

@@ -79,7 +79,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                     "models run on a machine of the mesh that serves them.", style = Type.body, color = c.dim)
             }
 
-            Heading("Agents")
+            PanelHeading("Agents")
             val agents = Mesh.sessions["phone"].orEmpty().filter { !it.optBoolean("archived") }
             Panel(rows = true) {
                 if (agents.isEmpty()) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -109,7 +109,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                 }
             }
 
-            Heading("Models")
+            PanelHeading("Models")
             Text("What the mesh's machines serve over an API. A model call goes through the mesh to the machine that " +
                 "has the model, and runs there as that machine's own settings say.",
                 style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
@@ -130,7 +130,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
 
             val bin = PhoneHost.trashed()
             if (bin.isNotEmpty()) {
-                Heading("Trash")
+                PanelHeading("Trash")
                 Panel(rows = true) {
                     bin.forEachIndexed { i, m ->
                         if (i > 0) Rule()
@@ -148,7 +148,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                 }
             }
 
-            Heading("What they reach")
+            PanelHeading("What they reach")
             Panel {
                 Text("Files in each agent's own folder on this phone; questions to you; and the mesh's hosts and " +
                     "chats, through this phone's connections to them. Nothing else of the phone's. What it asks you " +
@@ -190,32 +190,6 @@ private fun setPicture(s: JSONObject, png: ByteArray) {
         .put("name", bot.optString("name")).put("picture", java.util.Base64.getEncoder().encodeToString(png)))) {}
 }
 
-/** A phone agent's permission mode, in its chat's bar: tapped, the modes to pick from, as Baude's menu has them
- * (set_permission_mode). */
-@Composable
-fun PhoneMode(sid: String) {
-    val c = LocalBaude.current
-    Mesh.tick.value
-    val mode = Mesh.sessions["phone"].orEmpty().firstOrNull { it.optString("id") == sid }?.optString("mode") ?: return
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Text(PhoneTools.MODES.firstOrNull { it.first == mode }?.second ?: mode, style = Type.caption, color = c.fg,
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(c.raised).clickable { open = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp))
-        androidx.compose.material3.DropdownMenu(open, { open = false }, containerColor = c.dialog) {
-            for ((value, label) in PhoneTools.MODES) androidx.compose.material3.DropdownMenuItem(
-                text = { Text(label, style = Type.body, color = c.fg) },
-                onClick = {
-                    open = false
-                    Mesh.conn("phone")?.send(JSONObject().put("op", "input").put("session", sid).put("msg", JSONObject()
-                        .put("type", "control_request").put("request_id", java.util.UUID.randomUUID().toString())
-                        .put("request", JSONObject().put("subtype", "set_permission_mode").put("mode", value))))
-                },
-                leadingIcon = if (value == mode) ({ androidx.compose.material3.Icon(Icons.Filled.Check, null, tint = c.accent) }) else null)
-        }
-    }
-}
-
 /** A new agent on this phone: its name, the model that serves it (of those the mesh serves), and what it's to do
  * first. */
 @Composable
@@ -241,7 +215,7 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
                 Text("An agent here is a Bot: its name and its memory (a file in its folder) last.",
                     style = Type.caption, color = c.dim)
             }
-            Heading("Its model")
+            PanelHeading("Its model")
             Panel(rows = true) {
                 if (models.isEmpty()) Text("No machine in reach serves a model over an API yet (Ollama, or an " +
                     "OpenAI-compatible server).",
@@ -251,9 +225,9 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
                     Pick(model == m.value, m.display, "${m.providerName} on ${m.memberName}") { model = m.value }
                 }
             }
-            Heading("Its permission mode")
+            PanelHeading("Its permission mode")
             Panel(rows = true) {
-                PhoneTools.MODES.forEachIndexed { i, (value, label) ->
+                MODES.forEachIndexed { i, (value, label) ->
                     if (i > 0) Rule()
                     Pick(mode == value, label, MODE_SAID[value].orEmpty()) { mode = value }
                 }
@@ -292,7 +266,7 @@ private val MODE_SAID = mapOf("default" to "Asks before it changes a file",
 private fun modelSaid(value: String) = value.substringAfterLast("/")
 
 @Composable
-private fun Heading(text: String) {
+private fun PanelHeading(text: String) {
     val c = LocalBaude.current
     Text(text, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
 }

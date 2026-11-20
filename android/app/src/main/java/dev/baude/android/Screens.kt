@@ -3,7 +3,6 @@ package dev.baude.android
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -30,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,8 +44,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,71 +63,19 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-// ---------------------------------------------------------------------------------------------------- the Bots --
-
-/** Your Bots, on every host, the last to say something first: as Baude's sidebar lists them, each its picture, its
- * name and what it's on. */
-@Composable
-fun Contacts(open: (Contact) -> Unit, hosts: () -> Unit, phone: () -> Unit = {}) {
-    val c = LocalBaude.current
-    Mesh.tick.value // (a host's state changed: drawn again)
-    val contacts = Mesh.contacts
-    Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Baude", end = {
-            IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
-            IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
-        })
-        val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
-        if (Mesh.key.value == null || Mesh.hosts.isEmpty()) {
-            GreyBanner("Add a host to see its Bots.", onClick = hosts)
-        }
-        for (conn in down) GreyBanner("Can't connect to ${Mesh.label(conn.id)}: ${conn.why ?: "no answer"}", onClick = hosts)
-        if (contacts.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("No Bots yet", style = Type.title, color = c.fg)
-                Spacer(Modifier.size(6.dp))
-                Text("Make a chat a Bot in Baude, and it shows here.", style = Type.body, color = c.dim,
-                    textAlign = TextAlign.Center)
-            }
-            return
-        }
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = Gap.inside)) {
-            items(contacts, key = { it.hostId + it.id }) { contact ->
-                LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp))
-                        .clickable { open(contact) }.padding(horizontal = Gap.sidebarRowH + 4.dp, vertical = Gap.sidebarRowV),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Avatar(contact.name, Mesh.pictures[contact.pictureKey])
-                    Spacer(Modifier.width(Gap.avatarGap))
-                    Column(Modifier.weight(1f)) {
-                        Text(contact.name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val what = contact.session.optString("title").ifBlank { "" }
-                        if (what.isNotEmpty()) Text(what, style = Type.caption, color = c.dim, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis)
-                    }
-                    StatusDot(contact.state, contact.asking)
-                }
-            }
-        }
-    }
-}
-
 // ------------------------------------------------------------------------------------------------------ a chat --
 
-/** A Bot's chat: what it and you have said, what it did, and a box to write in (files too: pictures and PDFs as
- * Baude sends them, text files in the message). */
+/** A chat's page: what it and you have said, what it did, and a box to write in (files too: pictures and PDFs as
+ * Baude sends them, text files in the message). name: what the box asks you to message. */
 @Composable
-fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
+fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: Boolean = true) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
-    val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
+    val sid = chat.sid
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
-    val contact = Mesh.contact(at, sid)
-    val name = contact?.name ?: "Bot"
-    var text by androidx.compose.runtime.saveable.rememberSaveable(hostId, sid) { mutableStateOf("") }
+    val session = Mesh.session(at, sid)
+    val working = session?.optString("state") == "working" || chat.thinking.value
+    var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -150,31 +96,32 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
         }
     }
     val list = rememberLazyListState()
-    LaunchedEffect(chat.lines.size, chat.asks.size) { // (to the end: what it said last, or what it asks)
-        val n = chat.lines.size + chat.asks.size
-        if (n > 0) list.animateScrollToItem(n - 1)
+    // (to the end: what it said last, or what it asks, a tall one's foot too; what it's writing, as it grows)
+    LaunchedEffect(chat.lines.size, chat.asks.size, chat.streaming.value.length / 120) {
+        val n = list.layoutInfo.totalItemsCount
+        if (n > 0) {
+            list.animateScrollToItem(n - 1)
+            list.scrollBy(1e6f)
+        }
     }
     Mesh.tick.value
-    val conn = Mesh.conn(at)
-    Column(Modifier.fillMaxSize().background(c.inside).imePadding()) {
-        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
-            lead = { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) },
-            end = if (at == "phone") ({ PhoneMode(sid) }) else null) // (this phone's own agents: their permission mode)
-        if (conn == null || conn.state != "up") GreyBanner("Can't connect to the host." + (conn?.why?.let { " $it" } ?: ""))
+    Column(Modifier.fillMaxSize().inside(c)) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line) }
             if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
-            items(chat.asks, key = { it.rid }) { ask -> Asked(chat, ask, contact?.alwaysOffered ?: true, name) }
-            if (contact?.state == "working" && chat.asks.isEmpty()) item {
+            items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
+                Asked(chat, ask, at == "phone" || alwaysOffered(session?.optString("model")), name)
+            }
+            if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
         }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send beside it
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp)
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
                 .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
         ) {
@@ -189,16 +136,16 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
                 }
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                IconButton(Icons.Filled.Add, "Attach files") { pick.launch(arrayOf("*/*")) }
+                if (attach) IconButton(Icons.Filled.Add, "Attach files") { pick.launch(arrayOf("*/*")) }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
-                    if (text.isEmpty()) Text("Message $name", style = Type.body, color = c.dim)
+                    if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
                     BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
                 }
                 val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
                 IconButton(Icons.Filled.ArrowUpward, "Send", enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
-                    Mesh.send(chat, text, files.toList())
+                    chat.send(text, files.toList())
                     text = ""
                     files.clear()
                 }
@@ -211,7 +158,7 @@ fun ChatScreen(hostId: String, sid: String, back: () -> Unit) {
  * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String) {
+fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
     Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -317,7 +264,7 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
 }
 
 @Composable
-private fun Said(line: Line) {
+fun Said(line: Line) {
     val c = LocalBaude.current
     when (line.kind) {
         "you" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -329,6 +276,8 @@ private fun Said(line: Line) {
         }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
+        "rows" -> MetaRows(line.text)
+        "action" -> MetaAction(line.text)
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }
@@ -337,7 +286,7 @@ private fun Said(line: Line) {
 
 /** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks. */
 @Composable
-private fun Prose(text: String) {
+fun Prose(text: String) {
     val c = LocalBaude.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         text.split("```").forEachIndexed { i, part ->
@@ -487,7 +436,10 @@ fun HostsScreen(back: () -> Unit) {
     var renewing by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = back) },
-            end = { IconButton(Icons.Filled.Add, "Add Host") { adding = true } })
+            end = {
+                IconButton(Icons.Filled.Add, "Add Host") { adding = true }
+                if (Mesh.key.value != null) Menu(listOf("New Key…" to { renewing = true }))
+            })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val key = Mesh.key.value
@@ -499,8 +451,7 @@ fun HostsScreen(back: () -> Unit) {
                     Text(error, style = Type.body, color = c.destructive)
                     Button("Try Again", suggested = true) { Mesh.readKey() }
                 } else if (key == null) {
-                    Text("Make a key for this phone, then put its public half in each host's ~/.ssh/authorized_keys. " +
-                        "It's made and kept in Android's Keystore, which signs with it and never gives it out.",
+                    Text("Make a key for this phone, then put it in each host's ~/.ssh/authorized_keys.",
                         style = Type.body, color = c.dim)
                     if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
                     else Button("Make Key", suggested = true) { Mesh.makeKey() }
@@ -510,32 +461,16 @@ fun HostsScreen(back: () -> Unit) {
                         Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
                     }
-                    Text("ECDSA P-256 · ${key.fingerprint}", style = Type.caption, color = c.dim)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.Icon(Icons.Filled.Lock, null, tint = c.dim,
-                            modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("${key.where}. " + if (key.hardware) "It signs for this phone there and can't be " +
-                            "copied off it." else "It signs for this phone there: this app can't read it out.",
-                            style = Type.caption, color = c.dim)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button("Copy", suggested = true) {
-                            ctx.getSystemService(ClipboardManager::class.java)
-                                .setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
-                            Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
-                        }
-                        Button("Share") {
-                            ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                                .putExtra(Intent.EXTRA_TEXT, key.line), "Share the key"))
-                        }
-                        Button("New Key") { renewing = true }
+                    Button("Copy", suggested = true) {
+                        ctx.getSystemService(ClipboardManager::class.java)
+                            .setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
+                        Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
                     }
                     if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
                     error?.let { Text(it, style = Type.caption, color = c.destructive) }
                 }
             }
-            if (Mesh.hosts.isEmpty()) Text("No hosts yet. Add one as user@host: over Tailscale, its Tailscale name.",
+            if (Mesh.hosts.isEmpty()) Text("No hosts yet. Add one as user@host.",
                 style = Type.body, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
             for (h in Mesh.hosts.toList()) {
                 val conn = Mesh.conn(h.id)
@@ -567,10 +502,10 @@ fun HostsScreen(back: () -> Unit) {
             Members()
         }
     }
-    if (adding) AddHost { adding = false }
+    if (adding) AddHost(done = { adding = false })
     removing?.let { h ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
-            text = { Text("Its Bots aren't listed here any more. Nothing on the host changes.") },
+            text = { Text("Its sessions aren't listed here any more. Nothing on the host changes.") },
             confirmButton = { Button("Remove", destructive = true) { Mesh.removeHost(h); removing = null } },
             dismissButton = { Button("Cancel") { removing = null } }, containerColor = c.dialog)
     }
@@ -589,9 +524,7 @@ private fun Members() {
     val members = Mesh.members.values.sortedWith(compareBy({ it.optInt("hops", 99) }, { it.optString("name").lowercase() }))
     if (members.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text("The mesh", style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
-        Text("Reached through your hosts: they need no key of this phone's.", style = Type.caption, color = c.dim,
-            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        Text("Mesh", style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)) {
             members.forEachIndexed { i, m ->
                 val id = m.optString("id")
@@ -672,11 +605,13 @@ private fun KeyLines(label: String?, type: String, fingerprint: String) {
 }
 
 @Composable
-private fun AddHost(done: () -> Unit) {
+fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
+            added: () -> Unit = {}) { // (given, edited: Meta's add_host form's values, filled by it and by you)
     val c = LocalBaude.current
-    var dest by remember { mutableStateOf("") }
+    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
     var name by remember { mutableStateOf("") }
-    var command by remember { mutableStateOf("baude_headless.py") }
+    var command by remember { mutableStateOf(given?.str("command") ?: "baude_headless.py") }
+    LaunchedEffect(dest, command) { edited?.invoke(org.json.JSONObject().put("destination", dest).put("command", command)) }
     val host = Host.parse(dest, name, command)
     AlertDialog(
         onDismissRequest = done,
@@ -689,14 +624,14 @@ private fun AddHost(done: () -> Unit) {
                 Text("Over Tailscale, use the host's Tailscale name or address.", style = Type.caption, color = c.dim)
             }
         },
-        confirmButton = { Button("Add", suggested = true) { if (host != null) { Mesh.addHost(host); done() } } },
+        confirmButton = { Button("Add", suggested = true) { if (host != null) { Mesh.addHost(host); added(); done() } } },
         dismissButton = { Button("Cancel", onClick = done) },
         containerColor = c.dialog,
     )
 }
 
 @Composable
-private fun Field(value: String, set: (String) -> Unit, hint: String) {
+fun Field(value: String, set: (String) -> Unit, hint: String) {
     val c = LocalBaude.current
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
         .padding(horizontal = 10.dp, vertical = 9.dp)) {

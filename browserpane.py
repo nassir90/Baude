@@ -761,6 +761,7 @@ class BrowserPane(Gtk.Box):
         # here_off: Bots whose browser couldn't be had here, streamed instead; here_busy: one busy in its own
         # Emission, streamed till the page is shown again)
         self.pointer_seen = None  # (the last of the Bot's pointer's moves played, as its watch numbers them)
+        self.phoned = False  # (its browser on a phone, as its host lists it: said here, not watched)
         open_home(win.get_application(), lambda bot: (
             (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
         self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic", tooltip_text="Read-only")
@@ -901,6 +902,7 @@ class BrowserPane(Gtk.Box):
         if sid == self.sid and (not bot or info.get("remote") is self.home):
             return
         self.stop()
+        self.phoned = False  # (another Bot's: where its browser is, looked at again; its drives as read-only has them)
         import emission
         self.presence.pointer, self.pointer_seen = emission.BotPointer(), None  # (another Bot's: its own pointer)
         self.sid, self.home, self.info = sid, info.get("remote") if bot else None, info if bot else None
@@ -997,6 +999,8 @@ class BrowserPane(Gtk.Box):
             return
         if self.sid is None or self.stream is not None or self.is_out():
             return
+        if self.on_phone():
+            return self.show_phone()
         if self.here is not None and self.here.win is None and self.here.why is not None:  # (let go of meanwhile)
             self.here = None
         off = time.monotonic() - self.here_off.get(self.sid, -1e9) < OFF_S
@@ -1011,6 +1015,22 @@ class BrowserPane(Gtk.Box):
         self.pointer_seen = None  # (its moves before this watch: not played)
         self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
+
+    def on_phone(self):
+        """Whether the Bot's browser on its chat's host is on a phone now (its host's listing: phonebrowser)."""
+        listed = (getattr(self.home, "sessions", None) or {}).get(self.sid) or {}
+        return self.sid is not None and self.remote is self.home and bool(listed.get("on_phone"))
+
+    def show_phone(self):
+        """Its browser on a phone: not watched here (its page here isn't the one the Bot's using), said so."""
+        self.stop(keep=True)
+        self.phoned = True
+        for w in self.drives:
+            w.set_sensitive(False)
+        self.status.set_title("On a phone")
+        self.status.set_description(f"{self.name or 'The Bot'}'s browser is on a phone now, and shown there. It's "
+                                    "back here once the phone closes it.")
+        self.body.set_visible_child_name("status")
 
     def stop(self, keep=False):
         """No more watching (keep: the same Bot's, watched again once the page is shown again)."""
@@ -1154,6 +1174,14 @@ class BrowserPane(Gtk.Box):
         Presence's). As listings change (listen), and as its page is shown or its frames start."""
         if self.sid is None or not self.get_mapped():  # (nothing for a page out of sight, or a chat's)
             return False
+        if self.on_phone() != self.phoned:  # (gone to a phone, or back from one: said, or watched again)
+            if self.phoned:
+                self.phoned = False
+                for w in self.drives:
+                    w.set_sensitive(not self.read_only.get_active())
+                self.watch_if_shown()
+            else:
+                self.show_phone()
         listed = (getattr(self.home, "sessions", None) or {}).get(self.sid) or {}
         acting = bool(listed.get("acting")) and listed.get("state") == "working" and not self.is_out() and \
             getattr(self.home, "state", "alive") == "alive"
@@ -1389,7 +1417,7 @@ class BrowserPane(Gtk.Box):
 
     def read_only_set(self, on):
         for w in self.drives:
-            w.set_sensitive(not on)
+            w.set_sensitive(not on and not self.phoned)  # (on a phone: nothing driven here, read-only or not)
         if self.bound is not None:
             self.chrome.who.set_sensitive(False)
         if self.here is not None and self.here.win is not None:

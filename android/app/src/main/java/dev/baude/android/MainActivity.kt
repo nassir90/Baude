@@ -10,7 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 
-/** The app: your Bots as contacts, a Bot's chat, your hosts. */
+/** The app: the home screen (Baude's sidebar: your chats and Bots on every host), a chat with its pages, your hosts,
+ * Send Feedback. */
 class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
@@ -18,6 +19,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Mesh.start(this)
+        HomePrefs.load(this)
+        Outbox.start() // (feedback not filed yet: tried again)
+        Meta.restore() // (its conversation and journal, as they were kept; its session attached again once its host's up)
+        Meta.go = { b ->
+            when (b) {
+                "send_feedback" -> go(listOf("feedback"))
+                "hosts" -> go(listOf("hosts"))
+                "home" -> go(listOf("contacts"))
+            }
+        }
         MeshService.keep(this)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)
@@ -28,14 +39,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             BaudeTheme {
                 val now = screen.value
-                BackHandler(now[0] != "contacts") { back() } // (Hosts too: back to your Bots)
+                BackHandler(now[0] != "contacts") { back() } // (Hosts too: back to the home screen)
                 when (now[0]) {
-                    "chat" -> ChatScreen(now[1], now[2], ::back)
+                    "chat" -> androidx.compose.runtime.key(now[1], now[2]) { // (another chat: its own pages, from Chat)
+                        ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
+                            feedback = { go(listOf("feedback", now[1], now[2])) })
+                    }
                     "hosts" -> HostsScreen(::back)
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
-                    else -> Contacts(open = { go(listOf("chat", it.hostId, it.id)) }, hosts = { go(listOf("hosts")) },
-                        phone = { go(listOf("phone")) })
+                    "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
+                    else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
+                        feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) })
                 }
                 HostKeyAsk()
             }
@@ -55,13 +70,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun go(to: List<String>) {
-        if (screen.value[0] == "chat" && to[0] != "chat") Mesh.close()
+        if (screen.value[0] == "chat" && to[0] != "chat" && to[0] != "feedback") Mesh.close()
         screen.value = if (to[0] == "contacts") listOf("contacts") else to
     }
 
     private fun back() {
-        if (screen.value[0] == "chat") Mesh.close()
+        val now = screen.value
+        if (now[0] == "feedback" && now.size == 3) { // (back to the chat it was sent from)
+            screen.value = listOf("chat", now[1], now[2])
+            return
+        }
+        if (now[0] == "chat") Mesh.close()
         screen.value = listOf("contacts")
+    }
+
+    /** What Send Feedback says it's about: the screen, and a chat's session, folder and host. */
+    private fun feedbackContext(now: List<String>): List<String> {
+        if (now.size < 3) return listOf("Home screen")
+        val s = Mesh.session(now[1], now[2])
+        return listOfNotNull("Chat: " + (s?.optJSONObject("bot")?.optString("name")?.let { "Bot $it" }
+            ?: s?.str("title") ?: "(untitled)"),
+            "session: ${now[2]}", s?.optString("cwd")?.ifBlank { null }?.let { "folder: $it" }, "host: ${Mesh.label(now[1])}")
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

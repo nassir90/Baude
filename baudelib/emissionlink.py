@@ -189,6 +189,74 @@ def unlock_profile(pid):
         os.close(fd)
 
 
+def open_pages(pid, urls=None, why=None):
+    """A Bot's browser's pages, written down as they change (urls; why: it's closing itself, "idle"), so the next one
+    started knows what was lost if this one ends without closing them; or (no urls) what the last wrote, read and
+    forgotten: (urls, why)."""
+    path = os.path.join(data_home(), "profiles", pid + ".open")
+    if urls is None:
+        try:
+            with open(path, encoding="utf-8") as f:
+                had = json.load(f)
+            os.unlink(path)
+            had = had if isinstance(had, dict) else {"urls": had}
+            return [u for u in had.get("urls") or [] if isinstance(u, str)], had.get("why")
+        except (OSError, ValueError, AttributeError):
+            return [], None
+    try:
+        if urls:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"urls": urls, "why": why}, f)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
+    return urls
+
+
+def pending_note(pid, note=None):
+    """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
+    next): note "" once it's told; note None, what's waiting read."""
+    path = os.path.join(data_home(), "profiles", pid + ".note")
+    try:
+        if note is None:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip() or None
+        if note:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(note)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        return None
+    return None
+
+
+def phone_note(pid, note):
+    """pending_note's, about a Bot's browser on a phone: put in place of the last one written (kept beside it, to be
+    found again), or ("") taken out."""
+    path = os.path.join(data_home(), "profiles", pid + ".phone")
+    try:
+        with open(path, encoding="utf-8") as f:
+            last = f.read()
+    except OSError:
+        last = ""
+    before = pending_note(pid) or ""
+    now = before.replace(last, note) if last and last in before else " ".join(n for n in (before, note) if n)
+    pending_note(pid, " ".join(now.split()))
+    try:
+        if note:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(note)
+        elif os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
+
+
 # ----------------------------------------------------------------- the socket --
 
 def profile_socket(pid):

@@ -72,9 +72,6 @@ object PhoneTools {
     private val EXIT_PLAN = Triple("ExitPlanMode", "In plan mode: put your plan to the user. If they agree, you may " +
         "carry it out (your file tools work again).", schema(listOf("plan"), "plan" to prop("string", "The plan, in Markdown")))
 
-    /** The permission modes, as claude's (baudelib.claude.MODES): Manual, Accept edits, Plan, Auto, Don't ask, Bypass. */
-    val MODES = listOf("default" to "Manual", "acceptEdits" to "Accept edits", "plan" to "Plan", "auto" to "Auto",
-        "dontAsk" to "Don't ask", "bypassPermissions" to "Bypass permissions")
     private val READS = setOf("Read", "Glob")
     private val EDITS = setOf("Write", "Edit")
     private val MESH_LOOKS = setOf("mcp__mesh__hosts", "mcp__mesh__chats", "mcp__mesh__read_chat") // (meshtools.READ_ONLY)

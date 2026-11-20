@@ -144,6 +144,11 @@ fun Button(label: String, suggested: Boolean = false, destructive: Boolean = fal
     }
 }
 
+/** Set into the frame as Baude's inside is (widgets.inside, .baude-inside): Gap.inside in from the frame's sides and
+ * bottom, square, its 1px edge the rule, the inside's fill. */
+fun Modifier.inside(c: BaudeColors): Modifier = this.padding(start = Gap.inside, end = Gap.inside, bottom = Gap.inside)
+    .border(1.dp, c.rule).background(c.inside).padding(1.dp)
+
 /** A box with Baude's one edge (.tool-card's: a 1px rule, rounded 8). */
 fun Modifier.card(c: BaudeColors): Modifier =
     this.border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)

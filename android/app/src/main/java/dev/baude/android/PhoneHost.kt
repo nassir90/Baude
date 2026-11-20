@@ -54,8 +54,9 @@ object PhoneHost {
      * wire.speaks). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
-        "read_file", "catalogue", "set_permission_mode", "set_model")
-    private val CONTROLS = setOf("set_permission_mode", "set_model") // (OPS' that are control requests, not ops)
+        "read_file", "catalogue", "control", "set_permission_mode", "set_model")
+    private val CONTROLS = setOf("control", "set_permission_mode", "set_model") // (OPS' that are control requests, not
+    // ops: control, any a claude takes, answered as a host answers them for an agent between turns)
     lateinit var ctx: Context
     @Volatile var id = ""
     @Volatile var name = "Phone"
@@ -335,7 +336,7 @@ object PhoneHost {
         val folder = File(root, "agents/$slug-${sid.take(8)}").apply { mkdirs() } // (named as you'd say it: Baude
         // lists a folder's chats under its name)
         val spawnedBy = str("spawned_by").takeIf(::isId)
-        val asked = str("mode").takeIf { m -> PhoneTools.MODES.any { it.first == m } } ?: "default"
+        val asked = str("mode").takeIf { m -> MODES.any { it.first == m } } ?: "default"
         val prompt = str("prompt")
         val meta = JSONObject().put("id", sid).put("cwd", folder.path).put("model", served.value)
             .put("infer", served.json()).put("title", str("title").trim().ifBlank { null } ?: JSONObject.NULL)
@@ -428,7 +429,7 @@ object PhoneHost {
                         }
                     }
                     "get_settings" -> answer(JSONObject().put("applied", JSONObject().put("model", s.meta.optString("model"))))
-                    "set_permission_mode" -> if (PhoneTools.MODES.any { it.first == request.optString("mode") }) {
+                    "set_permission_mode" -> if (MODES.any { it.first == request.optString("mode") }) {
                         setMode(s, request.optString("mode"))
                         answer(JSONObject())
                     } else answer(null, "no such permission mode: ${request.optString("mode")}")

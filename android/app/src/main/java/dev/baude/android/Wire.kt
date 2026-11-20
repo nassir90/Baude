@@ -23,13 +23,6 @@ const val OPEN_MS = 20_000L   // (mesh.OPEN_S: a member's tunnel has this long t
 /** Is it an id a host may give (its own, a session's), as wire.is_id has it: a plain word, no path in it? */
 fun isId(value: String?): Boolean = value != null && Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,63}").matches(value)
 
-/** Does a host take op (wire.speaks): as its hello's ops say, where it lists them (a host that speaks only part of the
- * wire: a phone's); else by its version, the one that brought op. */
-fun speaks(info: JSONObject?, op: String, version: Int): Boolean {
-    val ops = info?.optJSONArray("ops") ?: return (info?.optInt("version", 1) ?: 1) >= version
-    return (0 until ops.length()).any { ops.optString(it) == op }
-}
-
 const val RELAY_RETRY_MS = 10_000L // (a member that's dropped, tried again this often while it's listed: Baude's 10 s)
 
 /** What ssh offers and takes here: what Android's own crypto has, P-256's ECDH and ECDSA, RSA and AES. */
@@ -68,6 +61,7 @@ open class Connection(
     private val identify: (JSch, (String) -> Unit) -> Unit, // (its keys given to JSch; why one couldn't sign, said)
     private val route: (String) -> Connection?,
     private val heard: (Connection, JSONObject) -> Unit,
+    private val subscribes: Boolean = true, // (false: one for a watch of its own, which a connection carries one of)
     private val changed: (Connection) -> Unit,
 ) {
     val id: String get() = place.id
@@ -240,7 +234,7 @@ open class Connection(
                         said = reply.optString("error", "the host said no")
                         end()
                     }
-                    !speaks(server, "bot", MIN_VERSION) -> {
+                    !offers(server, "bot", MIN_VERSION) -> {
                         said = "this host's Baude is too old for Bots: update it"
                         end()
                     }
@@ -249,7 +243,8 @@ open class Connection(
                         said = "" // (what it said starting: not why it goes later)
                         reached = true
                         set("up")
-                        send(JSONObject().put("op", "subscribe"))
+                        if (subscribes) // (archived ones too: the home screen lists them, folded)
+                            send(JSONObject().put("op", "subscribe").put("archived", true))
                     }
                 }
             }

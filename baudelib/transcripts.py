@@ -408,6 +408,29 @@ def _prose(rec):
     return "\n".join(c.get("text") or "" for c in content or () if isinstance(c, dict) and c.get("type") == "text")
 
 
+def from_record(path, target, among):
+    """Those of among (records' uuids) that are target's record or after it in a transcript, as it's written (in the
+    order said: a revert's mark only appended); none if target's isn't there."""
+    needles = {u: u.encode() for u in {*among, target} if isinstance(u, str)}
+    found, out = False, set()
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                if not any(n in line for n in needles.values()):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                u = rec.get("uuid") if isinstance(rec, dict) else None
+                found = found or u == target
+                if found and u in among:
+                    out.add(u)
+    except OSError:
+        return set()
+    return out
+
+
 def line_of_uuid(path, uuid, before):
     """Where the line of the record with this uuid starts, searched back from before (a revert's kept record): -1 for
     none kept (uuid None: all that's before is dropped); None if it isn't there."""
@@ -449,6 +472,26 @@ def _stopped_mark(content):
     return bool(texts) and all(t.lstrip().startswith(STOPPED) for t in texts)
 
 
+def queued_item(line):
+    """A message sent while a turn ran, as Claude Code keeps it (an attachment, queued_command, not a user record): a
+    'user' item, its uuid the message's own (source_uuid: what it was sent with, what a revert names), or None for
+    one that isn't a message (claude's own, a task's ending)."""
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        return None
+    a = rec.get("attachment") if isinstance(rec, dict) and rec.get("type") == "attachment" else None
+    if not isinstance(a, dict) or a.get("type") != "queued_command" or a.get("isMeta") or rec.get("isSidechain") \
+            or a.get("commandMode", "prompt") != "prompt" or (a.get("origin") or {}).get("kind") == "task-notification":
+        return None
+    content = a.get("prompt")
+    if isinstance(content, str):
+        content = _command_text(strip_reminders(content))
+    if not content:
+        return None
+    return "user", content, False, a.get("timestamp") or rec.get("timestamp"), a.get("source_uuid") or rec.get("uuid")
+
+
 def history_item(line, sidechain=False, first=None):
     """The visible item one transcript line makes (see history_items), or None: a line makes one at most."""
     if '"frame-link"' in line:  # Claude Desktop's record of an artifact it published
@@ -459,6 +502,8 @@ def history_item(line, sidechain=False, first=None):
         if rec.get("frameUrl"):
             return "artifact", {"url": rec["frameUrl"], "title": rec.get("title"), "path": rec.get("path")}
         return None
+    if '"queued_command"' in line[:400]:  # (a message sent while a turn ran: Claude Code keeps it as an attachment)
+        return queued_item(line)
     boundary = '"compact_boundary"' in line  # (Claude Code compacted the conversation here)
     if not boundary and '"type":"user"' not in line and '"type":"assistant"' not in line \
             and '"type": "user"' not in line and '"type": "assistant"' not in line:

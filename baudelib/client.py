@@ -111,6 +111,8 @@ class Remote:
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
+        self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
+        self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
@@ -266,6 +268,29 @@ class Remote:
         if ch is None or not ch.send({**msg, "req": req}):
             self.calls.pop(req, None)
             reply({"op": "error", "error": "the server isn't there"})
+
+    def senders_of(self, session_id):
+        """Who a session's messages from others than its user are from, by their uuids, as its host's sender store
+        had them when it was last fetched (sync_senders): {uuid: sender}."""
+        return (self.senders.get(session_id) or (0, {}))[1]
+
+    def sync_senders(self, session_id, done):
+        """Its host's sender store for a session fetched, if what's here is older than it lists (its senders): done()
+        once a newer one's here (through dispatch)."""
+        listed = (self.sessions.get(session_id) or {}).get("senders") or 0
+        have = self.senders.get(session_id)
+        if (have[0] if have else 0) == listed or session_id in self.fetching:
+            return
+        self.fetching.add(session_id)
+
+        def got(r):
+            self.fetching.discard(session_id)
+            if r.get("op") != "senders" or not isinstance(r.get("senders"), dict):
+                return
+            self.senders[session_id] = (r.get("rev") or 0, {k: c for k, v in r["senders"].items()  # (as this
+                                                            if wire.is_id(k) and (c := wire.clean_sender(v))})  # knows)
+            done()
+        self.request({"op": "senders", "session": session_id}, got)
 
     def call(self, msg, timeout=30):
         """A request, waited for (not on the main loop): the reply, or an error one."""
@@ -828,6 +853,7 @@ class RemoteProc(claude.ClaudeProc):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.session, self.live, self.code, self.killed = session_id, live, None, False
+        self.answering = {}  # (requests of its own sent on it, held's: their req -> what's done with the answer)
         self.ch, self.server = wire.reach(where, timeout=3)
         self.p = _Remote(self, [wire.said_where(where), session_id])
         self.ch.sock.settimeout(5)
@@ -848,7 +874,9 @@ class RemoteProc(claude.ClaudeProc):
     def _read_remote(self):
         for msg in self.ch:
             op = msg.get("op")
-            if op == "claude" and msg.get("session") == self.session:
+            if (done := self.answering.pop(msg.get("req"), None)) is not None:  # (held's answer: its own, not a turn's)
+                self.dispatch(lambda m=msg, done=done: done(m))
+            elif op == "claude" and msg.get("session") == self.session:
                 self.dispatch(lambda m=msg["msg"]: self.on_msg(self, m))
             elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
                 self.code = "stopped" if msg.get("stopped") else msg.get("code")
@@ -861,12 +889,25 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda e=said, g=msg.get("gone"): self.on_msg(self, {
                     "type": "result", "subtype": "error", "is_error": True, "result": e, **({"gone": g} if g else {})}))
         self.ch.close()
+        answering, self.answering = self.answering, {}  # (asked on it, not answered: no answer's coming)
+        for done in answering.values():
+            self.dispatch(lambda done=done: done({"op": "error", "error": "the connection to its host dropped"}))
         if not self.killed:  # ("lost": let go of with no exit said, its claude's or its host's: not a code of claude's)
             code = "lost" if self.code is None else self.code
             self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):
         self.ch.send({"op": "input", "session": self.session, "msg": obj})
+
+    def held(self, held_id, send, done):
+        """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says
+        of it comes here as it's said: done(answer) with the host's answer (op held, or error, why), on the main
+        loop."""
+        req = f"held-{next(self.req_ids)}"
+        self.answering[req] = done
+        if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": "its host isn't there"}))
 
     def close_stdin(self):
         pass  # (nothing to close here: the server's claude goes on)

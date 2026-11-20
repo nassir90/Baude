@@ -68,7 +68,7 @@ fun StatusDot(state: String, asking: Boolean) {
     }
     val pulse by rememberInfiniteTransition(label = "dot").animateFloat(
         1f, if (state == "working" && !asking) 0.35f else 1f,
-        infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pulse",
+        infiniteRepeatable(tween(Tokens.Motion.pulseMs), RepeatMode.Reverse), label = "pulse",
     )
     Box(Modifier.size(8.dp).alpha(pulse).clip(CircleShape).background(colour))
 }

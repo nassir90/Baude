@@ -1,0 +1,34 @@
+{
+  "$description": "Baude's dark colours: Baude, Record and Emission's GTK CSS's, and the Android app's.",
+  "libadwaita": {
+    "$type": "color",
+    "$description": "libadwaita's named colours, as GTK resolves them in its dark style (the status colours, which libadwaita makes in Oklab, held to sRGB's range). Each token's name is libadwaita's: Baude's CSS names the colour (@sidebar_bg_color), and GTK resolves it; the Android app draws in these.",
+    "sidebar_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.1804, 0.1804, 0.1961], "hex": "#2e2e32"}},
+    "view_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.1137, 0.1137, 0.1255], "hex": "#1d1d20"}},
+    "window_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.1333, 0.1333, 0.149], "hex": "#222226"}},
+    "window_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "view_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "borders": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.15, "hex": "#ffffff"}},
+    "card_bg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.08, "hex": "#ffffff"}},
+    "accent_bg_color": {"$value": "{accent.blue}"},
+    "accent_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
+    "accent_color": {"$value": {"colorSpace": "srgb", "components": [0.5059, 0.8157, 1], "hex": "#81d0ff"}},
+    "destructive_color": {"$value": {"colorSpace": "srgb", "components": [1, 0.5765, 0.549], "hex": "#ff938c"}},
+    "warning_color": {"$value": {"colorSpace": "srgb", "components": [1, 0.7608, 0.3216], "hex": "#ffc252"}},
+    "success_color": {"$value": {"colorSpace": "srgb", "components": [0.4706, 0.9137, 0.6706], "hex": "#78e9ab"}},
+    "dialog_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.2118, 0.2118, 0.2275], "hex": "#36363a"}}
+  },
+  "baude": {
+    "$type": "color",
+    "rule": {
+      "$description": "Every edge: the inside's, a card's, a table's. GTK's CSS makes it as $extensions has it.",
+      "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.135, "hex": "#ffffff"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.borders}, 0.9)"}
+    },
+    "raised": {
+      "$description": "What's raised inside the inside: a code block, a table's head.",
+      "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.06, "hex": "#ffffff"},
+      "$extensions": {"dev.baude.gtk": "alpha({libadwaita.view_fg_color}, 0.06)"}
+    }
+  }
+}

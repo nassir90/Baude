@@ -11,12 +11,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /** Baude's colours (libadwaita's, as GTK resolves them, light and dark: widgets.CSS's baude_frame, _inside, _rule and
- * _raised made of them), so the app looks as Baude does. */
+ * _raised made of them; schema/tokens', Tokens.light and Tokens.dark), so the app looks as Baude does. */
 data class BaudeColors(
     val frame: Color,      // (sidebar_bg_color: the frame, where the chats are listed)
     val inside: Color,     // (view_bg_color: where a chat's read and written)
@@ -38,58 +35,54 @@ data class BaudeColors(
     val rowSelected: Color get() = fg.copy(alpha = 0.10f)           // (a navigation sidebar's selected row)
 }
 
-private val ink = Color(0xFF000006)
+private fun baudeColors(t: ThemeTokens) = with(t.libadwaita) {
+    BaudeColors(
+        frame = t.baude.frame, inside = t.baude.inside, window = windowBgColor, fg = windowFgColor, rule = t.baude.rule,
+        raised = t.baude.raised, card = cardBgColor, accentBg = accentBgColor, accentFg = accentFgColor,
+        accent = accentColor, destructive = destructiveColor, warning = warningColor, success = successColor,
+        dialog = dialogBgColor,
+    )
+}
 
-val LightBaude = BaudeColors(
-    frame = Color(0xFFEBEBED), inside = Color(0xFFFFFFFF), window = Color(0xFFFAFAFB), fg = ink.copy(alpha = 0.8f),
-    rule = ink.copy(alpha = 0.12f * 0.9f), raised = ink.copy(alpha = 0.8f * 0.06f), card = Color(0xFFFFFFFF),
-    accentBg = Color(0xFF3584E4), accentFg = Color.White, accent = Color(0xFF0461BE), destructive = Color(0xFFC30000),
-    warning = Color(0xFF905400), success = Color(0xFF007C3D), dialog = Color(0xFFFAFAFB),
-)
+val LightBaude = baudeColors(Tokens.light)
 
-val DarkBaude = BaudeColors(
-    frame = Color(0xFF2E2E32), inside = Color(0xFF1D1D20), window = Color(0xFF222226), fg = Color.White,
-    rule = Color.White.copy(alpha = 0.15f * 0.9f), raised = Color.White.copy(alpha = 0.06f),
-    card = Color.White.copy(alpha = 0.08f), accentBg = Color(0xFF3584E4), accentFg = Color.White,
-    accent = Color(0xFF81D0FF), destructive = Color(0xFFFF938C), warning = Color(0xFFFFC252),
-    success = Color(0xFF78E9AB), dialog = Color(0xFF36363A),
-)
+val DarkBaude = baudeColors(Tokens.dark)
 
-/** Baude's measures (widgets.CSS and baude.py's margins), in dp. */
+/** Baude's measures (widgets.CSS and baude.py's margins: schema/tokens'), in dp. */
 object Gap {
-    val sidebarRowV = 6.dp      // (.session-row: padding 6px 4px)
-    val sidebarRowH = 4.dp
-    val botRow = 52.dp          // (row.bot-row: min-height 52px)
-    val avatar = 32.dp          // (bot_row's Adw.Avatar, size 32)
-    val avatarGap = 8.dp        // (bot_row's box spacing)
-    val headerTop = 6.dp        // (header_row: margin-top 6, start 4)
-    val headerStart = 4.dp
-    val chatH = 16.dp           // (the chat's box: margin start and end 16, top and bottom 12)
-    val chatV = 12.dp
-    val messageGap = 8.dp       // (spacing between a chat's parts)
-    val bubbleRadius = 12.dp    // (.user-bubble: radius 12px, padding 8px 12px)
-    val bubbleV = 8.dp
-    val bubbleH = 12.dp
-    val composerRadius = 12.dp  // (.composer-box: radius 12px, a 1px ring of the rule)
-    val composerButton = 34.dp  // (.composer-actions button: 34px)
-    val cardRadius = 8.dp       // (.tool-card: border 1px, radius 8px, padding 6px 10px)
-    val cardV = 6.dp
-    val cardH = 10.dp
-    val codeRadius = 6.dp       // (.codeblock)
-    val inside = 6.dp           // (widgets.INSIDE_GAP: the inside set this far into the frame)
-    val bar = 46.dp             // (an Adw.HeaderBar's height)
+    val sidebarRowV = Tokens.Gap.sidebarRowV        // (.session-row's padding)
+    val sidebarRowH = Tokens.Gap.sidebarRowH
+    val botRow = Tokens.Gap.botRow                  // (row.bot-row's min-height)
+    val avatar = Tokens.Gap.avatar                  // (bot_row's Adw.Avatar)
+    val avatarGap = Tokens.Gap.avatarGap            // (bot_row's box spacing)
+    val headerTop = Tokens.Gap.headerTop            // (header_row's margins, top and start)
+    val headerStart = Tokens.Gap.headerStart
+    val chatH = Tokens.Gap.chatH                    // (the chat's box: its margins, start and end, top and bottom)
+    val chatV = Tokens.Gap.chatV
+    val messageGap = Tokens.Gap.message             // (spacing between a chat's parts)
+    val bubbleRadius = Tokens.Radius.bubble         // (.user-bubble: its radius and padding)
+    val bubbleV = Tokens.Gap.bubbleV
+    val bubbleH = Tokens.Gap.bubbleH
+    val composerRadius = Tokens.Radius.composer     // (.composer-box: a 1px ring of the rule)
+    val composerButton = Tokens.Gap.composerButton  // (.composer-actions button)
+    val cardRadius = Tokens.Radius.card             // (.tool-card: border 1px, its radius and padding)
+    val cardV = Tokens.Gap.cardV
+    val cardH = Tokens.Gap.cardH
+    val codeRadius = Tokens.Radius.code             // (.codeblock)
+    val inside = Tokens.Gap.inside                  // (widgets.INSIDE_GAP: the inside set this far into the frame)
+    val bar = Tokens.Gap.bar                        // (an Adw.HeaderBar's height)
 }
 
 val LocalBaude = staticCompositionLocalOf { LightBaude }
 
-/** Text as Baude's is: libadwaita's 11pt body (about 15sp), .caption and .sysnote at 0.85em, .heading bold. */
+/** Text as Baude's is: libadwaita's 11pt body (about 15sp), .caption and .sysnote smaller, .heading bold. */
 object Type {
-    val body = TextStyle(fontSize = 15.sp, lineHeight = 21.sp)
-    val bold = body.copy(fontWeight = FontWeight.SemiBold)  // (.bot-name: 600)
-    val caption = TextStyle(fontSize = 12.5.sp, lineHeight = 16.sp)
-    val folder = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.Bold)  // (.sidebar-folder: 0.85em, bold, 0.6)
-    val title = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold)
-    val mono = TextStyle(fontSize = 13.5.sp, fontFamily = FontFamily.Monospace)  // (.mono: 0.9em)
+    val body = TextStyle(fontSize = Tokens.Font.body, lineHeight = Tokens.Font.bodyLine)
+    val bold = body.copy(fontWeight = Tokens.Font.semibold)  // (.bot-name)
+    val caption = TextStyle(fontSize = Tokens.Font.caption, lineHeight = Tokens.Font.captionLine)
+    val folder = TextStyle(fontSize = Tokens.Font.caption, fontWeight = Tokens.Font.bold)  // (.sidebar-folder, at 0.6)
+    val title = TextStyle(fontSize = Tokens.Font.body, fontWeight = Tokens.Font.bold)
+    val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = FontFamily.Monospace)  // (.mono)
 }
 
 @Composable
@@ -109,23 +102,13 @@ fun BaudeTheme(content: @Composable () -> Unit) {
     }
 }
 
-/** libadwaita's avatar colours (AdwAvatar's .color1 to .color14: a gradient's two ends, and its initials'), picked
- * as it picks them: g_str_hash of the name, mod 14. */
-private val AVATARS = listOf(
-    Triple(0xFF83B6EC, 0xFF337FDC, 0xFFCFE1F5), Triple(0xFF7AD9F1, 0xFF0F9AC8, 0xFFCAEAF2),
-    Triple(0xFF8DE6B1, 0xFF29AE74, 0xFFCEF8D8), Triple(0xFFB5E98A, 0xFF6AB85B, 0xFFE6F9D7),
-    Triple(0xFFF8E359, 0xFFD29D09, 0xFFF9F4E1), Triple(0xFFFFCB62, 0xFFD68400, 0xFFFFEAD1),
-    Triple(0xFFFFA95A, 0xFFED5B00, 0xFFFFE5C5), Triple(0xFFF78773, 0xFFE62D42, 0xFFF8D2CE),
-    Triple(0xFFE973AB, 0xFFE33B6A, 0xFFFAC7DE), Triple(0xFFCB78D4, 0xFF9945B5, 0xFFE7C2E8),
-    Triple(0xFF9E91E8, 0xFF7A59CA, 0xFFD5D2F5), Triple(0xFFE3CF9C, 0xFFB08952, 0xFFF2EADC),
-    Triple(0xFFBE916D, 0xFF785336, 0xFFE5D6CA), Triple(0xFFC0BFBC, 0xFF6E6D71, 0xFFD8D7D3),
-)
-
+/** libadwaita's avatar colours (AdwAvatar's .color1 to .color14, Tokens.avatar: a gradient's two ends, and its
+ * initials'), picked as it picks them: g_str_hash of the name, mod 14. */
 fun avatarColors(name: String): Triple<Color, Color, Color> {
     var h = 5381u
     for (b in name.toByteArray(Charsets.UTF_8)) h = (h shl 5) + h + b.toInt().toUInt()  // (glib: signed char)
-    val (top, bottom, fg) = AVATARS[(h % 14u).toInt()]
-    return Triple(Color(top), Color(bottom), Color(fg))
+    val (top, bottom, fg) = Tokens.avatar[(h % Tokens.avatar.size.toUInt()).toInt()]
+    return Triple(top, bottom, fg)
 }
 
 /** Initials as AdwAvatar makes them: the first letter of the first word and of the last. */

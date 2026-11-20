@@ -43,6 +43,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
+from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
 from baudelib.emissionlink import (DEFAULT, HELD, add_profile, bot_profile, call, call_bot, clear_leftovers,  # noqa
                                    data_home, profile_socket, forget_profile, hand_over, leftovers, lock_profile,
                                    note_leftover, open_pages, pending_note, profile_id, profiles, rename_profile,
@@ -1285,11 +1286,13 @@ class BotPointer:
     let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or
     its pointer's moving (gliding, pressing, dragging, scrolling), and out once neither is, GLOW_HOLD_S after.
     look(now) says what's to be drawn then (now: time.monotonic())."""
-    GLIDE_S = (0.16, 0.65)  # (a glide's time: the shortest, the longest; about a second for 1500 px between)
-    PRESS_S, RING_S, HINT_S = 0.14, 0.5, 0.6
-    IDLE_S, FADE_S, APPEAR_S = 6.0, 0.35, 0.15  # (nothing done this long: the pointer faded out, in this long; in, this)
-    GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = 0.35, 0.8, 0.5
-    BEHIND = 6  # (more than this many steps waiting: glides quicker, so it isn't left behind)
+    # (a glide's time: the shortest, the longest; about a second for 1500 px between)
+    GLIDE_S = (tokens.seconds("pointer.glide-shortest"), tokens.seconds("pointer.glide-longest"))
+    PRESS_S, RING_S, HINT_S = (tokens.seconds(f"pointer.{k}") for k in ("press", "ring", "hint"))
+    # (nothing done this long: the pointer faded out, in this long; in, this)
+    IDLE_S, FADE_S, APPEAR_S = (tokens.seconds(f"pointer.{k}") for k in ("idle", "fade", "appear"))
+    GLOW_IN_S, GLOW_OUT_S, GLOW_HOLD_S = (tokens.seconds(f"pointer.{k}") for k in ("glow-in", "glow-out", "glow-hold"))
+    BEHIND = tokens.number("pointer.behind")  # (more than this many steps waiting: glides quicker, so it isn't left behind)
 
     def __init__(self):
         self.at, self.steps, self.step, self.step_t = None, [], None, 0.0
@@ -1430,9 +1433,10 @@ class BotPointer:
 # (what's drawn over a page for the Bot's pointer, as shapes in the page's points: GTK draws them with its own paths,
 # macOS's overlay with Core Animation's)
 
-ARROW = [(0, 0), (0, 21), (5.5, 16.1), (9.1, 24), (12.5, 22.6), (9, 14.9), (16.1, 14.9)]  # (its tip at 0, 0)
-ARROW_SHADOW = (0.6, 1.6)  # (its shadow: this far right and down)
-RING_EDGE, ARROW_EDGE = 2.5, 1.6  # (lines' widths)
+ARROW = tokens.points("pointer.arrow")  # (its tip at 0, 0)
+ARROW_SHADOW = tokens.point("pointer.arrow-shadow")  # (its shadow: this far right and down)
+RING_EDGE, ARROW_EDGE = tokens.px("pointer.ring-edge"), tokens.px("pointer.arrow-edge")  # (lines' widths)
+HINT_EDGE, HINT_HALO = tokens.px("pointer.hint-edge"), tokens.px("pointer.hint-halo")  # (a chevron's; the white round it)
 
 
 def arrow_at(x, y, scale=1.0):
@@ -1460,8 +1464,8 @@ def chevrons(cx, cy, ux, uy):
     return out
 
 
-GLOW_STRENGTH = 0.72  # (the glow: how strong it is at the page's edge itself, 0 to 1,
-GLOW_REACH = 80       # and how far in it reaches, in points)
+GLOW_STRENGTH = tokens.number("pointer.glow-strength")  # (the glow: how strong it is at the page's edge itself,
+GLOW_REACH = tokens.px("pointer.glow-reach")             # 0 to 1, and how far in it reaches, in points)
 GLOWS = {}  # ((size, rgb, scale): its picture's pixels, made once)
 
 
@@ -1658,7 +1662,7 @@ class MacOverlay:
         for hint in self.hints:  # (white under the accent: its edge)
             self.set_colour(hint, b"setStrokeColor:", rgb)
             self.set_colour(hint, b"setFillColor:", rgb, 0.0)
-            send(hint, b"setLineWidth:", 2.8, types=(ctypes.c_double,))
+            send(hint, b"setLineWidth:", HINT_EDGE, types=(ctypes.c_double,))
             for sel, name in ((b"setLineCap:", "round"), (b"setLineJoin:", "round")):
                 send(hint, sel, macos.ns_string(name), types=(ctypes.c_void_p,))
             self.set_colour(hint, b"setShadowColor:", (1, 1, 1))

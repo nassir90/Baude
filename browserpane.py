@@ -724,8 +724,8 @@ class Presence(Gtk.Widget):
         for x, y, dx, dy, k, ha in look["hints"]:
             (ux, uy), (cx, cy) = emission.hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
             lines = self.path(emission.chevrons(cx, cy, ux, uy))
-            snapshot.append_stroke(lines, stroke(5), self.rgba(white, ha * a))
-            snapshot.append_stroke(lines, stroke(2.8), self.rgba(rgb, ha * a))
+            snapshot.append_stroke(lines, stroke(emission.HINT_HALO), self.rgba(white, ha * a))
+            snapshot.append_stroke(lines, stroke(emission.HINT_EDGE), self.rgba(rgb, ha * a))
         if look["x"] is not None and a > 0:
             tx, ty = ox + look["x"] * sx, oy + look["y"] * sy
             dx, dy = emission.ARROW_SHADOW

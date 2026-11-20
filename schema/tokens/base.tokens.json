@@ -1,0 +1,269 @@
+{
+  "$description": "Baude's design tokens that are the same light and dark (light.tokens.json and dark.tokens.json have the rest: baude.resolver.json puts them together).",
+  "accent": {
+    "$type": "color",
+    "$description": "The accents Settings offers (widgets.ACCENTS): libadwaita's, Adw.AccentColor's names, each as @accent_bg_color has it.",
+    "blue": {"$value": {"colorSpace": "srgb", "components": [0.2078, 0.5176, 0.8941], "hex": "#3584e4"}},
+    "teal": {"$value": {"colorSpace": "srgb", "components": [0.1294, 0.5647, 0.6431], "hex": "#2190a4"}},
+    "green": {"$value": {"colorSpace": "srgb", "components": [0.2275, 0.5804, 0.2902], "hex": "#3a944a"}},
+    "yellow": {"$value": {"colorSpace": "srgb", "components": [0.7843, 0.5333, 0], "hex": "#c88800"}},
+    "orange": {"$value": {"colorSpace": "srgb", "components": [0.9294, 0.3569, 0], "hex": "#ed5b00"}},
+    "red": {"$value": {"colorSpace": "srgb", "components": [0.902, 0.1765, 0.2588], "hex": "#e62d42"}},
+    "pink": {"$value": {"colorSpace": "srgb", "components": [0.8353, 0.3804, 0.6], "hex": "#d56199"}},
+    "purple": {"$value": {"colorSpace": "srgb", "components": [0.5686, 0.2549, 0.6745], "hex": "#9141ac"}},
+    "slate": {"$value": {"colorSpace": "srgb", "components": [0.4353, 0.5137, 0.5882], "hex": "#6f8396"}}
+  },
+  "baude": {
+    "$type": "color",
+    "frame": {
+      "$description": "The frame round the work: the bars, the lists on the left, the panels on the right.",
+      "$value": "{libadwaita.sidebar_bg_color}"
+    },
+    "inside": {
+      "$description": "The inside, where the work's read and written: a box set into the frame.",
+      "$value": "{libadwaita.view_bg_color}"
+    }
+  },
+  "avatar": {
+    "$type": "color",
+    "$description": "AdwAvatar's colours, .color1 to .color14: its gradient's top and bottom, and its initials'.",
+    "1": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.5137, 0.7137, 0.9255], "hex": "#83b6ec"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.2, 0.498, 0.8627], "hex": "#337fdc"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.8118, 0.8824, 0.9608], "hex": "#cfe1f5"}}
+    },
+    "2": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.4784, 0.851, 0.9451], "hex": "#7ad9f1"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.0588, 0.6039, 0.7843], "hex": "#0f9ac8"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.7922, 0.9176, 0.949], "hex": "#caeaf2"}}
+    },
+    "3": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.5529, 0.902, 0.6941], "hex": "#8de6b1"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.1608, 0.6824, 0.4549], "hex": "#29ae74"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.8078, 0.9725, 0.8471], "hex": "#cef8d8"}}
+    },
+    "4": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.7098, 0.9137, 0.5412], "hex": "#b5e98a"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.4157, 0.7216, 0.3569], "hex": "#6ab85b"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.902, 0.9765, 0.8431], "hex": "#e6f9d7"}}
+    },
+    "5": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.9725, 0.8902, 0.349], "hex": "#f8e359"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.8235, 0.6157, 0.0353], "hex": "#d29d09"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.9765, 0.9569, 0.8824], "hex": "#f9f4e1"}}
+    },
+    "6": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [1, 0.7961, 0.3843], "hex": "#ffcb62"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.8392, 0.5176, 0], "hex": "#d68400"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [1, 0.9176, 0.8196], "hex": "#ffead1"}}
+    },
+    "7": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [1, 0.6627, 0.3529], "hex": "#ffa95a"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.9294, 0.3569, 0], "hex": "#ed5b00"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [1, 0.898, 0.7725], "hex": "#ffe5c5"}}
+    },
+    "8": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.9686, 0.5294, 0.451], "hex": "#f78773"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.902, 0.1765, 0.2588], "hex": "#e62d42"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.9725, 0.8235, 0.8078], "hex": "#f8d2ce"}}
+    },
+    "9": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.9137, 0.451, 0.6706], "hex": "#e973ab"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.8902, 0.2314, 0.4157], "hex": "#e33b6a"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.9804, 0.7804, 0.8706], "hex": "#fac7de"}}
+    },
+    "10": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.7961, 0.4706, 0.8314], "hex": "#cb78d4"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.6, 0.2706, 0.7098], "hex": "#9945b5"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.9059, 0.7608, 0.9098], "hex": "#e7c2e8"}}
+    },
+    "11": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.6196, 0.5686, 0.9098], "hex": "#9e91e8"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.4784, 0.349, 0.7922], "hex": "#7a59ca"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.8353, 0.8235, 0.9608], "hex": "#d5d2f5"}}
+    },
+    "12": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.8902, 0.8118, 0.6118], "hex": "#e3cf9c"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.6902, 0.5373, 0.3216], "hex": "#b08952"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.949, 0.9176, 0.8627], "hex": "#f2eadc"}}
+    },
+    "13": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.7451, 0.5686, 0.4275], "hex": "#be916d"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.4706, 0.3255, 0.2118], "hex": "#785336"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.898, 0.8392, 0.7922], "hex": "#e5d6ca"}}
+    },
+    "14": {
+      "top": {"$value": {"colorSpace": "srgb", "components": [0.7529, 0.749, 0.7373], "hex": "#c0bfbc"}},
+      "bottom": {"$value": {"colorSpace": "srgb", "components": [0.4314, 0.4275, 0.4431], "hex": "#6e6d71"}},
+      "initials": {"$value": {"colorSpace": "srgb", "components": [0.8471, 0.8431, 0.8275], "hex": "#d8d7d3"}}
+    }
+  },
+  "gap": {
+    "$type": "dimension",
+    "inside": {
+      "$description": "The inside, set this far into the frame: from the panes beside it and the window's edge.",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "sidebar-row-v": {
+      "$description": "A chat's row in the sessions list: its padding, top and bottom (.session-row).",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "sidebar-row-h": {"$description": "And its sides.", "$value": {"value": 4, "unit": "px"}},
+    "bot-row": {
+      "$description": "A Bot's row: twice a chat's (row.bot-row's least height).",
+      "$value": {"value": 52, "unit": "px"}
+    },
+    "avatar": {"$description": "A Bot's picture in its row.", "$value": {"value": 32, "unit": "px"}},
+    "avatar-gap": {"$description": "Between a Bot's picture and its name.", "$value": {"value": 8, "unit": "px"}},
+    "header-top": {
+      "$description": "A folder's header in the sessions list: above it.",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "header-start": {"$description": "And before it.", "$value": {"value": 4, "unit": "px"}},
+    "chat-h": {"$description": "The chat, in from the inside's sides.", "$value": {"value": 16, "unit": "px"}},
+    "chat-v": {"$description": "And from its top and bottom.", "$value": {"value": 12, "unit": "px"}},
+    "message": {"$description": "Between a chat's parts on the phone.", "$value": {"value": 8, "unit": "px"}},
+    "bubble-v": {
+      "$description": "A message of yours: its bubble's padding, top and bottom (.user-bubble).",
+      "$value": {"value": 8, "unit": "px"}
+    },
+    "bubble-h": {"$description": "And its sides.", "$value": {"value": 12, "unit": "px"}},
+    "composer-button": {
+      "$description": "A button under the box you write in (.composer-actions).",
+      "$value": {"value": 34, "unit": "px"}
+    },
+    "card-v": {
+      "$description": "A tool call's card: its padding, top and bottom (.tool-card).",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "card-h": {"$description": "And its sides.", "$value": {"value": 10, "unit": "px"}},
+    "bar": {"$description": "A bar's height: Adw.HeaderBar's.", "$value": {"value": 46, "unit": "px"}}
+  },
+  "radius": {
+    "$type": "dimension",
+    "$description": "Corners' radii.",
+    "bubble": {"$description": "A message of yours (.user-bubble).", "$value": {"value": 12, "unit": "px"}},
+    "composer": {"$description": "The box you write in (.composer-box).", "$value": {"value": 12, "unit": "px"}},
+    "card": {"$description": "A tool call's card (.tool-card).", "$value": {"value": 8, "unit": "px"}},
+    "code": {"$description": "A code block (.codeblock).", "$value": {"value": 6, "unit": "px"}}
+  },
+  "font": {
+    "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
+    "$extensions": {"dev.baude.android": "sp"},
+    "body": {"$description": "The phone's body text.", "$type": "dimension", "$value": {"value": 15, "unit": "px"}},
+    "body-line": {"$description": "Its line height.", "$type": "dimension", "$value": {"value": 21, "unit": "px"}},
+    "caption": {
+      "$description": "The phone's small text: a note, a subtitle, a folder's name.",
+      "$type": "dimension",
+      "$value": {"value": 12.5, "unit": "px"}
+    },
+    "caption-line": {"$description": "Its line height.", "$type": "dimension", "$value": {"value": 16, "unit": "px"}},
+    "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
+    "small": {
+      "$description": "A note's size (.sysnote), and a folder's name's (.sidebar-folder), in em.",
+      "$type": "number",
+      "$value": 0.85
+    },
+    "mono-scale": {"$description": "Code's size (.mono), in em.", "$type": "number", "$value": 0.9},
+    "semibold": {"$description": "A Bot's name (.bot-name).", "$type": "fontWeight", "$value": 600},
+    "bold": {"$description": "A folder's name, a title.", "$type": "fontWeight", "$value": "bold"}
+  },
+  "motion": {
+    "$type": "duration",
+    "expand": {
+      "$description": "A list's row opened into its page, and closed back into it (ExpandStack).",
+      "$value": {"value": 260, "unit": "ms"}
+    },
+    "pulse": {
+      "$description": "A working chat's dot: from bright to faint, or back.",
+      "$value": {"value": 900, "unit": "ms"}
+    }
+  },
+  "pointer": {
+    "$description": "The Bot's pointer, drawn over its page (emission.BotPointer's; Baude's browser pane, Emission's window and the phone's draw it), and the glow round the page's edges while the Bot's at its tools. Sizes in the page's points.",
+    "$extensions": {"dev.baude.android": "double"},
+    "glide-shortest": {
+      "$description": "A glide's time: the shortest (about a second for 1500 points between).",
+      "$type": "duration",
+      "$value": {"value": 0.16, "unit": "s"}
+    },
+    "glide-longest": {"$description": "And the longest.", "$type": "duration", "$value": {"value": 0.65, "unit": "s"}},
+    "press": {"$description": "A click's press.", "$type": "duration", "$value": {"value": 0.14, "unit": "s"}},
+    "ring": {
+      "$description": "A click's ring, spreading as it fades.",
+      "$type": "duration",
+      "$value": {"value": 0.5, "unit": "s"}
+    },
+    "hint": {"$description": "A scroll's chevrons.", "$type": "duration", "$value": {"value": 0.6, "unit": "s"}},
+    "idle": {
+      "$description": "Nothing done this long: the pointer fades out.",
+      "$type": "duration",
+      "$value": {"value": 6, "unit": "s"}
+    },
+    "fade": {"$description": "In this long.", "$type": "duration", "$value": {"value": 0.35, "unit": "s"}},
+    "appear": {
+      "$description": "And it fades in in this long.",
+      "$type": "duration",
+      "$value": {"value": 0.15, "unit": "s"}
+    },
+    "glow-in": {"$description": "The glow fading in.", "$type": "duration", "$value": {"value": 0.35, "unit": "s"}},
+    "glow-out": {"$description": "And out.", "$type": "duration", "$value": {"value": 0.8, "unit": "s"}},
+    "glow-hold": {
+      "$description": "The glow held on this long after the pointer last moved.",
+      "$type": "duration",
+      "$value": {"value": 0.5, "unit": "s"}
+    },
+    "behind": {
+      "$description": "More than this many steps waiting: it glides quicker, so it isn't left behind.",
+      "$type": "number",
+      "$value": 6
+    },
+    "glow-reach": {
+      "$description": "How far in from the page's edges the glow reaches.",
+      "$type": "dimension",
+      "$value": {"value": 80, "unit": "px"}
+    },
+    "glow-strength": {
+      "$description": "How strong the glow is at the page's edge itself, 0 to 1.",
+      "$type": "number",
+      "$value": 0.72
+    },
+    "arrow": {
+      "$type": "dimension",
+      "$description": "The pointer's outline, its points in turn, its tip at 0, 0.",
+      "1": {"x": {"$value": {"value": 0, "unit": "px"}}, "y": {"$value": {"value": 0, "unit": "px"}}},
+      "2": {"x": {"$value": {"value": 0, "unit": "px"}}, "y": {"$value": {"value": 21, "unit": "px"}}},
+      "3": {"x": {"$value": {"value": 5.5, "unit": "px"}}, "y": {"$value": {"value": 16.1, "unit": "px"}}},
+      "4": {"x": {"$value": {"value": 9.1, "unit": "px"}}, "y": {"$value": {"value": 24, "unit": "px"}}},
+      "5": {"x": {"$value": {"value": 12.5, "unit": "px"}}, "y": {"$value": {"value": 22.6, "unit": "px"}}},
+      "6": {"x": {"$value": {"value": 9, "unit": "px"}}, "y": {"$value": {"value": 14.9, "unit": "px"}}},
+      "7": {"x": {"$value": {"value": 16.1, "unit": "px"}}, "y": {"$value": {"value": 14.9, "unit": "px"}}}
+    },
+    "arrow-shadow": {
+      "$type": "dimension",
+      "$description": "Its shadow: this far right and down.",
+      "x": {"$value": {"value": 0.6, "unit": "px"}},
+      "y": {"$value": {"value": 1.6, "unit": "px"}}
+    },
+    "arrow-edge": {
+      "$description": "The pointer's white edge's width.",
+      "$type": "dimension",
+      "$value": {"value": 1.6, "unit": "px"}
+    },
+    "ring-edge": {
+      "$description": "A click's ring's edge's width.",
+      "$type": "dimension",
+      "$value": {"value": 2.5, "unit": "px"}
+    },
+    "hint-edge": {
+      "$description": "A scroll's chevrons' width.",
+      "$type": "dimension",
+      "$value": {"value": 2.8, "unit": "px"}
+    },
+    "hint-halo": {
+      "$description": "And the white round them.",
+      "$type": "dimension",
+      "$value": {"value": 5, "unit": "px"}
+    }
+  }
+}

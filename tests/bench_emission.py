@@ -87,6 +87,18 @@ class Pages(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def forget_store(pid):
+    """(macOS) The bench's Bot's profile's store deleted: WebKit keeps a profile's cookies and cache under
+    ~/Library/WebKit by its id, whatever folders this run was given, so it's taken away again."""
+    import emission
+    from gi.repository import GLib
+    loop = GLib.MainLoop()
+    emission.MacWeb.remove_store(pid, lambda why: (why and print(f"   (the bench's store wasn't removed: {why})"),
+                                                   loop.quit()))
+    GLib.timeout_add_seconds(10, loop.quit)
+    loop.run()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=30, help="how many times each phase does its work")
@@ -177,6 +189,8 @@ def main():
             pass
         time.sleep(1)
         srv.shutdown()
+        if sys.platform == "darwin":
+            forget_store(emissionlink.bot_profile_id(BOT))
         if args.json:
             with open(args.json, "w") as f:
                 json.dump(rows, f, indent=1)

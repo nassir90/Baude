@@ -830,6 +830,12 @@ class HistoryIndex:
             del self.starts[last[0]:], self.sums[last[0]:], self.replies[last[0]:]
         return places
 
+    def peek(self, begin, end):
+        """Items begin..end of those not drawn yet (numbered as take's are), parsed, and left undrawn: what a chunk
+        would draw, to look in (BaudeWindow.find_beyond). None if a line isn't the one indexed."""
+        self.finish()
+        return self._read(begin, min(end, len(self.starts)))
+
     def item_at(self, place):
         """The item a line take gave the place of, parsed; None if it isn't the line indexed (rewritten since)."""
         start, line_sum = place

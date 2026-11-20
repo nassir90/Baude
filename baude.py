@@ -13171,6 +13171,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
         self.moved_at, self.still_timer, self.cull_at = 0.0, None, None
         self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
+        self.fill_held, self.looked_in = None, (None, set())  # (load_history; find_beyond)
         self.fill_sweeping, self.above_changed, self.place_at = False, False, None
 
         # composer (widgets.Composer: Record's too)
@@ -13249,6 +13250,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                             self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
         self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        self.chat_find.undrawn, self.chat_find.beyond = self.find_undrawn, self.find_beyond
         root.append(self.chat_find.wrap())
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
@@ -13853,10 +13855,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if at == self.cull_at:
             return
         self.cull_at = at
-        if self.chunk_slots or self.fill_jobs:
-            # (the view's somewhere else now it's laid out: a chunk near it is drawn. Asked as it was moved,
-            # on_scrolled, the frame's look came before its layout, at where the view had been: a jump into a part
-            # not drawn, a click in the scrollbar's trough, found nothing near and left it empty)
+        if (self.chunk_slots or self.fill_jobs) and self.fill_held is None:
+            # (the view's somewhere else now it's laid out: a chunk near it is drawn. on_scrolled asks as the view
+            # moves, before the frame's layout, when it's still where it was: this asks after it. Not while a chat
+            # just opened is held: fill_held)
             self.plan_fill()
         going, slot = set(), hist.get_first_child()
         while slot is not None:
@@ -15007,8 +15009,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.ref_surfaces.clear()
         self.reply_views.clear()
         self.orphan_results.clear()  # (results whose calls the chat before never drew: output, images and all)
-        self.history, self.chunk_slots = None, None
+        self.history, self.chunk_slots, self.looked_in = None, None, (None, set())
         self.drop_fills()
+        self.chat_find.close()  # (its matches are the chat before's labels: not kept, nor looked for in the next)
         self.panel.reset()
         self.update_tasks_indicator()
 
@@ -17987,7 +17990,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.update_earlier_btn()
         self.resumed_note = bool(items)  # "— resumed —" goes in when you first write, not on opening
         self.open_at(self.PLACES.get(self.session_id))
-        GLib.timeout_add(self.FILL_AFTER_MS, lambda: (self.plan_fill(), False)[1])
+        held = self.fill_held = object()  # (till then nothing's drawn ahead: the opening frames are the chat's own)
+
+        def release():
+            if self.fill_held is held:
+                self.fill_held = None
+                self.plan_fill()
+            return False
+        GLib.timeout_add(self.FILL_AFTER_MS, release)
 
     def update_earlier_btn(self):
         n = self.history.count() if self.history else 0
@@ -17999,7 +18009,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't
     # shrink and jump as they're drawn; each is drawn a little a frame (fill_frame) as the view comes near it: the one
-    # under the view first, the next ahead of the reader while the chat's still. One far from the view is never drawn.
+    # under the view first, the next ahead of the reader while the chat's still. One far from the view isn't drawn
+    # till the view comes near it, or it's asked for (Show earlier, a place put back, a find's match in it).
     PX_PER_ITEM = 100  # (an item's height, till some are drawn: about the average of long chats)
     FILL_NEAR = 3.0  # screens: a chunk this near the view is drawn even while it's scrolled
     FILL_AHEAD = 20.0  # screens: and one this near while it's still (a hard fling's length: it meets what's drawn)
@@ -18088,15 +18099,15 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         return False
 
     def show_earlier(self):
-        """Draw the previous chunk above what's shown, at once (the Show earlier button; a place put back: open_at),
+        """Draw the topmost chunk not drawn, at once (the Show earlier button, at the chat's top: what's under it),
         keeping the view where it was."""
         if not (self.history and self.history.more):
             return
         self.history.finish()  # (scrolled up before the start of a long chat was indexed: now)
         self.make_chunk_slots()
-        slot = self.history_box.get_last_child()
+        slot = self.history_box.get_first_child()  # (the one under the button: the chat's start, its first not drawn)
         while slot is not None and slot.filled:
-            slot = slot.get_prev_sibling()
+            slot = slot.get_next_sibling()
         if slot is None:  # (nothing in it to draw after all)
             self.update_earlier_btn()
             return
@@ -18132,6 +18143,63 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         slot.sums = {line_sum for _start, line_sum in job.items}  # (what it draws: not drawn again after a rewrite)
         self.fill_jobs.appendleft(job)
         return job
+
+    def find_undrawn(self):
+        """Whether the chat has earlier parts not drawn (ChatFind.undrawn: its count says there may be more)."""
+        return bool(self.history is not None and (self.chunk_slots or self.fill_jobs or self.history.todo))
+
+    @staticmethod
+    def item_words(item):
+        """What an item of the transcript shows as text once drawn: a message's words, a reply's (not a call's card,
+        closed, nor a summary, folded: find doesn't look in those either)."""
+        kind, content = item[0], item[1] if len(item) > 1 else None
+        if kind in ("user", "start_prompt"):
+            return "\n".join(clean_prompt(t) for t in _prompt_texts(content))
+        if kind == "assistant":
+            return content if isinstance(content, str) else "\n".join(
+                c.get("text") or "" for c in content or () if isinstance(c, dict) and c.get("type") == "text")
+        return ""
+
+    def find_beyond(self, text, by, y0, y1):
+        """ChatFind.beyond: the nearest earlier chunk not drawn whose items have text (case ignored, in the
+        transcript: item_words) drawn at once, looking by (1 down, -1 up) from height y0 in the chat as far as y1
+        (None: on round its other end, back to y0; y0 None: outward from the view). Whether one was drawn. A chunk
+        looked in is remembered while the text's the same (looked_in): Enter pressed again reads none twice."""
+        if self.history is None or not text:
+            return False
+        self.history.finish()
+        self.make_chunk_slots()
+        if getattr(self, "looked_in", (None,))[0] != (self.history, text):
+            self.looked_in = ((self.history, text), set())
+        looked, places = self.looked_in[1], []
+        content = widgets.ChatFind._content(self.scroller)  # (heights as find has them: in what's scrolled)
+        for slot in list(self.chunk_slots or ()) + [job.slot for job in self.fill_jobs]:
+            ok, b = slot.compute_bounds(content)
+            if ok and slot not in looked:
+                places.append((b.get_y(), b.get_y() + b.get_height(), slot))
+        if y0 is None:
+            top, page = self.view_top()
+            order = sorted(places, key=lambda p: self.slot_away(p[2], top or 0, page))
+        elif by < 0:
+            above = sorted((p for p in places if p[0] < y0), key=lambda p: -p[0])
+            order = [p for p in above if p[1] > y1] if y1 is not None else \
+                above + sorted((p for p in places if p[0] >= y0), key=lambda p: -p[0])
+        else:
+            below = sorted((p for p in places if p[1] > y0), key=lambda p: p[0])
+            order = [p for p in below if p[0] < y1] if y1 is not None else \
+                below + sorted((p for p in places if p[1] <= y0), key=lambda p: p[0])
+        needle = text.casefold()
+        for _top, _bottom, slot in order:
+            begun = next((job for job in self.fill_jobs if job.slot is slot), None)
+            items = None if begun is not None else self.history.peek(*slot.span)
+            if begun is None and items is None:  # (rewritten since it was indexed: drawing it finds where it went)
+                continue
+            if begun is not None or any(needle in self.item_words(item).casefold() for item in items):
+                self.stick_bottom = False
+                self.fill_now(slot)
+                return True
+            looked.add(slot)
+        return False
 
     def history_rewritten(self):
         """The transcript was rewritten since it opened: what's left to draw indexed again, with places of its own above
@@ -18225,8 +18293,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def next_fill(self, moving):
         """The chunk to draw on now: the one nearest the view within FILL_NEAR screens (a thumb dragged into a part not
         drawn yet: what's under the view first), or, while the chat's still, within FILL_AHEAD (ahead of the
-        reader); None for none now. The rest stay places in the file: drawn ahead whatever
-        their distance, a long chat left open was all drawn within the minute, and held all its widgets."""
+        reader); None for none now. The rest stay places in the file."""
         top, page = self.view_top()
         if top is None:
             return None
@@ -18305,15 +18372,19 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def last_compact_mark(self):
         """The marker of the last compaction drawn where history's being drawn (a chunk's slot, or the chat), if its
         summary isn't under it yet: the summary's record follows its boundary's, the messages a partial compaction kept
-        between them at most; items are drawn one at a time (fill_item), so it's looked for among what's drawn (a
-        chunk's slot, then the one before it: its boundary the end of that chunk)."""
-        target = self.render_target or self.transcript
-        for where in (target, target.get_prev_sibling() if target is not self.transcript else None):
-            child = where.get_last_child() if where is not None else None
+        between them at most; items are drawn one at a time (fill_item), so it's looked for among what's drawn: a
+        chunk's slot, then the ones before it that are drawn and have no marker (chunks are drawn nearest the view
+        first: the one with its boundary may be several up, drawn before the ones between)."""
+        where = target = self.render_target or self.transcript
+        while where is not None:
+            child = where.get_last_child()
             while child is not None and not isinstance(child, widgets.CompactMark):
                 child = child.get_prev_sibling()
             if child is not None:
                 return child if child.fold is None and child.state == "done" else None
+            if target is self.transcript or (where is not target and not where.filled):
+                return None  # (the chat itself; or a chunk not drawn yet: its marker, if it has one, adopts as it's drawn)
+            where = where.get_prev_sibling()
         return None
 
     COMPACT_LOOK = 200  # (how far past a marker its summary's looked for: what a partial compaction kept between)

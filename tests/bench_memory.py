@@ -135,7 +135,10 @@ def host_alone(rows):
                              "--state", state, "--socket", sock, "--exit-after-hours", "0"],
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
-        if not host.stdout.readline() or not wire.wait_for_socket(sock, 20):  # (its first line: it's listening)
+        import select
+        # (its first line: it's listening; waited for 20 s, not for as long as it says nothing)
+        if not select.select([host.stdout], [], [], 20)[0] or not host.stdout.readline() or \
+                not wire.wait_for_socket(sock, 20):
             return print("host process: it didn't start", flush=True)
         ch, _info = wire.connect_local(sock)
         ch.send({"op": "subscribe", "req": 1})

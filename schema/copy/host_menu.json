@@ -1,0 +1,17 @@
+{
+  "description": "The host process's item in macOS's menu bar: what it's doing, its sessions, and Quit.",
+  "messages": {
+    "title_asking": "Baude · {$n} asking",
+    "title_working": "Baude · {$n} working",
+    "title_restarting": "Baude · restarting",
+    "title_stopping": "Baude · stopping",
+    "sessions_running": ".input {$n :number} .match $n one {{{$n} session, {$running} running}} * {{{$n} sessions, {$running} running}}",
+    "sessions_none_running": ".input {$n :number} .match $n one {{{$n} session, none running}} * {{{$n} sessions, none running}}",
+    "asking": "asking",
+    "working": "working",
+    "waiting_for_you": "waiting for you",
+    "untitled": "(untitled)",
+    "daemon": "Daemon",
+    "quit": "Quit Baude's Host Process"
+  }
+}

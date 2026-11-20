@@ -8,6 +8,8 @@ import sqlite3
 import subprocess
 import threading
 
+from baudelib import wording
+
 DIR_LIMIT = 2000      # the most entries a folder's listing has
 LOG_LIMIT = 200       # the most commits a log has at once
 DIFF_LIMIT = 400_000  # the most of a diff sent (its first part)
@@ -42,14 +44,15 @@ def _git(cwd, *args, timeout=20, limit=OUT_LIMIT):
         p.stderr.close()
     text = out.decode("utf-8", errors="replace")
     if code != 0 and not cut:
-        return None, err.decode("utf-8", errors="replace").strip() or text.strip() or "git failed"
+        return None, err.decode("utf-8", errors="replace").strip() or text.strip() or \
+            wording.say("host_errors.git_failed")
     return text, None
 
 
 def _inside(server, path, checkout=False):
     """path (absolute) made real, if it's in one of the server's sessions' folders (or, checkout, its own code's)."""
     if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
-        raise ValueError("not an absolute path")
+        raise ValueError(wording.say("host_errors.not_absolute"))
     real = os.path.realpath(os.path.expanduser(path))
     if server.in_sessions(real):
         return real
@@ -58,7 +61,7 @@ def _inside(server, path, checkout=False):
         here = os.path.realpath(selfupdate.HERE)
         if real == here:
             return real
-    raise ValueError("not in one of its sessions' folders")
+    raise ValueError(wording.say("host_errors.not_in_session_folder"))
 
 
 def list_dir(server, path):
@@ -120,7 +123,7 @@ def git(server, msg):
     cwd = _inside(server, msg.get("cwd"), checkout=what == "log")
     top, err = _git(cwd, "rev-parse", "--show-toplevel")
     if top is None:
-        return {"what": what, "error": "Not in a git repository."}
+        return {"what": what, "error": wording.say("host_errors.not_a_repo")}
     if what == "log":
         rev = msg.get("rev") if isinstance(msg.get("rev"), str) and not msg["rev"].startswith("-") else "HEAD"
         limit = max(1, min(int(msg.get("limit") or 50), LOG_LIMIT))

@@ -1,0 +1,16 @@
+{
+  "description": "Who a message passed to a chat is from (a Bot, a chat, a subagent, a host, and where), and where a host is, as the chats' bubbles and the hosts list say it.",
+  "messages": {
+    "bot": "{$name}, a Bot",
+    "bot_unnamed": "a Bot, a Bot",
+    "chat": "“{$name}”",
+    "chat_unnamed": "a chat",
+    "subagent": "subagent “{$name}”",
+    "subagent_unnamed": "a subagent",
+    "host_unnamed": "a host",
+    "another": "another",
+    "on": "{$who} on {$where}",
+    "through_mesh": "through the mesh",
+    "local": "local"
+  }
+}

@@ -19,7 +19,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
 # (git and the look at it, with no GTK: the host process's updater uses them too)
-from baudelib import selfupdate  # noqa: E402
+from baudelib import selfupdate, wording  # noqa: E402
 from baudelib.selfupdate import (BROKEN, CHECK_S, GIT_ENV, HERE, git, importable, look, new_commits,  # noqa: E402,F401
                                  upstream)
 
@@ -140,16 +140,16 @@ def restarted(win, state, name):
     note = state.get("updated")
     if note and getattr(win, "toasts", None) is not None:
         n = note.get("commits") or 0
-        win.toasts.add_toast(Adw.Toast(title=f"{name} updated" + (f": {n} new commit{'s' if n != 1 else ''}" if n else ""),
-                                       timeout=5))
+        win.toasts.add_toast(Adw.Toast(title=wording.say("updates.updated_commits", app=name, n=n) if n else
+                                       wording.say("updates.updated", app=name), timeout=5))
 
 
 def settings_row():
     """Settings → Auto restart on update (Baude's and Record's, the one setting): off until it's turned on."""
     up = upstream()
-    row = Adw.SwitchRow(title="Auto restart on update",
-                        subtitle=f"From {up} every {CHECK_S}s, restarting once idle" if up else
-                        "Not a git checkout following a branch: nothing to update from",
+    row = Adw.SwitchRow(title=wording.say("updates.auto_restart"),
+                        subtitle=wording.say("updates.auto_restart_from", upstream=up, seconds=CHECK_S) if up else
+                        wording.say("updates.no_upstream"),
                         active=enabled() and up is not None, sensitive=up is not None)
     row.connect("notify::active", lambda r, _p: r.get_sensitive() and not r.syncing
                 and widgets.save_settings(auto_update=r.get_active()))
@@ -177,8 +177,9 @@ def version(commit, root=HERE):
 def version_row(commit=None, root=HERE):
     """Settings → Version (Baude's and Record's): the commit this process's code is (STARTED), and when it was made."""
     made = version(commit or STARTED, root)
-    return Adw.ActionRow(title=f"Version {made[0]}" if made else "Version unknown",
-                         subtitle=made_when(made[1]) if made else "Not a git checkout")
+    return Adw.ActionRow(title=wording.say("updates.version", commit=made[0]) if made else
+                         wording.say("updates.version_unknown"),
+                         subtitle=made_when(made[1]) if made else wording.say("updates.not_checkout"))
 
 
 def changelog_group(commit, root=HERE, limit=None, made=None):
@@ -194,7 +195,7 @@ def changelog_group(commit, root=HERE, limit=None, made=None):
     for entry in shown:
         add(*entry)
     if len(shown) < len(made):
-        more = Adw.ButtonRow(title=f"Show {len(made) - len(shown)} more")
+        more = Adw.ButtonRow(title=wording.say("meta.show_more", n=len(made) - len(shown)))
 
         def rest(btn):
             group.remove(btn)
@@ -212,10 +213,11 @@ def changelog_dialog(commit=None, root=HERE):
     made, entries = version(commit, root), changelog(commit, root)
     page, group = widgets.settings_page(), changelog_group(commit, root, limit=50, made=entries)
     if not entries:
-        group.add(Adw.ActionRow(title="No changelog", subtitle="No commits to list"))
+        group.add(Adw.ActionRow(title=wording.say("changelog.empty"), subtitle=wording.say("changelog.empty_detail")))
     page.add(group)
     head = Adw.HeaderBar(title_widget=Adw.WindowTitle(
-        title="Changelog", subtitle=f"Version {made[0]} · {made_when(made[1])}" if made else ""))
+        title=wording.say("changelog.title"),
+        subtitle=wording.say("changelog.version_made", commit=made[0], made=made_when(made[1])) if made else ""))
     view = Adw.ToolbarView(content=page)
     view.add_top_bar(head)
-    return Adw.Dialog(title="Changelog", content_width=640, content_height=720, child=view)
+    return Adw.Dialog(title=wording.say("changelog.title"), content_width=640, content_height=720, child=view)

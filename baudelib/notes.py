@@ -11,6 +11,8 @@ import sys
 import threading
 import time
 
+from baudelib import wording
+
 LIMIT = 8 * 1024 * 1024  # (a listing's text, at most: past it, the pages' text isn't sent, said as too big)
 _LOCK = threading.Lock()  # (one write to the file at a time, here)
 
@@ -96,7 +98,7 @@ def listing(have=None):
     have = have if isinstance(have, dict) else {}
     sent = [b for b in books if have.get(b["id"]) != digest(b)]
     if len(json.dumps(sent)) > LIMIT:
-        return {"notebooks": [], "error": "its notebooks are too big to send"}
+        return {"notebooks": [], "error": wording.say("host_errors.notebooks_too_big")}
     return {"notebooks": sent, "ids": [b["id"] for b in books]}
 
 
@@ -271,7 +273,7 @@ def write(changes):
     handed = _hand_over(changes)
     if handed is not None:
         return {"done": [c["id"] for c in changes], "by": "record"} if handed else \
-            {"error": "the Record running there didn't take the changes"}
+            {"error": wording.say("host_errors.changes_not_taken")}
     with _LOCK:
         path = records_path()
         try:

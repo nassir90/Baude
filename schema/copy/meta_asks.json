@@ -1,0 +1,24 @@
+{
+  "description": "What Meta asks before it acts (a read outside its folders, a command, a change to this machine's models), at its conversation's end, and the answers.",
+  "messages": {
+    "run": "Meta would like to run this:",
+    "run_why": "Meta would like to run this ({$why}):",
+    "edit": "Meta would like to edit {$path}:",
+    "write": "Meta would like to write {$path}:",
+    "fetch": "Meta would like to fetch {$url}",
+    "search_web": "Meta would like to search the web for “{$query}”",
+    "read": "Meta would like to read {$path}",
+    "grep": "Meta would like to search in {$path}",
+    "glob": "Meta would like to look for files in {$path}",
+    "other": "Meta would like to {$tool} {$path}",
+    "each_asked": "{$note}, so each command is asked. {$question}",
+    "remove_models": ".input {$n :number} .match $n one {{Meta would like to remove {$n} model from Ollama: {$models}. They'd have to be downloaded again.}} * {{Meta would like to remove {$n} models from Ollama: {$models}. They'd have to be downloaded again.}}",
+    "add_server": "Meta would like to add {$name} at {$where} as a model server.",
+    "add_server_key": "Meta would like to add {$name} at {$where} as a model server, sending it the key in ${$variable}.",
+    "copy_ollama": "Meta would like to copy {$model} ({$size} GB) from {$host} into this machine's Ollama, over the mesh.",
+    "copy_ollama_replacing": "Meta would like to copy {$model} ({$size} GB) from {$host} into this machine's Ollama, over the mesh. It replaces the {$name} Ollama has here.",
+    "copy_mlx": "Meta would like to copy {$model} ({$size} GB) from {$host} into the Hugging Face cache here ({$hub}), over the mesh.",
+    "build_apple": "Meta would like to build apple-claude, which runs Apple's on-device model: swift build -c release, in apple-claude/ (a minute or two).",
+    "build": "Build"
+  }
+}

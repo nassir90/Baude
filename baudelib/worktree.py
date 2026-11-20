@@ -6,6 +6,7 @@ import json
 import os
 import threading
 
+from baudelib import wording
 from baudelib.selfupdate import git
 
 MARK = os.sep + os.path.join(".claude", "worktrees") + os.sep  # (where Claude Code and Claude Desktop make theirs)
@@ -23,9 +24,11 @@ class Gone(OSError):
     /cd to carry on); why, and folder (where to carry on, None if there's nowhere to say), for a head that words the
     rest itself (one whose chat is on another machine's host, where /cd isn't there)."""
 
-    def __init__(self, why, folder=None, place="there"):
-        super().__init__(f"{why}: " + (f"/cd {said(folder)} to carry on {place}" if folder else
-                                       "/cd to another folder to carry on"))
+    def __init__(self, why, folder=None, in_project=False):
+        super().__init__(
+            wording.say("worktree.carry_on_in_project", why=why, folder=said(folder)) if folder and in_project else
+            wording.say("worktree.carry_on", why=why, folder=said(folder)) if folder else
+            wording.say("worktree.carry_on_elsewhere", why=why))
         self.why, self.folder = why, folder
 
 
@@ -47,8 +50,8 @@ def missing(path):
     path = os.path.realpath(os.path.expanduser(path))
     parts = split(path)
     if parts is None:
-        return Gone(f"{said(path)} no longer exists")
-    return Gone(f"worktree {parts[1]} is gone", parts[0], "in the project folder")
+        return Gone(wording.say("worktree.no_longer_exists", path=said(path)))
+    return Gone(wording.say("worktree.gone", name=parts[1]), parts[0], in_project=True)
 
 
 def transcript_branch(transcript, top):
@@ -95,12 +98,12 @@ def restore(path, transcript=None):
     repo, name = parts
     top = repo + MARK + name
     if not os.path.isdir(repo):
-        raise Gone(f"{said(repo)} no longer exists, and worktree {name} with it")
+        raise Gone(wording.say("worktree.repo_gone", repo=said(repo), name=name))
     with _LOCK:
         if os.path.isdir(path):
             return None
         if git(repo, "rev-parse", "--git-dir") is None:
-            raise Gone(f"worktree {name} is gone, and {said(repo)} isn't a git repository to make it again from", repo)
+            raise Gone(wording.say("worktree.not_a_repo", name=name, repo=said(repo)), repo)
         trees = checkouts(repo)
         stale = top in trees  # (git's record of it, its folder removed by hand: taken over, -f, not pruned)
         for branch in dict.fromkeys(b for b in (transcript_branch(transcript, top), trees.get(top), f"claude/{name}",
@@ -108,12 +111,11 @@ def restore(path, transcript=None):
             if git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
                 continue
             if (there := next((t for t, b in trees.items() if b == branch and t != top), None)) is not None:
-                raise Gone(f"worktree {name} is gone, and its branch {branch} is checked out in {said(there)}", there)
+                raise Gone(wording.say("worktree.branch_elsewhere", name=name, branch=branch, path=said(there)), there)
             made = git(repo, "worktree", "add", *(["-f"] if stale else []), top, branch, timeout=120) is not None
             if made or os.path.isdir(top):  # (made by something else meanwhile: there all the same)
                 if not os.path.isdir(path):  # (a folder in it the branch hasn't: the worktree's own, then)
-                    raise Gone(f"worktree {name} is back on {branch}, without {said(path)}", top)
+                    raise Gone(wording.say("worktree.back_without", name=name, branch=branch, path=said(path)), top)
                 return branch
-            raise Gone(f"worktree {name} is gone, and git couldn't check out its branch {branch} again", repo,
-                       "in the project folder")
-    raise Gone(f"worktree {name} is gone, and so is its branch", repo, "in the project folder")
+            raise Gone(wording.say("worktree.checkout_failed", name=name, branch=branch), repo, in_project=True)
+    raise Gone(wording.say("worktree.branch_gone", name=name), repo, in_project=True)

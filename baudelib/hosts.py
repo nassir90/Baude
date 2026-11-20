@@ -6,7 +6,7 @@ import signal
 import subprocess
 import sys
 
-from baudelib import wire
+from baudelib import wire, wording
 from baudelib.server import running_pid, state_home
 
 HEADLESS = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "baude_headless.py")
@@ -50,7 +50,7 @@ def reach(dest=None, command=None, member=None):
     if dest:
         return wire.connect_ssh(dest, command)
     if not start_here():
-        raise OSError(f"no host process here, and none could be started (see {log_path()})")
+        raise OSError(wording.say("host_status.none_started", log=log_path()))
     return wire.connect_mesh(member) if member else wire.connect_local()
 
 

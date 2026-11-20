@@ -32,6 +32,7 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
+from baudelib import wording  # noqa: E402
 import lookup  # noqa: E402,F401
 import widgets  # noqa: E402
 from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
@@ -110,15 +111,15 @@ class FindInText:
 
     def make_find_bar(self):
         """The bar, for the widget to put over its text, and its tags (over those made so far)."""
-        self.search_entry = Gtk.SearchEntry(placeholder_text="Find", hexpand=True)
+        self.search_entry = Gtk.SearchEntry(placeholder_text=wording.say("code_view.find"), hexpand=True)
         self.search_count = Gtk.Label(width_chars=9, xalign=1)
         self.search_count.add_css_class("dim-label")
         self.search_count.add_css_class("caption")
         bar = Gtk.Box(spacing=4)
         bar.append(self.search_entry)
         bar.append(self.search_count)
-        for icon, tip, step in (("go-up-symbolic", "Previous match (Shift+Enter)", -1),
-                                ("go-down-symbolic", "Next match (Enter)", 1)):
+        for icon, tip, step in (("go-up-symbolic", wording.say("find.previous"), -1),
+                                ("go-down-symbolic", wording.say("find.next"), 1)):
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip)
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, step=step: self.find_next(step))
@@ -215,7 +216,7 @@ class FindInText:
                 b.apply_tag(self.match_tag, *span)
                 self.matches.append((span[0].get_offset(), span[1].get_offset()))
         if not self.matches:
-            self.search_count.set_label("No matches")
+            self.search_count.set_label(wording.say("find.no_matches"))
             return
         top = self.find_top() if near is None else near
         first = next((i for i, (s0, _e) in enumerate(self.matches) if s0 >= top), 0)
@@ -237,8 +238,9 @@ class FindInText:
         s0, e0 = self.matches[i]
         start, end = b.get_iter_at_offset(s0), b.get_iter_at_offset(e0)
         b.apply_tag(self.current_tag, start, end)
-        more = "+" if len(self.matches) >= self.MATCH_LIMIT else ""
-        self.search_count.set_label(f"{i + 1} of {len(self.matches)}{more}")
+        self.search_count.set_label(wording.say("code_view.match_of_more", at=i + 1, n=len(self.matches))
+                                    if len(self.matches) >= self.MATCH_LIMIT else
+                                    wording.say("code_view.match_of", at=i + 1, n=len(self.matches)))
         mark = b.get_mark("found") or b.create_mark("found", start, True)
         b.move_mark(mark, start)
         if scroll:
@@ -485,22 +487,24 @@ class CodePage(Gtk.Box):
         self.where.add_css_class("dim-label")
         self.where.add_css_class("caption")
         head.append(self.where)
-        self.find_btn = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text="Find (Ctrl+F)")
+        self.find_btn = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text=wording.say("code_view.find_tip"))
         self.find_btn.add_css_class("flat")
         self.find_btn.connect("clicked", lambda *_: self.code.open_search())
         head.append(self.find_btn)
         self.wrap_btn = Gtk.ToggleButton(icon_name=themed_icon("text-wrap-symbolic", "format-justify-fill-symbolic"),
-                                         tooltip_text="Wrap long lines", active=bool(load_settings().get("code_wrap")))
+                                         tooltip_text=wording.say("code_view.wrap"),
+                                         active=bool(load_settings().get("code_wrap")))
         self.wrap_btn.add_css_class("flat")
         self.wrap_btn.connect("toggled", lambda b: (self.code.set_wrap(b.get_active()),
                                                     save_settings(code_wrap=b.get_active())))
         head.append(self.wrap_btn)
-        files_btn = Gtk.Button(icon_name="folder-symbolic", tooltip_text="Show in Files")
+        files_btn = Gtk.Button(icon_name="folder-symbolic", tooltip_text=wording.say("code_view.show_in_files"))
         files_btn.add_css_class("flat")
         files_btn.connect("clicked", lambda *_: self.path and os.path.exists(self.path) and
                           self.win.show_folder(os.path.dirname(self.path), self.path))
         head.append(files_btn)
-        self.editor_btn = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text="Open in your editor")
+        self.editor_btn = Gtk.Button(icon_name="document-edit-symbolic",
+                                     tooltip_text=wording.say("code_view.open_in_editor"))
         self.editor_btn.add_css_class("flat")
         self.editor_btn.connect("clicked", lambda *_: self.path and open_in_editor(self.path, self.line, self))
         head.append(self.editor_btn)
@@ -529,7 +533,7 @@ class CodePage(Gtk.Box):
         self.code.set_margin_top(6)
         self.code.set_wrap(self.wrap_btn.get_active())
         self.append(self.code)
-        self.empty = empty_label("Click a file, function or class in a reply to see its code here.")
+        self.empty = empty_label(wording.say("code_view.empty"))
         self.append(self.empty)
         self.code.set_visible(False)
 
@@ -563,14 +567,17 @@ class CodePage(Gtk.Box):
             bases = f"({', '.join(cls['bases'])})" if cls["bases"] else ""
             deco = "".join(f"@{d}  " for d in cls["decorators"])
             label = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
-            label.set_markup(f'{"Related class" if cls["related"] else "Class"}: <tt>{html.escape(deco)}'
+            what = wording.say("code_view.related_class") if cls["related"] else wording.say("code_view.class_label")
+            lines = wording.say("code_view.lines", start=cls["start"], end=cls["end"])
+            label.set_markup(f'{what}: <tt>{html.escape(deco)}'
                              f'<b>{html.escape(cls["name"])}</b>{html.escape(bases)}</tt>'
-                             f'  <span alpha="60%">lines {cls["start"]}–{cls["end"]}</span>')
+                             f'  <span alpha="60%">{lines}</span>')
             self.cls.set_label_widget(label)
             self.cls_doc.set_label(cls["doc"])
             self.cls_doc.set_visible(bool(cls["doc"]))
             for kind, name, n in [("class", cls["name"], cls["start"])] + cls["members"]:
-                btn = Gtk.Button(label=name, tooltip_text=f"{kind} {name}, line {n}")
+                btn = Gtk.Button(label=name,
+                                 tooltip_text=wording.say("code_view.member_tip", kind=kind, name=name, line=n))
                 btn.add_css_class("flat")
                 btn.add_css_class("code-member")
                 if n == line or (kind == "def" and any(c[2] == n for c in crumbs)):
@@ -749,16 +756,18 @@ class FilesPage(Gtk.Box):
         titles.append(self.title)
         titles.append(self.where)
         head.append(titles)
-        self.up_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Up a folder", visible=False)
+        self.up_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text=wording.say("code_view.up_folder"),
+                                 visible=False)
         self.up_btn.add_css_class("flat")
         self.up_btn.connect("clicked", lambda *_: self.gallery_up())
         head.prepend(self.up_btn)
-        self.mode_btn = Gtk.ToggleButton(icon_name="view-grid-symbolic", tooltip_text="Show as a gallery")
+        self.mode_btn = Gtk.ToggleButton(icon_name="view-grid-symbolic",
+                                         tooltip_text=wording.say("code_view.show_gallery"))
         self.mode_btn.add_css_class("flat")
         self.mode_btn.connect("toggled", lambda b: self.show_gallery(b.get_active()))
         head.append(self.mode_btn)
-        for icon, tip, fn in (("view-refresh-symbolic", "Read the folders again", self.refresh),
-                              ("folder-open-symbolic", "Open in your file manager",
+        for icon, tip, fn in (("view-refresh-symbolic", wording.say("code_view.read_folders_again"), self.refresh),
+                              ("folder-open-symbolic", wording.say("code_view.open_file_manager"),
                                lambda: self.root and self.launch(self.gallery_folder if self.in_gallery() else
                                                                  self.selected() or self.root))):
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip)
@@ -791,7 +800,7 @@ class FilesPage(Gtk.Box):
         self.modes = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
         self.modes.add_named(self.scroll, "tree")
         gallery = Gtk.Overlay(child=self.grid_scroll)
-        self.gallery_empty = empty_label("Nothing in this folder")
+        self.gallery_empty = empty_label(wording.say("code_view.empty_folder"))
         self.gallery_empty.set_visible(False)
         self.gallery_empty.set_valign(Gtk.Align.START)
         self.gallery_empty.set_can_target(False)
@@ -915,7 +924,7 @@ class FilesPage(Gtk.Box):
         else:
             self.modes.set_visible_child_name("tree")
             self.up_btn.set_visible(False)
-            self.mode_btn.set_tooltip_text("Show as a gallery")
+            self.mode_btn.set_tooltip_text(wording.say("code_view.show_gallery"))
             self.mode_btn.set_icon_name("view-grid-symbolic")
             if self.root is not None:
                 self.title.set_label(os.path.basename(self.root.rstrip(os.sep)) or self.root)
@@ -926,7 +935,7 @@ class FilesPage(Gtk.Box):
         laid out. keep_place: where it was scrolled to stays (read again), else from the top."""
         self.gallery_folder = folder
         self.modes.set_visible_child_name("gallery")
-        self.mode_btn.set_tooltip_text("Show as a tree")
+        self.mode_btn.set_tooltip_text(wording.say("code_view.show_tree"))
         self.mode_btn.set_icon_name("view-list-symbolic")
         self.up_btn.set_visible(True)
         self.up_btn.set_sensitive(folder.rstrip(os.sep) != self.root.rstrip(os.sep))
@@ -1180,10 +1189,11 @@ class FilesPage(Gtk.Box):
             return
         pop = Gtk.Popover(has_arrow=False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        items = [("Copy path", lambda: (self.get_clipboard().set(node.path), toast(self, "Path copied"))),
-                 ("Open in your file manager", lambda: self.launch(node.path))]
+        items = [(wording.say("code_view.copy_path"),
+                  lambda: (self.get_clipboard().set(node.path), toast(self, wording.say("code_view.path_copied")))),
+                 (wording.say("code_view.open_file_manager"), lambda: self.launch(node.path))]
         if node.is_dir:
-            items.insert(0, ("Show as a gallery", lambda: self.show_gallery(True, node.path)))
+            items.insert(0, (wording.say("code_view.show_gallery"), lambda: self.show_gallery(True, node.path)))
         for label, fn in items:
             btn = Gtk.Button(label=label)
             btn.add_css_class("flat")

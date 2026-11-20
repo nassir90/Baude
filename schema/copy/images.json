@@ -1,0 +1,28 @@
+{
+  "description": "Images in a chat or a page, their menu, the large view (lightbox) and what's said when one can't be shown.",
+  "messages": {
+    "open_in_browser": "Open in browser",
+    "open_with_default_app": "Open with default app",
+    "copied": "Image copied",
+    "cannot_copy": "This image can't be copied",
+    "view": "View",
+    "copy_image": "Copy image",
+    "open_in_folder": "Open in folder",
+    "unnamed": "image",
+    "click_tip": "{$name}\nClick to view · right-click for more",
+    "show_in_folder": "Show in folder",
+    "open_its_folder": "Open its folder",
+    "open_with_the_default_app": "Open with the default app",
+    "open_original_in_browser": "Open the original in the browser",
+    "close": "Close (Esc)",
+    "untitled": "Image",
+    "cannot_show": "Can't be shown here: Open opens it in its app",
+    "size_mb": "{$mb} MB",
+    "size_kb": "{$kb} kB",
+    "link": "Image: {$link}",
+    "couldnt_show": "Couldn't show the image: {$why}",
+    "couldnt_load": "Couldn't load the image: {$why}",
+    "not_an_image": "not an image ({$kind})",
+    "too_large": "image too large"
+  }
+}

@@ -47,7 +47,7 @@ import lookup  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
 from baudelib import tokens  # noqa: E402  (Meta's measures: schema/tokens, Baude's)
-from baudelib import agentproxy, codex, modelfiles, wire  # noqa: E402
+from baudelib import agentproxy, codex, modelfiles, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import EFFORT_LABELS, MODELS, ClaudeProc  # noqa: E402
@@ -84,8 +84,8 @@ REF_COLOR = "#2f8f72"  # (an @name: the notes' colour for one)
 MARK_HOWS = ("added", "removed", "moved", "highlight")
 
 
-UNAVAILABLE = "This model is unavailable"  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
-TOO_SMALL = f"Window too small for {NAME}: pick a larger model"  # (its instructions alone, as it counts
+UNAVAILABLE = wording.say("meta.unavailable")  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
+TOO_SMALL = wording.say("meta.too_small")  # (its instructions alone, as it counts
 # them, more than it holds: no clearing helps)
 HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
@@ -328,7 +328,7 @@ def runs_commands():
 def auto_mode_note(value=None):
     """What to say when claude didn't start a model (Meta's own, if none's given) in Auto mode (NO_AUTO), else ""."""
     value = model() if value is None else value
-    return f"Claude Code didn't start {model_name(value)} in Auto mode here" if value in NO_AUTO else ""
+    return wording.say("meta_settings.no_auto", model=model_name(value)) if value in NO_AUTO else ""
 
 
 # ---------------------------------------------------------------- text
@@ -921,8 +921,9 @@ def model_row(chat):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then every
     other in the mesh (listed_models; where it runs: provider_row), in a search box's list with each family's icon
     (widgets.ModelPicker). Its sync() lists them as they are now (sync_rows)."""
-    row = Adw.ActionRow(title="Intelligence", subtitle=f"The model {NAME} thinks with")
-    picker = widgets.ModelPicker([], f"The model {NAME} thinks with", lambda v: model_picked(chat, v))
+    row = Adw.ActionRow(title=wording.say("meta_settings.intelligence"),
+                        subtitle=wording.say("meta_settings.intelligence_detail"))
+    picker = widgets.ModelPicker([], wording.say("meta_settings.intelligence_detail"), lambda v: model_picked(chat, v))
     picker.set_valign(Gtk.Align.CENTER)
     picker.add_css_class("flat")
     row.add_suffix(picker)
@@ -947,9 +948,10 @@ def provider_row(chat):
     """Settings → Meta → Provider: where Meta's model runs, each provider that has it (alike: the same model on another
     host, or served another way), by host: this machine's (local) first. Picking another moves Meta's model there,
     from its next message. Greyed and off with one; gone on Claude's (claude runs where it is: no provider of its)."""
-    row = Adw.ActionRow(title="Provider", subtitle="Where the model runs")
+    row = Adw.ActionRow(title=wording.say("meta_settings.provider"),
+                        subtitle=wording.say("meta_settings.provider_detail"))
     same = {}  # (each provider that has Meta's model: its copy there)
-    picker = widgets.HostPicker("Where Meta's model runs", lambda pid: model_picked(chat, same[pid])
+    picker = widgets.HostPicker(wording.say("meta_settings.provider_picker"), lambda pid: model_picked(chat, same[pid])
                                 if pid in same and same[pid] != model() else sync_rows())
     picker.set_valign(Gtk.Align.CENTER)
     picker.add_css_class("flat")
@@ -983,18 +985,20 @@ def provider_row(chat):
 def effort_row(chat):
     """Settings → Meta → Effort: how hard Meta thinks, of the levels its model takes, from its next message. Its sync()
     offers another model's levels (model_picked)."""
-    row = Adw.ComboRow(title="Effort")
+    row = Adw.ComboRow(title=wording.say("meta_settings.effort"))
     state = {"values": [None], "syncing": False}
 
     def sync():
         levels = efforts()
         state["values"] = [None, *levels]
         state["syncing"] = True
-        row.set_model(Gtk.StringList.new(["Default", *(EFFORT_LABELS.get(lv, lv.title()) for lv in levels)]))
+        row.set_model(Gtk.StringList.new([wording.say("meta_settings.effort_default"),
+                                          *(EFFORT_LABELS.get(lv, lv.title()) for lv in levels)]))
         row.set_selected(state["values"].index(effort()))
         state["syncing"] = False
         row.set_sensitive(bool(levels))
-        row.set_subtitle(f"How hard {NAME} thinks" if levels else f"{model_name()} has no effort setting")
+        row.set_subtitle(wording.say("meta_settings.effort_detail") if levels else
+                         wording.say("meta_settings.no_effort", model=model_name()))
 
     def picked(r, _p):
         if not state["syncing"] and r.get_selected() < len(state["values"]):
@@ -1010,7 +1014,8 @@ def effort_row(chat):
 
 def code_mode_row(chat):
     """Settings → Meta → Code mode: Meta acts by writing a few lines of Python (run_python), from its next message."""
-    row = Adw.SwitchRow(title="Code mode", subtitle=f"{NAME} acts by writing up to {CODE_LINES} lines of Python",
+    row = Adw.SwitchRow(title=wording.say("meta_settings.code_mode"),
+                        subtitle=wording.say("meta_settings.code_mode_detail", n=CODE_LINES),
                         active=code_mode())
     row.connect("notify::active", lambda r, _p: r.syncing or (widgets.save_settings(meta_code_mode=r.get_active()),
                                                               chat is not None and chat.model_changed()))
@@ -1021,7 +1026,7 @@ def commands_row(chat):
     """Settings → Meta → Run commands: on Claude's models, Meta runs shell commands, edits files and looks things up
     on the web, in Claude Code's Auto mode, from its next message. Greyed on a model that only reads (takes_commands);
     its sync() says which (sync_rows)."""
-    row = Adw.SwitchRow(title="Run commands")
+    row = Adw.SwitchRow(title=wording.say("meta_settings.run_commands"))
     row.connect("notify::active", lambda r, _p: r.syncing or (widgets.save_settings(meta_commands=r.get_active()),
                                                               chat is not None and chat.model_changed()))
 
@@ -1031,9 +1036,9 @@ def commands_row(chat):
         row.set_active(takes and commands_on())  # (off, greyed, on a model that only reads: the setting kept)
         row.syncing = was
         row.set_sensitive(takes)
-        row.set_subtitle((f"{auto_mode_note()}: {NAME} asks before each command" if auto_mode_note() else
-                          f"{NAME} runs shell commands and edits files, in Auto mode") if takes else
-                         f"{model_name()} only reads: Claude's models run commands")
+        row.set_subtitle((wording.say("meta_settings.asks_each", note=auto_mode_note()) if auto_mode_note() else
+                          wording.say("meta_settings.run_commands_detail")) if takes else
+                         wording.say("meta_settings.only_reads", model=model_name()))
     row.sync = sync
     widgets.follow_setting(row, "meta_commands", lambda _v: sync())
     sync()
@@ -1075,40 +1080,45 @@ def shared_settings(win, chat, app, zoom_default):
         out = list(fontsetup.code_fonts())
         return out + [f for f in (fontsetup.code_font(), fontsetup.running_font()) if f not in out]
     out = [
-        Setting("accent", "Accent Colour", lambda: widgets.load_settings().get("accent") or "system", accent,
-                widgets.settings_accent, ["system", *widgets.ACCENTS]),
-        Setting("code_font", "Code Font", fontsetup.code_font, lambda v: widgets.save_settings(code_font=v),
+        Setting("accent", wording.say("shared_settings.accent_colour"), lambda: widgets.load_settings().get("accent") or "system",
+                accent, widgets.settings_accent, ["system", *widgets.ACCENTS]),
+        Setting("code_font", wording.say("shared_settings.code_font"), fontsetup.code_font,
+                lambda v: widgets.save_settings(code_font=v),
                 lambda: widgets.settings_code_font(win, app), fonts(),
                 note=f"takes from {app}'s next start: its row has Restart"),
-        Setting("text_scale", "Text Scale", lambda: widgets.scale_setting("text_scale"),
+        Setting("text_scale", wording.say("meta_settings.text_scale"), lambda: widgets.scale_setting("text_scale"),
                 lambda v: win.set_scale("text_scale", v),
-                lambda: widgets.settings_size("Text Scale", None, widgets.scale_setting("text_scale"),
+                lambda: widgets.settings_size(wording.say("meta_settings.text_scale"), None,
+                                              widgets.scale_setting("text_scale"),
                                               lambda s: win.set_scale("text_scale", s), key="text_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
-        Setting("icon_scale", "Icon Scale", lambda: widgets.scale_setting("icon_scale"),
+        Setting("icon_scale", wording.say("meta_settings.icon_scale"), lambda: widgets.scale_setting("icon_scale"),
                 lambda v: win.set_scale("icon_scale", v),
-                lambda: widgets.settings_size("Icon Scale", None, widgets.scale_setting("icon_scale"),
+                lambda: widgets.settings_size(wording.say("meta_settings.icon_scale"), None,
+                                              widgets.scale_setting("icon_scale"),
                                               lambda s: win.set_scale("icon_scale", s), key="icon_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
-        Setting("global_scale", "Global Scale", zoom_default, win.set_zoom_default,
-                lambda: widgets.settings_size("Global Scale", None, zoom_default(), win.set_zoom_default,
+        Setting("global_scale", wording.say("meta_settings.global_scale"), zoom_default, win.set_zoom_default,
+                lambda: widgets.settings_size(wording.say("meta_settings.global_scale"), None, zoom_default(),
+                                              win.set_zoom_default,
                                               widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"),
                 (widgets.ZOOM_MIN, widgets.ZOOM_MAX), note="what ⌘0 / Ctrl+0 goes back to"),
-        Setting("full_width", "Full-width text",
+        Setting("full_width", wording.say("meta_settings.full_width"),
                 lambda: bool((a := win.lookup_action("fullwidth")) and a.get_state().get_boolean()), wide,
-                lambda: widgets.settings_switch("Full-width text", None, "win.fullwidth"), bool),
-        Setting("auto_update", "Auto restart on update", update.enabled, auto, update.settings_row, bool),
-        Setting("meta_model", "Intelligence", model_value, lambda v: model_picked(chat, v), lambda: model_row(chat),
+                lambda: widgets.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"), bool),
+        Setting("auto_update", wording.say("updates.auto_restart"), update.enabled, auto, update.settings_row, bool),
+        Setting("meta_model", wording.say("meta_settings.intelligence"), model_value, lambda v: model_picked(chat, v),
+                lambda: model_row(chat),
                 lambda: [m[0] for m in models()], note=f"{NAME}'s own model, from its next message"),
-        Setting("meta_effort", "Effort", lambda: effort() or "default",
+        Setting("meta_effort", wording.say("meta_settings.effort"), lambda: effort() or "default",
                 lambda v: (widgets.save_settings(meta_effort=None if v == "default" else v), chat.model_changed()),
                 lambda: effort_row(chat), lambda: ["default", *efforts()],
                 note=f"how hard {NAME} thinks, of the levels its model takes, from its next message"),
-        Setting("meta_code_mode", "Code mode", code_mode,
+        Setting("meta_code_mode", wording.say("meta_settings.code_mode"), code_mode,
                 lambda v: (widgets.save_settings(meta_code_mode=v), chat.model_changed()), lambda: code_mode_row(chat),
                 bool, note=f"{NAME} acts through run_python, from its next message; the user's to turn on",
                 meta_sets=False),
-        Setting("meta_commands", "Run commands", lambda: commands_on() and takes_commands(),
+        Setting("meta_commands", wording.say("meta_settings.run_commands"), lambda: commands_on() and takes_commands(),
                 lambda v: (widgets.save_settings(meta_commands=v), chat.model_changed()), lambda: commands_row(chat),
                 bool, note=f"on Claude's models, {NAME} runs shell commands and edits files, from its next message; "
                 "the user's to turn on or off", meta_sets=False),
@@ -1557,8 +1567,8 @@ class Agent:
         commands = commands and takes_commands(model)  # (only Claude's models act)
         run = modelslib.launch(model, "auto" if commands else "default", effort)
         if run["missing"]:
-            raise OSError("apple-claude isn't built yet: swift build -c release, in apple-claude/"
-                          if run["program"] == "apple" else f"{run['program']}-claude isn't here")
+            raise OSError(wording.say("meta.apple_not_built") if run["program"] == "apple" else
+                          wording.say("meta.runner_missing", program=run["program"]))
         self.program = run["program"]
         self.runs = self.program if self.program in ("claude", "codex") else f"{self.program}-claude"  # (what runs it: runtime info)
         exe, effort = (exe, effort) if self.program == "claude" else (run["exe"], run["effort"])
@@ -1783,11 +1793,11 @@ class Agent:
             error, outgrown = None, False
             if msg.get("is_error") and not turn.get("stopped"):
                 error = (msg.get("result") or "; ".join(map(str, msg.get("errors") or [])) or
-                         "claude reported an error")[-600:]
+                         wording.say("meta.claude_error"))[-600:]
                 if outgrown := bool(OVERFLOW_RE.search(error)):
                     error = None  # (the conversation's more than the window holds: the chat's exhausted, _done)
                 elif "log" in error.lower() and "in" in error.lower():
-                    error += "\n\nRun `claude` in a terminal and /login, then ask again."
+                    error += "\n\n" + wording.say("meta.login_hint")
             self.chat._done(self, text, error, turn, outgrown)
         return False
 
@@ -1804,7 +1814,7 @@ class Agent:
         turn, self.turn = self.turn, None
         if turn is not None:
             error = None if turn.get("stopped") else \
-                ("\n".join(self.stderr[-6:]).strip() or f"{self.runs} exited with {code}")[-600:]
+                ("\n".join(self.stderr[-6:]).strip() or wording.say("meta.exited", program=self.runs, code=code))[-600:]
             self.chat._done(self, "".join(turn["text"]).strip(), error, turn)
         self.chat.agent_gone(self)
         return False
@@ -1926,7 +1936,9 @@ def mark_row(row, key, mark, chat, name_label, inline=True):
     paint()
     chat.painted.setdefault(key, {})["row"] = paint
     if note or action is not None:
-        said = f"{NAME}: {action['label'] if action else 'highlighted'}" + (f" ({note})" if note else "")
+        done = action["label"] if action else wording.say("meta_actions.highlighted")
+        said = wording.say("meta_actions.by_meta_note", action=done, note=note) if note else \
+            wording.say("meta_actions.by_meta", action=done)
         row.set_tooltip_text("\n".join(filter(None, [row.get_tooltip_text(), said])))
     if note and inline:
         said = Gtk.Label(label=note, ellipsize=Pango.EllipsizeMode.END, max_width_chars=12, valign=Gtk.Align.CENTER)
@@ -2018,7 +2030,7 @@ class RefCompleter:
         self.moved = at is not None
         if self.waiting is None and space.busy:
             self.waiting = space.refresh(self._catalogued)
-        note = f"{matched} found" if matched else "Nothing found"
+        note = wording.say("meta.found", n=matched) if matched else wording.say("meta.nothing_found")
         wide, most = self.anchor.get_width() - 10, widgets.PickList.WIDTH
         self.picks.scroll.set_size_request(min(most, wide) if wide > 0 else most, -1)
         self.picks.show(len(shown), (at or 0) if shown else None, note,
@@ -2118,7 +2130,7 @@ def rows_group(rows, title=None, limit=None):
     for r in shown:
         add(r)
     if len(shown) < len(rows):
-        more = Adw.ButtonRow(title=f"Show {len(rows) - len(shown)} more")
+        more = Adw.ButtonRow(title=wording.say("meta.show_more", n=len(rows) - len(shown)))
 
         def all_of_them(btn):
             group.remove(btn)
@@ -2141,7 +2153,7 @@ class Form:
     drop-down)], verb (its button's word), check() -> what's wrong (to say), or None; submit() -> what was done (told
     the model, and with said, on its card too), or ValueError saying why not."""
 
-    def __init__(self, heading, child, fields, check, submit, verb="Submit", body="", said=True):
+    def __init__(self, heading, child, fields, check, submit, verb=wording.say("meta.submit"), body="", said=True):
         self.heading, self.child, self.fields, self.verb, self.body = heading, child, fields, verb, body
         self.check, self.submit, self.said = check, submit, said
 
@@ -2285,12 +2297,11 @@ class MetaChat(Gtk.Box):
         self.too_small = None  # (the model whose window's too small for Meta's own instructions: Agent.first)
         foot = Gtk.Box(spacing=12)
         foot.add_css_class("meta-foot")
-        clear = Gtk.Button(label="Clear", tooltip_text="Clear the conversation (or ask clear, /clear)")
+        clear = Gtk.Button(label=wording.say("common.clear"), tooltip_text=wording.say("meta.clear_tip"))
         clear.add_css_class("flat")
         clear.connect("clicked", lambda *_: self._clear())
         foot.append(clear)
-        copy = Gtk.Button(label="Copy", tooltip_text="Copy the conversation, with its model, tools and context, to "
-                                                     "paste into an issue")
+        copy = Gtk.Button(label=wording.say("common.copy"), tooltip_text=wording.say("meta.copy_tip"))
         copy.add_css_class("flat")
         copy.connect("clicked", lambda *_: self.copy_report())
         foot.append(copy)
@@ -2413,9 +2424,11 @@ class MetaChat(Gtk.Box):
         """Settings → Meta: the send button says the model it asks; the next message is the new model's (submit)."""
         level = effort()
         name = model_name() + (f", {EFFORT_LABELS.get(level, level).lower()}" if level else "")
-        name += ", runs commands" if runs_commands() else ""
-        self.writing.send_tip = f"Ask {NAME} ({name}{', code mode' if code_mode() else ''}) ({widgets.SEND_KEY})\n" \
-                                "New line: Enter\n@: a chat, a file…\nclear or /clear: a new conversation"
+        if runs_commands():
+            name = wording.say("meta.with_commands", model=name)
+        if code_mode():
+            name = wording.say("meta.with_code_mode", model=name)
+        self.writing.send_tip = wording.say("meta.send_tip", model=name, shortcut=widgets.SEND_KEY)
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         self.ctx.window_changed()  # (no session's said what it's used: the new model's window)
@@ -2455,7 +2468,7 @@ class MetaChat(Gtk.Box):
             self.ctx.bar.set_value(1)
         if available():
             self.exhausted.set((self.ctx.over or outgrown) and self.ask is None,
-                               TOO_SMALL if self.too_small == model() else "Context Exhausted")
+                               TOO_SMALL if self.too_small == model() else wording.say("context_usage.exhausted"))
 
     def report_head(self):
         """The lines over a copied conversation (report_text): the app, Meta's model and what runs it, its effort, its
@@ -2498,7 +2511,7 @@ class MetaChat(Gtk.Box):
 
     def copy_report(self):
         self.get_clipboard().set(self.report() or report_text(self.report_head(), []))
-        widgets.toast(self, "Conversation copied")
+        widgets.toast(self, wording.say("meta.copied"))
 
     def close_agent(self):
         """Its session stopped (the conversation cleared, the window gone): the next message starts another, told what
@@ -2806,7 +2819,8 @@ class MetaChat(Gtk.Box):
             form = self.forms()[name][1]()
         except Exception as e:  # noqa: BLE001
             print(f"meta: form {name}: {type(e).__name__}: {e}", file=sys.stderr)
-            return None, label(f"(The {name.replace('_', ' ')} form can't be had now: {e})", css=("dim-label", "caption"))
+            return None, label(wording.say("meta.form_unavailable", form=name.replace("_", " "), why=e),
+                               css=("dim-label", "caption"))
         kept = dict(spec.get("values") or {})
         missed = form.fill({k: v for k, v in kept.items() if v not in (None, "")}, partial=True)
         base = form.values()  # (as it's shown: a field that couldn't be filled, kept as it was till it's changed)
@@ -2826,7 +2840,7 @@ class MetaChat(Gtk.Box):
         said = label("", css=("dim-label", "caption"))
         card.append(said)
         row = Gtk.Box(spacing=6, halign=Gtk.Align.END)
-        cancel = Gtk.Button(label="Cancel")
+        cancel = Gtk.Button(label=wording.say("common.cancel"))
         go = Gtk.Button(label=form.verb)
         go.add_css_class("suggested-action")
         row.append(cancel)
@@ -2850,11 +2864,11 @@ class MetaChat(Gtk.Box):
             filled = any(str(v).strip() for v in form.values().values())
             wrong.set_text((spec.get("error") or problem or "") if open_ and (filled or spec.get("error")) else "")
             wrong.set_visible(bool(wrong.get_text()))
-            said.set_text({"submitted": f"Done: {spec.get('said') or form.verb}" if form.said else "",
-                           "cancelled": "Cancelled"}.get(spec.get("state"), ""))
+            said.set_text({"submitted": wording.say("meta.form_done", said=spec.get("said") or form.verb)
+                           if form.said else "", "cancelled": wording.say("meta.cancelled")}.get(spec.get("state"), ""))
             said.set_visible(not open_ and bool(said.get_text()))
-            card.set_tooltip_text("Right-click: Unpin" if open_ and spec.get("pinned", True) else
-                                  "Right-click: Pin" if open_ else None)
+            card.set_tooltip_text(wording.say("meta.unpin_tip") if open_ and spec.get("pinned", True) else
+                                  wording.say("meta.pin_tip") if open_ else None)
 
         def edited():
             if filling:
@@ -2926,7 +2940,7 @@ class MetaChat(Gtk.Box):
             return
         pinned = spec.get("pinned", True)
         pop = Gtk.Popover(has_arrow=False)
-        btn = Gtk.Button(label="Unpin" if pinned else "Pin")
+        btn = Gtk.Button(label=wording.say("meta.unpin") if pinned else wording.say("meta.pin"))
         btn.add_css_class("flat")
 
         def toggle(*_):
@@ -3094,7 +3108,7 @@ class MetaChat(Gtk.Box):
         said = Gtk.Label(label=caption, xalign=0, hexpand=True, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         if batch and all(a["state"] != "done" for a in batch):
             said.add_css_class("dim-label")
-            said.set_label(caption + " · undone")
+            said.set_label(wording.say("meta_actions.undone", action=caption))
         line.append(said)
         if batch:
             line.append(self.batch_controls(batch))
@@ -3111,10 +3125,11 @@ class MetaChat(Gtk.Box):
         group = self.shown_widget(it["shown"][0])
         if batch and (row := getattr(group, "row", None)) is not None:
             a = batch[0]
-            row.set_tooltip_text(f"{NAME}: {a['label']}")
+            row.set_tooltip_text(wording.say("meta_actions.by_meta", action=a["label"]))
             if not row.get_subtitle():
-                row.set_subtitle(f"Was {said_value(a['undo']['value'])}" if a["state"] == "done" else
-                                 f"Set to {said_value(a['redo']['value'])}, undone")
+                row.set_subtitle(wording.say("meta_actions.was", value=said_value(a["undo"]["value"]))
+                                 if a["state"] == "done" else
+                                 wording.say("meta_actions.set_undone", value=said_value(a["redo"]["value"])))
             row.add_suffix(self.batch_controls(batch))
         return group
 
@@ -3135,7 +3150,8 @@ class MetaChat(Gtk.Box):
                     said = Gtk.Label(label=note[0], xalign=0)
                     said.add_css_class("meta-note")
                     line.append(said)
-                item = Gtk.Button(child=line, halign=Gtk.Align.START, tooltip_text=f"Open {name.get_label()}")
+                item = Gtk.Button(child=line, halign=Gtk.Align.START,
+                                  tooltip_text=wording.say("meta.open_item", name=name.get_label()))
                 item.add_css_class("flat")
                 item.add_css_class("meta-item")
                 item.connect("clicked", lambda *_, k=kind, key=key, how=how, a=a: self.open_mark(k, key, how, a))
@@ -3171,7 +3187,8 @@ class MetaChat(Gtk.Box):
     def tool_title(self, name):
         """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own in words (Move pages)."""
         name = name.removeprefix("mcp__meta__")
-        return name if name in READ_TOOLS + COMMAND_TOOLS else name.replace("_", " ").capitalize() if name else "Changes"
+        return name if name in READ_TOOLS + COMMAND_TOOLS else name.replace("_", " ").capitalize() if name else \
+            wording.say("meta.tool_changes")
 
     def tool_summary(self, name, inp):
         """What a call of a tool was for, in a line: a file read, a pattern, a page, the chats, a setting and its
@@ -3213,7 +3230,8 @@ class MetaChat(Gtk.Box):
         header = Gtk.Label(label=self.tool_summary(name, it.get("input") or {}), xalign=0, hexpand=True,
                            ellipsize=Pango.EllipsizeMode.END)
         if it.get("state") == "interrupted":
-            header.set_label(" · ".join(filter(None, (header.get_label(), "interrupted"))))
+            header.set_label(wording.say("meta.call_interrupted", call=header.get_label()) if header.get_label() else
+                             wording.say("meta.interrupted"))
         for w in (title, toggles, header):
             line.append(w)
         grid.attach(line, 0, 0, 1, 1)
@@ -3226,15 +3244,16 @@ class MetaChat(Gtk.Box):
         elif it.get("input"):
             code = base == "run_python"
             shown = str(it["input"].get("code") or "") if code else json.dumps(it["input"], ensure_ascii=False, indent=1)
-            self._disclosure(toggles, grid, 1, "Code" if code else "Input", shown, "python" if code else "json")
+            self._disclosure(toggles, grid, 1, wording.say("meta.code") if code else wording.say("meta.input"), shown,
+                             "python" if code else "json")
         if it.get("result"):
-            self._disclosure(toggles, grid, 2, "Error" if it.get("state") == "error" else "Output", it["result"],
-                             "output")
+            self._disclosure(toggles, grid, 2, wording.say("meta.error") if it.get("state") == "error" else
+                             wording.say("meta.output"), it["result"], "output")
         if batch:
             card.set_tooltip_text("\n".join(a["label"] for a in batch))
             if all(a["state"] != "done" for a in batch):
                 header.add_css_class("dim-label")
-                header.set_label(header.get_label() + " · undone")
+                header.set_label(wording.say("meta_actions.undone", action=header.get_label()))
         if batch and controls:
             line.append(self.batch_controls(batch))
             hover = Gtk.EventControllerMotion()
@@ -3270,11 +3289,11 @@ class MetaChat(Gtk.Box):
         done = [a for a in batch if a["state"] == "done"]
         buttons = []
         if any(not a.get("kept") for a in done):
-            buttons.append(("object-select-symbolic", "Keep", lambda: self.keep(done)))
+            buttons.append(("object-select-symbolic", wording.say("meta.keep"), lambda: self.keep(done)))
         if done:
-            buttons.append(("edit-undo-symbolic", "Undo", lambda: self.undo_many(batch, True)))
+            buttons.append(("edit-undo-symbolic", wording.say("common.undo"), lambda: self.undo_many(batch, True)))
         else:
-            buttons.append(("edit-redo-symbolic", "Redo", lambda: self.redo_many(batch, True)))
+            buttons.append(("edit-redo-symbolic", wording.say("common.redo"), lambda: self.redo_many(batch, True)))
         for icon, tip, fn in buttons:
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER)
             btn.add_css_class("flat")
@@ -3429,8 +3448,8 @@ class MetaChat(Gtk.Box):
             self.agent.ask(said, turn)
         except OSError as e:
             self.agent = None
-            self.messages().append({"role": "meta", "text": f"Couldn't run {model_name()} ({e}).", "error": True,
-                                    "t": time.time()})
+            self.messages().append({"role": "meta", "text": wording.say("meta.couldnt_run", model=model_name(), why=e),
+                                    "error": True, "t": time.time()})
             self.save(now=True)
             return self.render()
         self.ask = self.agent
@@ -3615,24 +3634,29 @@ class MetaChat(Gtk.Box):
         code = None
         if name == "Bash":
             why = str(inp.get("description") or "").strip().rstrip(".")
-            text = f"{NAME} would like to run this{f' ({why[:1].lower() + why[1:]})' if why else ''}:"
+            text = wording.say("meta_asks.run_why", why=why[:1].lower() + why[1:]) if why else \
+                wording.say("meta_asks.run")
             code = trimmed(str(inp.get("command") or ""), 600)
         elif name in EDIT_TOOLS:
-            text = f"{NAME} would like to {name.lower()} {home(inp.get('file_path'))}:"
+            path = home(inp.get("file_path"))
+            text = wording.say("meta_asks.edit", path=path) if name == "Edit" else \
+                wording.say("meta_asks.write", path=path)
             code = trimmed(str(inp.get("content") or ""), 600) if name == "Write" else trimmed("\n".join(
                 [*(f"- {line}" for line in str(inp.get("old_string") or "").splitlines()),
                  *(f"+ {line}" for line in str(inp.get("new_string") or "").splitlines())]), 600)
         elif name == "WebFetch":
-            text = f"{NAME} would like to fetch {inp.get('url') or ''}"
+            text = wording.say("meta_asks.fetch", url=inp.get("url") or "")
         elif name == "WebSearch":
-            text = f"{NAME} would like to search the web for “{inp.get('query') or ''}”"
+            text = wording.say("meta_asks.search_web", query=inp.get("query") or "")
         else:
             path = home(inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("glob"))
-            verb = {"Read": "read", "Grep": "search in", "Glob": "look for files in"}.get(name, name)
-            text = f"{NAME} would like to {verb} {path}"
+            text = wording.say("meta_asks.read", path=path) if name == "Read" else \
+                wording.say("meta_asks.grep", path=path) if name == "Grep" else \
+                wording.say("meta_asks.glob", path=path) if name == "Glob" else \
+                wording.say("meta_asks.other", tool=name, path=path)
         if name in COMMAND_TOOLS and agent.started_mode not in (None, "auto"):
-            text = f"{auto_mode_note(agent.model)}, so each command is asked. {text}"
-        self._ask_card(text, "Allow", lambda allow: agent.answer(rid, allow, name, inp), code)
+            text = wording.say("meta_asks.each_asked", note=auto_mode_note(agent.model), question=text)
+        self._ask_card(text, wording.say("common.allow"), lambda allow: agent.answer(rid, allow, name, inp), code)
         self.tell_desktop(text)
 
     def tell_desktop(self, body):
@@ -3685,7 +3709,7 @@ class MetaChat(Gtk.Box):
             if card.get_parent() is not None:
                 self.box.remove(card)
             answered(allow)
-        for text_, allow in (("Deny", False), (yes, True)):
+        for text_, allow in ((wording.say("common.deny"), False), (yes, True)):
             btn = Gtk.Button(label=text_)
             if allow:
                 btn.add_css_class("suggested-action")
@@ -3766,7 +3790,8 @@ class MetaChat(Gtk.Box):
             m = None
         if m is not None:
             self.store_reply(agent, m)
-            self.tell_desktop(f"Ended with an error: {error}" if error else text.strip() or "Finished")
+            self.tell_desktop(wording.say("meta.ended_error", error=error) if error else
+                              text.strip() or wording.say("meta.finished"))
         self.save(now=True)
         if self.showing(agent):
             self.render()
@@ -3934,7 +3959,7 @@ class MetaChat(Gtk.Box):
                 failed.append(f"{a['label']}: {e}")
         self._journal_changed()
         if failed and by_user:
-            widgets.toast(self, "Couldn't undo " + "; ".join(failed))
+            widgets.toast(self, wording.say("meta_actions.couldnt_undo", failed="; ".join(failed)))
         return failed
 
     def redo_action(self, a, by_user=False):
@@ -3944,7 +3969,7 @@ class MetaChat(Gtk.Box):
             self.apply_action(a, undo=False)
         except (ValueError, KeyError, OSError) as e:
             if by_user:
-                widgets.toast(self, f"Couldn't redo {a['label']}: {e}")
+                widgets.toast(self, wording.say("meta_actions.couldnt_redo", action=a["label"], why=e))
             return [str(e)]
         a["state"], a["kept"] = "done", not a.get("marks")
         if by_user:
@@ -3993,8 +4018,8 @@ class MetaChat(Gtk.Box):
         self.changes_label.set_hexpand(True)
         self.changes_label.set_valign(Gtk.Align.CENTER)
         bar.append(self.changes_label)
-        for text, fn in (("Keep", lambda: self.keep(self.unkept())),
-                         ("Undo", lambda: self.undo_many(self.unkept(), True))):
+        for text, fn in ((wording.say("meta.keep"), lambda: self.keep(self.unkept())),
+                         (wording.say("common.undo"), lambda: self.undo_many(self.unkept(), True))):
             btn = Gtk.Button(label=text, valign=Gtk.Align.CENTER)
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())
@@ -4004,7 +4029,7 @@ class MetaChat(Gtk.Box):
 
     def show_changes_bar(self):
         n = len(self.unkept())
-        self.changes_label.set_text(f"{n} change{'s' if n != 1 else ''} in the left bar")
+        self.changes_label.set_text(wording.say("meta.changes", n=n))
         self.changes_box.set_visible(n > 0)
 
     def find_action(self, ref):
@@ -4148,8 +4173,8 @@ class MetaChat(Gtk.Box):
             if missing := [m for m in names if m not in have]:
                 raise ValueError(f"Ollama has no {', '.join(missing)}: nothing was removed.")
             listed = ", ".join(f"{m} ({have[m] / 1e9:.1f} GB)" if have[m] else m for m in names)
-            if not self.confirm(turn, f"{NAME} would like to remove {len(names)} model{'s' * (len(names) > 1)} from "
-                                      f"Ollama: {listed}. They'd have to be downloaded again.", "Remove"):
+            if not self.confirm(turn, wording.say("meta_asks.remove_models", n=len(names), models=listed),
+                                wording.say("common.remove")):
                 return {"text": "The user said no: nothing was removed."}
             done, failed = [], []
             for m in names:
@@ -4187,7 +4212,8 @@ class MetaChat(Gtk.Box):
                      "input": ["text", "image"] if m["vision"] else ["text"]} | \
                 ({"thinking": True} if args.get("thinking") else {})
             self.apply("models", {"key": "mlx_models", "entry": entry, "present": True})
-            a = self.act(turn, f"MLX: added {shown}", "models", {"key": "mlx_models", "entry": entry, "present": False},
+            a = self.act(turn, wording.say("meta_actions.added_mlx", model=shown), "models",
+                         {"key": "mlx_models", "entry": entry, "present": False},
                          {"key": "mlx_models", "entry": entry, "present": True})
             return {"text": f"Added {shown} ({value}) to MLX's models (action {a['id']}): it's in the model pickers "
                     "now. MLX's server loads it when it's first asked."}
@@ -4216,8 +4242,9 @@ class MetaChat(Gtk.Box):
         def work():
             if key_env or not providerslib.local_url(url):  # (a server elsewhere, or a key sent: the user's to say)
                 where = parts.hostname + (f":{parts.port}" if parts.port else "")
-                if not self.confirm(turn, f"{NAME} would like to add {name} at {where} as a model server" +
-                                    (f", sending it the key in ${key_env}" if key_env else "") + ".", "Add"):
+                asked = wording.say("meta_asks.add_server_key", name=name, where=where, variable=key_env) if key_env else \
+                    wording.say("meta_asks.add_server", name=name, where=where)
+                if not self.confirm(turn, asked, wording.say("common.add")):
                     return {"text": "The user said no: nothing was added."}
             for try_url in [url] + ([url + "/v1"] if not url.endswith("/v1") else []):
                 there = providerslib.endpoint(providerslib.endpoints({"endpoints": [ep | {"url": try_url}]})[0])
@@ -4230,7 +4257,8 @@ class MetaChat(Gtk.Box):
                 return found
             entry = ep | {"url": found["url"]}
             self.apply("models", {"key": "endpoints", "entry": entry, "present": True})
-            a = self.act(turn, f"Server: added {name}", "models", {"key": "endpoints", "entry": entry, "present": False},
+            a = self.act(turn, wording.say("meta_actions.added_server", name=name), "models",
+                         {"key": "endpoints", "entry": entry, "present": False},
                          {"key": "endpoints", "entry": entry, "present": True})
             listed = ", ".join(found["models"][:12]) or "none yet"
             return {"text": f"Added {name} at {found['url']} (action {a['id']}); its models: {listed}. It's a "
@@ -4266,11 +4294,13 @@ class MetaChat(Gtk.Box):
                 return {"text": f"{model} is being fetched from {host} already: local_models says how it's going."}
             if k == "ollama" and providerslib.ollama()["error"]:
                 raise ValueError("Ollama isn't running here: the user opens it (or runs ollama serve) first.")
-            into = "this machine's Ollama" if k == "ollama" else f"the Hugging Face cache here ({modelslib.hf_hub()})"
             mine = k == "ollama" and where["name"] in self.ollama_names()
-            if not self.confirm(turn, f"{NAME} would like to copy {model} ({where['size'] / 1e9:.1f} GB) from {host} "
-                                      f"into {into}, over the mesh." +
-                                      (f" It replaces the {where['name']} Ollama has here." if mine else ""), "Copy"):
+            size = f"{where['size'] / 1e9:.1f}"
+            asked = wording.say("meta_asks.copy_mlx", model=model, size=size, host=host, hub=modelslib.hf_hub()) \
+                if k != "ollama" else \
+                wording.say("meta_asks.copy_ollama_replacing", model=model, size=size, host=host, name=where["name"]) \
+                if mine else wording.say("meta_asks.copy_ollama", model=model, size=size, host=host)
+            if not self.confirm(turn, asked, wording.say("common.copy")):
                 return {"text": "The user said no: nothing was copied."}
             f = FETCHES[key] = {"host": host, "model": model, "kind": k, "state": "starting", "done": 0,
                                 "total": where["size"], "error": None}
@@ -4312,8 +4342,7 @@ class MetaChat(Gtk.Box):
             if not st["swift"]:
                 raise ValueError("There's no swift here: the user installs Xcode, or its command line tools "
                                  "(xcode-select --install), first.")
-            if not self.confirm(turn, f"{NAME} would like to build apple-claude, which runs Apple's on-device model: "
-                                      "swift build -c release, in apple-claude/ (a minute or two).", "Build"):
+            if not self.confirm(turn, wording.say("meta_asks.build_apple"), wording.say("meta_asks.build")):
                 return {"text": "The user said no: nothing was built."}
 
             def built(ok):  # (said with the next message of the conversation it was asked in)
@@ -4338,7 +4367,8 @@ class MetaChat(Gtk.Box):
         self._show(turn, {"kind": "setting", "name": name, "set": now})
         if now == before:
             return {"text": f"{name} is {said_value(now)} already. Its row is under your reply."}
-        a = self.act(turn, f"{s.title}: {said_value(before)} → {said_value(now)}", "setting",
+        a = self.act(turn, wording.say("meta_actions.setting_changed", setting=s.title, before=said_value(before),
+                                       after=said_value(now)), "setting",
                      {"name": name, "value": before}, {"name": name, "value": now})
         return {"text": f"{name} is {said_value(now)} now (action {a['id']})" + (f"; {s.note}" if s.note else "") +
                 ". Its row is under your reply."}
@@ -4388,9 +4418,10 @@ class MetaChat(Gtk.Box):
         if title == before:
             return {"text": "It's called that already."}
         self.rename_chat_to(chat, title)
-        a = self.act(turn, f"Renamed “{before}” to “{title}”", "rename_chat", {"chat": chat["key"], "title": before},
-                     {"chat": chat["key"], "title": title},
-                     marks=[("chat", chat["key"], "moved", "renamed")] if self.CHAT_ROWS else ())
+        a = self.act(turn, wording.say("meta_actions.renamed", before=before, after=title), "rename_chat",
+                     {"chat": chat["key"], "title": before}, {"chat": chat["key"], "title": title},
+                     marks=[("chat", chat["key"], "moved", wording.say("meta_actions.renamed_note"))]
+                     if self.CHAT_ROWS else ())
         return {"text": f"Renamed (action {a['id']})."}
 
     def _python(self, agent, args):

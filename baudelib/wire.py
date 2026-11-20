@@ -68,6 +68,8 @@ import sys
 import threading
 import time
 
+from baudelib import wording
+
 SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema")
 STRICT = os.environ.get("BAUDE_WIRE_STRICT") == "1"
 KINDS = ("request", "reply", "event", "frame")  # (what a message is, as its file's name says: a request a host takes)
@@ -1001,10 +1003,12 @@ def sender_name(sender):
     """Who a sender is, as a message from it's headed: "Ada, a Bot on lab-mac", "subagent “List” on C"."""
     name, where = sender.get("name") or "", sender.get("host_name")
     kind = sender.get("kind")
-    who = {"bot": f"{name or 'a Bot'}, a Bot", "chat": f"“{name}”" if name else "a chat",
-           "subagent": f"subagent “{name}”" if name else "a subagent", "host": name or "a host"}.get(
-        kind, name or "another")  # (a kind of a newer host's: by its name)
-    return who + (f" on {where}" if where and kind != "host" else "")
+    who = {"bot": wording.say("senders.bot", name=name) if name else wording.say("senders.bot_unnamed"),
+           "chat": wording.say("senders.chat", name=name) if name else wording.say("senders.chat_unnamed"),
+           "subagent": wording.say("senders.subagent", name=name) if name else wording.say("senders.subagent_unnamed"),
+           "host": name or wording.say("senders.host_unnamed")}.get(
+        kind, name or wording.say("senders.another"))  # (a kind of a newer host's: by its name)
+    return wording.say("senders.on", who=who, where=where) if where and kind != "host" else who
 
 
 def said_by(sender, content):
@@ -1043,8 +1047,8 @@ def is_local(where):
 def said_where(where):
     """Where a host process is, as people say it: user@host, through the mesh, or local (this machine)."""
     if (where or {}).get("via") == "mesh":
-        return "through the mesh"
-    return where.get("dest") if (where or {}).get("via") == "ssh" else "local"
+        return wording.say("senders.through_mesh")
+    return where.get("dest") if (where or {}).get("via") == "ssh" else wording.say("senders.local")
 
 
 def bridge(sock, rfd=0, wfd=1):

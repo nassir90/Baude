@@ -14,7 +14,7 @@ import queue
 import sys
 import threading
 
-from baudelib import emissionlink, emissiontools
+from baudelib import emissionlink, emissiontools, wording
 
 GONE = "the phone's browser closed before it answered"
 
@@ -56,7 +56,7 @@ class Phones:
             s = self.server.sessions.get(bot)
             is_bot = s is not None and bool(s.meta.get("bot"))
         if not is_bot:
-            return reply("error", error="that's no Bot of this host's")
+            return reply("error", error=wording.say("host_errors.no_such_bot"))
         reply("emission_serving", bot=bot, on=True)
         self.notes.put((bot, None, (), ""))  # (what this host's Emission had for the Bot about a phone: not told now)
         with self.lock:
@@ -64,7 +64,7 @@ class Phones:
             self.serving[bot] = conn
         if was is not None and was is not conn:  # (another phone had it: told, and its requests not answered there)
             self.fail(was, bot)
-            was.send({"op": "emission_unserved", "bot": bot, "why": "another phone shows this Bot's browser now"})
+            was.send({"op": "emission_unserved", "bot": bot, "why": wording.say("host_errors.another_phone")})
         self.listed()
 
     def phone(self, bot_id):

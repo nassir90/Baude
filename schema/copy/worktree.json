@@ -1,0 +1,16 @@
+{
+  "description": "Why a chat's folder (a worktree that's gone) couldn't be made again, and where to /cd to carry on: said in the chat by Baude and by the host process.",
+  "messages": {
+    "carry_on": "{$why}: /cd {$folder} to carry on there",
+    "carry_on_in_project": "{$why}: /cd {$folder} to carry on in the project folder",
+    "carry_on_elsewhere": "{$why}: /cd to another folder to carry on",
+    "no_longer_exists": "{$path} no longer exists",
+    "gone": "worktree {$name} is gone",
+    "repo_gone": "{$repo} no longer exists, and worktree {$name} with it",
+    "not_a_repo": "worktree {$name} is gone, and {$repo} isn't a git repository to make it again from",
+    "branch_elsewhere": "worktree {$name} is gone, and its branch {$branch} is checked out in {$path}",
+    "back_without": "worktree {$name} is back on {$branch}, without {$path}",
+    "checkout_failed": "worktree {$name} is gone, and git couldn't check out its branch {$branch} again",
+    "branch_gone": "worktree {$name} is gone, and so is its branch"
+  }
+}

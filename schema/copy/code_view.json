@@ -1,0 +1,25 @@
+{
+  "description": "The code and files pages of the side panel (Baude's and Record's): a file as code, its find bar, and the folder's files.",
+  "messages": {
+    "find": "Find",
+    "match_of": "{$at} of {$n}",
+    "match_of_more": "{$at} of {$n}+",
+    "find_tip": "Find (Ctrl+F)",
+    "wrap": "Wrap long lines",
+    "show_in_files": "Show in Files",
+    "open_in_editor": "Open in your editor",
+    "empty": "Click a file, function or class in a reply to see its code here.",
+    "class_label": "Class",
+    "related_class": "Related class",
+    "lines": "lines {$start}–{$end}",
+    "member_tip": "{$kind} {$name}, line {$line}",
+    "up_folder": "Up a folder",
+    "show_gallery": "Show as a gallery",
+    "show_tree": "Show as a tree",
+    "read_folders_again": "Read the folders again",
+    "open_file_manager": "Open in your file manager",
+    "empty_folder": "Nothing in this folder",
+    "copy_path": "Copy path",
+    "path_copied": "Path copied"
+  }
+}

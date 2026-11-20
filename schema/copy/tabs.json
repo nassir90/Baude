@@ -1,0 +1,9 @@
+{
+  "description": "A window's tabs: their menu and copying a page's link.",
+  "messages": {
+    "copy_link_to_page": "Copy Link to This Page",
+    "copy_link": "Copy Link",
+    "link_copied": "Link copied",
+    "no_link": "This page has no link to copy"
+  }
+}

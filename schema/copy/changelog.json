@@ -1,0 +1,9 @@
+{
+  "description": "☰ → Changelog, Baude's and Record's: the commits the running version has, in a dialog its header names.",
+  "messages": {
+    "title": "Changelog",
+    "version_made": "Version {$commit} · {$made}",
+    "empty": "No changelog",
+    "empty_detail": "No commits to list"
+  }
+}

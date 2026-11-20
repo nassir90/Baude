@@ -1,0 +1,13 @@
+{
+  "description": "Auto restart on update and the version Baude and Record run: Settings' rows for them, and the toast after an update.",
+  "messages": {
+    "auto_restart": "Auto restart on update",
+    "auto_restart_from": "From {$upstream} every {$seconds}s, restarting once idle",
+    "no_upstream": "Not a git checkout following a branch: nothing to update from",
+    "updated": "{$app} updated",
+    "updated_commits": ".input {$n :number} .match $n one {{{$app} updated: {$n} new commit}} * {{{$app} updated: {$n} new commits}}",
+    "version": "Version {$commit}",
+    "version_unknown": "Version unknown",
+    "not_checkout": "Not a git checkout"
+  }
+}

@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, wording, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -715,8 +715,10 @@ class Server:
                 except OSError as e:
                     with self.lock:
                         s.deleting = False
-                    moved = f" ({', '.join(went)} moved already)" if went else ""
-                    return reply("error", error=f"{p} couldn't be moved to the trash: {e}{moved}")
+                    if went:
+                        return reply("error", error=wording.say("host_errors.trash_failed_some", path=p, why=e,
+                                                                moved=", ".join(went)))
+                    return reply("error", error=wording.say("host_errors.trash_failed", path=p, why=e))
         with self.lock:
             s.deleted = True
             if s.app_tools is not None:
@@ -1053,7 +1055,7 @@ class Server:
         import fixes  # (no GTK in it: feedback.py's own has)
         repo = fixes.submit_issue_target()
         if repo is None:
-            return reply("error", error="this host can't tell where to file it: is its gh signed in?")
+            return reply("error", error=wording.say("host_errors.feedback_no_target"))
         if msg.get("check"):
             return reply("feedback_target", repo=repo)
         text, note = msg.get("text"), msg.get("note")
@@ -1076,7 +1078,7 @@ class Server:
                 self._unclaim(note, claim)
             return reply("feedback_filed", repo=repo, **self.feedback_filed[note])
         if not mine:
-            return reply("error", error="it's being filed already: try again in a moment")
+            return reply("error", error=wording.say("host_errors.feedback_filing"))
         try:
             self._file_feedback(fixes, note, text, context, title, mark, token, repo, reply)
         finally:
@@ -1094,7 +1096,7 @@ class Server:
         ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
                            f'"baude-note-{note}" in:body', "--json", "number,url,body")
         if not ok:
-            return reply("error", error=out or "gh issue list failed")
+            return reply("error", error=out or wording.say("host_errors.gh_list_failed"))
         try:
             made = next((i for i in json.loads(out or "[]") if (i.get("body") or "").rstrip().endswith(token)), None)
         except ValueError:
@@ -1103,7 +1105,7 @@ class Server:
             ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body)
             url = next((line for line in out.splitlines() if line.startswith("https://")), None) if ok else None
             if url is None:
-                return reply("error", error=out or "gh issue create failed")
+                return reply("error", error=out or wording.say("host_errors.gh_create_failed"))
             number = int(m.group(1)) if (m := re.search(r"/issues/(\d+)", url)) else None
             made = {"url": url, "number": number}
         with self.feedback_lock:
@@ -1229,7 +1231,7 @@ class Server:
             if not isinstance(bot.get("id"), str) or not bot["id"] or getattr(conn, "emission_watch", None):
                 return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
             if self.phones.phone(bot["id"]) is not None:
-                return reply("error", error="this Bot's browser is on a phone now: it's shown there")
+                return reply("error", error=wording.say("host_errors.browser_on_phone"))
             threading.Thread(target=self.emission_watch, args=(conn, req, bot, msg), daemon=True,
                              name="emission-watch").start()
             return None
@@ -1268,7 +1270,7 @@ class Server:
             if s is None:
                 return reply("error", error=f"no session {msg.get('session')}")
             if s.deleting:
-                return reply("error", error=f"session {s.id} is being deleted")
+                return reply("error", error=wording.say("host_errors.being_deleted", session=s.id))
             if op == "attach":
                 conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
                 s.attached_once = True
@@ -1310,9 +1312,9 @@ class Server:
             if op == "set_cwd":  # (/cd: claude carries on there, from its next message: started again in it)
                 cwd = os.path.realpath(os.path.expanduser(msg.get("cwd") or ""))
                 if not os.path.isdir(cwd):
-                    return reply("error", error=f"not a folder here: {cwd}")
+                    return reply("error", error=wording.say("host_errors.not_a_folder", path=cwd))
                 if s.busy:
-                    return reply("error", error="it's at a turn: stop it, or wait for its end, first")
+                    return reply("error", error=wording.say("host_errors.at_a_turn"))
                 s.meta["cwd"] = cwd
                 self.save(s)
                 if s.proc is not None:  # (started again in it with the next message: those attached go on)
@@ -1334,7 +1336,7 @@ class Server:
                 return None
             if op == "senders":
                 if (have := self.senders(s)) is None:
-                    return reply("error", error="its sender store couldn't be read: see the host's log")
+                    return reply("error", error=wording.say("host_errors.senders_unreadable"))
                 return reply("senders", session=s.id, senders=dict(have), rev=s.meta.get("senders") or 0)
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
@@ -1350,7 +1352,7 @@ class Server:
                 held = s.meta.get("held") or []
                 h = next((h for h in held if h.get("id") == msg.get("id")), None)
                 if h is None:
-                    return reply("error", error="no such message held for it")
+                    return reply("error", error=wording.say("host_errors.no_held"))
                 if msg.get("send"):
                     self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
                                     h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
@@ -1386,14 +1388,14 @@ class Server:
                 have = list(s.meta.get("routines") or [])  # id); each set checked, its next run worked out)
                 if "set" in msg or "delete" in msg:
                     if not s.meta.get("bot"):
-                        return reply("error", error="routines are a Bot's")
+                        return reply("error", error=wording.say("host_errors.routines_bot_only"))
                     if "delete" in msg:
                         have = [r for r in have if r["id"] != msg["delete"]]
                     else:
                         given = msg["set"] if isinstance(msg["set"], dict) else None
                         old = next((r for r in have if given and r["id"] == given.get("id")), None)
                         if given is None or (old is None and len(have) >= 50):
-                            return reply("error", error="set is a routine (a Bot has 50 at most)")
+                            return reply("error", error=wording.say("host_errors.routine_limit"))
                         try:
                             made = routines.clean(given, old)
                         except (ValueError, TypeError) as e:
@@ -1407,7 +1409,7 @@ class Server:
             if op == "run_routine":  # (one of a Bot's routines run now, its schedule as it was)
                 r = next((r for r in s.meta.get("routines") or [] if r["id"] == msg.get("id")), None)
                 if r is None or not s.meta.get("bot") or s.meta.get("archived"):
-                    return reply("error", error="no such routine (or its Bot's archived)")
+                    return reply("error", error=wording.say("host_errors.no_routine"))
                 self.run_routine(s, r, schedule=False)
                 return reply("routines", session=s.id, routines=s.meta.get("routines") or [],
                              clock=routines.clock())
@@ -1427,7 +1429,7 @@ class Server:
         sent and not yet taken (its Bot still on a turn from before) isn't sent again: the run's skipped."""
         now = time.time()
         if r["id"] in s.routines_out and s.busy:
-            error = "skipped: previous run still going"
+            error = wording.say("host_errors.routine_skipped")
         else:
             error = None
             self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
@@ -1484,7 +1486,7 @@ class Server:
             s.meta.pop("bot", None)
         else:
             if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
-                raise ValueError("a Bot has a name")
+                raise ValueError(wording.say("host_errors.bot_needs_name"))
             os.makedirs(folder, mode=0o700, exist_ok=True)
             s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
                              "since": (s.meta.get("bot") or {}).get("since") or time.time()}
@@ -1499,7 +1501,7 @@ class Server:
             elif bot.get("picture"):
                 data = base64.b64decode(bot["picture"])
                 if len(data) > BOT_PICTURE_MAX:
-                    raise ValueError("the picture is too big (2 MB at most)")
+                    raise ValueError(wording.say("host_errors.picture_too_big"))
                 with open(pic + ".new", "wb") as f:
                     f.write(data)
                 os.replace(pic + ".new", pic)
@@ -1548,12 +1550,12 @@ class Server:
         given: written, and seen with it if that's given; base_mtime given, only if memory.md's mtime is still that,
         else nothing's written and it's {refused: why, text, seen, mtime, path}, the memory as the Bot left it."""
         if not s.meta.get("bot"):
-            raise ValueError("not a Bot")
+            raise ValueError(wording.say("host_errors.not_a_bot"))
         folder = bot_dir(self.state_dir, s.id)
         path, seen_path = os.path.join(folder, "memory.md"), os.path.join(folder, "memory.seen.md")
         if text is not None:
             if "base_mtime" in base and _mtime(path) != base["base_mtime"]:
-                return {"refused": "the Bot changed its memory since it was read", **self.memory_now(path, seen_path)}
+                return {"refused": wording.say("host_errors.memory_changed"), **self.memory_now(path, seen_path)}
             os.makedirs(folder, mode=0o700, exist_ok=True)
             if seen is not None:
                 _write_text(seen_path, str(seen))
@@ -1617,14 +1619,14 @@ class Server:
             params = {**params, "cwd": params.get("cwd") or src.meta["cwd"]}  # (a side question in a chat with
             src = None                                                         # nothing written yet: a fresh one, there)
         elif params.get("fork_from") and (src is None or src.kept() or src.transcript() is None):
-            raise ValueError(f"no conversation here to fork: {params['fork_from']}")
+            raise ValueError(wording.say("host_errors.no_fork_source", session=params["fork_from"]))
         cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or (src.meta["cwd"] if src else "~")))
         if origin is not None and not os.path.isdir(cwd) and cwd == os.path.realpath(origin.meta["cwd"]):
             worktree.restore(cwd, origin.transcript())  # (not under the lock: git; Gone if it can't be)
         if not os.path.isdir(cwd):
-            raise ValueError(f"not a folder here: {cwd}")
+            raise ValueError(wording.say("host_errors.not_a_folder", path=cwd))
         if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
-            raise ValueError(f"a fork runs in its session's folder: {src.meta['cwd']}")
+            raise ValueError(wording.say("host_errors.fork_folder", path=src.meta["cwd"]))
         model = model or (src.meta.get("model") if src else None)
         mode = params.get("mode") or "default"
         if params.get("spawned_by") and mode not in meshtools.SUBAGENT_MODES:  # (a Bot's subagent: Auto at most;
@@ -1633,7 +1635,7 @@ class Server:
             mode = "default"
         run = models.launch(model, mode, params.get("effort") or None)
         if not self.can_run(model):
-            raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
+            raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
         options = {k: params[k] for k, _flag in CLAUDE_OPTIONS if params.get(k)}
         if not isinstance(options.get("system", ""), str):
             raise ValueError("system is text")
@@ -1721,16 +1723,16 @@ class Server:
                 raise OSError("the host process is stopping")
             s = self.sessions.get(sid)
             if s is not None and s.deleting:
-                raise ValueError(f"session {sid} is being deleted")
+                raise ValueError(wording.say("host_errors.being_deleted", session=sid))
             if s is None:
                 if not path:
-                    raise ValueError(f"no conversation {sid} here to take up")
+                    raise ValueError(wording.say("host_errors.no_adopt_source", session=sid))
                 cwd = os.path.realpath(os.path.expanduser(params.get("cwd") or "~"))
                 if not os.path.isdir(cwd) and not worktree.restorable(cwd):  # (a worktree that's gone: made again
-                    raise ValueError(f"not a folder here: {cwd}")             # with its first message)
+                    raise ValueError(wording.say("host_errors.not_a_folder", path=cwd))  # with its first message)
                 model = params.get("model") or None
                 if not self.can_run(model):
-                    raise ValueError(f"{self.me['name']} can't run {model}: it, or its program, isn't here")
+                    raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
                 run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
                 s = Session(self, {"id": sid, "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
                                    "group": self.group_of(params), "title": params.get("title") or None,
@@ -1779,7 +1781,7 @@ class Server:
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=resumed)
         if not self.can_run(s.meta.get("model")):
-            raise OSError(f"{self.me['name']} can't run {s.meta.get('model')}: it, or its program, isn't here")
+            raise OSError(wording.say("host_errors.cant_run", host=self.me["name"], model=s.meta.get("model")))
         extra = list(run["extra"])
         if run["program"] == "claude":
             if s.meta.get("fork_from") and not resumed:  # (its first run: a copy of the other's conversation, which
@@ -1941,7 +1943,7 @@ class Server:
                 models.model_program(request["model"]) != models.model_program(s.meta.get("model")):
             return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                 "subtype": "error", "request_id": rid,
-                "error": "another kind of model can't carry this conversation on: start a session with it"}}})
+                "error": wording.say("host_errors.other_model")}}})
         if sub == "set_model" and s.proc is not None and request.get("model") != s.meta.get("model") and \
                 (models.model_program(request.get("model")) == "pi" or
                  models.runs_on(request.get("model")) != models.runs_on(s.meta.get("model"))):
@@ -1983,7 +1985,7 @@ class Server:
             if found is None:
                 return conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
                     "subtype": "success", "request_id": rid,
-                    "response": {"rewound": False, "error": "that message isn't in this chat's record"}}}})
+                    "response": {"rewound": False, "error": wording.say("host_errors.rewind_missing")}}}})
             s.rewinds[on], index, count, before = found
             msg = {**msg, "request": {**request, "baude_prompt_index": index, "baude_prompt_count": count,
                                       "baude_kept": before}}  # (Apple's, its session made again from them)
@@ -2340,7 +2342,8 @@ class Server:
             self.save(s)
             for conn, theirs in s.waiting_init:
                 conn.send({"op": "claude", "session": s.id, "msg": {"type": "control_response", "response": {
-                    "subtype": "error", "request_id": theirs, "error": f"claude exited ({code})"}}})
+                    "subtype": "error", "request_id": theirs,
+                    "error": wording.say("host_errors.claude_exited", code=code)}}})
             s.waiting_init = []
             self.drop_routes(s)
             if not self.stopped.is_set():
@@ -2367,7 +2370,7 @@ class Server:
         own for a transcript it keeps (or before there's any). done() once it is."""
         title = " ".join(str(title or "").split())[:200]
         if not title:
-            raise ValueError("a title can't be empty")
+            raise ValueError(wording.say("host_errors.empty_title"))
 
         def write(by_claude):
             path = None if s.kept() else s.transcript()
@@ -2588,9 +2591,9 @@ class Server:
         """A file in one of its sessions' folders (what a session's links name), not anywhere: there's no sign-in."""
         path = os.path.expanduser(path or "")
         if not os.path.isabs(path):
-            return {"path": path, "error": "not an absolute path"}
+            return {"path": path, "error": wording.say("host_errors.not_absolute")}
         if not self.in_sessions(os.path.realpath(path)):
-            return {"path": path, "error": "not in one of its sessions' folders"}
+            return {"path": path, "error": wording.say("host_errors.not_in_session_folder")}
         try:
             with open(path, "rb") as f:
                 data = f.read(min(int(limit or FILE_LIMIT), FILE_LIMIT) + 1)
@@ -2612,10 +2615,10 @@ class Server:
         sent at once; with nothing made yet, or wait, it's waited for while it's made (and GitHub's first read of it),
         up to CATALOGUE_WAIT_S. busy: there's more to come. At most CATALOGUE_LIMIT files, and every other name."""
         if not isinstance(cwd, str) or not os.path.isabs(os.path.expanduser(cwd)):
-            return {"cwd": cwd, "items": [], "error": "not an absolute path"}
+            return {"cwd": cwd, "items": [], "error": wording.say("host_errors.not_absolute")}
         real = os.path.realpath(os.path.expanduser(cwd))
         if not self.in_sessions(real) or not os.path.isdir(real):
-            return {"cwd": cwd, "items": [], "error": "not one of its sessions' folders"}
+            return {"cwd": cwd, "items": [], "error": wording.say("host_errors.not_session_folder")}
         root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         if root not in sys.path:
             sys.path.insert(0, root)

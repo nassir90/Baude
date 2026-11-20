@@ -1,0 +1,15 @@
+{
+  "description": "Times and durations said short (5m ago, just now, 1m 30s) and a date's day (4th).",
+  "messages": {
+    "just_now": "just now",
+    "minutes_ago": "{$n}m ago",
+    "hours_ago": "{$n}h ago",
+    "days_ago": "{$n}d ago",
+    "weeks_ago": "{$n}w ago",
+    "months_ago": "{$n}mo ago",
+    "years_ago": "{$n}y ago",
+    "day_of_month": ".input {$day :number} .match $day 1 {{{$day}st}} 2 {{{$day}nd}} 3 {{{$day}rd}} 21 {{{$day}st}} 22 {{{$day}nd}} 23 {{{$day}rd}} 31 {{{$day}st}} * {{{$day}th}}",
+    "minutes_seconds": "{$minutes}m {$seconds}s",
+    "seconds": "{$seconds}s"
+  }
+}

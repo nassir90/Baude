@@ -1,0 +1,12 @@
+{
+  "description": "A background task's ending, as a quiet line in a chat (Baude's and Record's).",
+  "messages": {
+    "agent": "Agent",
+    "background_command": "Background command",
+    "unnamed": "a background task",
+    "finished": "finished",
+    "failed": "failed",
+    "stopped": "stopped",
+    "ending_exit": "{$ending} (exit {$code})"
+  }
+}

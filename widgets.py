@@ -48,6 +48,7 @@ import pointers  # noqa: E402
 import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
 from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
 from baudelib import tokens  # noqa: E402  (the measures and colours below: schema/tokens, the Android app's too)
+from baudelib import wording  # noqa: E402
 
 
 # the sizes for what's drawn here: the text's, and an icon's in px (16 at 1.0); Baude's Settings → Size sets them
@@ -120,8 +121,9 @@ REF_ICON_SVG["merge"] = (f'<circle cx="4.6" cy="3.3" r="1.85" {_REF_STROKE}/><ci
 # being merged, the same grey fainter and struck through. One not known yet is a plain link on a patch of the text's
 # colour, and only takes its own when it's known: nothing moves.
 PR_COLORS = {"open": "#2da44e", "draft": "#8a8f98", "changes": "#e5484d", "merged": "#8957e5", "closed": "#8a8f98"}
-PR_SAID = {"open": "Open", "draft": "Draft", "changes": "Changes requested", "merged": "Merged",
-           "closed": "Closed without being merged"}
+PR_SAID = {"open": wording.say("common.open"), "draft": wording.say("references.pr_draft"),
+           "changes": wording.say("references.pr_changes_requested"), "merged": wording.say("references.pr_merged"),
+           "closed": wording.say("references.pr_closed_unmerged")}
 
 
 _REF_ICON_OPS = {}
@@ -529,7 +531,7 @@ def desktop_notify(key, title, body="", clicked=None):
     _fdo_call("Notify", GLib.Variant("(susssasa{sv}i)", (
         GLib.get_application_name() or "", _fdo["ids"].get(key, 0),
         GLib.filename_to_uri(_identity["svg"]) if _identity.get("svg") else app.get_application_id() or "", title, body,
-        ["default", "Open"], hints, -1)), posted)
+        ["default", wording.say("common.open")], hints, -1)), posted)
 
 
 def withdraw_notification(key):
@@ -545,8 +547,8 @@ def withdraw_notification(key):
 
 def notifications_row():
     """Settings → Notifications (Baude's and Record's, the one setting)."""
-    row = Adw.SwitchRow(title="Notifications", active=notifications_on(),
-                        subtitle="When a reply finishes, or asks you something, while you're elsewhere")
+    row = Adw.SwitchRow(title=wording.say("shared_settings.notifications"), active=notifications_on(),
+                        subtitle=wording.say("shared_settings.notifications_subtitle"))
     row.connect("notify::active", lambda r, _p: r.syncing or save_settings(notify=r.get_active()))
     return follow_setting(row, "notify", lambda v: row.set_active(v is not False))
 
@@ -800,7 +802,8 @@ def link_markup(url, text=None, markup=None):
         if text and text != url:
             label = inner
         else:  # (a title that may come later: what _inline draws with it isn't kept)
-            label, _checked_since = html.escape(ARTIFACT_TITLES.get(url, "Claude artifact"), quote=False), float("-inf")
+            label, _checked_since = html.escape(ARTIFACT_TITLES.get(url, wording.say("references.claude_artifact")),
+                                                quote=False), float("-inf")
         return f'<a href="{href}" title="{href}">{label} ↗</a>'
     return f'<a href="{href}">{inner}</a>'
 
@@ -1270,7 +1273,7 @@ def ref_markup(ref, inner, icon=True):
         inner = f'<span foreground="#c27b00" underline="error" underline_color="#c27b00">{inner}</span>'
     elif ref.status == "ambiguous":
         inner += f"<sup><small>{len(ref.locations)}</small></sup>"
-    title = "Looking it up…" if ref.status == "pending" else ref.summary()
+    title = wording.say("lookup.looking_it_up") if ref.status == "pending" else ref.summary()
     # (its logo once it's found: a name still being looked up, or not there, claims no kind)
     slot = ref_icon_slot(ref_icon(ref.kind, ref.data, [l["role"] for l in ref.locations])) \
         if icon and ref.status in ("resolved", "ambiguous", "stale") else ""
@@ -1368,8 +1371,8 @@ def ref_link(text, inner, backticked):
     return ref_markup(ref, inner)
 
 
-REF_ABSENT_WHY = {"proposed": "Proposed, not written yet", "external": "An outside tool or product",
-                  "elsewhere": "Somewhere else (another checkout, branch or machine)", "not_found": "Not in the code"}
+REF_ABSENT_WHY = {"proposed": wording.say("references.proposed"), "external": wording.say("references.external"),
+                  "elsewhere": wording.say("references.elsewhere"), "not_found": wording.say("references.not_in_code")}
 
 
 def ref_decision_markup(surface, dec, inner, icon=True):
@@ -1808,8 +1811,8 @@ class UpdateBar(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
-        self.button = Gtk.Button(label="Update", halign=Gtk.Align.START, margin_start=6, margin_end=6,
-                                 margin_top=4, margin_bottom=4)
+        self.button = Gtk.Button(label=wording.say("update_bar.update"), halign=Gtk.Align.START, margin_start=6,
+                                 margin_end=6, margin_top=4, margin_bottom=4)
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: on_click())
         self.append(self.button)
@@ -1818,8 +1821,9 @@ class UpdateBar(Gtk.Box):
         """waiting: what the restart waits for (shown in the tooltip), or None: no update waiting, no bar."""
         self.set_visible(waiting is not None)
         if waiting is not None:
-            self.button.set_tooltip_text("Waiting for:\n" + "\n".join(f"• {w}" for w in waiting) if waiting else
-                                         "A new version is ready")
+            self.button.set_tooltip_text(
+                wording.say("update_bar.waiting_for", waits="\n".join(f"• {w}" for w in waiting)) if waiting else
+                wording.say("update_bar.ready"))
 
 
 class HostState(Gtk.Revealer):
@@ -1853,7 +1857,8 @@ class HostState(Gtk.Revealer):
         return self.get_reveal_child()
 
 
-TASK_ENDINGS_SAID = {"completed": "finished", "failed": "failed", "killed": "stopped", "error": "failed"}
+TASK_ENDINGS_SAID = {"completed": wording.say("task_notes.finished"), "failed": wording.say("task_notes.failed"),
+                     "killed": wording.say("task_notes.stopped"), "error": wording.say("task_notes.failed")}
 
 
 def task_note_line(note):
@@ -1862,15 +1867,16 @@ def task_note_line(note):
     0)", plain text, whether it failed)."""
     status = note.get("status") or "completed"
     summary = html.unescape(note.get("summary") or "")
-    what = "Agent" if summary.startswith(("Agent", "Subagent")) else "Background command"
+    what = wording.say("task_notes.agent") if summary.startswith(("Agent", "Subagent")) else \
+        wording.say("task_notes.background_command")
     quoted = re.match(r'[^"]*"(.*)"', summary, re.S)
     desc = (quoted.group(1) if quoted else summary).strip().splitlines()[:1]
-    desc = desc[0] if desc else "a background task"
+    desc = desc[0] if desc else wording.say("task_notes.unnamed")
     if len(desc) > 80:
         desc = desc[:79] + "…"
     ending = TASK_ENDINGS_SAID.get(status, status)
     if (code := re.search(r"exit code (\d+)", summary)) is not None:
-        ending += f" (exit {code.group(1)})"
+        ending = wording.say("task_notes.ending_exit", ending=ending, code=code.group(1))
     return (f"<b>{html.escape(what)}</b> · {html.escape(desc)} — {html.escape(ending)}",
             f"{what} · {desc} — {ending}", status in ("failed", "killed", "error"))
 
@@ -1898,8 +1904,8 @@ class WidthLayout(Gtk.BinLayout):
 
 
 def fmt_tokens(n):
-    return f"{n / 1_000_000:.1f}M".replace(".0M", "M") if n >= 1_000_000 else \
-        f"{n / 1000:.1f}k".replace(".0k", "k") if n >= 1000 else str(n)
+    return wording.say("tokens.millions", n=f"{n / 1_000_000:.1f}".removesuffix(".0")) if n >= 1_000_000 else \
+        wording.say("tokens.thousands", n=f"{n / 1000:.1f}".removesuffix(".0")) if n >= 1000 else str(n)
 
 
 class ContextMeter(Gtk.LevelBar):
@@ -1961,7 +1967,7 @@ class ContextUsage(Gtk.Box):
     as far as it's known (window: a function giving it, None where it isn't): "— / 200k"."""
 
     def __init__(self, window=None, **kw):
-        super().__init__(spacing=6, tooltip_text="Context window usage", **kw)
+        super().__init__(spacing=6, tooltip_text=wording.say("context_usage.tooltip"), **kw)
         self.window = window
         self.label = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.bar = ContextMeter(min_value=0, max_value=1, value=0, valign=Gtk.Align.CENTER)
@@ -1980,25 +1986,28 @@ class ContextUsage(Gtk.Box):
             self.said = True
             self.bar.set_visible(False)
             self.over = False
-            self.label.set_text(f"context: {fmt_tokens(used)}" if usage.get("totalTokens") is not None else "context —")
-            self.set_tooltip_text("Context window usage")
+            self.label.set_text(wording.say("context_usage.used_no_limit", used=fmt_tokens(used))
+                                if usage.get("totalTokens") is not None else
+                                wording.say("context_usage.unknown_no_limit"))
+            self.set_tooltip_text(wording.say("context_usage.tooltip"))
             return
         if not total:
             return
         self.said = True
         self.bar.set_visible(True)
         self.over = used > total
-        self.label.set_text("context")
+        self.label.set_text(wording.say("context_usage.label"))
         self.bar.set_text(f"{fmt_tokens(used)} / {fmt_tokens(total)}")
         self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
                  if c.get("tokens") and c.get("kind") != "deferred"]
-        self.set_tooltip_text(f"Context window usage: {used / total:.0%}\n" + "\n".join(lines))
+        self.set_tooltip_text(wording.say("context_usage.usage_percent", percent=f"{used / total:.0%}",
+                                          categories="\n".join(lines)))
 
     def reset(self):
         """No session's: nothing used yet, of the window its model has (window_changed)."""
         self.over = self.said = False
-        self.label.set_text("context")
+        self.label.set_text(wording.say("context_usage.label"))
         self.bar.set_visible(True)
         self.bar.set_value(0)
         self.window_changed()
@@ -2009,8 +2018,8 @@ class ContextUsage(Gtk.Box):
             return
         total = self.window() if self.window else None
         self.bar.set_text(f"— / {fmt_tokens(total)}" if total else "—")
-        self.set_tooltip_text(f"Context window usage\nThe model's window: {total:,} tokens\n"
-                              "What's used is said once its session starts" if total else "Context window usage")
+        self.set_tooltip_text(wording.say("context_usage.window_known", total=total) if total else
+                              wording.say("context_usage.tooltip"))
 
 
 def compact_text(meta):
@@ -2018,16 +2027,19 @@ def compact_text(meta):
     18k · 41s". meta: a compact_boundary's compact_metadata as claude streams it (trigger, pre_tokens, post_tokens,
     duration_ms) or its compactMetadata as the transcript keeps it (preTokens, postTokens, durationMs)."""
     meta = meta if isinstance(meta, dict) else {}
-    how = {"auto": " automatically", "manual": " (/compact)"}.get(meta.get("trigger"), "")
     pre, post = meta.get("pre_tokens", meta.get("preTokens")), meta.get("post_tokens", meta.get("postTokens"))
     took = meta.get("duration_ms", meta.get("durationMs"))
-    parts = ["Conversation compacted" + how]
+    trigger = meta.get("trigger")
+    parts = [wording.say("compaction.compacted_auto") if trigger == "auto" else
+             wording.say("compaction.compacted_manual") if trigger == "manual" else wording.say("compaction.compacted")]
     if isinstance(pre, int) and pre > 0:
-        parts.append(f"{fmt_tokens(pre)} tokens of context" + (f" → {fmt_tokens(post)}" if isinstance(post, int)
-                                                                 and post > 0 else ""))
+        parts.append(wording.say("compaction.tokens_before_after", pre=fmt_tokens(pre), post=fmt_tokens(post))
+                     if isinstance(post, int) and post > 0 else
+                     wording.say("compaction.tokens_before", pre=fmt_tokens(pre)))
     if isinstance(took, (int, float)) and took >= 1000:
         secs = round(took / 1000)
-        parts.append(f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s")
+        parts.append(wording.say("time.minutes_seconds", minutes=secs // 60, seconds=secs % 60) if secs >= 60 else
+                     wording.say("time.seconds", seconds=secs))
     return " · ".join(parts)
 
 
@@ -2084,16 +2096,14 @@ class CompactMark(Gtk.Box):
             row.append(w)
         self.append(row)
         self.fold = None
-        self.set_tooltip_text("Claude Code summarised the conversation so far, to free its context window: the summary "
-                              "stands in for what came before")
+        self.set_tooltip_text(wording.say("compaction.tooltip"))
         self.finish(meta) if meta is not None else self.running()
 
     def running(self, written=None):
         """Under way; written: how many characters of the summary claude says it's written (an automatic one's)."""
         self.state = "running"
-        self.label.set_text("Compacting the conversation" +
-                            (f" · {written:,} characters of summary written" if isinstance(written, int) and written > 0
-                             else ""))
+        self.label.set_text(wording.say("compaction.running_written", written=written)
+                            if isinstance(written, int) and written > 0 else wording.say("compaction.running"))
         self.label.remove_css_class("error")
         self.dots.set_working(True)
 
@@ -2108,14 +2118,15 @@ class CompactMark(Gtk.Box):
         it did (stopped)."""
         self.state = "failed"
         self.dots.set_working(False)
-        self.label.set_text("Compaction didn't finish" if stopped else
-                            "Compaction failed" + (f": {error}" if error else ""))
+        self.label.set_text(wording.say("compaction.unfinished") if stopped else
+                            wording.say("compaction.failed_because", error=error) if error else
+                            wording.say("compaction.failed"))
         self.label.add_css_class("error")
 
     def set_summary(self, text):
         if not text or self.fold is not None:
             return
-        head = Gtk.Label(label="Summary of the earlier conversation")
+        head = Gtk.Label(label=wording.say("compaction.summary"))
         head.add_css_class("sysnote")
         body = MarkdownView(text)
         body.set_margin_start(18)
@@ -2134,9 +2145,8 @@ class UserTurn(Gtk.Box):
         super().__init__(spacing=6, hexpand=True)
         self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
         self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
-                                 tooltip_text="Revert: take back this message and everything after it, and put it "
-                                 "back in the box", hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END,
-                                 opacity=0, can_target=False)
+                                 tooltip_text=wording.say("chat_turns.revert"), hexpand=True, halign=Gtk.Align.END,
+                                 valign=Gtk.Align.END, opacity=0, can_target=False)
         self.revert.add_css_class("flat")
         self.revert.add_css_class("circular")
         self.revert.add_css_class("revert-turn")
@@ -2181,10 +2191,9 @@ class QueuedTurn(Gtk.Box):
         bubble.add_css_class("queued-bubble")
         self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
                                can_target=False)
-        for icon, tip, act in (("window-close-symbolic", "Delete this queued message", win.queue_drop),
-                               ("↑", "Send now: interrupt the agent, then send this and the queued "
-                                "messages before it", win.queue_send),
-                               ("view-refresh-symbolic", "Edit: put this message back in the box", win.queue_edit)):
+        for icon, tip, act in (("window-close-symbolic", wording.say("chat_turns.queued_delete"), win.queue_drop),
+                               ("↑", wording.say("chat_turns.queued_send_now"), win.queue_send),
+                               ("view-refresh-symbolic", wording.say("chat_turns.queued_edit"), win.queue_edit)):
             b = Gtk.Button(child=Gtk.Label(label="↑", css_classes=["queue-arrow"]) if icon == "↑" else
                            Gtk.Image(icon_name=icon, pixel_size=12), tooltip_text=tip)  # (an arrow, shaft and head)
             for c in ("flat", "circular", "revert-turn"):
@@ -2234,9 +2243,8 @@ class HeldTurn(Gtk.Box):
         bubble.add_css_class("queued-bubble")
         self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
                                can_target=False)
-        for icon, tip, act in (("window-close-symbolic", "Delete this held message", win.held_drop),
-                               ("↑", "Send it to the agent: it was held, not sent, as this chat's host restarted "
-                                "while it waited for it", win.held_send)):
+        for icon, tip, act in (("window-close-symbolic", wording.say("held.delete"), win.held_drop),
+                               ("↑", wording.say("held.send"), win.held_send)):
             b = Gtk.Button(child=Gtk.Label(label="↑", css_classes=["queue-arrow"]) if icon == "↑" else
                            Gtk.Image(icon_name=icon, pixel_size=12), tooltip_text=tip)
             for c in ("flat", "circular", "revert-turn"):
@@ -2262,12 +2270,12 @@ class Exhausted:
 
     def __init__(self, chat, box):
         self.box, self.on = box, False
-        self.label = Gtk.Label(label="Context Exhausted", xalign=0, margin_start=10, visible=False, wrap=True,
-                               max_width_chars=1)  # (a longer reason wrapped in the column, not widening it)
+        self.label = Gtk.Label(label=wording.say("context_usage.exhausted"), xalign=0, margin_start=10, visible=False,
+                               wrap=True, max_width_chars=1)  # (a longer reason wrapped in the column, not widening it)
         self.label.add_css_class("dim-label")
         box.get_parent().insert_child_after(self.label, box.get_prev_sibling())
 
-    def set(self, on, text="Context Exhausted"):
+    def set(self, on, text=wording.say("context_usage.exhausted")):
         """On or off; on, what's said (This model is unavailable, Meta's: its model's gone from the mesh)."""
         self.on = on
         self.label.set_text(text)
@@ -3085,7 +3093,7 @@ IMAGE_LINK = "baude-image:open"  # (a link that opens its image as ImageActions.
 
 def image_link_markup(text, acts):
     """text as the link that opens an image (acts: its ImageActions): a web one in the browser, a file in its app."""
-    tip = "Open in browser" if acts.url else "Open with default app"
+    tip = wording.say("images.open_in_browser") if acts.url else wording.say("images.open_with_default_app")
     return f'<a href="{IMAGE_LINK}" title="{tip}">{html.escape(text, quote=False)}</a>'
 
 
@@ -3794,7 +3802,7 @@ class Composer(Gtk.Overlay):
 
     FOLLOW_TOP = 20  # (follow_text's text top margin: its first line's middle level with the send button's)
 
-    def __init__(self, buttons=(), send_tip=f"Send ({SEND_KEY})\nNew line: Enter", follow_text=False):
+    def __init__(self, buttons=(), send_tip=wording.say("composer.send", key=SEND_KEY), follow_text=False):
         self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                   left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
         self.input.add_css_class("zoomable")
@@ -3860,7 +3868,7 @@ class Composer(Gtk.Overlay):
         self.send.set_sensitive(busy or not self.gates)
         if busy:
             self.send.set_icon_name("media-playback-stop-symbolic")
-            self.send.set_tooltip_text("Stop (Esc)")
+            self.send.set_tooltip_text(wording.say("composer.stop"))
             self.send.add_css_class("destructive-action")
         else:
             ensure_icons()
@@ -3907,9 +3915,9 @@ def fetch_web_image(url, done):
                 kind = r.headers.get_content_type()
                 data = r.read(WEB_IMAGE_MAX + 1)
             if not kind.startswith("image/"):
-                raise ValueError(f"not an image ({kind})")
+                raise ValueError(wording.say("images.not_an_image", kind=kind))
             if len(data) > WEB_IMAGE_MAX:
-                raise ValueError("image too large")
+                raise ValueError(wording.say("images.too_large"))
             result, error = data, None
         except (OSError, ValueError, urllib.error.URLError) as e:
             result, error = None, str(e)
@@ -4041,7 +4049,7 @@ class ImageActions:
     def copy(self):
         def put(tex):
             self.widget.get_clipboard().set(tex)
-            toast(self.widget, "Image copied")
+            toast(self.widget, wording.say("images.copied"))
         self.best(put)
 
     def open(self):
@@ -4098,7 +4106,7 @@ class FileImageActions(ImageActions):
         tex = self.texture()
         if tex is not None:
             self.widget.get_clipboard().set(tex)
-        toast(self.widget, "Image copied" if tex is not None else "This image can't be copied")
+        toast(self.widget, wording.say("images.copied") if tex is not None else wording.say("images.cannot_copy"))
 
     def decode(self):
         """The picture at its own size (off the main thread), or None."""
@@ -4151,12 +4159,12 @@ def make_image_interactive(widget, data, path=None, name=None, url=None):
         group.add_action(a)
     widget.insert_action_group("img", group)
     menu = Gio.Menu()
-    menu.append("View", "img.view")
+    menu.append(wording.say("images.view"), "img.view")
     if url:
-        menu.append("Open in browser", "img.browser")
-    menu.append("Copy image", "img.copy")
-    menu.append("Open with default app", "img.open")
-    menu.append("Open in folder", "img.folder")
+        menu.append(wording.say("images.open_in_browser"), "img.browser")
+    menu.append(wording.say("images.copy_image"), "img.copy")
+    menu.append(wording.say("images.open_with_default_app"), "img.open")
+    menu.append(wording.say("images.open_in_folder"), "img.folder")
     popover = widget.image_menu = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
     popover.set_parent(widget)
     widget.connect("destroy", lambda *_: popover.unparent())
@@ -4175,7 +4183,7 @@ def make_image_interactive(widget, data, path=None, name=None, url=None):
     click.connect("pressed", pressed)
     widget.add_controller(click)
     pointers.magnifier(widget)
-    widget.set_tooltip_text((path or name or "image") + "\nClick to view · right-click for more")
+    widget.set_tooltip_text(wording.say("images.click_tip", name=path or name or wording.say("images.unnamed")))
     return acts
 
 
@@ -4338,7 +4346,7 @@ class CodeBlock(Gtk.Overlay):
             tag = Gtk.Label(label=lang)
             tag.add_css_class("code-lang")
             corner.append(tag)
-        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy")
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"))
         copy.add_css_class("flat")
         copy.add_css_class("code-copy")
         copy.connect("clicked", lambda *_: self.get_clipboard().set(self.code))
@@ -4512,7 +4520,7 @@ def group_header(label, collapsed, toggle, plus=None, tooltip=None, current=Fals
 
     def set_collapsed(on):
         arrow.set_icon_name("pan-end-symbolic" if on else "pan-down-symbolic")
-        arrow.set_tooltip_text("Expand" if on else "Collapse")
+        arrow.set_tooltip_text(wording.say("common.expand") if on else wording.say("common.collapse"))
         (arrow.add_css_class if on else arrow.remove_css_class)("collapsed")
     set_collapsed(collapsed)
     box.arrow, box.name, box.set_collapsed = arrow, name, set_collapsed
@@ -4564,7 +4572,7 @@ def hover_uri(label, x, y):
     return next((href for start, end, href in markup_links(markup) if start <= index < end), None)
 
 
-COPY_LINK = "Copy Link to This Page"
+COPY_LINK = wording.say("tabs.copy_link_to_page")
 COPY_LINK_KEY = "<Meta><Shift>l" if sys.platform == "darwin" else "<Control><Shift>l"  # (<primary> is Control here, on a Mac too)
 
 
@@ -4641,14 +4649,14 @@ class MainTabs(Gtk.Box):
         self.append(self.view)
         if copy_links:
             menu, acts, copy = Gio.Menu(), Gio.SimpleActionGroup(), Gio.SimpleAction(name="copy-link")
-            menu.append("Copy Link", "tab.copy-link")
+            menu.append(wording.say("tabs.copy_link"), "tab.copy-link")
             self.view.set_menu_model(menu)
             self.view.connect("setup-menu", lambda _v, page: page is not None and setattr(self, "menu_page", page))
             copy.connect("activate", lambda *_: self.menu_page is not None and self.copy_link(tab_child(self.menu_page)))
             acts.add_action(copy)
             if rename is not None:
                 can, ask = rename
-                menu.append("Rename…", "tab.rename")
+                menu.append(wording.say("common.rename"), "tab.rename")
                 named = Gio.SimpleAction(name="rename")
                 named.connect("activate", lambda *_: self.menu_page is not None and ask(tab_child(self.menu_page)))
                 acts.add_action(named)
@@ -4728,7 +4736,7 @@ class MainTabs(Gtk.Box):
         link = child.tab_link() if hasattr(child, "tab_link") else None
         if link:
             self.get_clipboard().set(link)
-        toast(self, "Link copied" if link else "This page has no link to copy")
+        toast(self, wording.say("tabs.link_copied") if link else wording.say("tabs.no_link"))
         return link
 
     # ---- history
@@ -4798,7 +4806,8 @@ class MainTabs(Gtk.Box):
 
 def image_description(data, tex):
     kb = (data if isinstance(data, int) else len(data)) / 1024
-    size = f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB"
+    size = wording.say("images.size_mb", mb=f"{kb / 1024:.1f}") if kb > 1024 else \
+        wording.say("images.size_kb", kb=f"{kb:.0f}")
     return f"{tex.get_width()}×{tex.get_height()} · {size}"
 
 
@@ -4905,14 +4914,17 @@ class Lightbox(Gtk.Box):
         bar.append(self.title)
         bar.append(self.info)
         self.buttons = {}
-        for key, label, tip in (("copy", "Copy", "Copy image"), ("folder", "Show in folder", "Open its folder"),
-                                ("open", "Open", "Open with the default app"),
-                                ("browser", "Open in browser", "Open the original in the browser")):
+        for key, label, tip in (("copy", wording.say("common.copy"), wording.say("images.copy_image")),
+                                ("folder", wording.say("images.show_in_folder"), wording.say("images.open_its_folder")),
+                                ("open", wording.say("common.open"),
+                                 wording.say("images.open_with_the_default_app")),
+                                ("browser", wording.say("images.open_in_browser"),
+                                 wording.say("images.open_original_in_browser"))):
             btn = Gtk.Button(label=label, tooltip_text=tip)
             btn.connect("clicked", lambda *_, k=key: self.act(k))
             self.buttons[key] = btn
             bar.append(btn)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close (Esc)")
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
         close.add_css_class("circular")
         close.connect("clicked", lambda *_: self.close())
         bar.append(close)
@@ -5217,7 +5229,8 @@ class Lightbox(Gtk.Box):
         self.zoom_shown()
 
     def show_title(self, acts):
-        self.title.set_text(os.path.basename(acts.path) if acts.path else (acts.name or acts.url or "Image"))
+        self.title.set_text(os.path.basename(acts.path) if acts.path else
+                            (acts.name or acts.url or wording.say("images.untitled")))
         self.buttons["browser"].set_visible(bool(acts.url))
         self.zoom_shown()
 
@@ -5286,8 +5299,9 @@ class Lightbox(Gtk.Box):
             kb = acts.size() / 1024
             failed = acts.undecodable and not getattr(acts, "loading", False)
             what = (image_description(acts.size(), acts.full) if not acts.full_is_thumb else
-                    f"{kb / 1024:.1f} MB" if kb > 1024 else f"{kb:.0f} kB") if acts.full is not None else \
-                "Can't be shown here: Open opens it in its app" if failed else ""
+                    wording.say("images.size_mb", mb=f"{kb / 1024:.1f}") if kb > 1024 else
+                    wording.say("images.size_kb", kb=f"{kb:.0f}")) if acts.full is not None else \
+                wording.say("images.cannot_show") if failed else ""
         else:  # (not decoded again)
             what = image_description(acts.full[0] if acts.full else acts.data, self.picture.get_paintable())
         self.info.set_text("  ·  ".join(part for part in (
@@ -6835,7 +6849,7 @@ class ChatSelection:
         if hit is None:
             return False
         items = self.menu_at(*hit) if self.menu_at is not None else \
-            [("Copy", self.copy)] if hit[0] in self.shown else None
+            [(wording.say("common.copy"), self.copy)] if hit[0] in self.shown else None
         if not items:
             return False
         menu, group = Gio.Menu(), Gio.SimpleActionGroup()
@@ -6910,13 +6924,13 @@ class ChatFind:
         self.waiting = None  # (the frame waited for, a part just drawn laid out: _then)
         self.searching = None  # (what stops the look through the parts not drawn, while there's one: _step_beyond)
         self.marks = FindMarks(self)
-        self.entry = Gtk.SearchEntry(placeholder_text="Find in chat", hexpand=True)
+        self.entry = Gtk.SearchEntry(placeholder_text=wording.say("find.placeholder"), hexpand=True)
         self.count = Gtk.Label(width_chars=10, xalign=1, css_classes=["dim-label", "caption"])
         bar = Gtk.Box(spacing=4)
         bar.append(self.entry)
         bar.append(self.count)
-        for icon, tip, step in (("go-up-symbolic", "Previous match (Shift+Enter)", -1),
-                                ("go-down-symbolic", "Next match (Enter)", 1)):
+        for icon, tip, step in (("go-up-symbolic", wording.say("find.previous"), -1),
+                                ("go-down-symbolic", wording.say("find.next"), 1)):
             btn = Gtk.Button(icon_name=icon, tooltip_text=tip, css_classes=["flat"])
             btn.connect("clicked", lambda *_, step=step: self.step(step))
             bar.append(btn)
@@ -7078,7 +7092,8 @@ class ChatFind:
             if len(self.matches) >= self.MATCH_LIMIT:
                 break
         if not self.matches:
-            self.count.set_label("⏎ earlier" if self._more() else "No matches")  # (Enter looks in what's not drawn)
+            # (Enter looks in what's not drawn)
+            self.count.set_label(wording.say("find.earlier") if self._more() else wording.say("find.no_matches"))
             return
         if quiet:
             return
@@ -7145,7 +7160,7 @@ class ChatFind:
             elif drew:  # (drawn, and it doesn't show the text after all: the next part that has it)
                 self.step(by)
             else:
-                self.count.set_label("No matches")
+                self.count.set_label(wording.say("find.no_matches"))
 
         def done(drew):
             self.searching = None
@@ -7153,7 +7168,7 @@ class ChatFind:
                 self._then(lambda: go(True))  # (once it's laid out: its labels have their places then)
             else:
                 go(False)
-        self.count.set_label("searching…")
+        self.count.set_label(wording.say("find.searching"))
         self.searching = stop = lambda: None  # (till it's known what stops it: done may be called at once)
         stops = self.beyond(text, by, y0, y1, done)
         if self.searching is stop:
@@ -7208,8 +7223,9 @@ class ChatFind:
     def show(self, i):
         """The i'th match the current one, brought into view: in its code block's scroller, then in the chat's."""
         self.index = i
-        more = "+" if len(self.matches) >= self.MATCH_LIMIT or self._more() else ""
-        self.count.set_label(f"{i + 1} of {len(self.matches)}{more}")
+        more = len(self.matches) >= self.MATCH_LIMIT or self._more()
+        self.count.set_label(wording.say("find.match_of_more", at=i + 1, total=len(self.matches)) if more else
+                             wording.say("find.match_of", at=i + 1, total=len(self.matches)))
         self.marks.queue_draw()
         label = self.matches[i][0]
         root = self.root()
@@ -7445,7 +7461,7 @@ class MarkdownView(Gtk.Box):
                     return with_image_link(image_widget(f.read(), path=path, name=alt), written)
             except (OSError, GLib.Error):
                 pass
-        link = sel_label(f'Image: <a href="{html.escape(src)}">{html.escape(alt or src)}</a>')
+        link = sel_label(wording.say("images.link", link=f'<a href="{html.escape(src)}">{html.escape(alt or src)}</a>'))
         if not src.startswith(("http://", "https://")):
             return link
         holder = Gtk.Box()  # the link until the image arrives (or if it can't be loaded)
@@ -7456,12 +7472,12 @@ class MarkdownView(Gtk.Box):
                 try:
                     pic = image_widget(data, url=src, name=alt)
                 except GLib.Error as e:
-                    link.set_tooltip_text(f"Couldn't show the image: {e.message}")
+                    link.set_tooltip_text(wording.say("images.couldnt_show", why=e.message))
                     return
                 holder.remove(link)
                 holder.append(with_image_link(pic, src))
             else:
-                link.set_tooltip_text(f"Couldn't load the image: {error}")
+                link.set_tooltip_text(wording.say("images.couldnt_load", why=error))
         fetch_web_image(src, done)
         return holder
 
@@ -7482,17 +7498,22 @@ def time_ago(at, now=None):
     """How long ago a time was, in short: just now, 5m ago, 3h ago, 2d ago, 3w ago, 5mo ago, 2y ago (a clock that's behind:
     just now). To show one, say_time: it says the absolute time too."""
     secs = max(0, int((time.time() if now is None else now) - at))
-    for unit, n in (("y", 365 * 86400), ("mo", 30 * 86400), ("w", 7 * 86400), ("d", 86400), ("h", 3600), ("m", 60)):
+    for n, said in ((365 * 86400, lambda k: wording.say("time.years_ago", n=k)),
+                    (30 * 86400, lambda k: wording.say("time.months_ago", n=k)),
+                    (7 * 86400, lambda k: wording.say("time.weeks_ago", n=k)),
+                    (86400, lambda k: wording.say("time.days_ago", n=k)),
+                    (3600, lambda k: wording.say("time.hours_ago", n=k)),
+                    (60, lambda k: wording.say("time.minutes_ago", n=k))):
         if secs >= n:
-            return f"{secs // n}{unit} ago"
-    return "just now"
+            return said(secs // n)
+    return wording.say("time.just_now")
 
 
 def full_time(at):
     """A time in full, local: 00:00 Mon 4th May 2020. What every relative time says under the pointer (time_tip)."""
     t = time.localtime(at)
-    suffix = "th" if 10 <= t.tm_mday % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(t.tm_mday % 10, "th")
-    return time.strftime("%H:%M %a ", t) + f"{t.tm_mday}{suffix} " + time.strftime("%B %Y", t)
+    return time.strftime("%H:%M %a ", t) + wording.say("time.day_of_month", day=t.tm_mday) + " " + \
+        time.strftime("%B %Y", t)
 
 
 def say_time(label, at, before="", after="", markup=False):
@@ -7984,7 +8005,7 @@ def start_prompt_view(text, above=None):
     heading, the prompt as markdown (under above, its images, if any) in a box that scrolls once it's long, and a rule
     under it."""
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    head = Gtk.Label(label="Started with this prompt", xalign=0)
+    head = Gtk.Label(label=wording.say("chat_turns.started_with_prompt"), xalign=0)
     head.add_css_class("dim-label")
     head.add_css_class("caption-heading")
     box.append(head)
@@ -8201,7 +8222,7 @@ def model_family(value, label=""):
         for key, name, pattern in MODEL_FAMILIES:
             if any(re.search(pattern, s) for s in said):
                 return key, name
-    return None, "Other"
+    return None, wording.say("model_picker.other_family")
 
 
 def model_icon(value, label=""):
@@ -8233,7 +8254,7 @@ class ModelPicker(Gtk.MenuButton):
         self.set_child(face)
         pop = Gtk.Popover(css_classes=["model-palette"])
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.search = Gtk.SearchEntry(placeholder_text="Search models")
+        self.search = Gtk.SearchEntry(placeholder_text=wording.say("model_picker.search"))
         self.search.connect("search-changed", lambda *_: self._filter())
         self.search.connect("activate", lambda *_: self._activate(self.list.get_selected_row()))
         self.search.connect("stop-search", lambda *_: self.popdown())
@@ -8244,7 +8265,8 @@ class ModelPicker(Gtk.MenuButton):
         self.list.set_filter_func(self._shown)
         self.list.set_header_func(self._header)
         self.list.connect("row-activated", lambda _l, row: self._activate(row))
-        self.none = Gtk.Label(label="No models match", css_classes=["dim-label"], margin_top=12, margin_bottom=12)
+        self.none = Gtk.Label(label=wording.say("model_picker.none"), css_classes=["dim-label"], margin_top=12,
+                              margin_bottom=12)
         self.list.set_placeholder(self.none)
         self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                          propagate_natural_height=True, max_content_height=420, min_content_width=280)
@@ -9930,7 +9952,7 @@ def settings_accent():
     window as it's picked (apply_accent) and kept in settings.json."""
     names = ["system", *ACCENTS]
     picked = load_settings().get("accent")
-    row = Adw.ComboRow(title="Accent Colour", model=Gtk.StringList.new(names),
+    row = Adw.ComboRow(title=wording.say("shared_settings.accent_colour"), model=Gtk.StringList.new(names),
                        selected=names.index(picked) if picked in ACCENTS else 0)
 
     def setup(_f, item):
@@ -10047,8 +10069,9 @@ def settings_code_font(win, app):
         fonts.append(fontsetup.code_font())
     if running not in fonts:
         fonts.append(running)
-    row = Adw.ComboRow(title="Code Font", model=Gtk.StringList.new(fonts), selected=fonts.index(fontsetup.code_font()))
-    restart = Gtk.Button(label="Restart", valign=Gtk.Align.CENTER)
+    row = Adw.ComboRow(title=wording.say("shared_settings.code_font"), model=Gtk.StringList.new(fonts),
+                       selected=fonts.index(fontsetup.code_font()))
+    restart = Gtk.Button(label=wording.say("shared_settings.restart"), valign=Gtk.Align.CENTER)
     # (in Settings, closed first; under a reply of Meta's, there's no dialog to close)
     restart.connect("clicked", lambda b: ((d := b.get_ancestor(Adw.Dialog)) is not None and d.close(),
                                           win.activate_action("win.restart", None)))
@@ -10056,7 +10079,8 @@ def settings_code_font(win, app):
 
     def show(font):
         restart.set_visible(font != running)
-        row.set_subtitle("" if font == running else f"{font} from {app}'s next start")
+        row.set_subtitle("" if font == running else
+                         wording.say("shared_settings.code_font_next_start", font=font, app=app))
 
     def changed(r, _p):
         if not r.syncing:
@@ -10096,12 +10120,12 @@ class RefPalette(Adw.Dialog):
     LIMIT = 400  # rows shown at most (a glossary has thousands)
 
     def __init__(self, win, space, on_open):
-        super().__init__(title="Glossary", content_width=760, content_height=520)
+        super().__init__(title=wording.say("glossary.title"), content_width=760, content_height=520)
         self.win, self.space, self.on_open = win, space, on_open
         self.signal = getattr(space, "source", None)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=12, margin_end=12, margin_top=12,
                       margin_bottom=8)
-        self.entry = Gtk.SearchEntry(placeholder_text="Search", hexpand=True)
+        self.entry = Gtk.SearchEntry(placeholder_text=wording.say("glossary.search"), hexpand=True)
         self.entry.connect("search-changed", lambda *_: self.fill())
         self.entry.connect("activate", lambda *_: self.choose(self.selection.get_selected_item()))
         self.entry.connect("stop-search", lambda *_: self.close())
@@ -10216,7 +10240,7 @@ class RefPalette(Adw.Dialog):
         if self.store.get_n_items():
             self.selection.set_selected(0)
             self.table.scroll_to(0, None, Gtk.ListScrollFlags.NONE, None)
-        self.count.set_label(f"{matched} out of {len(self.items)}")
+        self.count.set_label(wording.say("glossary.count", matched=matched, total=len(self.items)))
 
     def shown(self):
         """The names shown, in order."""
@@ -10422,7 +10446,7 @@ class WorkingDots(Gtk.Label):
             return
         self.working = working
         self.set_visible(working)
-        self.set_tooltip_text("Working" if working else None)
+        self.set_tooltip_text(wording.say("common.working") if working else None)
         self._show(1 if working else 0)
         self._stop()
         self._run()
@@ -10458,7 +10482,7 @@ class Disclosure:
     card's name, Command (button=True), or an arrow and its label, › 5 tool calls; it goes in toggles, a box on that
     line. What it opens goes in grid's row, under the line."""
 
-    def __init__(self, toggles, grid, row, label="details", button=False):
+    def __init__(self, toggles, grid, row, label=wording.say("common.details"), button=False):
         self.on_expand = []  # run on every opening: content built only once someone looks
         self.grid, self.row = grid, row
         self.revealer, self.expanded = None, False  # (the revealer: once there's something in it)
@@ -10614,11 +10638,11 @@ class HostApart:
             return None
         folder = said["checkout"]
         return apart, *{
-            "head": (f"{name} is older than its daemon", f"Restart {name}"),
-            "host": (f"Daemon is older than {name}", "Restart Daemon"),
-            "both": (f"{name} and its daemon are out of date", "Restart Both"),
-            "elsewhere": (f"Daemon runs the code in {pretty_path(folder)}" if folder else
-                          "Daemon runs another checkout's code", "Dismiss")}[apart]
+            "head": (wording.say("code_apart.app_older", app=name), wording.say("code_apart.restart_app", app=name)),
+            "host": (wording.say("code_apart.daemon_older", app=name), wording.say("code_apart.restart_daemon")),
+            "both": (wording.say("code_apart.both_old", app=name), wording.say("code_apart.restart_both")),
+            "elsewhere": (wording.say("code_apart.elsewhere_folder", folder=pretty_path(folder)) if folder else
+                          wording.say("code_apart.elsewhere"), wording.say("code_apart.dismiss"))}[apart]
 
     def act(self, apart, restart_app, restart_host):
         """Its banner's button, on what it said (now's apart): the restart (or, for another checkout's, nothing), and

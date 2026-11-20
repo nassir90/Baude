@@ -11,6 +11,8 @@ import re
 import shutil
 import time
 
+from baudelib import wording
+
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (apple-claude/ and pi-claude/ are beside baudelib/)
 
 # (beta) Apple's on-device model, through apple-claude (apple-claude/: a Swift stand-in for claude on FoundationModels,
@@ -278,11 +280,12 @@ def mlx_missing():
     """What MLX's models need here and haven't, each with how it's put right: [] when they run."""
     out = []
     if not os.access(pi_path(), os.X_OK):
-        out.append(f"pi isn't installed (it goes in {os.path.dirname(os.path.dirname(os.path.dirname(pi_path())))})")
+        out.append(wording.say("model_providers.pi_missing",
+                               folder=os.path.dirname(os.path.dirname(os.path.dirname(pi_path())))))
     if not mlx_server():
         lm = shutil.which("mlx_lm.server") or os.access(os.path.expanduser("~/.local/bin/mlx_lm.server"), os.X_OK)
-        out.append("mlx-vlm isn't installed (uv tool install mlx-vlm)" +
-                   ("; mlx-lm is, but MLX's models run on mlx-vlm's server" if lm else ""))
+        out.append(wording.say("model_providers.mlx_vlm_missing_lm") if lm else
+                   wording.say("model_providers.mlx_vlm_missing"))
     return out
 
 
@@ -316,7 +319,8 @@ def runs_on(value):
     return (proxied(value) or (None,))[0]
 
 
-CODEX_MODES = [("default", "Manual"), ("auto", "Auto"), ("bypassPermissions", "Bypass Permissions")]
+CODEX_MODES = [("default", wording.say("mode_effort.manual")), ("auto", wording.say("mode_effort.auto")),
+               ("bypassPermissions", wording.say("mode_effort.codex_bypass"))]
 CODEX_MODE_VALUES = frozenset(value for value, _label in CODEX_MODES)
 
 

@@ -1,0 +1,25 @@
+{
+  "description": "Words many features say alike, in every app: buttons, menu items and states.",
+  "messages": {
+    "open": "Open",
+    "copy": "Copy",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "working": "Working",
+    "details": "details",
+    "cancel": "Cancel",
+    "save": "Save",
+    "undo": "Undo",
+    "redo": "Redo",
+    "clear": "Clear",
+    "send": "Send",
+    "stop": "Stop",
+    "discard": "Discard",
+    "allow": "Allow",
+    "deny": "Deny",
+    "remove": "Remove",
+    "add": "Add",
+    "done": "Done",
+    "rename": "Rename…"
+  }
+}

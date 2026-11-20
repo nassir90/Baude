@@ -1,0 +1,22 @@
+{
+  "description": "Send Feedback… (⌘. / Ctrl+.), Baude's and Record's: the note's dialog and its captures, the Capture bar, and the toasts as a note's saved and filed.",
+  "messages": {
+    "title": "Feedback",
+    "capture_open": "Capture what's open now",
+    "add_capture": "Add a screen capture: go to it, then press Capture",
+    "mark_capture": "Mark regions on this capture",
+    "regions": ".input {$n :number} .match $n one {{{$n} region}} * {{{$n} regions}}",
+    "click_to_mark": "click to mark regions",
+    "remove_capture": "Remove this capture",
+    "saved": "Feedback saved",
+    "saved_filing": "Feedback saved, filing it…",
+    "open_folder": "Open folder",
+    "filed": "Filed as an issue on {$repo}",
+    "open_issue": "Open issue",
+    "not_filed": "Saved, and it'll be filed on {$repo} when it can be",
+    "not_filed_why": "Saved, and it'll be filed on {$repo} when it can be: {$why}",
+    "filing_elsewhere": "Another window is filing this",
+    "capture_bar": "Feedback: go to what you want to show, then capture it",
+    "capture": "Capture"
+  }
+}

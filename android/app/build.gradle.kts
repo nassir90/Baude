@@ -304,6 +304,233 @@ androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeTokens, BaudeTokens::outputDir) }
 }
 
+/** schema/copy (each file a group of messages, each message Unicode MessageFormat 2's, as baudelib/wording.py reads
+ * them), as Kotlin made as the app's built (dev.baude.android.Wording, in build/generated: never kept): an object
+ * for each group (hosts.json: Wording.Hosts) and in it each message (a const val, or a fun of what it's given, by name:
+ * Wording.Hosts.looking(host = name)). A {$n :number}'s a Number, said with its thousands grouped; a .match's variants
+ * are a when, the best fit first. */
+abstract class BaudeCopy : DefaultTask() {
+    @get:InputDirectory abstract val copy: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    private class Message(val declared: Map<String, String>, val selectors: List<String>,
+                          val variants: List<Pair<List<String>, List<Any>>>) // (a part's text, or a Pair: name, function)
+
+    private class Parser(val s: String, val where: String) {
+        var i = 0
+        fun fail(what: String): Nothing = throw GradleException("schema/copy/$where: $what at $i")
+        fun peek(w: String) = s.startsWith(w, i)
+        fun take(w: String) { if (!peek(w)) fail("'$w' expected"); i += w.length }
+        fun space(needed: Boolean = false) {
+            val start = i
+            while (i < s.length && s[i] in " \t\n\r\u3000") i++
+            if (needed && i == start) fail("a space expected")
+        }
+        fun name(): String {
+            val m = Regex("[a-z][a-z0-9_]*").matchAt(s, i) ?: fail("a name expected")
+            i = m.range.last + 1
+            return m.value
+        }
+        fun literal(): String {
+            if (peek("|")) {
+                val end = s.indexOf('|', i + 1).takeIf { it >= 0 } ?: fail("an unclosed |literal|")
+                return s.substring(i + 1, end).also { i = end + 1 }
+            }
+            val m = Regex("-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?|[A-Za-z_][\\w.-]*").matchAt(s, i) ?: fail("a key expected")
+            i = m.range.last + 1
+            return m.value
+        }
+        fun expression(): Pair<String, String?> {
+            take("{"); space(); take("$")
+            val v = name()
+            space()
+            var fn: String? = null
+            if (peek(":")) {
+                i++
+                fn = name()
+                if (fn != "number" && fn != "string") fail("no function :$fn")
+                space()
+            }
+            take("}")
+            return v to fn
+        }
+        fun pattern(quoted: Boolean): List<Any> {
+            val parts = ArrayList<Any>()
+            val text = StringBuilder()
+            while (i < s.length) {
+                val c = s[i]
+                when {
+                    c == '\\' -> {
+                        if (i + 1 >= s.length || s[i + 1] !in "\\{}|") fail("an escape of \\, {, } or | expected")
+                        text.append(s[i + 1]); i += 2
+                    }
+                    quoted && peek("}}") -> break
+                    c == '{' -> {
+                        if (text.isNotEmpty()) { parts.add(text.toString()); text.clear() }
+                        parts.add(expression())
+                    }
+                    c == '}' -> fail("a lone }")
+                    else -> { text.append(c); i++ }
+                }
+            }
+            if (text.isNotEmpty()) parts.add(text.toString())
+            return parts
+        }
+        fun message(): Message {
+            space()
+            if (!peek(".")) { i = 0; return Message(emptyMap(), emptyList(), listOf(emptyList<String>() to pattern(false))) }
+            val declared = LinkedHashMap<String, String>()
+            while (peek(".input")) {
+                i += ".input".length; space()
+                val (v, fn) = expression()
+                if (v in declared || fn == null) fail("\$$v declared twice, or with no function")
+                declared[v] = fn
+                space()
+            }
+            if (peek("{{")) {
+                i += 2
+                val out = pattern(true)
+                take("}}"); space()
+                if (i != s.length) fail("more after the pattern")
+                return Message(declared, emptyList(), listOf(emptyList<String>() to out))
+            }
+            take(".match")
+            val selectors = ArrayList<String>()
+            while (true) {
+                space(needed = true)
+                if (!peek("$")) break
+                i++
+                val v = name()
+                if (v !in declared) fail("\$$v is matched on, but not declared with .input")
+                selectors.add(v)
+            }
+            if (selectors.isEmpty()) fail("a selector expected")
+            val variants = ArrayList<Pair<List<String>, List<Any>>>()
+            while (i < s.length) {
+                val keys = ArrayList<String>()
+                while (!peek("{{")) {
+                    if (peek("*")) { i++; keys.add("*") } else keys.add(literal())
+                    space(needed = !peek("{{"))
+                }
+                if (keys.size != selectors.size) fail("${selectors.size} keys expected")
+                i += 2
+                val out = pattern(true)
+                take("}}")
+                variants.add(keys to out)
+                space()
+            }
+            if (variants.none { (keys, _) -> keys.all { it == "*" } }) fail("no variant for the rest (* for each selector)")
+            return Message(declared, selectors, variants)
+        }
+    }
+
+    private val keywords = setOf("as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
+        "interface", "is", "null", "object", "package", "return", "super", "this", "throw", "true", "try", "typealias",
+        "typeof", "val", "var", "when", "while")
+
+    private fun camel(name: String) = name.split("_").mapIndexed { i, w ->
+        if (i == 0) w else w.replaceFirstChar { it.uppercase() } }.joinToString("").let { if (it in keywords) "`$it`" else it }
+
+    private fun pascal(name: String) = camel(name).trim('`').replaceFirstChar { it.uppercase() }
+
+    private fun quote(text: String) = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
+        .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+    @TaskAction
+    fun write() {
+        val out = StringBuilder()
+        out.append("// Made from schema/copy as the app's built (build.gradle.kts's baudeCopy): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("object Wording {\n")
+        out.append("    fun number(n: Number): String = java.text.NumberFormat.getNumberInstance(java.util.Locale.ENGLISH).format(n)\n")
+        out.append("    fun category(n: Number) = if (n.toDouble() == 1.0) \"one\" else \"other\"\n")
+        val seen = HashMap<String, String>()
+        val files = copy.get().asFile.listFiles { f -> f.name.endsWith(".json") && !f.name.startsWith(".") }!!
+            .sortedBy { it.name }
+        for (f in files) {
+            val group = f.name.removeSuffix(".json")
+            if (!Regex("[a-z][a-z0-9_]*").matches(group)) throw GradleException("schema/copy/${f.name}: not named in lower case")
+            @Suppress("UNCHECKED_CAST")
+            val doc = groovy.json.JsonSlurper().parse(f) as Map<String, Any?>
+            if (doc.keys != setOf("description", "messages"))
+                throw GradleException("schema/copy/${f.name}: a description and messages, and nothing else")
+            out.append("\n    /** ${(doc["description"] as String).replace("*/", "* /")} */\n")
+            out.append("    object ${pascal(group)} {\n")
+            @Suppress("UNCHECKED_CAST")
+            for ((key, text) in doc["messages"] as Map<String, Any?>) {
+                val where = "${f.name}: $key"
+                if (text !is String || !Regex("[a-z][a-z0-9_]*").matches(key))
+                    throw GradleException("schema/copy/$where: a lower-case key and a message's text")
+                seen[text]?.let { throw GradleException("schema/copy/$where: says what $it says") }
+                seen[text] = "$group.$key"
+                val m = Parser(text, where).message()
+                val types = LinkedHashMap<String, String>()
+                for ((v, fn) in m.declared) types[v] = if (fn == "number") "Number" else "String"
+                for ((_, parts) in m.variants) for (p in parts) if (p is Pair<*, *>) {
+                    val v = p.first as String
+                    if (v !in types) types[v] = if (p.second == "number") "Number" else "Any"
+                }
+                fun say(parts: List<Any>) = "\"" + parts.joinToString("") { p ->
+                    if (p is String) quote(p) else {
+                        val (v, fn) = p as Pair<*, *>
+                        val number = (fn ?: m.declared[v]) == "number"
+                        "\${" + (if (number) "number(${camel(v as String)})" else camel(v as String)) + "}"
+                    }
+                } + "\""
+                out.append("        /** ${text.replace("*/", "* /").replace("\n", " ")} */\n")
+                if (types.isEmpty()) {
+                    out.append("        const val ${camel(key)} = ${say(m.variants.single().second)}\n")
+                    continue
+                }
+                val args = types.entries.joinToString(", ") { (v, t) -> "${camel(v)}: $t" }
+                if (m.selectors.isEmpty()) {
+                    out.append("        fun ${camel(key)}($args): String = ${say(m.variants.single().second)}\n")
+                    continue
+                }
+                fun rank(sel: String, k: String) = when {
+                    k == "*" -> 2
+                    m.declared[sel] == "number" && k.toDoubleOrNull() == null -> 1
+                    else -> 0
+                }
+                fun test(sel: String, k: String): String? {
+                    val v = camel(sel)
+                    return when {
+                        k == "*" -> null
+                        m.declared[sel] != "number" -> "$v == \"${quote(k)}\""
+                        k.toDoubleOrNull() != null -> "$v.toDouble() == ${k.toDouble()}"
+                        else -> "category($v) == \"${quote(k)}\""
+                    }
+                }
+                val ordered = m.variants.sortedWith { a, b ->
+                    m.selectors.indices.map { rank(m.selectors[it], a.first[it]).compareTo(rank(m.selectors[it], b.first[it])) }
+                        .firstOrNull { it != 0 } ?: 0
+                }
+                out.append("        fun ${camel(key)}($args): String = when {\n")
+                for ((keys, parts) in ordered) {
+                    val tests = m.selectors.indices.mapNotNull { test(m.selectors[it], keys[it]) }
+                    out.append("            ${if (tests.isEmpty()) "else" else tests.joinToString(" && ")} -> ${say(parts)}\n")
+                    if (tests.isEmpty()) break
+                }
+                out.append("        }\n")
+            }
+            out.append("    }\n")
+        }
+        out.append("}\n")
+        val dir = outputDir.get().asFile.resolve("dev/baude/android")
+        dir.mkdirs()
+        dir.resolve("Wording.kt").writeText(out.toString())
+    }
+}
+
+val baudeCopy = tasks.register<BaudeCopy>("baudeCopy") {
+    copy.set(rootProject.layout.projectDirectory.dir("../schema/copy"))
+    outputDir.set(layout.buildDirectory.dir("generated/baudeCopy"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeCopy, BaudeCopy::outputDir) }
+}
+
 /** schema/types and schema/variables, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names,
  * WireConstants (the variables, the wire's version among them), Msg's classes, one for each message and entity (each
  * a file of schema/types, named for it: Name.json, or Name.kind.json for a message), built with their fields and made

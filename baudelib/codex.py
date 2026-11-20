@@ -7,6 +7,7 @@ import subprocess
 import threading
 from collections import deque
 
+from baudelib import wording
 from baudelib.claude import ClaudeProc
 from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
 
@@ -81,7 +82,7 @@ def stderr_notice(line, model=None):
     if unsupported:
         if model is None or unsupported.group(1) != model[0]:
             return None  # (another model's: one it tried ahead, say, not the one this chat asks for)
-        return "model", f"Codex can't use {model[1]} with a ChatGPT account. Choose another model."
+        return "model", wording.say("model_providers.codex_unsupported", model=model[1])
     if level != "ERROR" or target.startswith(QUIET_TARGETS):
         return None
     if not message.strip():

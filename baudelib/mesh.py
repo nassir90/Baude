@@ -69,7 +69,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from baudelib import models, wire
+from baudelib import models, wire, wording
 
 RETRY_S = (2, 10, 30, 120, 300)  # a link that's dropped, or couldn't be made, is tried again after these
 OFF_S = 30  # (one the other end's deactivated this host on: tried again this often)
@@ -357,7 +357,7 @@ class Here:
             self.out.put(msg, passed=True)
 
     def closed(self, error=None):
-        self.error = error or "the tunnel was closed"
+        self.error = error or wording.say("host_status.tunnel_closed")
         self.up.set()
         if self.pumping:  # (else whoever's opening it says why, first)
             self.out.close(self.ch.close)
@@ -470,12 +470,12 @@ class Out:
         """A connection to where: made a link, and run till it drops."""
         peer = _hello_of(info)
         if peer is None or peer["id"] == self.mesh.id:
-            self.error = "it gave no id Baude can use" if peer is None else "that's this host"
+            self.error = wording.say("host_status.no_id") if peer is None else wording.say("host_status.this_host")
             self.state = "dropped"
             ch.close()
             return
         if self.expect is not None and peer["id"] != self.expect:  # (another host there than the member it's to)
-            self.error, self.state = f"another host, {peer['name']}, is there", "dropped"
+            self.error, self.state = wording.say("host_status.another_host", host=peer["name"]), "dropped"
             ch.close()
             return
         if peer["id"] in self.mesh.inactive:  # (deactivated here by its id: not linked to, wherever it's reached)
@@ -488,7 +488,7 @@ class Out:
         reply = ch.reply()
         theirs = _hello_of((reply or {}).get("host"))
         if not reply or reply.get("op") != "joined" or theirs is None or theirs["id"] != peer["id"]:
-            self.error, self.state = wire.said(reply) or "it didn't answer", "dropped"
+            self.error, self.state = wire.said(reply) or wording.say("host_status.no_answer"), "dropped"
             ch.close()
             return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
@@ -502,7 +502,7 @@ class Out:
         self.mesh.add(self.link)
         self.link.run()
         self.link, self.state = None, "dropped"
-        self.error = f"the link to {peer['name']} dropped"
+        self.error = wording.say("host_status.link_dropped", host=peer["name"])
 
     def kept(self):
         return {"where": self.where, "id": self.id, "name": self.name, **({} if self.active else {"active": False})}
@@ -833,8 +833,8 @@ class Mesh:
         if peer is None or peer["id"] == self.id or peer["id"] in self.inactive or \
                 straight and peer["id"] in self.unlinked:
             ch.send({"op": "error", "req": msg.get("req"), "error": "no host given" if peer is None else
-                     "that's this host" if peer["id"] == self.id else f"deactivated on {self.server.me['name']}"
-                     if peer["id"] in self.inactive else f"unlinked on {self.server.me['name']}"})
+                     wording.say("host_status.this_host") if peer["id"] == self.id else
+                     f"deactivated on {self.server.me['name']}" if peer["id"] in self.inactive else f"unlinked on {self.server.me['name']}"})
             return
         if not ch.send({"op": "joined", "req": msg.get("req"), "host": self.hello()}):
             return
@@ -889,7 +889,7 @@ class Mesh:
         if link.id in self.remembered:
             self.save()
         for end in tunnels.values():
-            end.closed(f"the link to {link.peer['name']} dropped")
+            end.closed(wording.say("host_status.link_dropped", host=link.peer["name"]))
         if not self.stopped.is_set():
             self.log(f"mesh: the link {'to' if link.made else 'from'} {link.peer['name']} dropped")
         self.changed()
@@ -1102,7 +1102,8 @@ class Mesh:
             return
         ahead = self.next_link(to) if wire.is_id(to) else None
         if ahead is None or ahead is link or not isinstance(ttl, int) or ttl <= 1:
-            link.tsend(key, {"op": "close", "error": f"{self.server.me['name']} has no way to {self.name_of(to)}"})
+            link.tsend(key, {"op": "close", "error": wording.say("host_status.no_way", host=self.server.me["name"],
+                                                                 to=self.name_of(to))})
             return
         okey = ahead.new_key()
         with self.lock:
@@ -1115,14 +1116,14 @@ class Mesh:
         """A tunnel opened from here to member to, for end (a Here): None once it's there, else what's wrong. sender:
         who what's sent through it is from (a chat here: Server.chat_sender)."""
         if not wire.is_id(to):
-            return "no such host"
+            return wording.say("host_status.no_such_host")
         if to == self.id:
-            return "that's this host"
+            return wording.say("host_status.this_host")
         if to in self.inactive:
-            return f"{self.name_of(to)} is deactivated here"
+            return wording.say("host_status.deactivated_here", host=self.name_of(to))
         ahead = self.next_link(to)
         if ahead is None:
-            return f"{self.name_of(to)} isn't in the mesh now"
+            return wording.say("host_status.not_in_mesh", host=self.name_of(to))
         key = ahead.new_key()
         end.link, end.key, end.to = ahead, key, to
         with self.lock:

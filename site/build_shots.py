@@ -12,8 +12,11 @@ import hashlib
 import html
 import json
 import os
+import re
 import shutil
 import sys
+import urllib.error
+import urllib.request
 
 try:
     from PIL import Image
@@ -24,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MATRIX = os.path.join(HERE, "..", "screenshots")
 APK = os.path.join(HERE, "..", "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
 OUT = os.path.join(HERE, "public", "apps", "baude")
+FEED = "https://mpts.ie/apps/baude/baude-android.json"  # (what the app looks at, as it's live: publish_apk's)
 THEMES = ("light", "dark")
 GRID_WIDTH = 760  # the grid's image width: two columns on a 1040px page, sharp on 2x screens
 
@@ -58,19 +62,44 @@ def webp(src, dest, width=None):
     return im.size
 
 
-def write_feed(apk):
-    """baude-android.json beside apk: the build's versionCode and versionName (from the output-metadata.json Gradle
-    writes beside it), the APK's name, size and sha256. The app (android/.../Update.kt) downloads a higher versionCode
-    and installs it only if it's the size and sha256 said here."""
-    with open(os.path.join(os.path.dirname(APK), "output-metadata.json")) as f:
+def publish_apk(built_apk, out, live=FEED):
+    """built_apk copied into out as baude-android.apk, and baude-android.json beside it: the build's versionCode and
+    versionName (from the output-metadata.json Gradle writes beside built_apk), the APK's name, size and sha256. The
+    app (android/.../Update.kt) downloads a higher versionCode and installs it only if it's the size and sha256 said
+    here. Refused (the build stops, nothing copied) for a build with changes that aren't committed or a versionCode
+    Gradle was given, or one whose versionCode is below the one live (live: the feed now published, None not to
+    look); the same versionCode (nothing in the app changed) is published again, and phones leave it be."""
+    with open(os.path.join(os.path.dirname(built_apk), "output-metadata.json")) as f:
         built = json.load(f)["elements"][0]
+    code, name = built["versionCode"], built["versionName"]
+    if not re.fullmatch(r"[0-9a-f]{4,40}", name):
+        sys.exit(f"not publishing the Android app built as {name}: build it from a clean checkout "
+                 "(android/, emission.py and schema/ committed)")
+    if live:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(live, headers={"Cache-Control": "no-cache", "User-Agent": "baude-site-build"}),
+                                        timeout=30) as r:
+                was = json.load(r)["versionCode"]
+        except urllib.error.HTTPError as e:
+            if e.code != 404:  # (404: none published yet)
+                sys.exit(f"not publishing the Android app: couldn't read {live}: {e}")
+            was = 0
+        except (OSError, ValueError, KeyError) as e:
+            sys.exit(f"not publishing the Android app: couldn't read {live}: {e}")
+        if code < was:
+            sys.exit(f"not publishing the Android app: its versionCode {code} is below the live one's, {was} "
+                     "(an older checkout, or a branch behind main?)")
+        if code == was:
+            print(f"the Android app is versionCode {code}, as the live one is: phones won't update")
+    apk = os.path.join(out, "baude-android.apk")
+    shutil.copyfile(built_apk, apk)
     sha = hashlib.sha256()
     with open(apk, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             sha.update(chunk)
-    feed = {"versionCode": built["versionCode"], "versionName": built["versionName"],
+    feed = {"versionCode": code, "versionName": name,
             "apk": os.path.basename(apk), "size": os.path.getsize(apk), "sha256": sha.hexdigest()}
-    with open(os.path.join(os.path.dirname(apk), "baude-android.json"), "w") as f:
+    with open(os.path.join(out, "baude-android.json"), "w") as f:
         json.dump(feed, f, indent=1)
         f.write("\n")
 
@@ -103,8 +132,7 @@ def main():
         f.write(page)
     if not os.path.exists(APK):
         sys.exit(f"missing {os.path.normpath(APK)}: run npm run build:apk first")
-    shutil.copyfile(APK, os.path.join(OUT, "baude-android.apk"))
-    write_feed(os.path.join(OUT, "baude-android.apk"))
+    publish_apk(APK, OUT)
     total = sum(os.path.getsize(os.path.join(shots, n)) for n in os.listdir(shots))
     print(f"{len(SHOTS)} screenshots in two themes ({total / 1e6:.1f} MB) -> {os.path.relpath(OUT, HERE)}")
 

@@ -240,7 +240,7 @@ private fun limit(key: String): Int = when {
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
-         note: @Composable () -> Unit = {}) {
+         settings: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -252,7 +252,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         Bar("Baude", end = {
             IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
-            Menu(listOf(Wording.Fixes.sendFeedback to feedback))
+            Menu(listOf(Wording.Window.settings to settings, Wording.Fixes.sendFeedback to feedback))
         })
         note()
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }
@@ -312,7 +312,8 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
 }
 
 /** At the foot, under a rule from the chats (Baude's UpdateBar): Update, while a newer build's ready or waiting to be
- * downloaded (Update.kt), how much of it's come while it's downloading; tapped, installed. */
+ * downloaded (Update.kt), how much of it's come while it's downloading; tapped, installed. A newer build that can't be
+ * installed over this one: why, instead. */
 @Composable
 private fun UpdateBar() {
     val c = LocalBaude.current
@@ -322,7 +323,10 @@ private fun UpdateBar() {
         if (Update.state.value == "downloading")
             androidx.compose.material3.LinearProgressIndicator({ Update.progress.value }, Modifier.fillMaxWidth(),
                 color = c.accentBg, trackColor = c.rule)
-        Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+        if (Update.state.value == "wrong") // (a newer build that can't be installed over this one: why)
+            Text(Update.why.value, style = Type.caption, color = c.dim,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
+        else Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
     }
 }

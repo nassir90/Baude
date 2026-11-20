@@ -52,8 +52,10 @@ class MainActivity : ComponentActivity() {
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
+                    "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
+                        settings = { go(listOf("settings")) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()
@@ -70,10 +72,7 @@ class MainActivity : ComponentActivity() {
      * Shared to from another app: to a Bot (its shortcut in the share sheet), its chat with what's shared in it; to
      * Baude, the home screen to choose the chat. */
     private fun opened(intent: Intent?) {
-        if (intent?.getBooleanExtra("update", false) == true) {
-            intent.removeExtra("update")
-            Update.install(this)
-        }
+        Update.opened(this, intent)
         intent?.let(Shares::from)?.let { (shared, to) ->
             setIntent(Intent(this, MainActivity::class.java)) // (made again, as it's turned: not shared again)
             Shares.pending.value = shared

@@ -88,10 +88,20 @@ object Type {
     val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = FontFamily.Monospace)  // (.mono)
 }
 
+/** The app's look as Settings has it: light or dark (Appearance: the system's, or one of them), the accent (Accent
+ * Colour: accent_bg_color, and accent_color made of it), and the sizes (Text Scale: the text's, Global Scale:
+ * everything's, as the density's). */
 @Composable
 fun BaudeTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val c = if (dark) DarkBaude else LightBaude
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Settings.load(ctx)
+    val dark = when (Settings.appearance.value) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemInDarkTheme()
+    }
+    val accent = Settings.accentBg(ctx)
+    val c = (if (dark) DarkBaude else LightBaude).copy(accentBg = accent, accent = Settings.standalone(accent, dark))
     val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
         primary = c.accentBg, onPrimary = c.accentFg, background = c.inside, onBackground = c.fg,
         surface = c.inside, onSurface = c.fg, surfaceVariant = c.frame, onSurfaceVariant = c.dim,
@@ -99,7 +109,10 @@ fun BaudeTheme(content: @Composable () -> Unit) {
         surfaceContainerLow = c.window, outline = c.rule, outlineVariant = c.rule, error = c.destructive,
         secondaryContainer = c.rowSelected, onSecondaryContainer = c.fg,
     )
-    CompositionLocalProvider(LocalBaude provides c) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    CompositionLocalProvider(LocalBaude provides c, androidx.compose.ui.platform.LocalDensity provides
+        androidx.compose.ui.unit.Density(density.density * Settings.globalScale.value,
+            density.fontScale * Settings.textScale.value)) {
         MaterialTheme(colorScheme = scheme, typography = Typography(bodyLarge = Type.body, bodyMedium = Type.body),
             content = content)
     }

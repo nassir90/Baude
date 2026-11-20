@@ -1,0 +1,11 @@
+{
+  "description": "Settings rows only the phone has: whether it's light or dark (Appearance), and the size rows' buttons.",
+  "messages": {
+    "appearance": "Appearance",
+    "follow_system": "Follow System",
+    "light": "Light",
+    "dark": "Dark",
+    "smaller": "Smaller",
+    "larger": "Larger"
+  }
+}

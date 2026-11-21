@@ -13,8 +13,7 @@
     {
       "name": "body",
       "shows": "\"Its transcript will be moved to <where>, where you can restore it.\" where is \"your trash\" for this machine's sessions, or \"the trash on <host>\" for a session on a host. When earlier copies of the conversation were folded into this session: \"Its transcript and its N earlier copy/copies will be moved to <where>, where you can restore it.\" For a session on Codex's model, a line is added: \"Codex keeps its own copy of this session.\"",
-      "copy": ["trash.body", "trash.body_copies", "trash.yours", "trash.on_host"],
-      "text": ["Codex keeps its own copy of this session."]
+      "copy": ["trash.body", "trash.body_copies", "trash.yours", "trash.on_host", "trash.codex_copy"]
     },
     {
       "name": "Cancel",

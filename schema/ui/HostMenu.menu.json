@@ -13,8 +13,7 @@
     {
       "name": "Deactivate / Activate",
       "shows": "\"Deactivate\" for the picked host, or \"Activate\" if it is deactivated. Only for another machine (never for this one). Deactivating greys its chats and shows the banner \"<host> is deactivated\" over them; the host is not reached while off.",
-      "copy": ["hosts.deactivate", "hosts.activate"],
-      "text": ["{host} deactivated", "{host} activated"],
+      "copy": ["hosts.deactivate", "hosts.activate", "hosts.now_deactivated", "hosts.now_activated"],
       "actions": [
         {"by": "click", "does": "Switches the host off or on; a toast says \"<host> deactivated\" or \"<host> activated\"."}
       ]

@@ -86,7 +86,7 @@ object Meta {
     fun index(): String {
         val lines = ArrayList<String>()
         lines.add("Baude for Android · ${Mesh.hosts.size} host(s) added")
-        lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }}")
+        lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${picked()?.let { Mesh.label(it) }.orEmpty()}")
         for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") } +
                 listOf("phone" to Mesh.label("phone")))) { // (this phone's own agents too)
             val conn = Mesh.conn(id)
@@ -445,7 +445,7 @@ fun MetaRows(text: String) {
         Button(o.str("label") ?: b, suggested = b != "trash", destructive = b == "trash") {
             when (b) {
                 "trash" -> asking = true
-                "host" -> { HomePrefs.host.value = o.optString("host"); HomePrefs.save(); Meta.go("home") }
+                "host" -> { HomePrefs.pick(o.optString("host")); Meta.go("home") }
                 else -> Meta.go(b)
             }
         }
@@ -475,9 +475,9 @@ fun MetaRows(text: String) {
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
             val up = Mesh.reached("subscribe")
-            Picker(HomePrefs.host.value.let { if (it == "all") "All hosts" else Mesh.label(it) }, "Hosts shown",
-                listOf("All hosts" to "all") + up.map { it.second to it.first }, HomePrefs.host.value) {
-                HomePrefs.host.value = it; HomePrefs.save()
+            Picker(picked()?.let { Mesh.label(it) }.orEmpty(), "Hosts shown",
+                up.map { it.second to it.first }, picked()) {
+                HomePrefs.pick(it)
             }
         }
     }

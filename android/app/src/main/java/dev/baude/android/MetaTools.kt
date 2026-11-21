@@ -35,7 +35,7 @@ object MetaTools {
     val BUTTONS = mapOf( // (desktop Baude's, trash and host, and the phone's own)
         "trash" to "Move to Trash… a chat (items: its id), to its host's trash; asks first, and can't be undone here",
         "host" to "Open a host (items: its name): the home screen lists its chats, and New session's on it",
-        "send_feedback" to Wording.Fixes.sendFeedback, "hosts" to "Hosts: the phone's key, its hosts, the mesh")
+        "send_feedback" to Wording.Fixes.sendFeedback)
 
     private fun tool(name: String, description: String, required: List<String>, props: JSONObject) =
         JSONObject().put("name", name).put("description", description)
@@ -139,7 +139,7 @@ object MetaTools {
 
     fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
         Mesh.conn(id)?.info?.groups.orEmpty() - (Mesh.conn(id)?.info?.let { it.group.orEmpty() } ?: "")
-    } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sorted()
+    } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sortedBy { it.lowercase() }
 
     private fun key(h: String, s: Msg.Session) = "$h/${s.id.orEmpty()}"
 
@@ -258,16 +258,16 @@ object MetaTools {
         "sidebar_group" -> if (v !in setOf("folder", "date")) "sidebar_group is folder or date"
             else { HomePrefs.by.value = v; HomePrefs.save(); null }
         "sidebar_host" -> {
-            val to = if (v == "all") "all" else hostByName(v) ?: Mesh.conn(v)?.id
-            if (to == null) "no host $v: all, or ${Mesh.reached("subscribe").joinToString(", ") { it.second }}"
-            else { HomePrefs.host.value = to; HomePrefs.save(); null }
+            val to = hostByName(v) ?: Mesh.conn(v)?.id
+            if (to == null) "no host $v: ${Mesh.reached("subscribe").joinToString(", ") { it.second }}"
+            else { HomePrefs.pick(to); null }
         }
         else -> "No setting '$name': they're sidebar_group, sidebar_host."
     }
 
     private fun settingValue(name: String) = when (name) {
         "sidebar_group" -> HomePrefs.by.value
-        "sidebar_host" -> HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }
+        "sidebar_host" -> picked()?.let { Mesh.label(it) }.orEmpty()
         else -> ""
     }
 
@@ -565,7 +565,7 @@ object MetaTools {
         }
         "groups" -> listOf("No group") + groupNames()
         "settings" -> listOf("sidebar_group=${settingValue("sidebar_group")} (folder or date: how the left bar, the home " +
-            "screen, groups chats)", "sidebar_host=${settingValue("sidebar_host")} (all, or a host's name: whose chats it lists)")
+            "screen, groups chats)", "sidebar_host=${settingValue("sidebar_host")} (a host's name: whose chats it lists)")
         "forms" -> FORMS.map { (k, f) -> "$k: ${f.about}" }
         "buttons" -> BUTTONS.map { (k, v) -> "$k: $v" }
         "pages" -> Meta.pages().map { it.title }.ifEmpty { listOf("(no chat open)") }

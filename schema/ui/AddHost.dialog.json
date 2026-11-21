@@ -3,8 +3,15 @@
   "apps": ["baude"],
   "opens": ["host picker's right-click → Add Host…"],
   "code": ["baude.py:BaudeWindow.ask_add_host", "baude.py:BaudeWindow.host_form"],
-  "copy": ["new_session", "hosts", "common"],
+  "copy": ["new_session", "hosts", "common", "phone_keys"],
   "parts": [
+    {
+      "name": "This phone's key",
+      "apps": ["phone"],
+      "shows": "Above the fields: the phone's own ssh key's authorized_keys line with Copy and New Key…, or Make Key while it has none.",
+      "copy": ["phone_keys.heading", "phone_keys.none", "phone_keys.put_line", "phone_keys.make", "phone_keys.new_ellipsis"],
+      "phone": {"does": "Shown here, where hosts are added, as the phone signs in with its own key", "why": "No ssh agent on a phone", "decided": "2026-11-21"}
+    },
     {
       "name": "heading",
       "shows": "\"Add a host\".",
@@ -31,7 +38,7 @@
     {
       "name": "Add",
       "shows": "\"Add\" button, the default, suggested style, disabled until the destination is valid.",
-      "copy": ["common.add"],
+      "copy": ["common.add", "hosts.looking_for_baude"],
       "actions": [
         {"by": "click", "does": "The host is added (by ssh with the destination and the command) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
       ]

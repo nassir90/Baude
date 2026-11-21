@@ -43,9 +43,6 @@
         "sidebar.no_group",
         "sidebar.show_all"
       ],
-      "text": [
-        "New Group…"
-      ],
       "parts": [
         {
           "name": "Group list (filter)",
@@ -81,10 +78,12 @@
         {
           "name": "Group right-click menu",
           "shows": "Two items at the pointer: \"Rename Group…\" and \"Delete Group\".",
-          "text": [
-            "Rename Group…",
-            "Delete Group"
+          "copy": [
+            "sidebar.rename_group_ellipsis",
+            "sidebar.delete_group",
+            "sidebar.group_deleted"
           ],
+          "phone": {"does": "Opened by a long-press on a group's row", "why": "Touch's right-click", "decided": "2026-11-21"},
           "actions": [
             {
               "by": "click Rename Group…",
@@ -99,8 +98,8 @@
         {
           "name": "New Group…",
           "shows": "A menu item \"New Group…\" under the list.",
-          "text": [
-            "New Group…"
+          "copy": [
+            "sidebar.new_group_ellipsis"
           ],
           "actions": [
             {

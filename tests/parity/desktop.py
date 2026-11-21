@@ -140,9 +140,20 @@ def open_chat(app, sc):
 
 def build(app, sc):
     name = sc["name"]
-    if name == "home":
+    if name.startswith("home"):
         write_sessions()
-        return app.window(S.opts(cwd=folder("garden")))
+        win = app.window(S.opts(cwd=folder("garden")))
+        if name == "home":
+            return win
+        title = fixture("sessions.json")["sessions"][0]["title"]
+        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        if name == "home-row-menu":
+            win.sidebar.show_menu(S.sidebar_row(win, title), 120, 14)
+        elif name == "home-host-menu":
+            S.host_right_click(win)
+        elif name == "home-add-host":
+            win.ask_add_host()
+        return win
     if name.startswith("chat") or name.startswith("panel"):
         return open_chat(app, sc)
     if name == "menu":

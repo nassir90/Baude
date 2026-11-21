@@ -517,8 +517,9 @@ def report_text(head, messages, limit=REPORT_ITEM, most=None):
     parts = []
     for m in messages:
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["t"])) if m.get("t") else ""
-        who = "User" if m.get("role") == "user" else NAME + (f" ({m['model']})" if m.get("model") else "") + \
-            (" (error)" if m.get("error") else "")
+        who = wording.say("report.user") if m.get("role") == "user" else (
+            wording.say("report.meta_model", model=m["model"]) if m.get("model") else wording.say("meta_settings.title")) + \
+            (" " + wording.say("report.error") if m.get("error") else "")
         out = [f"## {who}" + (f" · {when}" if when else "")]
         if m.get("role") == "user":
             if m.get("quote"):
@@ -541,9 +542,10 @@ def report_text(head, messages, limit=REPORT_ITEM, most=None):
                 out.append(f"[{widgets.compact_text(it.get('meta')) if done else 'compaction ' + it.get('state', '?')}]")
                 continue
             inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
-            out.append(f"[tool {it.get('name') or '?'} · {it.get('state') or '?'}]\n{trimmed(inp, limit)}")
+            out.append(wording.say("report.meta_tool", name=it.get("name") or "?", state=it.get("state") or "?")
+                       + "\n" + trimmed(inp, limit))
             if it.get("result"):
-                out.append("[result]\n" + trimmed(str(it["result"]), limit))
+                out.append(wording.say("report.result") + "\n" + trimmed(str(it["result"]), limit))
         if m.get("error") and m.get("text") and m.get("items") is not None:
             out.append(m["text"])
         parts.append("\n".join(out))
@@ -1835,7 +1837,7 @@ label.said-refs link {{ color: {REF_COLOR}; }}  /* (an @reference in what you wr
 .meta-ui list.boxed-list > row {{ background: none; }}
 .meta-ui list.boxed-list > row:hover {{ background: alpha(@view_fg_color, 0.04); }}
 .tool-card button.meta-batch {{ min-height: 0; min-width: 0; padding: 1px 5px; }}
-.changes-bar {{ background: alpha(@accent_bg_color, 0.12); border-radius: 8px; padding: 1px 2px 1px 10px; }}
+.changes-bar {{ background: alpha(@accent_bg_color, {{meta.changes-bar-alpha}}); border-radius: {{meta.changes-bar-radius}}; padding: 1px 2px 1px 10px; }}
 .changes-bar button {{ min-height: 24px; padding: 0 8px; }}
 /* (under the box as Baude's status line is under a chat's, as tall, so the two boxes are on a line) */
 .meta-foot {{ font-size: 0.85em; padding: 4px 0; }}
@@ -1849,10 +1851,9 @@ label.meta-note {{ font-size: {{font.small}}em; opacity: 0.75; }}
 button.meta-item {{ min-height: 0; padding: 1px 4px; font-weight: normal; }}
 """)
 _CSS = []
-MARK_COLORS = {"added": "#2ec27e", "removed": "#e01b24", "moved": "#3584e4", "archived": "#e5a50a",
-               "edited": "#9141ac"}  # (edited: a page whose text changed; highlight:
-# the accent's)
-MARK_ALPHA, LIT_ALPHA = 0.28, 0.6  # (a mark's highlight; lit, its card under the pointer: MetaChat.light)
+MARK_COLORS = {how: tokens.color_hex(f"meta.{how}", "light") for how in ("added", "removed", "moved", "archived", "edited")}
+# (edited: a page whose text changed; highlight: the accent's)
+MARK_ALPHA, LIT_ALPHA = tokens.number("meta.mark-alpha"), tokens.number("meta.lit-alpha")  # (a mark's highlight; lit, its card under the pointer: MetaChat.light)
 
 
 def install_css(display):
@@ -2488,20 +2489,24 @@ class MetaChat(Gtk.Box):
         usage = getattr(self, "last_usage", None) or {}
         if self.used is not None:
             total = usage.get("maxTokens") or (agent.window if agent else window(value))
-            context = f"{self.used:,} / {total:,} tokens" if total else f"{self.used:,} tokens"
+            context = (wording.say("report.tokens_of", used=f"{self.used:,}", total=f"{total:,}") if total
+                       else wording.say("side_panel.tokens", n=f"{self.used:,}"))
             parts = [f"{c['name']} {c.get('tokens', 0):,}" for c in usage.get("categories") or []
                      if c.get("tokens") and c.get("kind") != "deferred"]
             context += f" ({', '.join(parts)})" if parts else ""
         else:
             shown = self.ctx.label.get_text().removeprefix("context").strip(" :—")
-            context = "no session yet" if agent is None else shown or "not said by its session yet"
+            context = wording.say("report.no_session") if agent is None else shown or wording.say("report.not_said_by_session")
         picked = model()
         return [(wording.say("report.app"), f"{self.APP} ({NAME})"),
                 (wording.say("common.model"), f"{model_name(value)} ({value})"),
-                ("Next message", f"{model_name(picked)} ({picked}), picked since" if picked != value else ""),
-                ("Runs on", agent.runs if agent is not None else ""),
-                ("Effort", EFFORT_LABELS.get(level, level) if level else "default"),
-                ("Code mode", said_value(bool(coded))), ("Runs commands", said_value(bool(commands))),
+                (wording.say("report.next_message"), wording.say("report.picked_since", name=model_name(picked), value=picked)
+                 if picked != value else ""),
+                (wording.say("report.runs_on"), agent.runs if agent is not None else ""),
+                (wording.say("meta_settings.effort"),
+                 EFFORT_LABELS.get(level, level) if level else wording.say("report.default")),
+                (wording.say("meta_settings.code_mode"), wording.say("report.on" if coded else "report.off")),
+                (wording.say("report.runs_commands"), wording.say("report.on" if commands else "report.off")),
                 (wording.say("report.mode"), agent.started_mode if agent is not None else ""),
                 (wording.say("report.context"), context), (wording.say("lookup.tools"), ", ".join(dict.fromkeys(tools))),
                 (wording.say("report.copied"), time.strftime("%Y-%m-%d %H:%M:%S %z"))]
@@ -2510,7 +2515,7 @@ class MetaChat(Gtk.Box):
         """The conversation as text for an issue (report_text), what's being said now too; None if nothing's been."""
         messages = list(self.messages()) if self.ready() else []
         if self.ask is not None and self.ask.turn is not None and self.ask.turn.get("items"):
-            messages.append({"role": "meta", "items": self.ask.turn["items"], "warned": ["still replying"],
+            messages.append({"role": "meta", "items": self.ask.turn["items"], "warned": [wording.say("report.still_replying")],
                              "model": self.ask.model})
         return report_text(self.report_head(), messages, most=most) if messages else None
 

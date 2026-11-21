@@ -120,10 +120,10 @@ fun rememberWindow(hostId: String, model: String?, tokens: Int) {
 
 private fun usedOf(u: JSONObject) = if (u.has("totalTokens") && !u.isNull("totalTokens")) u.optInt("totalTokens") else null
 
-fun contextShown(chat: Chat): ContextShown {
+fun contextShown(chat: Chat, model: String? = Mesh.session(chat.hostId, chat.sid)?.model?.ifBlank { null },
+                 usage: JSONObject? = chat.chrome.usage.value): ContextShown {
     val at = chat.hostId
-    val model = Mesh.session(at, chat.sid)?.model?.ifBlank { null }
-    val u = chat.chrome.usage.value
+    val u = usage
     val total = u?.optInt("maxTokens", 0) ?: 0
     if (u == null) {
         val window = contextWindow(at, model)

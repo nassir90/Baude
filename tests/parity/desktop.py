@@ -129,6 +129,8 @@ def open_chat(app, sc):
     if sc.get("files"):  # (the scene's files join the chat's folder)
         shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
     path = write_sessions(sc.get("lines"), sc.get("transcript"), sc.get("subagents"))[sc.get("session", 0)]
+    if sc.get("meta"):  # (Meta's conversation, as its store keeps it)
+        baude._META[:] = [{k: v for k, v in fixture(sc["meta"]).items() if k != "description"}]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
@@ -155,6 +157,11 @@ def open_chat(app, sc):
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)
+        if sc.get("meta") and sc.get("open"):  # (Meta's cards' Input and Output opened)
+            for b in T.find(win.panel.meta, Gtk.ToggleButton):
+                if b.has_css_class("tool-toggle"):
+                    b.set_active(True)
+            T.pump(0.4)
     for t in sc.get("running", []):  # (background tasks heard as started)
         win.on_task_event("task_started", dict(t))
     if sc.get("process"):
@@ -302,6 +309,7 @@ def main():
                 for w in Gtk.Window.list_toplevels():
                     if isinstance(w, baude.BaudeWindow):
                         T.close(w)
+                baude._META.clear()
                 S.reset_state()
                 shutil.rmtree(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects"), ignore_errors=True)
     print(f"{failed} failures -> {out}")

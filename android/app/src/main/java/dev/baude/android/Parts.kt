@@ -128,12 +128,12 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
 /** A flat button as libadwaita's in a bar: an icon, 34 square, rounded. */
 @Composable
 fun IconButton(icon: ImageVector, label: String, enabled: Boolean = true, tint: androidx.compose.ui.graphics.Color? = null,
-               background: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
+               background: androidx.compose.ui.graphics.Color? = null, tip: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     Box(
         Modifier.size(Gap.composerButton).clip(RoundedCornerShape(8.dp))
             .then(if (background != null) Modifier.background(background) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick() } else Modifier.clickable(enabled = enabled, onClick = onClick)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(18.dp.icon))

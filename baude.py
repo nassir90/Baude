@@ -10478,7 +10478,8 @@ class BaudeMeta(meta.MetaChat):
         where = wording.say("meta_chats.group_named", name=group) if group else wording.say("meta_chats.no_group")
         a = self.act(turn, wording.say("meta_chats.moved", chats=self.said(infos), where=where), "move_chats",
                      {"before": before, "group": group, "made": made}, {"ids": ids, "group": group, "made": made},
-                     [("chat", i, "moved", f"→ {group or 'no group'}") for i in ids])
+                     [("chat", i, "moved", wording.say("meta_chats.moved_note", group=group or wording.say("meta_chats.no_group")))
+                      for i in ids])
         return {"text": f"Moved to {where} (action {a['id']})."}
 
     def make_group(self, turn, args):
@@ -10561,7 +10562,8 @@ class BaudeMeta(meta.MetaChat):
                      wording.say("meta_chats.unarchived", chats=self.said(infos)), "archive",
                      {"ids": ids, "archived": not archive, "lists": lists, "expect": archive},
                      {"ids": ids, "archived": archive, "expect": not archive},
-                     [("chat", i, "archived" if archive else "added", "archived" if archive else "back") for i in ids])
+                     [("chat", i, "archived" if archive else "added",
+                      wording.say("meta_chats.archived_note" if archive else "meta_chats.back_note")) for i in ids])
         return {"text": f"{'Archived' if archive else 'Unarchived'} (action {a['id']})."}
 
     def delete_chats(self, turn, args):

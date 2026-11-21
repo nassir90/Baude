@@ -70,18 +70,18 @@ private suspend fun readTranscript(hostId: String, sid: String): String {
 }
 
 /** A text as meta.trimmed has it: its start as far as limit, and how much is left. */
-private fun trimmed(text: String, limit: Int): String =
+fun trimmed(text: String, limit: Int = ITEM): String =
     if (text.length <= limit) text else text.take(limit).trimEnd() + "\n" + Wording.Report.moreCharacters(n = (text.length - limit).toString())
 
 /** The head's lines, the values in a column (those with none left out). */
-private fun headText(head: List<Pair<String, String>>): String {
+fun headText(head: List<Pair<String, String>>): String {
     val shown = head.filter { it.second.isNotEmpty() }
     val width = shown.maxOfOrNull { it.first.length } ?: 0
     return shown.joinToString("\n") { (it.first + ":").padEnd(width + 1) + " " + it.second }
 }
 
 /** The head, then the parts as many of the last as fit (meta.capped_report), what was left out said. */
-private fun capped(head: List<Pair<String, String>>, parts: List<String>): String {
+fun capped(head: List<Pair<String, String>>, parts: List<String>): String {
     val top = headText(head)
     val kept = ArrayList<String>()
     var size = top.length

@@ -22,20 +22,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.AccountTree
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.QuestionAnswer
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,26 +48,28 @@ data class Page(val key: String, val title: String, val icon: ImageVector)
 fun pages(bot: Boolean, hostId: String): List<Page> {
     fun has(op: String) = takes(hostId, op)
     return listOfNotNull(
-        Page("chat", Wording.Chats.chat, Icons.AutoMirrored.Filled.Chat),
-        Page("meta", "Meta", Icons.Filled.Build),
-        if (bot && has("memory")) Page("memory", Wording.BotMemory.title, Icons.Filled.EditNote) else null,
-        if (bot && has("emission_watch")) Page("browser", Wording.BotBrowser.title, Icons.Filled.Web) else null,
-        if (bot && has("routines")) Page("routines", Wording.Routines.title, Icons.Filled.Alarm) else null,
-        Page("agents", Wording.SidePanel.subagents, Icons.Filled.Groups),
-        Page("processes", Wording.SidePanel.processes, Icons.Filled.Terminal),
-        if (has("ephemeral")) Page("btw", Wording.SidePanel.sideQuestions, Icons.Filled.QuestionAnswer) else null,
-        Page("artifacts", Wording.SidePanel.artifacts, Icons.Filled.Language),
-        if (has("list_dir")) Page("files", Wording.Lookup.files, Icons.Filled.Folder) else null,
-        if (has("git")) Page("git", Wording.Git.title, Icons.Filled.AccountTree) else null,
-        if (has("signal_names")) Page("signal", Wording.SidePanel.signal, Icons.Filled.Link) else null,
+        Page("chat", Wording.Chats.chat, Adwaita.Claude),
+        Page("meta", "Meta", Adwaita.Meta),
+        if (bot && has("memory")) Page("memory", Wording.BotMemory.title, Adwaita.DocumentEdit) else null,
+        if (bot && has("emission_watch")) Page("browser", Wording.BotBrowser.title, Adwaita.WebBrowser) else null,
+        if (bot && has("routines")) Page("routines", Wording.Routines.title, Adwaita.Alarm) else null,
+        Page("agents", Wording.SidePanel.subagents, Adwaita.SystemUsers),
+        Page("processes", Wording.SidePanel.processes, Adwaita.UtilitiesTerminal),
+        if (has("ephemeral")) Page("btw", Wording.SidePanel.sideQuestions, Adwaita.DialogQuestion) else null,
+        Page("artifacts", Wording.SidePanel.artifacts, Adwaita.WebBrowser),
+        if (has("list_dir")) Page("files", Wording.Lookup.files, Adwaita.Folder) else null,
+        if (has("git")) Page("git", Wording.Git.title, Adwaita.MediaPlaylistShuffle) else null,
+        if (has("signal_names")) Page("signal", Wording.SidePanel.signal, Adwaita.InsertLink) else null,
     )
 }
 
 /** A chat open: its bar (its Bot's picture and name, or its title; where it is), Baude's header controls under it,
- * its pages to swipe between, and the bottom bar that's Baude's side panel's switcher (a row that scrolls). */
+ * its pages to swipe between (first: the one shown first), and the bottom bar that's Baude's side panel's switcher
+ * (a row that scrolls). */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit) {
+fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
+              first: String = "chat") {
     val c = LocalBaude.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     Meta.opener = open
@@ -92,7 +80,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val contact = s?.let { Contact(at, it) }
     val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null } ?: Wording.Common.untitled
     val all = pages(bot != null, at)
-    var shown by rememberSaveable(hostId, sid) { mutableStateOf("chat") }
+    var shown by rememberSaveable(hostId, sid) { mutableStateOf(first) }
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
     val scope = rememberCoroutineScope()
     Meta.pages = { all }
@@ -112,7 +100,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
+        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)

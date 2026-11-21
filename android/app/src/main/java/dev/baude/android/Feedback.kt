@@ -22,8 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -142,7 +140,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar(Wording.Feedback.title, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Common.cancel, onClick = back) })
+        Bar(Wording.Feedback.title, start = { IconButton(Adwaita.GoPrevious, Wording.Common.cancel, onClick = back) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             context.firstOrNull()?.let { Text(it, style = Type.bold, color = c.fg, modifier = Modifier.padding(top = 10.dp)) }

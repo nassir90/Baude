@@ -10,10 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.Redo
-import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -406,7 +402,7 @@ fun MetaRows(text: String) {
             r()
         }
     }
-    val chevron: @Composable () -> Unit = { androidx.compose.material3.Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim) }
+    val chevron: @Composable () -> Unit = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) }
     o.optJSONArray("chats")?.let { rows ->
         boxed((0 until rows.length()).mapNotNull { rows.optJSONArray(it) }.map { r ->
             {
@@ -494,8 +490,8 @@ fun MetaAction(id: String) {
     val a = MetaTools.actions.firstOrNull { it.id == id } ?: return
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(if (a.undone.value) Wording.MetaActions.undone(action = a.said) else a.said, style = Type.caption, color = if (a.undone.value) c.dim else c.fg, modifier = Modifier.weight(1f))
-        if (a.undone.value) IconButton(Icons.AutoMirrored.Filled.Redo, Wording.Common.redo) { MetaTools.button(a, undo = false) }
-        else IconButton(Icons.AutoMirrored.Filled.Undo, Wording.Common.undo) { MetaTools.button(a, undo = true) }
+        if (a.undone.value) IconButton(Adwaita.EditRedo, Wording.Common.redo) { MetaTools.button(a, undo = false) }
+        else IconButton(Adwaita.EditUndo, Wording.Common.undo) { MetaTools.button(a, undo = true) }
     }
 }
 

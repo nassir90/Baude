@@ -15,8 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -240,10 +238,10 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     val offline = failed?.let { if (it in UNREACHED) Wording.BotMemory.cantConnect else Wording.BotMemory.couldntLoad }
     if (m.base == null) {
         when {
-            failed == null -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.noMemory, Wording.BotMemory.emptyText)
-            failed in UNREACHED -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.cantConnect.removeSuffix("."),
+            failed == null -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.noMemory, Wording.BotMemory.emptyText)
+            failed in UNREACHED -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.cantConnect.removeSuffix("."),
                 Wording.BotMemory.shownWhenBack)
-            else -> StatusPage(Icons.Filled.EditNote, Wording.BotMemory.couldntLoad.removeSuffix("."), failed)
+            else -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.couldntLoad.removeSuffix("."), failed)
         }
         return
     }

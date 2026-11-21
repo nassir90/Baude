@@ -23,18 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -213,18 +201,18 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             val on = !readOnly && !phoned && watch.status.value == "watching"
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, enabled = on && (now == null || now.back == true)) {
+            IconButton(Adwaita.GoPrevious, Wording.Browser.back, enabled = on && (now == null || now.back == true)) {
                 call(JSONObject().put("op", "navigate").put("url", "back")) }
-            IconButton(Icons.AutoMirrored.Filled.ArrowForward, Wording.Browser.forward, enabled = on && now?.forward == true) {
+            IconButton(Adwaita.GoNext, Wording.Browser.forward, enabled = on && now?.forward == true) {
                 call(JSONObject().put("op", "navigate").put("url", "forward")) }
             val loading = now?.loading == true
-            IconButton(if (loading) Icons.Filled.Close else Icons.Filled.Refresh, Wording.Browser.reload, enabled = on) {
+            IconButton(if (loading) Adwaita.WindowClose else Adwaita.ViewRefresh, Wording.Browser.reload, enabled = on) {
                 call(JSONObject().put("op", "navigate").put("url", "reload")) }
             Address(now?.url.orEmpty(), on, Modifier.weight(1f)) { call(JSONObject().put("op", "navigate").put("url", it)) }
-            IconButton(Icons.Filled.Add, Wording.Browser.newTab, enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
-            IconButton(Icons.Filled.Keyboard, "Type into the page", enabled = on,
+            IconButton(Adwaita.ListAdd, Wording.Browser.newTab, enabled = on) { call(JSONObject().put("op", "new_tab").put("url", "about:blank")) }
+            IconButton(Adwaita.InputKeyboard, "Type into the page", enabled = on,
                 background = if (typing) c.fg.copy(alpha = 0.10f) else null) { typing = !typing }
-            IconButton(if (readOnly) Icons.Filled.Lock else Icons.Filled.LockOpen, Wording.BotBrowser.readOnly,
+            IconButton(if (readOnly) Adwaita.ChangesPrevent else Adwaita.ChangesAllow, Wording.BotBrowser.readOnly,
                 background = if (readOnly) c.fg.copy(alpha = 0.10f) else null) {
                 readOnly = !readOnly
                 prefs.edit().putBoolean("ro:$sid", readOnly).apply()
@@ -242,7 +230,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
                     Text(if (label.length > 28) label.take(27) + "…" else label, style = Type.caption, color = c.fg, maxLines = 1,
                         modifier = Modifier.clickable { call(JSONObject().put("op", "select_tab").put("tab", id)) }
                             .padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp).widthIn(max = 180.dp))
-                    IconButton(Icons.Filled.Close, Wording.BotBrowser.closeTab) { call(JSONObject().put("op", "close_tab").put("tab", id)) }
+                    IconButton(Adwaita.WindowClose, Wording.BotBrowser.closeTab) { call(JSONObject().put("op", "close_tab").put("tab", id)) }
                 }
             }
         }
@@ -257,15 +245,15 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
             .padding(if (acting) 2.dp else 1.dp).onSizeChanged { picture = it }) {
             val bmp = watch.frame.value
             if (phoned) {
-                StatusPage(Icons.Filled.Web, Wording.BotBrowser.onPhoneTitle,
+                StatusPage(Adwaita.WebBrowser, Wording.BotBrowser.onPhoneTitle,
                     Wording.BotBrowser.onPhone(bot = name.ifBlank { Wording.BotBrowser.theBot }))
                 return@Box
             }
             if (bmp == null) {
                 when (watch.status.value) {
-                    "failed" -> StatusPage(Icons.Filled.Web, Wording.BotBrowser.couldntOpen, watch.why.value)
-                    "stopped" -> StatusPage(Icons.Filled.Web, Wording.BotBrowser.stopped, Wording.BotBrowser.restartsOnOpen)
-                    else -> StatusPage(Icons.Filled.Web, if (here) Wording.BotBrowser.connecting else Wording.BotBrowser.noPages)
+                    "failed" -> StatusPage(Adwaita.WebBrowser, Wording.BotBrowser.couldntOpen, watch.why.value)
+                    "stopped" -> StatusPage(Adwaita.WebBrowser, Wording.BotBrowser.stopped, Wording.BotBrowser.restartsOnOpen)
+                    else -> StatusPage(Adwaita.WebBrowser, if (here) Wording.BotBrowser.connecting else Wording.BotBrowser.noPages)
                 }
                 return@Box
             }
@@ -384,8 +372,8 @@ private fun TypeRow(enabled: Boolean, call: (JSONObject) -> Unit) {
                 keyboardActions = KeyboardActions(onSend = { call(JSONObject().put("op", "key").put("keys", "Enter")); text = "" }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus))
         }
-        IconButton(Icons.Filled.Backspace, "Backspace", enabled = enabled) { call(JSONObject().put("op", "key").put("keys", "Backspace")) }
-        IconButton(Icons.AutoMirrored.Filled.KeyboardReturn, "Enter", enabled = enabled) {
+        IconButton(Adwaita.EditClear, "Backspace", enabled = enabled) { call(JSONObject().put("op", "key").put("keys", "Backspace")) }
+        IconButton(Adwaita.Return, "Enter", enabled = enabled) {
             call(JSONObject().put("op", "key").put("keys", "Enter")); text = "" }
     }
 }

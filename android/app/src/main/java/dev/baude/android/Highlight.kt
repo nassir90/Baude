@@ -958,7 +958,7 @@ fun numberedSpans(text: String, path: String): List<Triple<Int, Int, Tok>> {
 }
 
 /** spans (in text) cut at its line ends: for each line, its (start, end, token) from the line's start. */
-private fun lineSpans(text: String, spans: List<Span>): List<List<Span>> {
+fun lineSpans(text: String, spans: List<Triple<Int, Int, Tok>>): List<List<Triple<Int, Int, Tok>>> {
     val starts = ArrayList<Int>()
     starts.add(0)
     for (i in text.indices) if (text[i] == '\n') starts.add(i + 1)

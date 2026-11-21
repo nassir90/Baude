@@ -156,7 +156,7 @@ data class Item(val hostId: String, val s: Msg.Session, val depth: Int) {
     val bot: Msg.BotListing? get() = s.bot
 }
 
-/** A section: a folder, a day, the Bots (no header) or the archived ones; top: its rows at depth 0, for its limit. */
+/** A section: a folder, a day, the Bots (no header) or the archived ones. */
 data class Section(val key: String, val label: String, val hostId: String?, val folder: String?, val rows: List<Item>,
                    val full: String = label)
 
@@ -310,15 +310,6 @@ fun sections(query: String): List<Section> {
     return out
 }
 
-/** The top-level rows a section shows before "Show N more", as Baude's (by date: all today's, 10 yesterday's, 5 of
- * an earlier day's; a folder's 8; the Bots' and archived ones', all). */
-private fun limit(key: String): Int = when {
-    key == "date:0" || key == "bots" || key == "archived" -> Int.MAX_VALUE
-    key == "date:1" -> 10
-    key.startsWith("date:") -> 5
-    else -> 8
-}
-
 /** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the sessions of every
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by date and pick
  * groups. */
@@ -332,7 +323,6 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     var query by rememberSaveable { mutableStateOf("") }
     var starting by remember { mutableStateOf<Starting?>(null) } // (New session's form: where it's from)
     var adding by remember { mutableStateOf(false) }
-    val more = remember { mutableStateListOf<String>() } // (sections shown whole this run: Show N more)
     val snack = remember { SnackbarHostState() }
     // New session: a draft on the host picked, in the folder it was last started in, with no form (Baude's new_chat)
     fun newSession() {
@@ -392,19 +382,11 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                     }
                 }
                 if (folded) continue
-                val tops = sec.rows.count { it.depth == 0 }
-                val cap = if (query.isNotBlank() || sec.key in more) Int.MAX_VALUE else limit(sec.key)
-                var seen = 0
-                val rows = sec.rows.filter { if (it.depth == 0) seen++; seen <= cap }
+                val rows = sec.rows
                 val through = through(rows.map { it.depth })
                 itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
                     if (item.bot != null && item.depth == 0 && !dead(item.hostId)) BotRow(item) { open(item.hostId, item.id) }
                     else SessionRow(item, through[i]) { open(item.hostId, item.id) }
-                }
-                if (tops > cap) item(key = "m:" + sec.key) { // (every row it hides counted, nested ones too)
-                    Text(Wording.Meta.showMore(n = sec.rows.size - rows.size), style = Type.body, color = c.dim,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { more.add(sec.key) }
-                            .padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
                 }
             }
         }

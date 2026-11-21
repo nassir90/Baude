@@ -90,6 +90,7 @@ BACKLOG = wire.CONSTANTS["BACKLOG"]  # (messages a model's files may have waitin
 # than this)
 LINKS = "links.json"
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
+FETCH_S = 300  # (a commit git here hasn't, to count how far behind something is: origin fetched at most this often)
 _COMMIT = re.compile(r"[0-9a-f]{7,64}")
 _PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
 
@@ -614,7 +615,7 @@ class Mesh:
         self.told = None  # (the endpoints what runs here was last told of: endpoints())
         # (how many commits each commit in the mesh lacks of the newest, by (commit, newest), as git here counts them:
         # None, it can't; counted off the lock, on a thread of its own, as they're first asked for: behind)
-        self.counted, self.counting = {}, queue.Queue()
+        self.counted, self.counting, self.retry = {}, queue.Queue(), {}
         threading.Thread(target=self._count, daemon=True, name="mesh-versions").start()
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
         try:
@@ -1237,7 +1238,8 @@ class Mesh:
             return None
         if commit == newest:
             return 0
-        if (commit, newest) not in self.counted:
+        if (commit, newest) not in self.counted or time.monotonic() >= self.retry.get((commit, newest), math.inf):
+            self.retry.pop((commit, newest), None)
             self.counted[(commit, newest)] = None
             self.counting.put((commit, newest))
         return self.counted[(commit, newest)]
@@ -1253,10 +1255,21 @@ class Mesh:
             return self.counted_behind(self.records[self.id]["rec"]["info"], self.newest())
 
     def _count(self):
-        """What behind asks for, counted by git here, one at a time: heads told of each it can count."""
+        """What behind asks for, counted by git here, one at a time: heads told of each it can count. One git here
+        can't count (it hasn't one of the commits: this checkout's never fetched them) is counted again once origin's
+        fetched, at most every FETCH_S; the checkout itself isn't moved."""
+        fetched = 0.0
         while not self.stopped.is_set():
             commit, newest = self.counting.get()
             n = selfupdate.git(selfupdate.HERE, "rev-list", "--count", f"{commit}..{newest}", timeout=10)
+            if n is None and time.monotonic() - fetched >= FETCH_S:
+                fetched = time.monotonic()
+                selfupdate.git(selfupdate.HERE, "fetch", "-q", "origin", timeout=120)
+                n = selfupdate.git(selfupdate.HERE, "rev-list", "--count", f"{commit}..{newest}", timeout=10)
+            if n is None:
+                with self.lock:  # (asked for again once origin can be fetched again)
+                    self.retry[(commit, newest)] = time.monotonic() + FETCH_S
+                continue
             if n is not None and n.isdigit():
                 with self.lock:
                     self.counted[(commit, newest)] = int(n)

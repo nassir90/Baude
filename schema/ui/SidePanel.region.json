@@ -162,11 +162,11 @@
       "shows": "Subagents, Processes and Side questions are lists of rows; each row can open as a detail page that fills the panel. The row animates into the page's header: its title, status and subtitle move to the header, and a back button (‹, go-previous) sits at the right end where the row's chevron or square was. Closing animates back into the row. Git (a commit's card) and Signal (a name's card, the reader) also have list to detail pages: Git and Signal's name cards slide in from the right with a back button at the left of the header. Back-button tooltips: \"All subagents\", \"All processes\", \"All side questions\", \"The log\" (Git), \"All names\" (Signal).",
       "copy": [
         "side_panel.all_subagents",
+        "side_panel.all_processes",
         "side_questions.all",
         "git.the_log"
       ],
       "text": [
-        "All processes",
         "All names"
       ],
       "actions": [

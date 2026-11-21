@@ -13,6 +13,12 @@
     "no_artifacts": "No artifacts yet",
     "subagent": "Subagent",
     "tool_uses": ".input {$n :number} .match $n one {{{$n} tool use}} * {{{$n} tool uses}}",
-    "tokens": "{$n} tokens"
+    "tokens": "{$n} tokens",
+    "no_output_yet": "(no output yet)",
+    "show_output": "Show this process's output",
+    "hide_output": "Hide this process's output",
+    "open_process": "Open this process in the whole panel",
+    "all_processes": "All processes",
+    "stop_requested": "stop requested for {$task}"
   }
 }

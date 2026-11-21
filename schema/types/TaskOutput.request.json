@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The last part of a background task's output file, one a session's transcript names. Answered as file.",
+  "properties": {
+    "op": {
+      "const": "task_output",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session whose task it is."
+    },
+    "path": {
+      "type": "string",
+      "description": "The output file a task's start or end named."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Its last this many bytes (4000 if absent)."
+    }
+  },
+  "required": ["op", "session", "path"],
+  "additionalProperties": false
+}

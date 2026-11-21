@@ -54,7 +54,7 @@ private fun taskTag(t: String, name: String) =
 fun taskNote(t: String): JSONObject = JSONObject().put("task_id", taskTag(t, "task-id"))
     .put("tool_use_id", taskTag(t, "tool-use-id")).put("status", taskTag(t, "status"))
     .put("summary", taskTag(t, "summary").orEmpty().ifBlank { Wording.TranscriptNotes.taskFinished })
-    .put("result", taskTag(t, "result").orEmpty())
+    .put("result", taskTag(t, "result").orEmpty()).put("output_file", taskTag(t, "output-file").orEmpty())
 
 /** What a background task's end line says (widgets.task_note_line): what it was, which one, how it ended; failed:
  * it went wrong. */

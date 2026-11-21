@@ -105,7 +105,7 @@ class Chat(hostId: String, sid: String) {
     var offset = -1L
     var reading = false
     var again = false
-    val sent = mutableStateListOf<Sent>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
+    val sent = mutableStateListOf<Outgoing>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
     val queued = mutableStateListOf<Queued>() // (written while a turn ran: sent when it ends)
     var queueUpto: Queued? = null             // (↑ on a queued message: the queue is sent up to it at the turn's end)
     var stopAsked = false                     // (the turn was stopped: its queue stays)
@@ -875,7 +875,7 @@ object Mesh {
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /** What you wrote (and the files you chose) sent to the chat at once, as Baude sends it: a user message for its
-     * agent, drawn as yours meanwhile (Sent). If its host says no, it's taken out and put back in the box, and why
+     * agent, drawn as yours meanwhile (Outgoing). If its host says no, it's taken out and put back in the box, and why
      * said. */
     fun send(chat: Chat, text: String, files: List<Picked>) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
@@ -896,7 +896,7 @@ object Mesh {
             val lines = parse(JSONObject().put("type", "user").put("uuid", id).put("message", msg.getJSONObject("message"))
                 .toString(), cutFirst = false).filter { it.kind == "you" }
             main.post {
-                val sent = Sent(id, lines, text, files)
+                val sent = Outgoing(id, lines, text, files)
                 chat.sent.add(sent)
                 c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
                     main.post {

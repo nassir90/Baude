@@ -40,7 +40,7 @@ import java.io.File
 
 /** A message you sent that its transcript doesn't show yet: drawn as the transcript will draw it (lines), its text and
  * files kept to put back in the box if its host says no. */
-class Sent(val id: String, val lines: List<Line>, val text: String, val files: List<Picked>)
+class Outgoing(val id: String, val lines: List<Line>, val text: String, val files: List<Picked>)
 
 /** A message written while a turn runs, queued under the chat. */
 class Queued(val text: String, val files: List<Picked>)

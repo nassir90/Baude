@@ -74,6 +74,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
             else if (opened.isNull("transcript")) standIn(opened)
             else transcript(opened.getString("transcript"), sc.optInt("lines", -1))).toByteArray()
+        SignalLinks.open.value = null
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))

@@ -101,7 +101,7 @@ object RefIcons {
     const val slot = SLOT
 
     @Composable
-    fun Draw(name: String, tint: Color, size: Dp = 16.dp) {
+    fun Draw(name: String, tint: Color, size: Dp = 16.dp.icon) {
         val logo = LOGOS[name] ?: return
         val color = own(name) ?: tint
         Canvas(Modifier.size(size).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
@@ -117,7 +117,7 @@ object RefIcons {
     val inline: Map<String, InlineTextContent> by lazy {
         LOGOS.keys.flatMap { n -> listOf("ok", "stale").map { st -> n to st } }.associate { (n, st) ->
             "ref-icon-$n-$st" to InlineTextContent(Placeholder(1.em, 1.em, PlaceholderVerticalAlign.TextCenter)) {
-                Draw(n, if (st == "stale") Tokens.Signal.stale else LocalBaude.current.accent, 16.dp)
+                Draw(n, if (st == "stale") Tokens.Signal.stale else LocalBaude.current.accent, 16.dp.icon)
             }
         }
     }

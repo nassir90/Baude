@@ -161,7 +161,7 @@ private fun NamesPopover(chat: Chat, surface: String) {
                     .padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.weight(0.4f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        RefIcons.Draw(refIcon(r.kind, r.found, listOf(role)) ?: "code", c.fg, 16.dp)
+                        RefIcons.Draw(refIcon(r.kind, r.found, listOf(role)) ?: "code", c.fg, 16.dp.icon)
                         Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(role.replaceFirstChar { it.uppercase() }, style = Type.body, color = c.dim, maxLines = 1,

@@ -34,8 +34,9 @@ private class HostCode(val id: String, val name: String, val daemon: Code, val h
 private fun Number?.long(): Long? = this?.toLong()
 
 /** The mesh as your first host that's up says it is (widgets.mesh_versions): (the newest code's commit and when it
- * was made, or null; the hosts, that one first, each once), or null with none up. */
-private fun meshVersions(): Pair<Pair<String, Long?>?, List<HostCode>>? {
+ * was made, or null; the hosts, that one first, each once; the hosts in the mesh not reached now, as (id, name)), or
+ * null with none up. */
+private fun meshVersions(): Triple<Pair<String, Long?>?, List<HostCode>, List<Pair<String, String>>>? {
     val info = Mesh.versions() ?: return null
     fun heads(hs: List<Msg.Head>?) = hs.orEmpty().map { (it.client ?: "") to Code(it.commit, it.made.long(), it.behind.long()) }
     val hosts = (listOf(HostCode(info.id.orEmpty(), info.name ?: info.id.orEmpty().take(8),
@@ -44,10 +45,12 @@ private fun meshVersions(): Pair<Pair<String, Long?>?, List<HostCode>>? {
             HostCode(m.id.orEmpty(), m.name ?: m.id.orEmpty().take(8),
                 Code(m.commit, m.made.long(), m.behind.long()), heads(m.heads))
         }).distinctBy { it.id }
-    val newest = info.mesh?.newest ?: return null to hosts
+    val seen = hosts.map { it.id }.toSet()
+    val away = info.mesh?.gone.orEmpty().filter { it.id !in seen }.map { it.id.orEmpty() to (it.name ?: it.id.orEmpty().take(8)) }
+    val newest = info.mesh?.newest ?: return Triple(null, hosts, away)
     val made = hosts.flatMap { listOf(it.daemon) + it.heads.map { h -> h.second } }
         .firstOrNull { it.commit == newest && it.made != null }?.made
-    return (newest to made) to hosts
+    return Triple(newest to made, hosts, away)
 }
 
 /** Where a daemon's or an app's code stands against the newest (widgets.version_standing): (newest, behind, older,
@@ -86,7 +89,7 @@ fun MeshScreen(back: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                 return@Column
             }
-            val (newest, hosts) = got
+            val (newest, hosts, away) = got
             for (h in hosts) {
                 Heading(h.name)
                 BoxedList(listOf(Wording.HostMenu.daemon to h.daemon) + h.heads.map { clientName(it.first) to it.second }, "") { (title, code) ->
@@ -101,6 +104,11 @@ fun MeshScreen(back: () -> Unit) {
                             color = if (kind == "newest") c.dim else c.warning, maxLines = 1, modifier = Modifier.width(150.dp))
                     }
                 }
+            }
+            for ((_, name) in away) {
+                Heading(name)
+                Text(Wording.Hosts.down(host = name), style = Type.caption, color = c.dim,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
             }
         }
     }

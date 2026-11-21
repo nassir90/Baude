@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "fixes' answer: list {repo, items, can_write, locations}, or an error (gh's, or what was asked for); shot {data}; the rest {}.",
+  "properties": {
+    "op": {
+      "const": "fixes",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was done."
+    },
+    "error": {
+      "type": "string",
+      "description": "What went wrong."
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "list: where feedback is read from (owner/name); null: GitHub isn't connected here."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "list: the issues and where each stands, in the order they're listed: {number, key, issue_location, title, body, author, url, created, updated (seconds), status (open, working, ready, merged, rejected, closed), thread [{author, at, text, mark {state, round, machine, shots [{label, before, after}]} or null, trusted}], rounds, working {machine, round, at} or null, here, error, pr {number, url, state, head, sha, cross} or null}."
+    },
+    "can_write": {
+      "type": "boolean",
+      "description": "list: whether you can merge and fix on it."
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "list: the repositories the issues are on."
+    },
+    "data": {
+      "type": "string",
+      "description": "shot: the image's PNG, base64."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

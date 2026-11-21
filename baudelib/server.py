@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, wording, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, hostfixes, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, wording, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -1218,11 +1218,13 @@ class Server:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
             return None
-        if op in ("list_dir", "git", "signal_names"):  # (a session's folder read for a head elsewhere: hostfiles; on a
+        if op in ("list_dir", "git", "signal_names", "fixes"):  # (a session's folder read for a head elsewhere: hostfiles; on a
             def read():                                  # thread of its own, as git may take a while)
                 try:
                     if op == "list_dir":
                         reply("dir", **hostfiles.list_dir(self, msg.get("path")))
+                    elif op == "fixes":
+                        reply(op, **hostfixes.answer(self, msg))
                     else:
                         reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
                 except (ValueError, OSError) as e:

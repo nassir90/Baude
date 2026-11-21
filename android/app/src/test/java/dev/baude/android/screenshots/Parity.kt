@@ -21,7 +21,11 @@ import dev.baude.android.ChatShell
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
+import dev.baude.android.BotSettings
 import dev.baude.android.FeedbackScreen
+import dev.baude.android.Fixes
+import dev.baude.android.FixesScreen
+import dev.baude.android.Item
 import dev.baude.android.Mesh
 import dev.baude.android.Queued
 import dev.baude.android.Meta
@@ -169,11 +173,26 @@ abstract class Parity(private val theme: String, private val scene: String) {
             }
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
+            // (what Baude answers with its own functions: tests/parity/host.py, a throwaway process for each request)
+            "fixes" -> {
+                val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
+                p.outputStream.use { it.write(msg.toString().toByteArray()) }
+                val out = p.inputStream.readBytes().toString(Charsets.UTF_8)
+                p.waitFor()
+                return JSONObject(out)
+            }
         }
         return null
     }
 
     @After fun down() {
+        Fixes.items = emptyList()
+        Fixes.repo = null
+        Fixes.error = null
+        Fixes.readAt = 0
+        Fixes.lastRead = 0
+        Fixes.firstRead = true
+        Fixes.loading = false
         Meta.host.value = null
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -232,6 +251,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     hold(sc.getString("queued"))
                 }
             }
+            name == "bot-settings" -> show {
+                BotSettings(Item(host.getString("id"), Mesh.sessions.getValue(host.getString("id")).first(), 0)) {}
+            }
+            name == "feedback-ongoing" -> show { FixesScreen({}, {}, show = "12") }
+            name == "feedback-ongoing-list" -> show { FixesScreen({}, {}) }
             name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }

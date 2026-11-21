@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 import argparse  # noqa: E402
 import re  # noqa: E402
 import time  # noqa: E402
+import types  # noqa: E402
 
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
@@ -201,6 +202,17 @@ def build(app, sc):
         win = open_chat(app, sc)
         update.changelog_dialog().present(win)
         return win
+    if name == "bot-settings":
+        win = open_chat(app, sc)
+        title = fixture("sessions.json")["sessions"][0]["title"]
+        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        row = S.sidebar_row(win, title)
+        win.sidebar.ask_bot({**row.info, "remote": types.SimpleNamespace(request=lambda *a, **k: None)})
+        return win
+    if name.startswith("feedback-ongoing"):
+        with open(os.path.join(FIX, "gallery", "docs", "flow.png"), "rb") as f:
+            png = f.read()
+        return S.fixes_tab(app, shots={"12/1/1-before.png": png, "12/1/1-after.png": png})[0]
     return None
 
 

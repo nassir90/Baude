@@ -208,6 +208,8 @@ object Mesh {
     }
 
     fun removeHost(host: Host) {
+        val machine = conns[host.id]?.info?.id?.takeIf(::isId) ?: HostStore.machine(app, host)
+        if (machine != null) HostStore.setRemoved(app, machine, true) // (nor reached again as a member another host lists)
         hosts.removeAll { it.id == host.id }
         HostStore.save(app, hosts)
         if (hosts.none { it.address == host.address && it.port == host.port }) HostStore.forget(app, host)
@@ -218,6 +220,30 @@ object Mesh {
         moved.values.removeAll { it == host.id }
         meshed()
         Shares.look()
+    }
+
+    /** A host's or a member's name here (Mesh's Rename): a host's, as it was added; a member's, kept by its id. Empty:
+     * its own again. */
+    fun rename(id: String, name: String) {
+        val i = hosts.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            hosts[i] = hosts[i].copy(name = name.trim())
+            HostStore.save(app, hosts)
+        } else HostStore.setAlias(app, id.removePrefix("mesh:"), name)
+        tick.value++
+    }
+
+    /** A host or a member removed here (Mesh's Remove): a host of yours, as Hosts' Remove does; a member, not reached
+     * or listed here from now on, even while a host of yours lists it, till its machine's added as a host. Nothing on
+     * it changes. */
+    fun remove(id: String) {
+        val h = hosts.firstOrNull { it.id == id }
+        if (h != null) return removeHost(h)
+        val member = id.removePrefix("mesh:")
+        HostStore.setRemoved(app, member, true)
+        conns["mesh:$member"]?.let { drop(it) }
+        members.remove(member)
+        tick.value++
     }
 
     fun connect(host: Host) {
@@ -232,9 +258,11 @@ object Mesh {
         c.start()
     }
 
-    /** Where a connection's id is, as you'd say it: a host's name, or a member's. */
+    /** Where a connection's id is, as you'd say it: a host's name, or a member's (the one it's given here, if it's
+     * been renamed). */
     fun label(id: String): String {
-        conns[id]?.host?.let { return it.label }
+        (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { return it.label }
+        HostStore.alias(app, id.removePrefix("mesh:"))?.let { return it }
         val m = members[id.removePrefix("mesh:")]?.first
         return m?.name?.ifBlank { null } ?: conns[id]?.info?.name?.ifBlank { null } ?: "a host"
     }
@@ -257,6 +285,7 @@ object Mesh {
             HostStore.machine(app, h) == m.id.orEmpty() || h.address.lowercase() in listOf(m.host, m.bonjour, m.name)
                 .mapNotNull { it.orEmpty().lowercase().ifBlank { null } }.flatMap { listOf(it, "$it.local") }
         }                                                                    // or the names its record gives it)
+        val removed = HostStore.removed(app)
         val best = HashMap<String, Pair<Msg.Member, Connection>>()
         for (h in hosts) {
             val c = conns[h.id]?.takeIf { it.state == "up" } ?: continue
@@ -264,7 +293,8 @@ object Mesh {
             for (m in c.info?.mesh?.members.orEmpty()) {
                 val id = m.id?.takeIf(::isId) ?: continue
                 seen.add(id)
-                if (id in known || heldBy(m) != null || id == PhoneHost.id) continue // (this phone, as the mesh has it)
+                if (id in known || heldBy(m) != null || id == PhoneHost.id || id in removed) continue // (this phone, as
+                // the mesh has it; one removed here)
                 val now = best[id]
                 if (now == null || (m.hops?.toInt() ?: 99) < (now.first.hops?.toInt() ?: 99)) best[id] = m to c
             }
@@ -330,7 +360,12 @@ object Mesh {
         tick.value++
         PhoneBrowser.changed(c)
         if (c.state == "up") {
-            c.host?.let { h -> c.info?.id?.takeIf(::isId)?.let { HostStore.setMachine(app, h, it) } }
+            c.host?.let { h ->
+                c.info?.id?.takeIf(::isId)?.let {
+                    HostStore.setMachine(app, h, it)
+                    if (it in HostStore.removed(app)) HostStore.setRemoved(app, it, false) // (added as a host again)
+                }
+            }
             if (sessions[c.id] != null) catchUp.add(c.id)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
@@ -373,6 +408,14 @@ object Mesh {
 
     /** A session as its host lists it, or null. */
     fun session(hostId: String, sid: String): Msg.Session? = sessions[hostId]?.firstOrNull { it.id == sid }
+
+    /** Every host and member of the mesh known here, up or not (as Baude's New session dropdown lists them), that takes
+     * op if it's given and it's up (takes): (id, label, whether it's up), your hosts first. */
+    fun known(op: String? = null): List<Triple<String, String, Boolean>> = (hosts.map { it.id } + conns.keys).distinct()
+        .map { it to (conns[it]?.state == "up") }
+        .filter { (id, up) -> !up || op == null || takes(id, op) }
+        .sortedWith(compareBy({ conns[it.first]?.place is Place.Member }, { label(it.first).lowercase() }))
+        .map { (id, up) -> Triple(id, label(id), up) }
 
     /** Every connection that's up, as a host or a member of the mesh, that takes op if it's given (takes): (id,
      * label), your hosts first. */
@@ -656,6 +699,7 @@ object Mesh {
                     chat.offset = next
                     for (line in lines) {
                         when (line.kind) {
+                            "cost" -> line.text.toDoubleOrNull()?.let { chat.chrome.cost.value = it; chat.chrome.costSeen = it }
                             "use", "result", "task", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
@@ -979,6 +1023,10 @@ fun parse(text: String, cutFirst: Boolean, sidechain: Boolean = false): List<Lin
         val type = o.optString("type")
         if (type == "last-prompt" && o.optBoolean("rewound")) {
             out.add(Line("rewind", "", if (o.isNull("leafUuid")) null else o.optString("leafUuid")))
+            continue
+        }
+        if (type == "cost-state") { // (what claude had spent on it when it last exited: a resume counts on from it)
+            out.add(Line("cost", o.optDouble("totalCostUSD", 0.0).toString()))
             continue
         }
         val uuid = if (o.isNull("uuid")) null else o.optString("uuid").ifBlank { null }

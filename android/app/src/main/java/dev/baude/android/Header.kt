@@ -345,10 +345,10 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
 fun middleCut(s: String) = if (s.length > 24) s.take(11) + "…" + s.takeLast(12) else s
 
 /** A dropdown as the header bar's (a flat button, its choice and ▾): its choices (label, value), the one picked
- * checked. */
+ * checked, those dimmed greyed and not to be picked. */
 @Composable
 fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picked: String?, enabled: Boolean = true,
-           pick: (String) -> Unit) {
+           dimmed: Set<String> = emptySet(), pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -360,7 +360,7 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp))
         }
         Popover(open, { open = false }) {
-            for ((label, value) in choices) MenuChoice(label, value == picked) { open = false; pick(value) }
+            for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed) { open = false; pick(value) }
         }
     }
 }

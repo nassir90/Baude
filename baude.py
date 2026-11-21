@@ -7938,7 +7938,7 @@ def chat_group(info, assigned=None):
 
 
 def remote_name(r):
-    return r.info.get("name") or r.host
+    return r.label
 
 
 def stopping_said(r):
@@ -19188,6 +19188,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             st = None
         live = st is not None and time.time() - st.st_mtime < LIVE_SECONDS
         self.total_cost = session_cost(path)  # (claude's, as it last exited)
+        self.update_status()
         self.load_history(path, live=live)
         self.resume_pending, self.view_path = True, path
         self.tail.start(path, st.st_size if st else 0)

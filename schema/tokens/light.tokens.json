@@ -13,8 +13,6 @@
     "accent_bg_color": {"$value": "{accent.blue}"},
     "accent_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
     "accent_color": {"$value": {"colorSpace": "srgb", "components": [0.0157, 0.3804, 0.7451], "hex": "#0461be"}},
-    "destructive_bg_color": {"$value": {"colorSpace": "srgb", "components": [0.8784, 0.1059, 0.1412], "hex": "#e01b24"}},
-    "destructive_fg_color": {"$value": {"colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff"}},
     "destructive_color": {"$value": {"colorSpace": "srgb", "components": [0.7647, 0, 0], "hex": "#c30000"}},
     "error_color": {"$value": {"colorSpace": "srgb", "components": [0.7647, 0, 0], "hex": "#c30000"}},
     "warning_color": {"$value": {"colorSpace": "srgb", "components": [0.5647, 0.3294, 0], "hex": "#905400"}},

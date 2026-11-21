@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -210,28 +211,68 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
     val model = session?.model?.ifBlank { null }
     val cost = ch.cost.value
     val shown = contextShown(chat)
-    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        WorkingDots(working)
-        Text(Mesh.label(at), style = Type.mono.copy(fontSize = Type.caption.fontSize), color = text, maxLines = 1,
-            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.fg.copy(alpha = 0.10f)).padding(horizontal = 5.dp)
-                .tip(if (address != null) Wording.StatusBar.hostTipAt(address = address) else Wording.StatusBar.hostTip))
+    StatusRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
+        if (working) Box(Modifier.layoutId("dots")) { WorkingDots(working) }
+        Box(Modifier.layoutId("host")) {
+            Text(Mesh.label(at), style = Type.mono.copy(fontSize = Type.caption.fontSize), color = text, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.fg.copy(alpha = 0.10f)).padding(horizontal = 5.dp)
+                    .tip(if (address != null) Wording.StatusBar.hostTipAt(address = address) else Wording.StatusBar.hostTip))
+        }
         val cwd = session?.cwd.orEmpty()
-        Text(shortPath(at, cwd) + "   " + ch.lastTurn.value, style = Type.caption, color = text, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).tip(cwd))
+        Box(Modifier.layoutId("folder")) {
+            Text(shortPath(at, cwd) + "   " + ch.lastTurn.value, style = Type.caption, color = text, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.tip(cwd))
+        }
         if (running.isNotEmpty()) {
             val parts = listOfNotNull(if (procs > 0) Wording.StatusBar.processes(n = procs) else null,
                 if (agents > 0) Wording.StatusBar.subagents(n = agents) else null)
             val what = running.joinToString("\n") { it.str("description") ?: it.optString("task_id") }
-            Text(Wording.StatusBar.running(tasks = parts.joinToString(" · ")),
-                style = Type.caption.copy(fontSize = Type.caption.fontSize * 0.95f), color = text, maxLines = 1,
-                modifier = Modifier.padding(horizontal = 8.dp).tip(what + "\n" + Wording.StatusBar.openPanel) {
-                    openPage(if (agents > 0) "agents" else "processes")
-                })
+            Box(Modifier.layoutId("tasks")) {
+                Text(Wording.StatusBar.running(tasks = parts.joinToString(" · ")),
+                    style = Type.caption.copy(fontSize = Type.caption.fontSize * 0.95f), color = text, maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 8.dp).tip(what + "\n" + Wording.StatusBar.openPanel) {
+                        openPage(if (agents > 0) "agents" else "processes")
+                    })
+            }
         }
-        Text(if (cost == 0.0 && runsFree(model)) Wording.StatusBar.costLocal
-            else Wording.StatusBar.cost(cost = String.format(Locale.ROOT, "%.4f", cost)),
-            style = Type.caption, color = text, maxLines = 1, modifier = Modifier.tip(Wording.StatusBar.costTip))
-        ContextMeter(shown, ch.outgrown.value, text)
+        Box(Modifier.layoutId("cost")) {
+            Text(if (cost == 0.0 && runsFree(model)) Wording.StatusBar.costLocal
+                else Wording.StatusBar.cost(cost = String.format(Locale.ROOT, "%.4f", cost)),
+                style = Type.caption, color = text, maxLines = 1, modifier = Modifier.tip(Wording.StatusBar.costTip))
+        }
+        Box(Modifier.layoutId("context")) { ContextMeter(shown, ch.outgrown.value, text) }
+    }
+}
+
+/** The status bar's row: parts 12 apart, never wider than the bar, the cost and the context meter at its right.
+ * What doesn't fit gives way: the folder and the turn's figures first (they have what room is left, and none when
+ * it's short), then the tasks button, the host, the working dots; the cost and the meter never do. */
+@Composable
+private fun StatusRow(modifier: Modifier, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content, modifier) { measurables, k ->
+        val gap = 12.dp.roundToPx()
+        val loose = androidx.compose.ui.unit.Constraints()
+        val by = measurables.associateBy { it.layoutId as String }
+        val kept = by.filterKeys { it != "folder" }.mapValues { it.value.measure(loose) }.toMutableMap()
+        fun width() = kept.values.sumOf { it.width } + gap * (kept.size - 1)
+        for (id in listOf("tasks", "host", "dots")) if (width() > k.maxWidth) kept.remove(id)
+        val room = k.maxWidth - width() - gap * 2
+        val folder = by["folder"]?.takeIf { room >= 40.dp.roundToPx() }
+            ?.measure(androidx.compose.ui.unit.Constraints(maxWidth = room))
+        val left = listOf("dots", "host").mapNotNull { kept[it] } + listOfNotNull(folder) + listOfNotNull(kept["tasks"])
+        val right = listOfNotNull(kept["cost"], kept["context"])
+        val h = (left + right).maxOfOrNull { it.height } ?: 0
+        layout(k.maxWidth, h) {
+            var x = 0
+            for (p in left) {
+                p.placeRelative(x, (h - p.height) / 2)
+                x += p.width + gap
+            }
+            x = k.maxWidth - right.sumOf { it.width } - gap * (right.size - 1)
+            for (p in right) {
+                p.placeRelative(x, (h - p.height) / 2)
+                x += p.width + gap
+            }
+        }
     }
 }

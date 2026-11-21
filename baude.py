@@ -7809,7 +7809,7 @@ def turn_said(msg):
     """A turn's result (its stream-json result message), for a notification: what it said last, or that it ended."""
     said = (msg.get("result") or "").strip()
     if msg.get("is_error"):
-        return wording.say("meta.ended_error", error=said or msg.get("subtype") or "unknown")
+        return wording.say("meta.ended_error", error=said or msg.get("subtype") or wording.say("meta.error_unknown"))
     return said or wording.say("meta.finished")
 
 

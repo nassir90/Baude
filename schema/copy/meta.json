@@ -20,6 +20,7 @@
     "couldnt_run": "Couldn't run {$model} ({$why}).",
     "ended_error": "Ended with an error: {$error}",
     "finished": "Finished",
+    "error_unknown": "unknown",
     "changes": ".input {$n :number} .match $n one {{{$n} change in the left bar}} * {{{$n} changes in the left bar}}",
     "keep": "Keep",
     "tool_changes": "Changes",

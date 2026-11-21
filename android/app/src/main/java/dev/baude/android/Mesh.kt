@@ -895,9 +895,9 @@ object Mesh {
     private fun channel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = app.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH)
-                .apply { lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE }) // (locked: who, not what)
-            nm.createNotificationChannel(NotificationChannel(LINKED, "Connected", NotificationManager.IMPORTANCE_MIN))
+            nm.createNotificationChannel(NotificationChannel(MESSAGES, Wording.SharedSettings.notifications, NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = Wording.SharedSettings.notificationsSubtitle; lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE }) // (locked: who, not what)
+            nm.createNotificationChannel(NotificationChannel(LINKED, Wording.BotBrowser.title, NotificationManager.IMPORTANCE_MIN))
         }
     }
 
@@ -914,7 +914,7 @@ object Mesh {
         val contact = contact(c.id, sid) ?: return
         val result = turn.result.orEmpty().trim()
         when {
-            turn.isError == true -> notify(contact, "Couldn't finish" + if (result.isNotEmpty()) ": $result" else "")
+            turn.isError == true -> notify(contact, Wording.Meta.endedError(error = result.ifEmpty { Wording.Meta.errorUnknown }))
             result.isNotEmpty() -> notify(contact, result)
             else -> main.postDelayed({ // (no result said: its transcript's end, once its new size is listed)
                 val size = session(c.id, sid)?.size?.toLong() ?: 0
@@ -980,7 +980,7 @@ object Mesh {
             .setPublicVersion(NotificationCompat.Builder(app, MESSAGES)
                 .setSmallIcon(R.drawable.ic_baude)
                 .setContentTitle(contact.name)
-                .setContentText(if (tag != null) Wording.Asks.waiting else "New message")
+                .setContentText(if (tag != null) Wording.Asks.waiting else Wording.Meta.finished)
                 .build())
             .build()
         try {

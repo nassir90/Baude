@@ -1,5 +1,6 @@
 package dev.baude.android
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,8 +52,8 @@ private const val TOOL_DOCS_PAGE = "https://code.claude.com/docs/en/tools-refere
 
 /** Signal's names for the chat, as Baude's Signal page lists them (SignalPage): those its replies named that the folder's
  * glossary has, by kind, each how it stands (linked, several matches, looking up, not found, stale) and what it is; a
- * name opens its card. Read from its host (signal_names) each time the page is shown: nothing runs here, so what looks
- * names up, and the reader, are drawn as the desktop has them and left off. */
+ * name opens its card. Read from its host (signal_names) each time the page is shown. The reader's, language servers'
+ * and tools' switches, and the search-again buttons, are drawn as the desktop has them and dimmed. */
 @Composable
 fun SignalPage(hostId: String, sid: String, here: Boolean) {
     val c = LocalBaude.current
@@ -76,13 +77,14 @@ fun SignalPage(hostId: String, sid: String, here: Boolean) {
     }
     val strong = SignalNames.strong()
     val texts = SignalNames.texts()
-    val shown = g?.refs.orEmpty().filter { r ->
+    val shown = remember(g, filter, strong) { g?.refs.orEmpty().filter { r ->
         val surface = r.surface.orEmpty()
         val keep = !r.found.optBoolean("plain") && !refCloudProvider(surface) &&
             !((r.status == NOT_FOUND || r.status == PENDING) && surface !in strong)
         val f = filter.trim().lowercase()
         keep && (f.isEmpty() || surface.lowercase().contains(f) || r.canonical.orEmpty().lowercase().contains(f))
-    }
+    } }
+    val firsts = remember(texts, shown) { shown.associate { r -> r.surface.orEmpty() to texts.indexOf(r.surface.orEmpty()).let { if (it < 0) Int.MAX_VALUE else it } } }
     Scrolled {
         Row(Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             SearchField(filter, { filter = it }, Wording.Signal.filter, Modifier.weight(1f))
@@ -105,7 +107,7 @@ fun SignalPage(hostId: String, sid: String, here: Boolean) {
         val by = shown.groupBy { refGroup(it) }
         for (group in GROUP_ORDER) {
             val rows = by[group] ?: continue
-            val first = { r: Msg.SignalRef -> texts.indexOf(r.surface.orEmpty()).let { if (it < 0) Int.MAX_VALUE else it } }
+            val first = { r: Msg.SignalRef -> firsts[r.surface.orEmpty()] ?: Int.MAX_VALUE }
             Text(if (group == "pending") Wording.Signal.lookingUpGroup else KINDS[group] ?: group, style = Type.folder, color = c.dim,
                 modifier = Modifier.padding(start = 14.dp, top = 8.dp))
             BoxedList(rows.sortedWith(compareBy({ first(it) }, { it.surface.orEmpty().lowercase() })), "") { r ->
@@ -121,8 +123,7 @@ private fun pretty(path: String, hostId: String): String {
     return if (path == home || path.startsWith("$home/")) "~" + path.removePrefix(home) else path
 }
 
-/** What Signal may use, as toggle buttons (the reader's model, LSP, Tools) and the switch for the chat: all drawn as the
- * desktop has them, and left as they are, for nothing runs here. */
+/** What Signal may use, as toggle buttons (the reader's model, LSP, Tools) and the switch for the chat, dimmed. */
 @Composable
 private fun OptionsRow() {
     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -178,6 +179,7 @@ private fun NameCard(hostId: String, r: Msg.SignalRef, root: String?, back: () -
     val c = LocalBaude.current
     val d = r.found
     val surface = r.surface.orEmpty()
+    BackHandler(onBack = back)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -212,7 +214,7 @@ private fun NameCard(hostId: String, r: Msg.SignalRef, root: String?, back: () -
                 }
                 if ((r.kind == "commit" || r.kind == "branch") && r.status == RESOLVED) Box(Modifier.semantics {
                     contentDescription = Wording.Signal.showInGitTip }) {
-                    Button(Wording.Signal.showInGit) { SignalLinks.openPage("git") }
+                    Button(Wording.Signal.showInGit) { SignalLinks.showInGit(r) }
                 }
             }
         }

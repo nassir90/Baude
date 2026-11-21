@@ -202,6 +202,8 @@ fun GitPage(hostId: String, sid: String) {
     val commits = remember(cwd) { mutableStateListOf<Msg.Commit>() }
     var why by remember(cwd) { mutableStateOf<String?>(null) }
     var commit by remember(cwd) { mutableStateOf<String?>(null) }
+    val want = GitLinks.want.value // (a Signal link's commit: shown here)
+    LaunchedEffect(want) { if (want != null) { commit = want; GitLinks.want.value = null } }
     var again by remember { mutableStateOf(0) }
     fun more(skip: Int) = Mesh.ask(hostId, Msg.Git(what = "log", cwd = cwd, limit = 50, skip = skip).json()) { r ->
         val g = Msg.GitReply.from(r)

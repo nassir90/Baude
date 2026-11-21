@@ -20,7 +20,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 
 /** The header's chain-link button (BaudeWindow.signal_btn) and its dropdown: this chat's two Signal switches. Lit while
- * its links are shown; Signal never runs on the phone, so Activate Signal stays off. */
+ * its links are shown. Show links is the chat's own switch; Activate Signal is drawn off and dimmed. */
 @Composable
 fun SignalButton(hostId: String, sid: String) {
     val c = LocalBaude.current

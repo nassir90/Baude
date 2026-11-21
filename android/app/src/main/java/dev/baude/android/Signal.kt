@@ -5,8 +5,8 @@ import android.os.Looper
 import androidx.compose.runtime.mutableIntStateOf
 import org.json.JSONObject
 
-// Signal on the phone is the desktop's halted Signal: its links are drawn from the names the folder's glossary already
-// has (signal_names), kept per chat. What looks names up runs only where Baude does.
+// Signal's links are drawn from the names the folder's glossary has (signal_names), as the desktop draws them with
+// Signal not running, and kept per chat.
 
 /** The wire's name, as the Signal page's ref has it: its data (what was found) and its locations, never null. */
 val Msg.SignalRef.found: JSONObject get() = data ?: JSONObject()
@@ -43,8 +43,7 @@ const val STALE = "stale"
 // ------------------------------------------------------------------------------------------------------ per chat --
 
 /** Each chat's two Signal switches, (on, links), as the desktop keeps them (BaudeWindow.chat_signal): a new chat's are
- * (not activated, links shown); the last 500 changed are kept. On the phone `on` stays off: nothing here looks names
- * up. version changes as one is set: what's drawn from it is drawn again. */
+ * (not activated, links shown); the last 500 changed are kept. version changes as one is set: what's drawn from it is drawn again. */
 object SignalChats {
     val version = mutableIntStateOf(0)
     private const val KEPT = 500
@@ -105,7 +104,35 @@ object SignalNames {
     }
 
     /** The chat's replies' texts, joined: where a name first comes in them says its place in the Signal page. */
-    fun texts(): String = chat?.lines?.filter { it.kind == "bot" }?.joinToString("\n") { it.text }.orEmpty()
+    fun texts(): String {
+        memo()
+        return joined
+    }
+
+    private var joined = ""
+    private var strongNames = emptySet<String>()
+    private var memoOf: Chat? = null
+    private var memoKey = -1
+
+    /** texts and strong, read from the chat's lines again only when they've grown or their last one has changed. */
+    private fun memo() {
+        val c = chat
+        val key = if (c == null) -1 else c.lines.size * 31 + (c.lines.lastOrNull()?.text?.length ?: 0)
+        if (c === memoOf && key == memoKey) return
+        memoOf = c
+        memoKey = key
+        val replies = c?.lines?.filter { it.kind == "bot" }.orEmpty()
+        joined = replies.joinToString("\n") { it.text }
+        strongNames = replies.flatMap { l -> BACKTICKED.findAll(l.text).map { refKey(it.groupValues[1]) }.toList() }.toSet()
+    }
+
+    /** Every name read is forgotten (a new chat or scene starts with none). */
+    fun forget() {
+        held.clear()
+        asked.clear()
+        memoOf = null
+        version.intValue++
+    }
 
     /** Ask the host again for the chat's names. */
     fun read(hostId: String, sid: String) {
@@ -141,8 +168,8 @@ object SignalNames {
 
     /** The names a chat's replies backtick (Signal.strong): they're linked whatever they came to. */
     fun strong(): Set<String> {
-        val c = chat ?: return emptySet()
-        return c.lines.filter { it.kind == "bot" }.flatMap { l -> BACKTICKED.findAll(l.text).map { refKey(it.groupValues[1]) }.toList() }.toSet()
+        memo()
+        return strongNames
     }
 
     /** Hear the chat's turns end (its names are read again); the way to stop hearing. */
@@ -266,7 +293,7 @@ fun refGroup(r: Msg.SignalRef): String {
         else r.kind.orEmpty()
 }
 
-/** baude.ref_status_text: the status line of a popover or a card (the late-lookup note needs a time the phone lacks). */
+/** baude.ref_status_text: the status line of a popover or a card (a resolved name's summary ends in a full stop). */
 fun refStatusText(r: Msg.SignalRef): String = when (r.status) {
     PENDING -> Wording.Lookup.lookingItUp
     NOT_FOUND -> Wording.Signal.statusNotFound(reason = r.reason.orEmpty())
@@ -313,7 +340,7 @@ val REF_PLAIN = Regex("(?<![$WORD/.@`$-])(?:" +
 
 private val BARE_NUMBER = Regex("#\\d+")
 
-/** widgets.ref_markup: inner as a Signal link, drawn by how far its lookup got (no reader decisions, no pill). */
+/** widgets.ref_markup: inner as a Signal link, drawn by how far its lookup got: its logo, then the link. */
 private fun refMarkup(r: Msg.SignalRef, inner: String): String {
     val surface = r.surface.orEmpty()
     val icon = if (r.status == RESOLVED || r.status == AMBIGUOUS || r.status == STALE)

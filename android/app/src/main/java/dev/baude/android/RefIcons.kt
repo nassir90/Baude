@@ -1,7 +1,12 @@
 package dev.baude.android
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.Modifier
@@ -101,10 +106,22 @@ object RefIcons {
     const val slot = SLOT
 
     @Composable
-    fun Draw(name: String, tint: Color, size: Dp = 16.dp.icon) {
+    fun Draw(name: String, tint: Color, size: Dp = 16.dp.icon) = Paint(name, tint, Modifier.size(size))
+
+    /** The logo in front of a link in text: in the text's colour, 0.78 of the line's height, at the start of its 1 em,
+     * the rest of it the gap before the name. */
+    @Composable
+    private fun Inline(name: String) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+            Paint(name, LocalBaude.current.fg, Modifier.fillMaxHeight(0.78f).aspectRatio(1f))
+        }
+    }
+
+    @Composable
+    private fun Paint(name: String, tint: Color, modifier: Modifier) {
         val logo = LOGOS[name] ?: return
         val color = own(name) ?: tint
-        Canvas(Modifier.size(size).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+        Canvas(modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
             scale(this.size.width / 16f, Offset.Zero) {
                 for (s in logo.shapes) draw(s, color)
                 for (s in logo.cut) draw(s, Color.Black, clear = true)
@@ -112,13 +129,10 @@ object RefIcons {
         }
     }
 
-    /** What a text's inline logos are made of, by "ref-icon-<name>-<ok|stale>": a logo before a link, the link's colour
-     * (the accent, or amber once stale). */
+    /** What a text's inline logos are made of, by "ref-icon-<name>": a logo before a link. */
     val inline: Map<String, InlineTextContent> by lazy {
-        LOGOS.keys.flatMap { n -> listOf("ok", "stale").map { st -> n to st } }.associate { (n, st) ->
-            "ref-icon-$n-$st" to InlineTextContent(Placeholder(1.em, 1.em, PlaceholderVerticalAlign.TextCenter)) {
-                Draw(n, if (st == "stale") Tokens.Signal.stale else LocalBaude.current.accent, 16.dp.icon)
-            }
+        LOGOS.keys.associate { n ->
+            "ref-icon-$n" to InlineTextContent(Placeholder(1.em, 1.em, PlaceholderVerticalAlign.TextCenter)) { Inline(n) }
         }
     }
 

@@ -290,7 +290,7 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
                     if (kind == "ref") { // (a Signal link: its logo, then its text drawn by how far its lookup got)
                         val status = attrs["status"].orEmpty()
                         attrs["icon"]?.ifEmpty { null }?.let {
-                            appendInlineContent("ref-icon-$it-${if (status == "stale") "stale" else "ok"}", RefIcons.slot)
+                            appendInlineContent("ref-icon-$it", RefIcons.slot)
                         }
                         val colour = when (status) {
                             "pending" -> accent.copy(alpha = accent.alpha * Tokens.Signal.pendingOpacity.toFloat())

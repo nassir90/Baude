@@ -38,9 +38,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** A tap on a Signal link in a reply, and what comes of it (BaudeWindow.open_ref, without the reader's decisions and the
- * databases and clusters the phone has no views for): a file opens, a commit or branch shows on the Git page, a pull
- * request or issue opens in the browser, a tool shows its card, and everything else gets a popover. */
+/** A tap on a Signal link in a reply, and what comes of it (BaudeWindow.open_ref): a file opens, a commit or branch shows
+ * on the Git page, a pull request or issue opens in the browser, a tool shows its card, and everything else gets a
+ * popover. */
 object SignalLinks {
     /** The popover that's open: the name, and whether it's its places ("names") or its lookup ("lookup"). */
     class Pop(val surface: String, val kind: String)
@@ -55,13 +55,19 @@ object SignalLinks {
     /** The place a location is read from: the checkout's top, else the chat's folder. */
     private fun rootOf(): String? = SignalNames.reply(hostId, sid)?.root?.ifBlank { null } ?: Mesh.session(hostId, sid)?.cwd
 
-    /** Open one of a name's locations on the Files page, at its line (one on another branch isn't in this checkout). */
+    /** Open one of a name's locations on the Files page, at its line (a location on another branch (rev) is listed only). */
     fun openLocation(loc: JSONObject) {
         if (loc.str("rev") != null) return
         val path = loc.str("path") ?: return
         val full = if (path.startsWith("/")) path else (rootOf() ?: return).trimEnd('/') + "/" + path
         val line = if (loc.isNull("line")) null else loc.optInt("line").takeIf { it > 0 }
         FileLinks.open(Wanted(hostId, full, line, loc.str("role") == "folder"))
+    }
+
+    /** The Git page, at the commit (or the branch's tip) the name stands for. */
+    fun showInGit(r: Msg.SignalRef) {
+        GitLinks.want.value = r.found.str("sha") ?: r.surface
+        openPage("git")
     }
 
     /** The page's card for a name, or the popover's open button's. */
@@ -78,7 +84,7 @@ object SignalLinks {
         if (r == null) return
         if (r.status == PENDING) { open.value = Pop(surface, "lookup"); return }
         val d = r.found
-        if (r.status == RESOLVED && (r.kind == "commit" || r.kind == "branch")) { openPage("git"); return }
+        if (r.status == RESOLVED && (r.kind == "commit" || r.kind == "branch")) { showInGit(r); return }
         if (r.status == RESOLVED && r.kind == "pr" && d.str("url") != null) {
             try {
                 Mesh.app.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(d.str("url")))
@@ -203,4 +209,9 @@ private fun LookupPopover(chat: Chat, surface: String) {
             }
         }
     }
+}
+
+/** The commit a link asks the Git page to show; the page takes it and clears it. */
+object GitLinks {
+    val want = androidx.compose.runtime.mutableStateOf<String?>(null)
 }

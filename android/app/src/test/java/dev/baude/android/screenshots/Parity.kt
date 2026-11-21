@@ -34,6 +34,7 @@ import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SignalLinks
+import dev.baude.android.SignalNames
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
 import dev.baude.android.Wanted
@@ -85,6 +86,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
             else if (opened.isNull("transcript")) standIn(opened)
             else transcript(opened.getString("transcript"), sc.optInt("lines", -1))).toByteArray()
         SignalLinks.open.value = null
+        SignalNames.forget()
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))

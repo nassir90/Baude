@@ -3769,7 +3769,7 @@ class ComposerMarkdown:
         return True
 
 
-SEND_KEY = "⌘Enter" if sys.platform == "darwin" else "Ctrl+Enter"  # (what sends from a box: Enter is a new line)
+SEND_KEY = wording.say("composer.send_key_mac" if sys.platform == "darwin" else "composer.send_key")  # (what sends from a box: Enter is a new line)
 
 
 def sends(state):

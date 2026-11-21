@@ -442,7 +442,7 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Text(sec.label, style = Type.folder.copy(fontSize = 14.sp), color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(0.6f).weight(1f, fill = false))
-            Box(Modifier.size(20.dp).alpha(if (folded) 0.75f else 0.4f), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(24.dp).alpha(if (folded) 0.75f else 0.4f), contentAlignment = Alignment.Center) {
                 Icon(if (folded) Adwaita.PanEnd else Adwaita.PanDown,
                     if (folded) Wording.Common.expand else Wording.Common.collapse, tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
@@ -589,7 +589,7 @@ private fun HostPick() {
             verticalAlignment = Alignment.CenterVertically) {
             Text(pick?.let(::name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                 modifier = Modifier.widthIn(max = 120.dp))
-            Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
+            Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }) {
             for (id in ids.sortedBy { name(it).lowercase() }) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {

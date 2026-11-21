@@ -44,7 +44,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
-private val thumbnails = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(64)
+internal val thumbnails =android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(64)
 
 /** What a message's revert needs of the chat's page: whether its button's shown, how it's shown, and what it does. */
 class RevertOffer(val revealed: Boolean, val reveal: () -> Unit, val onRevert: () -> Unit)
@@ -79,7 +79,7 @@ fun UserTurn(line: Line, revert: RevertOffer?) {
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (line.files.isNotEmpty()) Attachments(line.files)
+            if (line.files.isNotEmpty()) Attachments(line.files, line.uuid)
             if (line.text.isNotBlank()) SelectionContainer {
                 MarkdownView(line.text, under = c.bubble.compositeOver(c.inside))
             }
@@ -101,11 +101,11 @@ private fun RevertButton(revert: RevertOffer?) {
 
 /** A message's pictures and files in a row (.attach-thumb, .attach-chip): a picture a 96 square, cropped; a file a chip. */
 @Composable
-private fun Attachments(files: List<Sent>) {
+private fun Attachments(files: List<Sent>, uuid: String?) {
     val c = LocalBaude.current
     val density = LocalDensity.current
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (f in files) {
+        for ((index, f) in files.withIndex()) {
             if (f.kind == "image") {
                 val bitmap = androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
                     thumbnails.get(f.data.orEmpty()), f.data) {
@@ -124,8 +124,10 @@ private fun Attachments(files: List<Sent>) {
                         null
                     } }
                 }.value
-                if (bitmap != null) Image(bitmap, f.name, contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(Tokens.Markdown.thumb).clip(RoundedCornerShape(6.dp)))
+                if (bitmap != null) ImageTouch("you:$uuid:$index") {
+                    Image(bitmap, f.name, contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(Tokens.Markdown.thumb).clip(RoundedCornerShape(6.dp)))
+                }
             } else Row(Modifier.clip(RoundedCornerShape(Gap.cardRadius)).background(c.raised)
                 .padding(start = 4.dp, top = 2.dp, end = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {

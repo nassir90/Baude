@@ -118,6 +118,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         val i = all.indexOfFirst { it.key == shown }
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
@@ -138,7 +139,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                         })
                     ChatBanner(chat, open)
                     Box(Modifier.weight(1f)) {
-                        ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat, openPage) })
+                        ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat, openPage) }, openPage = openPage, open = open)
                     }
                 }
                 "meta" -> MetaPage(at, here)
@@ -156,6 +157,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         }
         }
         if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
+    }
+    ViewerOverlay()
     }
 }
 

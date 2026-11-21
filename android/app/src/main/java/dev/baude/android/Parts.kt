@@ -154,7 +154,7 @@ fun Button(label: String, suggested: Boolean = false, destructive: Boolean = fal
     val c = LocalBaude.current
     Box(
         Modifier.clip(RoundedCornerShape(8.dp))
-            .background(if (suggested) c.accentBg else c.fg.copy(alpha = 0.10f))
+            .background((if (suggested) c.accentBg else c.fg.copy(alpha = 0.10f)).let { if (enabled) it else it.copy(alpha = it.alpha * 0.4f) })
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {

@@ -64,6 +64,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
             if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
             Settings.save(ctx)
         },
+        MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
         MenuItem(Wording.Fixes.sendFeedback) { feedback() },
         MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
     ))

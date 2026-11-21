@@ -15,7 +15,7 @@ VENDOR = ROOT / "vendor" / "adwaita-icons"
 OUT = ROOT / "android/app/src/main/java/dev/baude/android/Adwaita.kt"
 SYSTEM = Path("/opt/homebrew/share/icons/Adwaita/symbolic")  # (where a new one's copied from, if it isn't yet)
 
-ICONS = """go-previous go-next go-up window-close view-refresh tab-new pan-down pan-end list-add list-remove
+ICONS = """go-previous go-next go-up go-down window-close view-refresh tab-new pan-down pan-end list-add list-remove
 input-keyboard changes-prevent changes-allow web-browser edit-clear phone network-server document-new system-search
 view-more object-select document-edit edit-undo edit-redo media-playback-start media-playback-stop user-trash alarm
 system-users utilities-terminal dialog-question folder media-playlist-shuffle insert-link process-stop dialog-error

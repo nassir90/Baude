@@ -5737,7 +5737,7 @@ def tool_input_view(name, inp):
 # there is resumed from its transcript, and said so: show_cut). A call of one of these till its result (a subagent's
 # too), and a background task that isn't a subagent till its end.
 COMMAND_TOOLS = ("Bash", "PowerShell")
-CUT_CONTINUE = "Continue where you left off: a restart cut your last turn short."
+CUT_CONTINUE = wording.say("cut_short.message")
 
 
 def command_what(inp):
@@ -6877,13 +6877,13 @@ def attachment_widget(att, size, on_remove=None):
 # --------------------------------------------------------- slash completer --
 
 LOCAL_COMMANDS = [  # handled by baude itself, never sent to claude
-    {"name": "new", "description": "Start a fresh session", "argumentHint": "", "aliases": ["clear"]},
-    {"name": "cd", "description": "Move the conversation to another folder", "argumentHint": "<path>"},
-    {"name": "btw", "description": "Ask a side question: answered from this conversation, without adding to it",
+    {"name": "new", "description": wording.say("slash_commands.new"), "argumentHint": "", "aliases": ["clear"]},
+    {"name": "cd", "description": wording.say("slash_commands.cd"), "argumentHint": "<path>"},
+    {"name": "btw", "description": wording.say("slash_commands.btw"),
      "argumentHint": "<question>"},
-    {"name": "login", "description": "Sign in to your Anthropic account (claude auth login)",
+    {"name": "login", "description": wording.say("slash_commands.login"),
      "argumentHint": "[--console | --sso | --email <address>]"},
-    {"name": "logout", "description": "Sign out of your Anthropic account (claude auth logout)", "argumentHint": ""},
+    {"name": "logout", "description": wording.say("slash_commands.logout"), "argumentHint": ""},
 ]
 
 
@@ -6928,12 +6928,12 @@ class LoginCard(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("perm-card")
         self.win, self.args, self.proc, self.said = win, list(args), None, []
-        self.title = sel_label("<b>Signing in to Claude…</b>")
-        self.body = sel_label("<span alpha='60%'>Starting the sign-in…</span>")
+        self.title = sel_label(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
+        self.body = sel_label(f"<span alpha='60%'>{html.escape(wording.say('sign_in.starting'))}</span>")
         self.append(self.title)
         self.append(self.body)
         self.row = Gtk.Box(spacing=6)
-        self.code = Gtk.Entry(hexpand=True, placeholder_text="If the page shows a code, paste it here")
+        self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
         self.code.connect("activate", lambda *_: self.paste())
         self.send = Gtk.Button(label=wording.say("common.send"))
         self.send.connect("clicked", lambda *_: self.paste())
@@ -6949,8 +6949,8 @@ class LoginCard(Gtk.Box):
         self.start()
 
     def start(self):
-        self.title.set_markup("<b>Signing in to Claude…</b>")
-        self.body.set_markup("<span alpha='60%'>Starting the sign-in…</span>")
+        self.title.set_markup(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
+        self.body.set_markup(f"<span alpha='60%'>{html.escape(wording.say('sign_in.starting'))}</span>")
         self.row.set_visible(True)
         self.again.set_visible(False)
         self.said = []
@@ -7005,7 +7005,7 @@ class LoginCard(Gtk.Box):
         self.proc = None
         self.row.set_visible(False)
         if code == 0:
-            self.title.set_markup("<b>Signing in to Claude…</b>")
+            self.title.set_markup(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
             self.body.set_markup("<span alpha='60%'>Signed in; checking who as…</span>")
 
             def check():
@@ -7131,7 +7131,7 @@ class SlashCompleter:
         name.set_text("/" + c["name"])
         desc = (c.get("description") or "").strip()
         also = ", ".join("/" + a for a in c.get("aliases") or [])
-        about.set_text(" · ".join(x for x in (also and f"also {also}", c.get("argumentHint") or "",
+        about.set_text(" · ".join(x for x in (also and wording.say("slash_commands.also", names=also), c.get("argumentHint") or "",
                                               desc.split("\n")[0]) if x))
         about.set_tooltip_text(desc or None)
 
@@ -13598,13 +13598,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
         row.add_css_class("cut-note")
         going = getattr(self, "cut_continuing", False)  # (Continue pressed, the turn not started yet: said, not asked)
-        said = Gtk.Label(label="Continuing…" if going else "Cut short by a restart", xalign=0)
+        said = Gtk.Label(label=wording.say("cut_short.continuing") if going else wording.say("cut_short.line"), xalign=0)
         said.add_css_class("dim-label")
         if going:
             row.append(widgets.Spinner())
             row.append(said)
         else:
-            go = Gtk.Button(label="Continue", tooltip_text=f"Send “{CUT_CONTINUE}”")
+            go = Gtk.Button(label=wording.say("cut_short.button"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
             go.connect("clicked", lambda *_: self.continue_cut())
             row.append(said)
             row.append(go)
@@ -15213,7 +15213,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 and not self.remote.local:  # (signing in is a machine's: another's claude signs in there)
             buf.set_text("")
             self.completer.hide()
-            self.note(f"{remote_name(self.remote)}'s claude signs in there: run claude auth login on it")
+            self.note(wording.say("sign_in.signs_in_there", host=remote_name(self.remote)))
             return
         if typed == "/btw" or typed.startswith("/btw "):  # even mid-turn: it doesn't interrupt
             question = typed[4:].strip()
@@ -16491,12 +16491,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.note(f"not a directory: {path}")
             return
         if self.busy:
-            self.note("wait for the current turn to finish (or Stop it) before changing folder")
+            self.note(wording.say("slash_commands.cd_busy"))
             return
         if path == self.run_cwd and (self.remote is None or self.remote_folder() in (None, path)):
             return  # (a host's chat whose folder there isn't this window's, a worktree that's gone, say: moved still)
         if self.remote is not None and not self.remote.mine:  # (another machine's folders: not this one's to pick)
-            self.note(f"/cd is this machine's: a session on {remote_name(self.remote)} stays in its folder there")
+            self.note(wording.say("slash_commands.cd_elsewhere", host=remote_name(self.remote)))
             return
         if self.remote is not None:  # (this machine's host process runs it: there, from its next message on)
             reply = self.remote.call({"op": "set_cwd", "session": self.session_id, "cwd": path}, timeout=10)
@@ -19537,13 +19537,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def login_prompt(self, why):
         """A turn that failed for want of signing in: said, with Sign in (sign_in); another machine's: where to."""
         if self.remote is not None and not self.remote.local:
-            self.note(f"{remote_name(self.remote)}'s claude isn't signed in: run claude auth login on it")
+            self.note(wording.say("sign_in.not_signed_in_there", host=remote_name(self.remote)))
             return
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("perm-card")
-        card.append(sel_label("<b>Claude Code isn't signed in</b>  <span alpha='60%'>"
+        card.append(sel_label(f"<b>{html.escape(wording.say('sign_in.not_signed_in'))}</b>  <span alpha='60%'>"
                               f"{html.escape(why[:200])}</span>"))
-        btn = Gtk.Button(label="Sign in", halign=Gtk.Align.START)
+        btn = Gtk.Button(label=wording.say("sign_in.sign_in"), halign=Gtk.Align.START)
         btn.add_css_class("suggested-action")
         btn.connect("clicked", lambda *_: (card.get_parent() and card.get_parent().remove(card), self.sign_in()))
         card.append(btn)

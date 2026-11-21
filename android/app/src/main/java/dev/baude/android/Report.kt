@@ -99,7 +99,7 @@ private fun capped(head: List<Pair<String, String>>, parts: List<String>): Strin
 }
 
 /** A compaction as its marker says it (widgets.compact_text). */
-private fun compactText(meta: JSONObject?): String {
+fun compactText(meta: JSONObject?): String {
     fun num(a: String, b: String): Long? = meta?.let { m -> listOf(a, b).firstNotNullOfOrNull { k -> m.opt(k).takeIf { it is Number } as Number? } }?.toLong()
     val pre = num("pre_tokens", "preTokens")
     val post = num("post_tokens", "postTokens")

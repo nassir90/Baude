@@ -115,6 +115,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 created = now - s.getDouble("ago") - 600,
                 state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
+                cut = if (i == 0 && sc.optBoolean("cut")) now else null,
                 size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
     }
@@ -169,6 +170,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
             }
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
+            "catalogue" -> return reply("cwd" to msg.optString("cwd"), "items" to JSONArray(), "busy" to false)
         }
         return null
     }
@@ -223,6 +225,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.has("typed")) type(sc.getString("typed"))
+                if (sc.optBoolean("view")) {
+                    dev.baude.android.Viewer.flyMs = 0
+                    val shot = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+                        n.config.getOrNull(SemanticsProperties.Role) == Role.Image && n.config.contains(SemanticsActions.OnClick)
+                    }
+                    shot?.config?.get(SemanticsActions.OnClick)?.action?.invoke()
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (sc.optBoolean("open")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
@@ -273,6 +285,18 @@ abstract class Parity(private val theme: String, private val scene: String) {
             call.inputOpen = true
             call.outputOpen = true
             chat.calls.opened[call.id] = true
+        }
+        for (line in chat.lines) if (line.kind == "compact") line.uuid?.let { dev.baude.android.CompactFolds.open[it] = true }
+    }
+
+    /** typed put in the box a character at a time, as typing (what starts the / and @ lists is the one just typed). */
+    private fun type(typed: String) {
+        val box = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { it.config.contains(SemanticsActions.SetText) }
+            ?: error("no box to type in")
+        for (k in 1..typed.length) {
+            box.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(typed.take(k)))
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
         }
     }
 

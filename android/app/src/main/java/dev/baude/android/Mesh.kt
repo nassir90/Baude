@@ -123,7 +123,6 @@ object Mesh {
     // record, as the host it's reached through lists it (id, name, host, hops, through), and that host's label)
     @Volatile private var routes = emptyMap<String, Connection>() // (a member: the host that's up and reaches it in
     // fewest hops)
-    private val allowed = HashMap<String, MutableSet<String>>() // (a chat: the tools you've always allowed it here)
     private val listedBy = HashMap<String, MutableSet<String>>() // (a host of yours: the members it's listed)
     private val moved = HashMap<String, String>() // (a member's connection id: the host of yours its machine is now)
     private val askNotes = HashMap<String, MutableSet<String>>() // (a chat, "connection/session": the asks notified)
@@ -489,13 +488,6 @@ object Mesh {
         }
     }
 
-    /** The tools its host allows the chat whenever it asks (a session's always_allow, version 15), and those you've
-     * allowed from here. */
-    fun alwaysAllowed(chat: Chat): Set<String> {
-        val host = session(chat.hostId, chat.sid)?.alwaysAllow.orEmpty()
-        return host.toSet() + allowed["${chat.hostId}/${chat.sid}"].orEmpty()
-    }
-
     /** An ask answered, as Baude answers it: claude's control_response for it, sent as the chat's input. allow: Allow
      * (always: and allowed whenever it asks for that tool, its host told so too: always_allow); answers: claude's
      * questions answered (AskUserQuestion's). */
@@ -513,10 +505,8 @@ object Mesh {
         val msg = JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
             .put("request_id", ask.rid).put("response", response))
         if (always) {
-            val mine = allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.apply { add(ask.tool) }
             c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
                 if (r.optString("op") == Op.ERROR) main.post {
-                    mine.remove(ask.tool)
                     chat.said.value = Wording.Asks.notAlwaysAllowed(tool = toolDisplay(ask.tool).first, why = Msg.Error.from(r).said.orEmpty())
                 }
             }

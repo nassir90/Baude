@@ -15,6 +15,7 @@
     "new_group": "New group",
     "group_needs_name": "A group needs a name",
     "group_exists": "There's a group {$name} already",
-    "group_body": "A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group puts it there"
+    "group_body": "A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group puts it there",
+    "rename_group": "Rename group"
   }
 }

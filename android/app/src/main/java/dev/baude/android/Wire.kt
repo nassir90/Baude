@@ -169,9 +169,9 @@ open class Connection(
             } catch (e: Exception) {
                 if (stopped) break
                 val repo = lastRepo
-                if (repo?.shown != null) {
+                if (repo?.shown != null && !repo.shown!!.changed) { // (a changed key is refused as ssh's BatchMode does: down, in JSch's words)
                     shown = repo.shown
-                    set("key", if (repo.shown!!.changed) "the host's key changed" else "the host's key isn't trusted yet")
+                    set("key", Wording.PhoneKeys.notTrustedYet)
                     return // (made again once you've said: Mesh.trust)
                 }
                 set("down", if (e is NoRoute) e.message else plain(e))

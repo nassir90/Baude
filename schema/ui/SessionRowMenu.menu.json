@@ -4,6 +4,7 @@
   "opens": ["right-click a session row (not the open unsaved chat, not a ghost)", "key F2 (Rename… only)"],
   "code": ["baude.py:SessionSidebar.show_menu", "baude.py:SessionSidebar.group_submenu", "baude.py:SessionSidebar.on_key"],
   "copy": ["common", "trash", "new_session", "sidebar"],
+  "phone": {"does": "Opened by a long-press on a session or Bot row, at the finger; Move to Group's list opens in place of the items, with a back row first", "why": "Touch's right-click", "decided": "2026-11-21"},
   "parts": [
     {
       "name": "Rename…",
@@ -17,7 +18,7 @@
     {
       "name": "Bot items",
       "shows": "Only for a top-level session on a host that is alive, supports Bots, and runs a model of Claude's or pi's program (not a fork): either \"Make Bot…\" (a plain chat) or both \"Bot Settings…\" and \"Turn Back into a Chat\" (a Bot). They sit right after Rename…, before Move to Group.",
-      "text": ["Make Bot…", "Bot Settings…", "Turn Back into a Chat"],
+      "copy": ["sidebar.make_bot_ellipsis", "sidebar.bot_settings_ellipsis", "sidebar.unbot"],
       "actions": [
         {"by": "click Make Bot… / Bot Settings…", "does": "Opens the Make Bot / Bot Settings dialog (BotSettings.dialog.json)."},
         {"by": "click Turn Back into a Chat", "does": "The host lists it as a plain chat again; its memory and picture stay on the host for if it is made a Bot again."}
@@ -26,12 +27,12 @@
     {
       "name": "Mesh tools item",
       "shows": "For a non-Bot chat on a host that takes mesh tools (the same chats that can be Bots): \"Give Mesh Tools\", or \"Remove Mesh Tools\" if it has them. Sits third (after Rename… and any Bot item, before Move to Group; for a fork, after Move to Group). With mesh tools its agent can see the mesh's hosts and models, start a subagent on any of them and message other chats, from its next start.",
-      "text": ["Give Mesh Tools", "Remove Mesh Tools"]
+      "copy": ["sidebar.give_mesh_tools", "sidebar.remove_mesh_tools"]
     },
     {
       "name": "Move to Group",
       "shows": "A submenu, for any chat (this machine's or a host's), after Rename… and any Bot and mesh items (first if there is no Rename…). Lists each group by name (those made, those chats are put in, and those hosts' sessions were started in), alphabetical, the chat's own ticked; then \"No Group\"; then, in a separate section, \"New Group…\".",
-      "text": ["Move to Group", "No Group", "New Group…"],
+      "copy": ["sidebar.move_to_group", "sidebar.no_group_item", "sidebar.new_group_ellipsis"],
       "actions": [
         {"by": "click a group or No Group", "does": "Puts the chat in that group (or none); the list and the ⋮ → Groups list refresh. Undo is not offered."},
         {"by": "click New Group…", "does": "Asks for a name (GroupName.dialog.json); the group is made and this chat moved into it."}
@@ -40,7 +41,7 @@
     {
       "name": "Archive / Unarchive",
       "shows": "\"Archive\" for a normal session, \"Unarchive\" for one that is already archived (here, in Claude Desktop, or on its host). For a session on a host that is at a turn (working or waiting), Archive is left out (Stop is offered instead). For a session of this machine's own: archived only in Baude's settings, listed under Archived. On a host: archived there, for every app.",
-      "text": ["Archive", "Unarchive"],
+      "copy": ["sidebar.archive", "sidebar.unarchive"],
       "actions": [
         {"by": "click", "does": "Moves it to the Archived group (or back). A host that refuses says \"<host> didn't archive it: <why>\" / \"…didn't unarchive it: <why>\" in a toast."}
       ]

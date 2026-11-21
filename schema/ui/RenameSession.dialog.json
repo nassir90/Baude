@@ -3,12 +3,12 @@
   "apps": ["baude"],
   "opens": ["session row right-click → Rename…", "key F2 on a session row"],
   "code": ["baude.py:SessionSidebar.ask_rename", "baude.py:SessionSidebar.rename", "baude.py:SessionSidebar.renamed_remote"],
-  "copy": ["common"],
+  "copy": ["common", "sidebar"],
   "parts": [
     {
       "name": "heading",
       "shows": "\"Rename session\"; for a Bot on a host, \"Rename Bot\".",
-      "text": ["Rename session", "Rename Bot"]
+      "copy": ["sidebar.rename_session", "sidebar.rename_bot"]
     },
     {
       "name": "name field",

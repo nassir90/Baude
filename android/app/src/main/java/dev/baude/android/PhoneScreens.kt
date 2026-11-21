@@ -167,7 +167,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
 }
 
 /** A picture picked, as a Bot's is sent: a PNG, 256 across at most (null if it can't be read). */
-private fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArray? = try {
+fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArray? = try {
     val bmp = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
     bmp?.let {
         val k = minOf(1f, 256f / maxOf(it.width, it.height))

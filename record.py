@@ -8409,7 +8409,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         servers.json and by this machine's host process); the note over them says so while it is."""
         if (r := self.host_remote(key)) is not None:
             network().deactivate(r, off)
-            self.toast(f"{remote_name(r)} {'deactivated' if off else 'activated'}")
+            self.toast(wording.say("hosts.now_deactivated" if off else "hosts.now_activated", host=remote_name(r)))
             self.show_host_state()
 
     def ask_host_command(self, key):

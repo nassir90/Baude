@@ -187,7 +187,12 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val name = sc.getString("name")
         val first = sessions.getJSONArray("sessions").getJSONObject(0)
         when {
-            name == "home" -> show { Home(open = { _, _ -> }, hosts = {}, feedback = {}) }
+            name.startsWith("home") -> {
+                show { Home(open = { _, _ -> }, feedback = {}) }
+                if (name == "home-row-menu") hold(first.getString("title"))
+                if (name == "home-host-menu" || name == "home-add-host") hold(host.getString("name"))
+                if (name == "home-add-host") tap(Wording.Sidebar.addHost)
+            }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
@@ -219,6 +224,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
         // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A long-press on what's labelled label, as a finger's would. */
+    private fun hold(label: String) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnLongClick) && (label in said(n) || label == described(n))
+        } ?: error("nothing to hold labelled $label")
+        node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

@@ -2,6 +2,9 @@
   "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session with only the first `lines` lines of its transcript (all of them when absent); `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
   "scenes": [
     {"name": "home", "what": "The sessions list, no chat open", "inventory": ["Sidebar.region", "GroupByMenu.menu"]},
+    {"name": "home-row-menu", "what": "The sessions list, the first session's menu open (right-click on the desktop, a long-press on the phone)", "inventory": ["SessionRowMenu.menu"]},
+    {"name": "home-host-menu", "what": "The sessions list, the host picker's menu open (right-click or press and hold)", "inventory": ["HostMenu.menu"]},
+    {"name": "home-add-host", "what": "Add a host, from the host picker's menu", "inventory": ["AddHost.dialog"]},
     {"name": "chat-bash", "what": "A failed command with its output, after thinking", "lines": 3, "inventory": ["ToolCall.element", "Thinking.element", "UserTurn.element"]},
     {"name": "chat-bash-open", "what": "The same, its input and output opened", "lines": 3, "open": true, "inventory": ["ToolCall.element"]},
     {"name": "chat-read-search", "what": "Read, Grep and Glob in a row", "lines": 9, "inventory": ["ToolCall.element", "ToolGroup.element"]},

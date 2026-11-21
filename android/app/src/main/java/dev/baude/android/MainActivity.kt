@@ -29,7 +29,6 @@ class MainActivity : ComponentActivity() {
         Meta.go = { b ->
             when (b) {
                 "send_feedback" -> go(listOf("feedback"))
-                "hosts" -> go(listOf("hosts"))
                 "home" -> go(listOf("contacts"))
             }
         }
@@ -52,7 +51,6 @@ class MainActivity : ComponentActivity() {
                             feedback = { go(listOf("feedback", now[1], now[2])) },
                             screen = { go(listOf(it, now[1], now[2])) })
                     }
-                    "hosts" -> HostsScreen(::back)
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
@@ -61,7 +59,7 @@ class MainActivity : ComponentActivity() {
                     }, chat = now.drop(1))
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
-                    else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
+                    else -> Home(open = { h, s -> go(listOf("chat", h, s)) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         changelog = { go(listOf("changelog")) },

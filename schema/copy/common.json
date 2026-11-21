@@ -18,6 +18,7 @@
     "allow": "Allow",
     "deny": "Deny",
     "remove": "Remove",
+    "remove_ellipsis": "Remove…",
     "add": "Add",
     "done": "Done",
     "ok": "OK",

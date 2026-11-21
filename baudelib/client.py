@@ -104,7 +104,8 @@ class Remote:
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
     "tailscale", as it was found then), "mesh" (a member of the mesh this machine's host process is in: reached
     through it, and tried again when it's there, Network.meshed). command: its host process's command, as given
-    here (what it's said to be otherwise). mesh: what the host process says of a member (hops, through)."""
+    here (what it's said to be otherwise). mesh: what the host process says of a member (hops, through). alias: the
+    name it's given here (Mesh's Rename), if it's been given one: label."""
 
     def __init__(self, network, key, where, cached=None, found_by="hand"):
         cached = cached or {}
@@ -119,6 +120,7 @@ class Remote:
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
         self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
+        self.alias = cached.get("alias") if isinstance(cached.get("alias"), str) and cached["alias"].strip() else None
         self.tried, self.error = 0.0, None
         self.mesh = None  # (a member of this machine's mesh: {hops, through, providers, ...})
         self.deactivated = bool(cached.get("deactivated"))  # (not reached till it's activated: Network.deactivate)
@@ -146,6 +148,16 @@ class Remote:
     def host(self):
         """Where it is, as people say it: user@host, or this machine."""
         return wire.said_where(self.where)
+
+    @property
+    def phone(self):
+        """Is it a phone (a member that links out only: it has no host process, its app is its host)?"""
+        return (self.mesh or {}).get("dial") is False or self.info.get("dial") is False
+
+    @property
+    def label(self):
+        """What it's called here: the name it's given here (alias), else its own, else where it is."""
+        return self.alias or self.info.get("name") or self.host
 
     @property
     def through(self):
@@ -458,6 +470,7 @@ class Remote:
     def cached(self):
         return {"where": self.where, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
                 "found_by": self.found_by, "command": self.command, "sessions": list(self.sessions.values()),
+                **({"alias": self.alias} if self.alias else {}),
                 **({"deactivated": True} if self.deactivated else {}), **({"untold": True} if self.untold else {})}
 
     def let_go(self):
@@ -480,7 +493,11 @@ class Network:
         self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
         self.linked_pid = None  # (the host process here that's been asked to link to the hosts given by hand)
+        self.removed = self.removed_saved()  # (removed here, by its id or key: not known again till it's added by hand)
+        self.unremoved = set()  # (no longer removed: added again by hand, this run)
         for key, c in self.saved().items():
+            if self.is_removed(key, c):
+                continue
             if time.time() - (c.get("seen") or 0) < FORGET_S or c.get("by_hand") or c.get("deactivated"):
                 self.servers[key] = Remote(self, key, c["where"], c)
             else:
@@ -493,20 +510,36 @@ class Network:
         self.here()
         threading.Thread(target=self._tick, daemon=True, name="network-tick").start()
 
-    def saved(self):
-        """servers.json as it is on disk now: {key: what was kept of the host} (one from before hosts were reached by
-        ssh or their socket, at a port: none)."""
+    def _file(self):
+        """servers.json as it is on disk now, whole ({} if it can't be read)."""
         try:
             with open(os.path.join(self.home, "servers.json"), encoding="utf-8") as f:
                 cache = json.load(f)
         except (OSError, ValueError):
             return {}
-        return {k: c for k, c in (cache.get("servers") or {}).items() if isinstance(c, dict) and _where(c.get("where"))}
+        return cache if isinstance(cache, dict) else {}
+
+    def saved(self):
+        """servers.json as it is on disk now: {key: what was kept of the host} (one from before hosts were reached by
+        ssh or their socket, at a port: none)."""
+        servers = self._file().get("servers")
+        return {k: c for k, c in (servers if isinstance(servers, dict) else {}).items()
+                if isinstance(c, dict) and _where(c.get("where"))}
+
+    def removed_saved(self):
+        """servers.json's hosts removed here (remove), by id or key."""
+        removed = self._file().get("removed")
+        return {k for k in removed if isinstance(k, str)} if isinstance(removed, list) else set()
+
+    def is_removed(self, key, cached=None):
+        """Is a host (by its key, and what was kept of it) one that's been removed here?"""
+        return key in self.removed or ((cached or {}).get("info") or {}).get("id") in self.removed
 
     def _tick(self):
         """Every few seconds: this machine's host process looked for (here), and servers.json taken up as it's edited."""
         while not self.stopped.wait(5):
             self.here()
+            self.take_removed()
             self.take_saved()
 
     def here(self):
@@ -523,10 +556,28 @@ class Network:
         """servers.json's hosts that aren't known here (put in it while Baude runs): known, and tried."""
         for key, c in self.saved().items():
             with self.lock:
-                if key in self.servers or key in self.forgotten or \
+                if key in self.servers or key in self.forgotten or self.is_removed(key, c) or \
                         any(r.where == c["where"] for r in self.servers.values()):
                     continue
                 self.servers[key] = Remote(self, key, c["where"], c).start()
+            self.changed()
+
+    def unremove(self, key):
+        """(lock held) A host added again by hand: no longer removed."""
+        if key in self.removed:
+            self.removed.discard(key)
+            self.unremoved.add(key)
+
+    def take_removed(self):
+        """servers.json's hosts removed as it's edited (by Baude or Record): let go of here too."""
+        on_disk = self.removed_saved() - self.unremoved
+        with self.lock:
+            new = on_disk - self.removed
+            self.removed |= on_disk
+            gone = [r for r in self.servers.values() if not r.mine and {r.key, r.info.get("id")} & new]
+        for r in gone:
+            self.drop(r)
+        if gone:
             self.changed()
 
     def listen(self, fn):
@@ -540,6 +591,8 @@ class Network:
             r = next((r for r in self.servers.values() if r.where == dict(where)), None)
             if r is None:
                 key = f"ssh:{where['dest']}" if where.get("via") == "ssh" else f"unix:{where.get('path')}"
+                if by_hand:  # (added again: no longer removed)
+                    self.unremove(key)
                 if (old := self.servers.get(key)) is not None:  # (the same destination, reached otherwise: this one)
                     old.stop()
                 r = self.servers[key] = Remote(self, key, where, found_by="hand")
@@ -554,6 +607,39 @@ class Network:
             self.save()
             self.changed()
         return r
+
+    def rename(self, r, alias):
+        """A host's name here (Mesh's Rename): alias, or its own again with none. Only here: the host keeps its own."""
+        r.alias = (alias or "").strip()[:120] or None
+        self.save(force=True, only=r.key)
+        self.changed()
+
+    def remove(self, r):
+        """A host removed here (Mesh's Remove): this machine's host process's link to it let go of (a phone's, which
+        links here, kept), and it's not reached, listed or kept here from now on, even while the mesh reaches it
+        through another member, till it's added again by hand. Nothing on the host changes."""
+        if r.mine:
+            return
+        rid = r.info.get("id") if wire.is_id(r.info.get("id")) else None
+        if (here := self.here_alive()) is not None:
+            linked = r.by_hand and r.where.get("via") in ("ssh", "unix")
+            straight = rid if rid and not r.phone else None
+            if linked or straight:
+                here.request({"op": "unlink", **({"where": r.reach_where()} if linked else {}),
+                              **({"id": straight} if straight else {})})
+        with self.lock:
+            self.removed |= {k for k in (r.key, rid, *getattr(r, "was", ())) if k}
+        self.drop(r)
+        self.save(force=True)
+        self.changed()
+
+    def drop(self, r):
+        """A host let go of here, and not kept in servers.json."""
+        r.stop()
+        with self.lock:
+            if self.servers.get(r.key) is r:
+                del self.servers[r.key]
+            self.forgotten.add(r.key)
 
     def set_command(self, r, command):
         """A host's process's command there, as given here (None: what it says, or SSH_COMMAND): tried again with it."""
@@ -638,7 +724,7 @@ class Network:
                     r.mesh = None  # (gone from the mesh: tried again once it's back)
             known = {r.info.get("id") for r in self.servers.values() if r.where.get("via") != "mesh"}
             for m in members:
-                if m["id"] == here.info.get("id"):
+                if m["id"] == here.info.get("id") or m["id"] in self.removed:
                     continue
                 r = self.servers.get(m["id"])
                 if r is None and m["id"] not in known:
@@ -702,6 +788,12 @@ class Network:
         """A host given by where it is said who it is: known by its id from now on (one remembered by it, folded in).
         This machine's, by its socket, stays so: the same one reached over ssh too (by hand, say) is let go."""
         with self.lock:
+            if key in self.removed and not remote.by_hand:  # (removed here: taken up again only by hand)
+                remote.stop()
+                if self.servers.get(remote.key) is remote:
+                    del self.servers[remote.key]
+                return False
+            self.unremove(key)
             old = self.servers.get(key)
             if old is not None and old is not remote and old.local and not remote.local and old.state == "alive":
                 remote.stop()
@@ -742,21 +834,23 @@ class Network:
 
     def save(self, force=False, only=None):
         """servers.json: every host reached or given by hand, and what's in it that isn't known here (put there
-        meanwhile: take_saved takes it up), not written over. (readonly: not written, but for force: a change the user
-        made here to one host, only, its key, the rest left as they are there.)"""
+        meanwhile: take_saved takes it up), not written over; and those removed. (readonly: not written, but for
+        force: a change the user made here to one host, only, its key, or a host removed, the rest left as they are
+        there.)"""
         self.saved_at = time.time()
         if self.readonly and not force:
             return
         if self.readonly:
             return self._save_one(only)
-        on_disk = self.saved()
+        on_disk, removed = self.saved(), self.removed_saved() - self.unremoved
         with self.lock:
+            self.removed |= removed  # (Record's, meanwhile, kept too)
             servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
             for key, c in on_disk.items():
-                if key not in self.servers and key not in self.forgotten and \
+                if key not in self.servers and key not in self.forgotten and not self.is_removed(key, c) and \
                         not any(r.where == c["where"] for r in self.servers.values()):
                     servers[key] = c
-            data = {"servers": servers}
+            data = {"servers": servers, **({"removed": sorted(self.removed)} if self.removed else {})}
         target = os.path.join(self.home, "servers.json")
         try:
             os.makedirs(self.home, exist_ok=True)
@@ -768,21 +862,23 @@ class Network:
             pass
 
     def _save_one(self, key):
-        """servers.json with one host's entry as it is here, every other as it is there (a read-only Network's: what
-        it knows of the rest may be older than Baude's)."""
+        """servers.json with one host's entry as it is here (key; None: those removed here only), every other as it is
+        there (a read-only Network's: what it knows of the rest may be older than Baude's)."""
         with self.lock:
-            r = self.servers.get(key)
+            r = self.servers.get(key) if key else None
             mine = r.cached() if r is not None else None
-        if mine is None:
+            removed = self.removed | (self.removed_saved() - self.unremoved)
+        if mine is None and key:
             return
-        on_disk = self.saved()
-        on_disk[key] = mine
+        on_disk = {k: c for k, c in self.saved().items() if not (k in removed or (c.get("info") or {}).get("id") in removed)}
+        if mine is not None:
+            on_disk[key] = mine
         target = os.path.join(self.home, "servers.json")
         try:
             os.makedirs(self.home, exist_ok=True)
             tmp = f"{target}.{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"servers": on_disk}, f)
+                json.dump({"servers": on_disk, **({"removed": sorted(removed)} if removed else {})}, f)
             os.replace(tmp, target)
         except OSError:
             pass

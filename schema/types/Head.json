@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "An app connected to a host process (one that's subscribed: Baude, Record, the Android app; or an Emission there), by the code it runs. Those on the same code are one.",
+  "description": "An app on a host's own machine connected to its host process (one that's subscribed: Baude, Record; or an Emission there), by the code it runs. Those on the same code are one.",
   "properties": {
     "client": {
       "type": "string",

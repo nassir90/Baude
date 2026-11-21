@@ -51,7 +51,7 @@
       "items": {
         "$ref": "Head.json"
       },
-      "description": "The apps connected to it, by the code they run."
+      "description": "The apps on its machine connected to it, by the code they run."
     }
   },
   "required": ["id"],

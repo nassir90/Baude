@@ -22,6 +22,10 @@
     "commit": {
       "type": "string",
       "description": "The commit its code is (said in the host's log if it's another than the host's)."
+    },
+    "here": {
+      "type": "boolean",
+      "description": "true: it's on the host's own machine, connected by its socket (an app there is listed among the host's heads; one elsewhere isn't)."
     }
   },
   "required": ["op"],

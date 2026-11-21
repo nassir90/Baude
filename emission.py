@@ -2440,6 +2440,10 @@ class Window(Adw.ApplicationWindow):
             frame.add_css_class("baude-frame")
         frame.add_top_bar(bar)
         frame.add_top_bar(strip)
+        if agent and not hosted:  # (never seen: its page the whole window, which goes as small as resize does, so a
+            bar.set_visible(False)  # watcher's size is its page's, a phone's narrow one too)
+            strip.set_visible(False)
+            self.set_size_request(200, 200)
         self.set_content(frame)
         if self.Engine is None:
             self.who.set_sensitive(False)
@@ -4052,8 +4056,12 @@ class Control:
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
 
         def sized(now):
-            ww, wh = self.win.get_default_size()
-            self.win.set_default_size(max(300, ww + w - int(now["w"])), max(300, wh + h - int(now["h"])))
+            ww, wh = self.win.get_width() or self.win.get_default_size()[0], \
+                self.win.get_height() or self.win.get_default_size()[1]
+            iw, ih = int(now["w"]), int(now["h"])
+            if iw < 1 or ih < 1:  # (not laid out yet: the window's all page)
+                iw, ih = ww, wh
+            self.win.set_default_size(max(200, ww + w - iw), max(200, wh + h - ih))
             GLib.timeout_add(500, guarded(lambda: self.js(t, "return {width: innerWidth, height: innerHeight}",
                                                           answer, lambda v: answer({**self.describe(t), "size": v}))
                                           and False, answer))

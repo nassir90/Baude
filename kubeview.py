@@ -73,6 +73,7 @@ from kubedata import (  # noqa: E402,F401  (the data the view shows, with no GTK
     KUBE_PODS, KUBE_NODES, KUBE_SECTIONS, KUBE_SECTION_ICONS, KUBE_SECRETS_TEMPLATE, kube_custom_page, _KUBE_PRINTERS,
     kube_page_columns, kube_page_crd, kube_list, kube_metrics_ctx, kube_pod_metrics, kube_node_metrics, kube_rows,
 )
+from kubedata import kube_cell_tone, kube_delete, kube_secret_yaml  # noqa: E402,F401
 
 
 class KubeLogTail:
@@ -1082,7 +1083,7 @@ class KubeView(Gtk.Box):
             if col["kind"] == "status":
                 for t in tones:
                     w.remove_css_class(t)
-                if tone := (col["tone"] or kube_status_tone)(text.split(",")[0].strip()):
+                if tone := kube_cell_tone(col, text):
                     w.add_css_class(f"kube-{tone}")
         f.connect("setup", setup)
         f.connect("bind", bind)
@@ -1181,10 +1182,8 @@ class KubeView(Gtk.Box):
         if page["source"] in ("secrets", "helm"):
             self.details_shown = None  # (shown from what's listed: nothing read)
         if page["source"] == "secrets":  # (only its keys' names: its values are never read)
-            keys = obj["raw"].get("keys") or []
-            self.details.load(f"# Secret {obj['namespace']}/{obj['name']} ({obj['raw'].get('type', '')})\n"
-                              "# " + wording.say("kube.secret_values_hidden") + "\nkeys:\n" +
-                              "".join(f"  - {k}\n" for k in keys), "secret.yaml")
+            self.details.load(kube_secret_yaml(obj["namespace"], obj["name"], obj["raw"].get("type", ""),
+                                               obj["raw"].get("keys") or []), "secret.yaml")
             return
         if page["source"] == "helm":
             self.details.load(json.dumps(obj["raw"], indent=2), "release.json")
@@ -1413,11 +1412,7 @@ class KubeView(Gtk.Box):
                       wording.say("kube.deleting", name=name))
 
         def work():
-            try:
-                said = kube_delete_pod(context, ns, name, force) or wording.say("kube.deleted", name=name)
-            except RuntimeError as e:
-                said = wording.say("kube.delete_failed", name=name, why=e)
-            GLib.idle_add(self._deleted, context, said)
+            GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force))
         KUBE_POOL.submit(work)
 
     def _deleted(self, context, said):

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "databases' answer: servers {servers, databases}; schema {tables, links, took}; rows {rows}.",
+  "properties": {
+    "op": {
+      "const": "databases",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was read."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong."
+    },
+    "servers": {
+      "type": "array",
+      "items": {
+        "$ref": "DbServer.json"
+      },
+      "description": "servers: the servers found."
+    },
+    "databases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "description": "servers: each server's (by container) databases."
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "$ref": "DbTable.json"
+      },
+      "description": "schema: its tables."
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "DbLink.json"
+      },
+      "description": "schema: their foreign keys."
+    },
+    "took": {
+      "type": "number",
+      "description": "schema: seconds it took to read, 0 when it was kept from a read before."
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "rows: the first rows, each {column: value}; objects and lists as JSON text."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

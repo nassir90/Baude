@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Why a cluster can't be read, as kubectl's failure is diagnosed.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "What went wrong."
+    },
+    "why": {
+      "type": "string",
+      "description": "What kubectl said that says why."
+    },
+    "fix": {
+      "type": ["string", "null"],
+      "description": "A command to run in a terminal that fixes it, or null."
+    },
+    "said": {
+      "type": "string",
+      "description": "All kubectl wrote."
+    }
+  },
+  "required": ["title"],
+  "additionalProperties": false
+}

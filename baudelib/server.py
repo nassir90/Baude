@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import uuid
 
-from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostfiles, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, wording, worktree
+from baudelib import agentproxy, claude, codex, emissionlink, emissiontools, hostdb, hostfiles, hostkube, mesh, meshtools, phonebrowser, routines, models, notes, providers, selfupdate, transcripts, wire, wording, worktree
 
 IDLE_S = 30 * 60
 EXIT_S = 4 * 3600  # (nothing running and nobody attached this long: the host process goes; a head starts it again)
@@ -1037,6 +1037,7 @@ class Server:
                 tools.unbind(conn)                               # to attach again, which binds them to it then)
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
+            hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
                     conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
@@ -1231,6 +1232,14 @@ class Server:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
             return None
+        if op in ("kube", "databases"):  # (the clusters and databases here, read for a head elsewhere: hostkube, hostdb)
+            def read():
+                try:
+                    reply(op, **(hostkube if op == "kube" else hostdb).answer(self, msg))
+                except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=read, daemon=True, name=op).start()
+            return None
         if op == "feedback":  # (a head with no gh of its own: its feedback filed by this host's; on a thread of its own)
             def feedback():
                 try:
@@ -1278,6 +1287,10 @@ class Server:
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
+        if op == "kube_follow":  # (a pod's log followed, or a kind's list watched, for a head elsewhere: on this
+            threading.Thread(target=hostkube.follow, args=(self, conn, msg), daemon=True,  # connection, ended with it)
+                             name="kube-follow").start()
             return None
         if op == "emission_watch":  # (a Browser pane elsewhere: a Bot's Emission here watched, its frames carried on
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection)

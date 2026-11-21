@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A pod's log followed (logs), or a kind's list watched (watch): one a connection, the answers kube_text and kube_rows till the connection goes (kubectl is stopped then).",
+  "properties": {
+    "op": {
+      "const": "kube_follow",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": ["logs", "watch"],
+      "description": "What to follow."
+    },
+    "context": {
+      "type": "string",
+      "description": "The kubeconfig context."
+    },
+    "page": {
+      "type": "string",
+      "description": "watch: the kind's page, by its resource."
+    },
+    "crd": {
+      "type": "string",
+      "description": "watch: a custom resource's definition."
+    },
+    "namespace": {
+      "type": "string",
+      "description": "logs: the pod's namespace."
+    },
+    "pod": {
+      "type": "string",
+      "description": "logs: the pod."
+    },
+    "container": {
+      "type": "string",
+      "description": "logs: the container."
+    },
+    "previous": {
+      "type": "boolean",
+      "description": "logs: its previous run's log, not followed."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A name in an object's YAML that is another object.",
+  "properties": {
+    "line": {
+      "type": "integer",
+      "description": "Its line (from 0)."
+    },
+    "column": {
+      "type": "integer",
+      "description": "Its column (from 0)."
+    },
+    "length": {
+      "type": "integer",
+      "description": "Its length."
+    },
+    "kind": {
+      "type": "string",
+      "description": "The object's kind."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Its namespace, or empty."
+    }
+  },
+  "required": ["line"],
+  "additionalProperties": false
+}

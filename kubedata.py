@@ -112,6 +112,27 @@ def kube_delete_pod(context, namespace, name, force=False):
     return kube_run("kubectl", args, timeout=60).strip()
 
 
+def kube_delete(context, namespace, name, force=False):
+    """Delete a pod (worker thread), once you've confirmed it: what to say of it: kubectl's text, else that it's gone,
+    or why it failed."""
+    try:
+        return kube_delete_pod(context, namespace, name, force) or wording.say("kube.deleted", name=name)
+    except RuntimeError as e:
+        return wording.say("kube.delete_failed", name=name, why=e)
+
+
+def kube_secret_yaml(namespace, name, kind, keys):
+    """What a Secret shows: only its keys' names (its values are never read)."""
+    return (f"# Secret {namespace}/{name} ({kind})\n# " + wording.say("kube.secret_values_hidden") + "\nkeys:\n" +
+            "".join(f"  - {k}\n" for k in keys))
+
+
+def kube_cell_tone(col, text):
+    """A status cell's tone (ok, warn, bad, or None) from its text: the first of several, by the column's own reading or
+    the common one."""
+    return (col["tone"] or kube_status_tone)(text.split(",")[0].strip())
+
+
 def kube_uid(o):
     """What an object is known by across a watch's events: its uid, or its namespace and name without one."""
     m = _km(o)

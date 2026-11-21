@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A category of the Kubernetes view's sidebar.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Its icon's name, or empty."
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "$ref": "KubePage.json"
+      },
+      "description": "Its kinds."
+    }
+  },
+  "required": ["title"],
+  "additionalProperties": false
+}

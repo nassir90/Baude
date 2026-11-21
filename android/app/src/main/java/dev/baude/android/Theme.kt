@@ -37,6 +37,8 @@ data class BaudeColors(
 ) {
     val dim: Color get() = fg.copy(alpha = fg.alpha * 0.6f)        // (.sysnote, .dim-label: 0.55–0.6)
     val bubble: Color get() = accentBg.copy(alpha = 0.15f)          // (.user-bubble)
+    val quiet: Color get() = fg.copy(alpha = fg.alpha * 0.07f)      // (.queued-bubble, .sender-bubble)
+    val quietFg: Color get() = fg.copy(alpha = fg.alpha * 0.55f)    // (.queued-bubble's text)
     val rowSelected: Color get() = fg.copy(alpha = 0.10f)           // (a navigation sidebar's selected row)
 }
 

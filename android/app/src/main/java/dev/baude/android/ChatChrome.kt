@@ -198,6 +198,7 @@ fun showUsage(chat: Chat, usage: JSONObject, model: String? = null) {
  * five seconds, or at once if its host says nothing's running. */
 fun interrupt(chat: Chat) {
     val c = chat.chrome
+    chat.stopAsked = true
     if (c.interrupting != 0L) return
     val token = SystemClock.elapsedRealtime()
     c.interrupting = token

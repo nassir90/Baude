@@ -347,11 +347,6 @@ fun MetaPage(chatHost: String, here: Boolean) {
     Meta.version.value
     val up = Mesh.reached("app_tools")
     androidx.compose.runtime.LaunchedEffect(up, chatHost) { // (a host it's on kept, even while it's away: its session
-        val on = Meta.host.value
-        if (on != null && Mesh.hosts.none { it.id == on } && on.removePrefix("mesh:") !in Mesh.members.keys) {
-            Meta.host.value = null // (removed: picked again)
-            Meta.clear()
-        }
         if (Meta.host.value == null)                          // waits for the phone there)
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
     }

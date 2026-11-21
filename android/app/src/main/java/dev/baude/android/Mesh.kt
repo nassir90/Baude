@@ -123,6 +123,7 @@ object Mesh {
     val key = mutableStateOf<Key?>(null)
     val keyError = mutableStateOf<String?>(null) // (why the Keystore's key couldn't be read, or made: none made then)
     val making = mutableStateOf(false) // (a key being made, off the main thread)
+    val deactivated = mutableStateListOf<String>() // (connection ids switched off: a host's id, or "mesh:<id>")
     val infos = mutableStateMapOf<String, Msg.Info>() // (a host of yours: what its host process last said it is,
     // its mesh too: Mesh Versions)
     val members = mutableStateMapOf<String, Pair<Msg.Member, String?>>() // (a member of a host's mesh, by its id: its
@@ -147,6 +148,7 @@ object Mesh {
         WireStrict.look(app)
         readKey()
         hosts.addAll(HostStore.load(app))
+        deactivated.addAll(HostStore.deactivated(app))
         Pending.load(app) { conns.values.filter { it.state == "up" }.forEach(::pumpAll) }
         channel()
         hosts.forEach { connect(it) }
@@ -171,7 +173,7 @@ object Mesh {
             key.value = Keys.load()
             keyError.value = null
         } catch (e: Exception) {
-            keyError.value = "This phone's key couldn't be read: ${e.message ?: e.javaClass.simpleName}"
+            keyError.value = Wording.PhoneKeys.unreadable(why = e.message ?: e.javaClass.simpleName)
         }
     }
 
@@ -187,7 +189,7 @@ object Mesh {
                     key.value = it
                     keyError.value = null
                     hosts.forEach { h -> connect(h) }
-                }.onFailure { keyError.value = "A key couldn't be made: ${it.message ?: it.javaClass.simpleName}" }
+                }.onFailure { keyError.value = Wording.PhoneKeys.notMade(why = it.message ?: it.javaClass.simpleName) }
             }
         }
     }
@@ -220,6 +222,29 @@ object Mesh {
         Shares.look()
     }
 
+    /** A host (or a member, "mesh:<id>") switched off, or on again: not reached while off, its chats listed as last seen
+     * (Baude's Network.deactivate). */
+    fun deactivate(id: String, off: Boolean) {
+        if (off) { if (id !in deactivated) deactivated.add(id) } else deactivated.remove(id)
+        HostStore.setDeactivated(app, deactivated)
+        if (off) {
+            conns.remove(id)?.stop()
+            states.remove(id)
+        } else if (id.startsWith("mesh:")) meshed()
+        else hosts.firstOrNull { it.id == id }?.let { declined.removeAll { d -> d.startsWith("${it.id} ") }; connect(it) }
+        tick.value++
+    }
+
+    /** A host's command changed (empty: baude_headless.py, on its PATH), and the host reached again. */
+    fun setCommand(h: Host, command: String) {
+        val now = h.copy(command = command.ifBlank { "baude_headless.py" })
+        val i = hosts.indexOfFirst { it.id == h.id }
+        if (i >= 0) hosts[i] = now
+        declined.removeAll { it.startsWith("${h.id} ") }
+        HostStore.save(app, hosts)
+        connect(now)
+    }
+
     /** A host's or a member's name here (Mesh's Rename): a host's, as it was added; a member's, kept by its id. Empty:
      * its own again. */
     fun rename(id: String, name: String) {
@@ -246,7 +271,7 @@ object Mesh {
 
     fun connect(host: Host) {
         conns.remove(host.id)?.stop()
-        if (key.value == null) return
+        if (key.value == null || host.id in deactivated) return
         start(Connection(app, Place.Direct(host), ::identify, { routes[it] }, ::heard) { conn -> main.post { changed(conn) } })
     }
 
@@ -259,7 +284,10 @@ object Mesh {
     /** Where a connection's id is, as you'd say it: a host's name, or a member's (the one it's given here, if it's
      * been renamed). */
     fun label(id: String): String {
-        (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { return it.label }
+        (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { h ->
+            return h.name.ifBlank { null } ?: infos[id]?.name?.ifBlank { null }
+                ?: conns[id]?.info?.name?.ifBlank { null } ?: h.address
+        }
         HostStore.alias(app, id.removePrefix("mesh:"))?.let { return it }
         val m = members[id.removePrefix("mesh:")]?.first
         return m?.name?.ifBlank { null } ?: conns[id]?.info?.name?.ifBlank { null } ?: "a host"
@@ -300,6 +328,7 @@ object Mesh {
         routes = best.mapValues { it.value.second }
         for ((id, pair) in best) {
             members[id] = pair.first to pair.second.host?.label
+            if ("mesh:$id" in deactivated) continue
             val c = conns["mesh:$id"]
             if (c == null) {
                 moved.remove("mesh:$id") // (reached through the mesh again: its chats here, not a host's)

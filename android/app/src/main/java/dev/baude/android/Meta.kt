@@ -37,6 +37,9 @@ object Meta {
     var pages: () -> List<Page> = { emptyList() }      // (the chat open's pages)
     var go: (String) -> Unit = {}                       // (a button's screen: send_feedback, hosts, home)
     private var started = false
+    private var startedWith = "" // (the model, effort and whether it runs commands, as its session was started)
+    private var startedModel = ""
+    val noAuto = androidx.compose.runtime.mutableStateListOf<String>() // (models claude didn't start in Auto mode)
     private val waiting = ArrayList<String>() // (sent before its session's made: sent once it is)
     private val relays = HashSet<Int>()      // (its tools' relays open on its host: their numbers)
     private var heard: ((String, JSONObject) -> Unit)? = null
@@ -47,6 +50,17 @@ object Meta {
     val late = ArrayList<String>() // (calls that ran here after its host had told it they failed: said with the next
                                    // message, so it doesn't do them again)
     const val GRACE_S = 6 * 3600 // (how long its session waits on its host for the phone to come back)
+
+    /** Claude Code's own tools that act, given on Claude's models while Run commands is on (meta.COMMAND_TOOLS). */
+    val COMMAND_TOOLS = listOf("Bash", "Edit", "Write", "WebFetch", "WebSearch")
+
+    /** What Meta is told besides SYSTEM while it runs commands (meta.COMMANDS_SYSTEM). */
+    val COMMANDS_SYSTEM = "\n\nCommands: you run shell commands (Bash), edit files (Edit, Write) and look things up on the " +
+        "web (WebFetch, WebSearch), in Claude Code's Auto mode: what looks risky is put to the user first. Check things " +
+        "yourself rather than asking the user to: where a file is, what's installed, what a host has. Read and look as " +
+        "you like. Commands and file edits aren't your actions: they have no undo, and what's said above of undo is of " +
+        "the app's tools. So change nothing outside the app that the user didn't ask for, install, delete or download " +
+        "nothing unasked, and before a command that changes or removes something, say in a line what it will do."
 
     /** Shown under this turn's reply, once it ends. */
     fun under(line: Line) {
@@ -86,7 +100,7 @@ object Meta {
     fun index(): String {
         val lines = ArrayList<String>()
         lines.add("Baude for Android · ${Mesh.hosts.size} host(s) added")
-        lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${HomePrefs.host.value.let { if (it == "all") "all" else Mesh.label(it) }}")
+        lines.add("settings: sidebar_group=${HomePrefs.by.value} sidebar_host=${picked()?.let { Mesh.label(it) }.orEmpty()}")
         for ((id, label) in (Mesh.hosts.map { it.id to it.label } + Mesh.members.keys.map { "mesh:$it" to Mesh.label("mesh:$it") } +
                 listOf("phone" to Mesh.label("phone")))) { // (this phone's own agents too)
             val conn = Mesh.conn(id)
@@ -112,6 +126,7 @@ object Meta {
     fun save() {
         if (!loaded) return
         val o = JSONObject().put("host", host.value).put("sid", chat.sid).put("started", started)
+            .put("started_with", startedWith).put("started_model", startedModel)
             .put("lines", JSONArray(chat.lines.map { JSONArray(listOf(it.kind, it.text)) }))
             .put("actions", JSONArray(MetaTools.actions.map { it.json() })).put("next", MetaTools.next).put("turn", MetaTools.turn)
             .put("late", JSONArray(late))
@@ -139,6 +154,8 @@ object Meta {
         MetaTools.turn = o.optInt("turn", 0)
         late.addAll(o.optJSONArray("late").strings())
         started = o.optBoolean("started") && chat.sid.isNotEmpty()
+        startedWith = o.optString("started_with")
+        startedModel = o.optString("started_model")
         host.value?.let { h ->
             listen(h)
             if (started && Mesh.conn(h)?.state == "up") reattach(h)
@@ -206,15 +223,29 @@ object Meta {
         c.thinking.value = true
         c.said.value = null
         save()
+        val entry = metaEntry(Settings.metaModel.value ?: "haiku", metaModels(h), h)
+        val effort = Settings.metaEffort.value?.takeIf { entry != null && it in entry.efforts }
+        val commands = metaTakesCommands(h, entry?.value) && Settings.metaCommands.value
+        val now = "${entry?.value.orEmpty()}|${effort.orEmpty()}|$commands"
+        if (started && c.sid.isNotEmpty() && startedWith != now) { // (another model, effort or Run commands: its next
+            Mesh.conn(c.hostId)?.send(Msg.Stop(session = c.sid).json()) // message starts a session for them, told what was said)
+            Mesh.conn(c.hostId)?.send(Msg.Detach(session = c.sid).json())
+            started = false
+            c.sid = ""
+            relays.clear()
+        }
         if (!started || c.hostId != h) {
             started = true
+            startedWith = now
+            startedModel = entry?.value.orEmpty()
             c.hostId = h
             listen(h)
-            val haiku = models(h).firstOrNull { it.value == "haiku" || it.name.lowercase().startsWith("haiku") }
-            val msg = Msg.Start(prompt = index() + "\n\n" + before + ran + text, cwd = "~", mode = "default",
-                ephemeral = true, grace = GRACE_S, title = "Meta", system = SYSTEM,
-                allowedTools = listOf("Read", "Grep", "Glob"), attach = true, appTools = listOf(MetaTools.NAME)).json()
-            haiku?.let { msg.put("model", it.value) }
+            val msg = Msg.Start(prompt = index() + "\n\n" + before + ran + text, cwd = "~",
+                mode = if (commands) "auto" else "default", effort = effort,
+                ephemeral = true, grace = GRACE_S, title = "Meta", system = SYSTEM + if (commands) COMMANDS_SYSTEM else "",
+                allowedTools = listOf("Read", "Grep", "Glob"),
+                disallowedTools = if (commands) null else COMMAND_TOOLS, attach = true, appTools = listOf(MetaTools.NAME)).json()
+            entry?.let { msg.put("model", it.value) }
             Mesh.ask(h, msg) { r ->
                 val id = Msg.Started.from(r).session?.id
                 if (r.optString("op") == Op.STARTED && id != null) {
@@ -292,6 +323,12 @@ object Meta {
                     val m = Msg.Claude.from(msg).msg ?: return@l
                     Ask.of(m)?.let { a -> if (c.asks.none { it.rid == a.rid }) c.asks.add(a) }
                     when (m.optString("type")) {
+                        "system" -> m.optString("permissionMode").takeIf { it.isNotEmpty() }?.let { mode ->
+                            if (startedWith.endsWith("|true")) {
+                                if (mode != "auto" && startedModel !in noAuto) noAuto.add(startedModel)
+                                if (mode == "auto") noAuto.remove(startedModel)
+                            }
+                        }
                         "assistant" -> if (m.isNull("parent_tool_use_id")) for (b in m.optJSONObject("message")
                             ?.optJSONArray("content").list()) when (b.optString("type")) {
                             "text" -> b.optString("text").trim().ifBlank { null }?.let { c.lines.add(Line("bot", it)) }
@@ -445,7 +482,7 @@ fun MetaRows(text: String) {
         Button(o.str("label") ?: b, suggested = b != "trash", destructive = b == "trash") {
             when (b) {
                 "trash" -> asking = true
-                "host" -> { HomePrefs.host.value = o.optString("host"); HomePrefs.save(); Meta.go("home") }
+                "host" -> { HomePrefs.pick(o.optString("host")); Meta.go("home") }
                 else -> Meta.go(b)
             }
         }
@@ -475,9 +512,9 @@ fun MetaRows(text: String) {
         "sidebar_host" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text("The home screen shows", style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
             val up = Mesh.reached("subscribe")
-            Picker(HomePrefs.host.value.let { if (it == "all") "All hosts" else Mesh.label(it) }, "Hosts shown",
-                listOf("All hosts" to "all") + up.map { it.second to it.first }, HomePrefs.host.value) {
-                HomePrefs.host.value = it; HomePrefs.save()
+            Picker(picked()?.let { Mesh.label(it) }.orEmpty(), "Hosts shown",
+                up.map { it.second to it.first }, picked()) {
+                HomePrefs.pick(it)
             }
         }
     }

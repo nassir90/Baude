@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -34,46 +36,44 @@ import org.json.JSONObject
  * it's on (fixed), or null to pick. */
 @Composable
 fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String, String) -> Unit,
-               given: JSONObject? = null, edited: ((JSONObject) -> Unit)? = null, heading: String? = null) {
+               given: JSONObject? = null, edited: ((JSONObject) -> Unit)? = null, heading: String? = null,
+               first: String? = null, focus: String? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Mesh.tick.value
-    val up = Mesh.reached("start")
-    val known = Mesh.known("start")
+    val up = Mesh.reached("start").sortedBy { it.first != first } // (the host the + belongs to: first)
+    val known = Mesh.known("start").sortedBy { it.first != first }
     var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
-        ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
+        ?: first?.takeIf { h -> up.any { it.first == h } } ?: picked()?.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
     fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.home?.ifBlank { null } } ?: "~"
     var cwd by remember { mutableStateOf(given?.str("folder") ?: home(at)) }
-    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { Mesh.conn(it)?.info?.group }.orEmpty()) }
+    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { newGroup(it).ifBlank { null } ?: Mesh.conn(it)?.info?.group }.orEmpty()) }
     var prompt by remember { mutableStateOf(given?.str("prompt").orEmpty()) }
     var model by remember { mutableStateOf<String?>(given?.str("agent")?.let { a -> // (Meta's spawn_agent: its agent)
         at?.let { h -> models(h).firstOrNull { it.name.equals(a, true) || it.value == a }?.value } }) }
     var effort by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf("auto") }
-    var busy by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(at, cwd, group, prompt, model) { // (the user's own edits, kept where it's Meta's form)
         edited?.invoke(JSONObject().put("host", at?.let { Mesh.label(it) } ?: "").put("folder", cwd).put("group", group)
             .put("prompt", prompt).put("agent", at?.let { h -> chosen(models(h), model ?: defaultModel(h))?.name }.orEmpty()))
     }
-    var error by remember { mutableStateOf<String?>(null) }
     fun start() {
         val h = at ?: return
-        busy = true
-        error = null
         val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode,
             group = group.trim()).json()
         model?.let { msg.put("model", it) }
         effort?.let { msg.put("effort", it) }
         if (prompt.isBlank()) msg.put("draft", true)
+        done()
+        val made = group.trim()
         Mesh.ask(h, msg) { r ->
-            busy = false
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) {
                 HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
+                Groups.putIn(made)
                 opened(h, id)
-                done()
-            } else error = Wording.NewSession.hostRefused(host = Mesh.label(h),
-                why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo })
+            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
+                why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }))
         }
     }
     AlertDialog(
@@ -93,20 +93,21 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                         effort = null
                     }
                 }
-                FormRow(Wording.Common.folder) { Field(cwd, { cwd = it }, "~") }
+                FormRow(Wording.Common.folder) { NameField(cwd, { cwd = it }, "~", {}, focus = focus == "folder") }
                 FormRow(Wording.NewSession.group) { Field(group, { group = it }, Wording.Sidebar.noGroup) }
                 FormRow(Wording.NewSession.prompt) {
                     Box(Modifier.fillMaxWidth().heightIn(min = 96.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius))
                         .padding(horizontal = 8.dp, vertical = 6.dp)) {
+                        val focusing = remember { FocusRequester() }
+                        androidx.compose.runtime.LaunchedEffect(Unit) { if (focus != "folder") focusing.requestFocus() }
                         BasicTextField(prompt, { prompt = it }, textStyle = Type.body.copy(color = c.fg),
-                            cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp))
+                            cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp).focusRequester(focusing))
                     }
                 }
                 FormRow("With") { StartPickers(at, model, effort, mode) { m, e, md -> model = m; effort = e; mode = md } }
-                error?.let { Text(it, style = Type.caption, color = c.destructive) }
             }
         },
-        confirmButton = { Button(if (busy) "Starting…" else Wording.NewSession.start, suggested = at != null && !busy) { if (!busy) start() } },
+        confirmButton = { Button(Wording.NewSession.start, suggested = at != null) { start() } },
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = c.dialog,
     )

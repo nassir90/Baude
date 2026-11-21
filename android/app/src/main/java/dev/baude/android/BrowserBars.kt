@@ -69,7 +69,7 @@ fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String)
             Text(profile, style = Type.bold, color = c.fg.copy(alpha = c.fg.alpha * 0.5f), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 96.dp))
             Icon(Adwaita.PanDown, null, tint = c.fg.copy(alpha = c.fg.alpha * 0.5f),
-                modifier = Modifier.size(16.dp))
+                modifier = Modifier.size(16.dp.icon))
         }
     }
 }
@@ -128,7 +128,7 @@ fun TabStrip(b: Browser, pick: (String) -> Unit, close: (String) -> Unit) {
                         modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
                     if (front) Box(Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable { close(t.id) },
                         contentAlignment = Alignment.Center) {
-                        Icon(Adwaita.WindowClose, "Close Tab", tint = c.fg, modifier = Modifier.size(16.dp))
+                        Icon(Adwaita.WindowClose, "Close Tab", tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     } else Spacer(Modifier.size(26.dp))
                 }
             }

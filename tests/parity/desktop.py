@@ -201,6 +201,24 @@ def build(app, sc):
         win = open_chat(app, sc)
         update.changelog_dialog().present(win)
         return win
+    if name == "databases":
+        win = app.window(S.opts())
+        fx = fixture("databases.json")
+        sv = win.schema
+        sv.set_visible(True)
+        sv.schema, sv.database, sv.focus_column = baude.pg_normalize(fx["raw"]), fx["database"], None
+        sv.servers, sv.dbs = [fx["server"]], {fx["server"]["container"]: [fx["database"]]}
+        sv.syncing = True  # (drawn from the fixture, not read from a server)
+        sv.server_dd.set_model(Gtk.StringList.new([f"{fx['server']['container']} (Postgres {fx['server']['version']})"]))
+        sv.db_dd.set_model(Gtk.StringList.new([fx["database"]]))
+        sv.syncing = False
+        sv.show_namespace("public")
+        T.wait_for(lambda: sv.canvas.get_width() > 0 and sv.canvas.cards, "laid out")
+        T.pump(0.3)
+        sv.canvas.fit()
+        return win
+    if name == "kubernetes":
+        return S.kube_window(app)[0]
     return None
 
 

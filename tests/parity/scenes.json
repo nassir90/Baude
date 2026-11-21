@@ -38,6 +38,8 @@
     {"name": "panel-signal", "what": "… its Signal page", "page": "signal", "inventory": ["Signal.panel"]},
     {"name": "chat-queued", "what": "A turn running, a message written meanwhile queued under the chat, its buttons shown", "lines": 3, "state": "working", "queued": "Also check the bench", "inventory": ["QueuedTurn.element", "Composer.region"]},
     {"name": "chat-host-down", "what": "The chat's host can't be reached: the banner, something written in the box, send off", "down": true, "draft": "Does the bench need it too?", "inventory": ["Banners.region", "Composer.region"]},
-    {"name": "feedback", "what": "Send Feedback, empty", "inventory": ["SendFeedback.dialog"]}
+    {"name": "feedback", "what": "Send Feedback, empty", "inventory": ["SendFeedback.dialog"]},
+    {"name": "databases", "what": "Database Schemas on the fixture database, fitted", "inventory": ["DatabaseSchemas.page"]},
+    {"name": "kubernetes", "what": "Kubernetes on the fake cluster k3d-dev, its pods by CPU", "inventory": ["Kubernetes.page", "KubernetesPodMenu.menu"]}
   ]
 }

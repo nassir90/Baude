@@ -627,35 +627,10 @@ def _(app):
 
 
 def schema_sample():
-    """A small app's schema (the shape PG_SCHEMA_SQL returns), for the diagram scene: no database needed."""
-    tables = {"orgs": [("id", "uuid", False), ("name", "text", False), ("plan", "text", False),
-                       ("created_at", "timestamptz", False)],
-              "users": [("id", "uuid", False), ("org_id", "uuid", False), ("email", "text", False),
-                        ("password_hash", "text", True), ("last_seen", "timestamptz", True)],
-              "projects": [("id", "uuid", False), ("org_id", "uuid", False), ("name", "text", False),
-                           ("repo_url", "text", True)],
-              "runners": [("id", "text", False), ("org_id", "uuid", False), ("label", "text", True),
-                          ("last_seen", "timestamptz", True)],
-              "jobs": [("id", "uuid", False), ("project_id", "uuid", False), ("requested_by", "uuid", False),
-                       ("runner_id", "text", True), ("status", "text", False), ("created_at", "timestamptz", False)],
-              "job_events": [("id", "bigint", False), ("job_id", "uuid", False), ("kind", "text", False),
-                             ("payload", "jsonb", True), ("at", "timestamptz", False)],
-              "artefacts": [("id", "uuid", False), ("job_id", "uuid", False), ("path", "text", False),
-                            ("bytes", "bigint", False)],
-              "api_keys": [("id", "uuid", False), ("user_id", "uuid", False), ("prefix", "text", False),
-                           ("key_hash", "text", False), ("revoked_at", "timestamptz", True)],
-              "settings": [("key", "text", False), ("value", "jsonb", True)]}
-    rows = {"orgs": 12, "users": 340, "projects": 58, "runners": 6, "jobs": 18_204, "job_events": 412_877,
-            "artefacts": 9_310, "api_keys": 77, "settings": 14}
-    fks = [("users", "org_id", "orgs"), ("projects", "org_id", "orgs"), ("runners", "org_id", "orgs"),
-           ("jobs", "project_id", "projects"), ("jobs", "requested_by", "users"), ("jobs", "runner_id", "runners"),
-           ("job_events", "job_id", "jobs"), ("artefacts", "job_id", "jobs"), ("api_keys", "user_id", "users")]
-    return baude.pg_normalize({
-        "tables": [{"s": "public", "t": t, "rows": rows[t], "kind": "r"} for t in tables],
-        "columns": [{"s": "public", "t": t, "c": c, "type": ty, "null": n, "def": None}
-                    for t, cols in tables.items() for c, ty, n in cols],
-        "pks": [{"s": "public", "t": t, "c": cols[0][0]} for t, cols in tables.items()],
-        "fks": [{"s": "public", "t": t, "c": c, "rs": "public", "rt": rt, "rc": "id"} for t, c, rt in fks]})
+    """A small app's schema (the shape PG_SCHEMA_SQL returns: tests/parity/fixtures/databases.json's), for the diagram
+    scene: no database needed."""
+    with open(os.path.join(HERE, "parity", "fixtures", "databases.json")) as f:
+        return baude.pg_normalize(json.load(f)["raw"])
 
 
 @scene("38c-schema-diagram", "Database schemas (☰ → Database Schemas…, or a table name in a reply): every reachable "

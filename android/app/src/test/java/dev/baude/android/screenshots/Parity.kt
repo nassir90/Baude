@@ -18,6 +18,8 @@ import dev.baude.android.BaudeTheme
 import dev.baude.android.Change
 import dev.baude.android.ChangelogScreen
 import dev.baude.android.ChatShell
+import dev.baude.android.DatabaseScreen
+import dev.baude.android.KubeScreen
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
@@ -140,6 +142,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
             val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
             return at.firstOrNull { it.exists() } ?: at.last()
         }
+        if (op == "kube" || op == "databases") return hostAnswer(msg)
         when (op) {
             "transcript" -> {
                 val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
@@ -171,6 +174,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
         }
         return null
+    }
+
+    /** What the fixture host answers for kube and databases: tests/parity/host.py's, which reads the fixtures with the
+     * host's own code (hostkube.py, hostdb.py), one process a request. */
+    private fun hostAnswer(msg: JSONObject): JSONObject {
+        val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
+        p.outputStream.use { it.write(msg.toString().toByteArray()) }
+        val out = p.inputStream.bufferedReader().readText()
+        p.waitFor()
+        return JSONObject(out)
     }
 
     @After fun down() {
@@ -235,6 +248,12 @@ abstract class Parity(private val theme: String, private val scene: String) {
             name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
+            name == "databases" -> show { DatabaseScreen(host.getString("id"), {}) }
+            name == "kubernetes" -> {
+                show { KubeScreen(host.getString("id"), {}) }
+                tap("CPU")
+                tap("CPU")
+            }
             else -> return false
         }
         return true

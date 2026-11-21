@@ -50,7 +50,7 @@
         {
           "name": "Prompt",
           "shows": "Label \"Prompt\". A multi-line box in a card frame, at least about 96 tall, wrapping, scrolling, no horizontal scroll, Tab does not insert a tab. Focused when the dialog opens (not in Meta's card). Empty is allowed: the session then starts without a first prompt.",
-          "copy": ["new_session.prompt"]
+          "copy": ["common.prompt"]
         }
       ]
     },

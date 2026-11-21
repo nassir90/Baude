@@ -131,6 +131,12 @@ def open_chat(app, sc):
                 if getattr(card, t, None) is not None:
                     getattr(card, t).set_expanded(True)
         T.pump(0.4)
+    if sc.get("ask"):
+        card = win.tool_cards[sc["ask"]]
+        if card.state == "interrupted":  # (a finished chat's call with no result: asking now)
+            card.set_state("running")
+        win.permission_card(f"perm-{sc['ask']}", card.name, card.input, sc["ask"])
+        T.pump(0.4)
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)

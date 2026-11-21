@@ -368,8 +368,15 @@ object MetaTools {
                     if (r.optString("op") != Op.TRANSCRIPT) return@ask no(Msg.Error.from(r).said.orEmpty())
                     val data = Msg.TranscriptReply.from(r).data.orEmpty()
                     val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
-                    val said = parse(text, cutFirst = size > 60_000).filter { it.kind in setOf("you", "bot", "tool", "note", "error") }
-                        .joinToString("\n") { "[${it.kind}] ${it.text}" }.takeLast(20_000).ifEmpty { "(nothing said yet)" }
+                    val said = parse(text, cutFirst = size > 60_000).mapNotNull {
+                        when (it.kind) {
+                            "you", "bot", "note", "error" -> "[${it.kind}] ${it.text}"
+                            "call" -> "[tool] " + toolLine(JSONObject(it.text))
+                            "task" -> "[note] " + taskSaid(JSONObject(it.text))
+                            "stopped" -> "[note] " + Wording.Meta.interrupted
+                            else -> null
+                        }
+                    }.joinToString("\n").takeLast(20_000).ifEmpty { "(nothing said yet)" }
                     ok("<chat title=\"${title(s).replace("\"", "&quot;")}\">\n$said\n</chat>")
                 }
             }

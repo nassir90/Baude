@@ -128,7 +128,10 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
             val shown = if (taken != null) chat.lines.take(taken) else chat.lines
-            items(shown) { line ->
+            val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
+            val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
+            drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
+                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
                 val uuid = line.uuid
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
                     if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
@@ -142,9 +145,8 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 SelectionContainer { Thinking(chat.streamingThought.value) }
             }
             if (taken == null && chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
-            items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
-                Asked(chat, ask, alwaysOffered(session?.let { it.model.orEmpty() }, at),
-                    if (session?.bot != null) name else "Claude") // (a Bot's question: its name's)
+            items(chat.asks.filter { a -> a.toolUseId == null || chat.calls.byId[a.toolUseId] == null }, key = { it.rid }) { ask ->
+                Asked(chat, ask, offered, askName) // (one with no card of its own: this phone's own agents', as claude's)
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
@@ -223,25 +225,50 @@ fun take(ctx: Context, chat: Chat, uris: List<Uri>) {
     }
 }
 
-/** What a Bot asks to do, as Baude's permission card has it: Allow, Always allow (for Claude Code's models), Deny;
- * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
-@OptIn(ExperimentalLayoutApi::class)
+/** What a Bot asks to do where its call has no card (Baude's own permission box): amber-edged, what it would run as a
+ * call's input is shown, and Allow, Always allow (for Claude Code's models), Deny; claude's own questions
+ * (AskUserQuestion) as a form. */
 @Composable
 fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
-    Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (ask.tool == "AskUserQuestion" && questions != null) {
             Text(Wording.Asks.hasQuestion(name = name), style = Type.bold, color = c.fg)
+        } else {
+            val said = summary(ask.tool, ask.input)
+            SelectionContainer {
+                Text(androidx.compose.ui.text.buildAnnotatedString {
+                    withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)) {
+                        append(Wording.Asks.allowTool(tool = toolTitle(ask.tool)))
+                    }
+                    if (said.isNotEmpty()) withStyle(androidx.compose.ui.text.SpanStyle(color = c.fg.copy(alpha = c.fg.alpha * 0.6f))) {
+                        append("  $said")
+                    }
+                }, style = Type.body, color = c.fg)
+            }
+            SelectionContainer { InputView(ask.tool, ask.input) }
+        }
+        AskButtons(chat, ask, alwaysOffered, name)
+    }
+}
+
+/** The buttons of a permission (Baude's, under a call's card or in its box): Allow, Always allow (for Claude Code's
+ * models), Deny; claude's questions (AskUserQuestion) as a form, answered or skipped. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
+    val c = LocalBaude.current
+    val questions = ask.input.optJSONArray("questions")
+    if (ask.tool == "AskUserQuestion" && questions != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
-            return@Column
         }
-        Text(Wording.Asks.allowTool(tool = toolTitle(ask.tool)), style = Type.bold, color = c.fg)
-        val shown = shownInput(ask.input)
-        if (shown.isNotBlank()) Text(shown, style = Type.mono, color = c.fg, maxLines = 14, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
-                .padding(horizontal = 8.dp, vertical = 6.dp))
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(Wording.Common.allow, suggested = true) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
@@ -256,19 +283,10 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
     }
 }
 
-/** A call's input as the card shows it: its command, or its fields one a line. */
-private fun shownInput(input: org.json.JSONObject): String {
-    input.optString("command").ifBlank { null }?.let { return it }
-    return input.keys().asSequence().joinToString("\n") { k ->
-        val v = input.opt(k)
-        "$k: " + (if (v is String) v else v.toString()).lines().take(6).joinToString("\n  ").take(400)
-    }
-}
-
 /** claude's questions (AskUserQuestion), as Baude's QuestionForm: each its options (one picked, or several if it
  * says so) and Other, to write your own. Answer sends {question: what's picked, comma-joined}; Skip, none. */
 @Composable
-private fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
+fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
     val c = LocalBaude.current
     val qs = (0 until questions.length()).mapNotNull { questions.optJSONObject(it) }.filter { it.optString("question").isNotBlank() }
     val picked = remember { mutableStateListOf<Set<String>>().apply { repeat(qs.size) { add(emptySet()) } } }
@@ -429,6 +447,7 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
         "thinking" -> SelectionContainer { Thinking(line.text) }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
+        "tasknote" -> TaskNoteLine(line.text)
         "rows" -> MetaRows(line.text)
         "action" -> MetaAction(line.text)
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,

@@ -1,5 +1,5 @@
 {
-  "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session with only the first `lines` lines of its transcript (all of them when absent), or of the fixture named by `transcript` instead; `files` names a folder of fixtures/ whose contents join the chat's folder; `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
+  "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session with only the first `lines` lines of its transcript (all of them when absent), or of the fixture named by `transcript` instead; `files` names a folder of fixtures/ whose contents join the chat's folder; `transcript` (a fixtures file used for the first session instead of sessions.json's), `state` (the first session's state as its host lists it, for the phone) and `ask` (the tool_use id of a call in the transcript to ask permission for) are further optional keys of a chat scene; `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
   "scenes": [
     {"name": "home", "what": "The sessions list, no chat open", "inventory": ["Sidebar.region", "GroupByMenu.menu"]},
     {"name": "chat-bash", "what": "A failed command with its output, after thinking", "lines": 3, "inventory": ["ToolCall.element", "Thinking.element", "UserTurn.element"]},
@@ -17,6 +17,9 @@
     {"name": "chat-todo-agent-open", "what": "The same, opened", "lines": 18, "open": true, "inventory": ["ToolCall.element"]},
     {"name": "chat-web-mcp", "what": "WebFetch and an MCP tool", "lines": 22, "inventory": ["ToolCall.element"]},
     {"name": "chat-web-mcp-open", "what": "The same, opened", "lines": 22, "open": true, "inventory": ["ToolCall.element"]},
+    {"name": "chat-tool-states", "what": "An image Read, a background command that finished, a command with no description, the ending of a task whose call isn't drawn, a call cut short", "transcript": "tool-states.jsonl", "inventory": ["ToolCall.element", "ToolGroup.element", "BackgroundTask.element"]},
+    {"name": "chat-tool-states-open", "what": "The same, opened", "transcript": "tool-states.jsonl", "open": true, "inventory": ["ToolCall.element", "ToolGroup.element", "BackgroundTask.element"]},
+    {"name": "chat-permission", "what": "The MCP call asking permission in its card, in its group", "lines": 21, "state": "waiting", "ask": "toolu_10", "inventory": ["PermissionPrompt.element", "ToolCall.element", "ToolGroup.element"]},
     {"name": "chat-end", "what": "The whole chat, at its end", "inventory": ["UserTurn.element", "Reply.element", "Thinking.element", "Composer.region", "StatusBar.region", "HeaderBar.region"]},
     {"name": "menu", "what": "The chat's main menu open (☰ on the desktop)", "inventory": ["MainMenu.menu"]},
     {"name": "settings", "what": "Settings", "inventory": ["Settings.dialog", "MetaSettings.dialog"]},

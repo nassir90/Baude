@@ -49,15 +49,22 @@ fun artifact(use: JSONObject, text: String): Artifact? {
 private fun taskTag(t: String, name: String) =
     Regex("<$name>(.*?)</$name>", RegexOption.DOT_MATCHES_ALL).find(t)?.groupValues?.get(1)?.trim()
 
-/** A background task's end, as claude tells it (<task-notification>): its task's id, its call's, how it ended. */
+/** A background task's end, as claude tells it (<task-notification>): its task's id, its call's, how it ended, what
+ * it says of it, and a subagent's report. */
 fun taskNote(t: String): JSONObject = JSONObject().put("task_id", taskTag(t, "task-id"))
     .put("tool_use_id", taskTag(t, "tool-use-id")).put("status", taskTag(t, "status"))
+    .put("summary", taskTag(t, "summary").orEmpty().ifBlank { Wording.TranscriptNotes.taskFinished })
+    .put("result", taskTag(t, "result").orEmpty())
 
-/** A background task's end as one line, as Baude's chat and Record say it (widgets.task_note_line): "Background
- * command · what it was — finished (exit 0)", or "Agent · …" for a subagent's. */
-fun taskLine(t: String): String {
-    val status = taskTag(t, "status").orEmpty().ifBlank { "completed" }
-    val summary = unescape(taskTag(t, "summary").orEmpty().ifBlank { Wording.TranscriptNotes.taskFinished })
+/** What a background task's end line says (widgets.task_note_line): what it was, which one, how it ended; failed:
+ * it went wrong. */
+class TaskSaid(val what: String, val desc: String, val ending: String, val failed: Boolean) {
+    override fun toString() = "$what · $desc — $ending"
+}
+
+fun taskSaid(note: JSONObject): TaskSaid {
+    val status = note.optString("status").ifBlank { "completed" }
+    val summary = unescape(note.optString("summary").ifBlank { Wording.TranscriptNotes.taskFinished })
     val what = if (summary.startsWith("Agent") || summary.startsWith("Subagent")) Wording.Common.agent
         else Wording.TaskNotes.backgroundCommand
     val quoted = Regex("^[^\"]*\"(.*)\"", RegexOption.DOT_MATCHES_ALL).find(summary)?.groupValues?.get(1)
@@ -70,7 +77,7 @@ fun taskLine(t: String): String {
         else -> status
     }
     Regex("exit code (\\d+)").find(summary)?.let { ending = Wording.TaskNotes.endingExit(ending = ending, code = it.groupValues[1]) }
-    return "$what · $desc — $ending"
+    return TaskSaid(what, desc, ending, status in setOf("failed", "killed", "error"))
 }
 
 /** Text with its HTML character references read (html.unescape's, for the ones claude's notes have): named ones and

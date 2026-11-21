@@ -5586,7 +5586,7 @@ def _value_widget(v, depth=0):
     if isinstance(v, str) and "\n" in v:
         return CodeBlock(v)
     if isinstance(v, bool):
-        return sel_label("yes" if v else "no")
+        return sel_label(wording.say("tool_calls.yes" if v else "tool_calls.no"))
     if isinstance(v, (str, int, float)):
         return sel_label(html.escape(str(v)))
     if isinstance(v, list) and all(isinstance(x, (str, int, float, bool)) for x in v):
@@ -5642,7 +5642,7 @@ def tool_display(name):
     _, server, tool = name.split("__", 2)
     server = re.sub(r"^(claude_ai_|plugin_[^_]+_)", "", server)
     if re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", server):
-        source = "MCP"  # an unnamed connector: only an id
+        source = wording.say("tool_calls.mcp")  # an unnamed connector: only an id
     else:
         source = MCP_SERVER_NAMES.get(server.lower()) or " ".join(
             w[:1].upper() + w[1:] for w in humanize(server).split())
@@ -5671,26 +5671,27 @@ def tool_input_view(name, inp):
             add(CodeBlock(change.get("diff") or "", "diff"))
         rest = _kv_rows(inp, skip=("changes",))
     elif base == "Edit" and "file_path" in inp:
-        add(_path_label(inp["file_path"], "all occurrences" if inp.get("replace_all") else ""))
+        add(_path_label(inp["file_path"], wording.say("tool_calls.all_occurrences") if inp.get("replace_all") else ""))
         add(diff_block(inp.get("old_string"), inp.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "MultiEdit" and "file_path" in inp:
-        add(_path_label(inp["file_path"], f"{len(inp.get('edits') or [])} edits"))
+        add(_path_label(inp["file_path"], wording.say("tool_calls.edits", n=len(inp.get("edits") or []))))
         for e in inp.get("edits") or []:
             add(diff_block(e.get("old_string"), e.get("new_string"), inp["file_path"]))
         rest = None
     elif base == "Write" and "file_path" in inp:
         content = inp.get("content") or ""
         lines = content.splitlines()
-        add(_path_label(inp["file_path"], f"{len(lines)} lines"))
-        shown = "\n".join(lines[:2000]) + (f"\n… {len(lines) - 2000} more lines" if len(lines) > 2000 else "")
+        add(_path_label(inp["file_path"], wording.say("tool_calls.line_count", n=len(lines))))
+        shown = "\n".join(lines[:2000]) + ("\n" + wording.say("tool_calls.more_lines", n=len(lines) - 2000) if len(lines) > 2000 else "")
         add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], ""), path=inp["file_path"]))
         rest = None
     elif base == "Read" and "file_path" in inp:
         span = ""
         if inp.get("offset") or inp.get("limit"):
             start = inp.get("offset") or 1
-            span = f"lines {start}–{start + inp['limit'] - 1}" if inp.get("limit") else f"from line {start}"
+            span = wording.say("code_view.lines", start=start, end=start + inp["limit"] - 1) if inp.get("limit") \
+                else wording.say("tool_calls.from_line", start=start)
         add(_path_label(inp["file_path"], span))
         rest = _kv_rows(inp, skip=("file_path", "offset", "limit"))
     elif base in ("Grep", "Glob") and "pattern" in inp:
@@ -5991,9 +5992,9 @@ class ToolCard(Gtk.Box):
         self.append(grid)
         base = self.base = name.split("__")[-1]
         # (a Write's is the whole file it wrote, not a change: Input)
-        self.input_toggle = Disclosure(toggles, grid, 1, "Command" if base in ("Bash", "BashOutput", "PowerShell")
-                                       else "Prompt" if base in ("Task", "Agent")
-                                       else "Diff" if base in ("Edit", "MultiEdit") else wording.say("meta.input"),
+        self.input_toggle = Disclosure(toggles, grid, 1, wording.say("common.command") if base in ("Bash", "BashOutput", "PowerShell")
+                                       else wording.say("common.prompt") if base in ("Task", "Agent")
+                                       else wording.say("tool_calls.diff") if base in ("Edit", "MultiEdit") else wording.say("meta.input"),
                                        button=True)
         self.output_toggle = Disclosure(toggles, grid, 2, wording.say("meta.output"), button=True)
         self.output_toggle.set_visible(False)  # until there is output
@@ -6070,11 +6071,11 @@ class ToolCard(Gtk.Box):
         s = summarize_tool(self.name, self.input)
         extra = []
         if self.state == "background":
-            extra.append("running in background")
+            extra.append(wording.say("tool_calls.running_in_background"))
         elif self.state == "interrupted":
-            extra.append("interrupted")
+            extra.append(wording.say("meta.interrupted"))
         if self.decision == "denied":
-            extra.append(self.decision)
+            extra.append(wording.say("tool_calls.denied"))
         tail = "".join(f"  <span alpha='55%'>· {html.escape(e)}</span>" for e in extra)
         title, source = tool_display(self.name)
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
@@ -6164,7 +6165,7 @@ class ToolCard(Gtk.Box):
 
     def add_output_text(self, text, lang=""):
         # it scrolls inside its own pane now, so keep much more (a label this size is still cheap)
-        shown = text if len(text) < 200_000 else text[:200_000] + f"\n… ({len(text)} chars)"
+        shown = text if len(text) < 200_000 else text[:200_000] + "\n" + wording.say("tool_calls.cut_chars", n=len(text))
         self.pending_output.append((shown, lang))
         if self.output_toggle.get_expanded():
             self.build_output()
@@ -6199,7 +6200,7 @@ class ToolCard(Gtk.Box):
                 if path and self.image_acts is None:
                     self.image_acts = image.image_actions
             except GLib.Error:
-                self.media_box.append(sel_label("[image could not be decoded]"))
+                self.media_box.append(sel_label(wording.say("tool_calls.image_not_decoded")))
         self.artifact = artifact_from_tool(self.input, text) if self.base == "Artifact" else None
         if self.artifact:
             ARTIFACT_TITLES[self.artifact["url"]] = self.artifact["title"]  # a publish is authoritative
@@ -6481,8 +6482,9 @@ class ToolGroup(Gtk.Grid):
         cards = self.cards()
         failed = sum(c.state == "error" for c in cards)
         cut = sum(c.state == "interrupted" for c in cards)
-        self.toggle.set_label(f"{len(cards)} tool calls" + (f", {failed} failed" if failed else "")
-                              + (f", {cut} interrupted" if cut else ""))
+        self.toggle.set_label(wording.say("tool_calls.count", n=len(cards))
+                              + (wording.say("tool_calls.failed", n=failed) if failed else "")
+                              + (wording.say("tool_calls.interrupted", n=cut) if cut else ""))
         states = {c.state for c in cards if c.asking is None}  # (one waiting to be allowed isn't running)
         state = "running" if states & {"running", "background"} else "error" if "error" in states else \
             "interrupted" if "interrupted" in states and len(states) == 1 else "done"
@@ -11335,7 +11337,7 @@ class SidePanel(Gtk.Box):
         if getattr(card, "view_btn", None) is None:
             tid = task.get("tool_use_id") or card.tool_id
             btn = Gtk.ToggleButton(label=wording.say("common.view"), valign=Gtk.Align.CENTER, focus_on_click=False,
-                                   tooltip_text="Open this subagent in the side panel")
+                                   tooltip_text=wording.say("tool_calls.view_tip"))
             btn.add_css_class("tool-toggle")  # (as Prompt is, beside it)
             btn.connect("toggled", lambda b: b.get_active() and (b.set_active(False), self.view_agent(tid)))
             card.toggles.append(btn)
@@ -18902,7 +18904,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                               left_margin=8, right_margin=8)
         frame = Gtk.ScrolledWindow(child=prompt, min_content_height=96, hscrollbar_policy=Gtk.PolicyType.NEVER)
         frame.add_css_class("card")
-        field(wording.say("new_session.prompt"), frame, top=True)
+        field(wording.say("common.prompt"), frame, top=True)
         effort = lambda: (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None  # noqa: E731  (the top bar's as it's started)
         runs = " · ".join(x for x in (None if agents else self.model_said(self.model_dd.value()),
@@ -19609,7 +19611,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if tool_use_id in self.tool_cards:
                 self.tool_cards[tool_use_id].set_decision(decision)  # keeps tool groups together
             elif behavior != "allow":  # (allowed, it runs: nothing to say)
-                self.note(f"{decision} {name}")
+                self.note(wording.say("tool_calls.denied_tool" if decision == "denied" else "tool_calls.not_answered_tool",
+                                      tool=name))
 
         choices = [(wording.say("common.allow"), "allow", False, "suggested-action"),
                    (wording.say("asks.always_allow", tool=tool_display(name)[0]), "allow", True, None),

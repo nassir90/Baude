@@ -57,7 +57,6 @@ object CodeBlocks {
 fun diffBlock(old: String, new: String): List<Pair<String, String>> =
     (splitLines(old).map { "del" to it } + splitLines(new).map { "add" to it }).ifEmpty { listOf("ctx" to "") }
 
-private fun splitLines(s: String) = if (s.isEmpty()) emptyList() else s.removeSuffix("\n").lines()
 
 private typealias Spans = List<Triple<Int, Int, Tok>>
 

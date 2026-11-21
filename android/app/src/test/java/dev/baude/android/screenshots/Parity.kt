@@ -12,12 +12,17 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import dev.baude.android.Ask
+import dev.baude.android.AppVersion
 import dev.baude.android.BaudeTheme
+import dev.baude.android.Change
+import dev.baude.android.ChangelogScreen
 import dev.baude.android.ChatShell
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.Mesh
+import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
@@ -58,23 +63,36 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
+        files = sc.optString("files").ifBlank { null }
         val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
-        shown = (if (opened.isNull("transcript")) standIn(opened) else transcript(opened.getString("transcript"),
-            sc.optInt("lines", -1))).toByteArray()
+        shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
+            else if (opened.isNull("transcript")) standIn(opened)
+            else transcript(opened.getString("transcript"), sc.optInt("lines", -1))).toByteArray()
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
         activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         Mesh.app = activity.applicationContext
-        // (Settings' Version: the fixture changelog's commit, not this build's; its date is the build's resource: left)
-        org.robolectric.Shadows.shadowOf(activity.packageManager).getInternalMutablePackageInfo(activity.packageName)
-            .versionName = JSONObject(File(root, "fixtures/changelog.json").readText()).getString("commit")
+        // (the running version, as Settings' Version and the Changelog say it: the fixture's, not this build's)
+        val log = JSONObject(File(root, "fixtures/changelog.json").readText())
+        AppVersion.short = log.getString("commit")
+        AppVersion.made = log.getLong("made")
+        AppVersion.read = log.getJSONArray("commits").let { a ->
+            (0 until a.length()).map { a.getJSONArray(it) }.map { Change(it.getString(0), it.getLong(1), it.getString(2)) }
+        }
         Settings.load(activity)
         val set = JSONObject(File(root, "fixtures/settings.json").readText())
         Settings.accent.value = if (set.isNull("accent")) null else set.getString("accent")
         Settings.appearance.value = "system"
         Settings.textScale.value = set.optDouble("text_scale", 1.0).toFloat()
+        Settings.iconScale.value = set.optDouble("icon_scale", 1.0).toFloat()
         Settings.globalScale.value = set.optDouble("zoom_default", 1.0).toFloat()
+        Settings.fullWidth.value = set.optBoolean("full_width", true)
+        Settings.readOnly.clear()
+        Settings.metaModel.value = null
+        Settings.metaEffort.value = null
+        Settings.metaCommands.value = true
+        Settings.codeFont.value = null
         Settings.notify.value = set.optBoolean("notifications", true)
         Settings.meteredUpdates.value = false
         Update.state.value = ""
@@ -82,13 +100,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
         Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
         val h = Host(id = host.getString("id"), name = host.getString("name"), user = "dev", address = "workshop.example")
         Mesh.hosts.add(h)
+        Meta.host.value = h.id
         FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
-        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.map { s ->
+        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
             Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
                 updated = now - s.getDouble("ago"), said = now - s.getDouble("ago"),
-                created = now - s.getDouble("ago") - 600, state = s.getString("state"), model = s.getString("model"),
+                created = now - s.getDouble("ago") - 600,
+                state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
                 size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
@@ -97,6 +117,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */
     private var shown = ByteArray(0)
 
+    /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
+    private var files: String? = null
+
     /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
      * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
@@ -104,9 +127,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
         fun reply(vararg more: Pair<String, Any?>) = JSONObject().put("op", op).put("req", msg.opt("req")).also { r ->
             more.forEach { (k, v) -> r.put(k, v) }
         }
-        fun local(path: String) = File(root, "fixtures/garden").let { g ->
+        // (the scene's files first, then fixtures/garden: the desktop rig's folder holds both)
+        fun local(path: String): File? {
             val rel = path.removePrefix("$home/garden").trimStart('/')
-            if (path != "$home/garden" && !path.startsWith("$home/garden/")) null else if (rel.isEmpty()) g else File(g, rel)
+            if (path != "$home/garden" && !path.startsWith("$home/garden/")) return null
+            val roots = listOfNotNull(files, "garden").map { File(root, "fixtures/$it") }
+            val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
+            return at.firstOrNull { it.exists() } ?: at.last()
         }
         when (op) {
             "transcript" -> {
@@ -117,9 +144,12 @@ abstract class Parity(private val theme: String, private val scene: String) {
             }
             "list_dir" -> {
                 val path = msg.optString("path")
-                val dir = local(path)?.takeIf { it.isDirectory } ?: return JSONObject().put("op", "error").put("req", msg.opt("req"))
-                    .put("error", "Not in a session folder")
-                val entries = dir.listFiles().orEmpty().filter { it.name != ".git" }
+                val rel = path.removePrefix("$home/garden").trimStart('/')
+                val dirs = listOfNotNull(files, "garden").map { File(root, "fixtures/$it").let { g -> if (rel.isEmpty()) g else File(g, rel) } }
+                    .filter { it.isDirectory }
+                if (local(path) == null || dirs.isEmpty()) return reply("op" to "dir", "path" to path, "entries" to JSONArray(),
+                    "error" to "No such file or directory")
+                val entries = dirs.flatMap { it.listFiles().orEmpty().toList() }.filter { it.name != ".git" }.distinctBy { it.name }
                     .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
                 return reply("op" to "dir", "path" to path, "more" to false, "entries" to JSONArray(entries.map { e ->
                     JSONObject().put("name", e.name).put("dir", e.isDirectory).put("ignored", false)
@@ -139,6 +169,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        Meta.host.value = null
         FixtureConnection.down()
         Mesh.hosts.clear()
         Mesh.sessions.clear()
@@ -171,13 +202,22 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val name = sc.getString("name")
         val first = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         when {
-            name == "home" -> show { Home(open = { _, _ -> }, hosts = {}, feedback = {}) }
+            name.startsWith("home") -> {
+                show { Home(open = { _, _ -> }, feedback = {}) }
+                if (name == "home-row-menu") hold(first.getString("title"))
+                if (name == "home-host-menu" || name == "home-add-host") hold(host.getString("name"))
+                if (name == "home-add-host") tap(Wording.Sidebar.addHost)
+            }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
+                if (sc.optBoolean("open")) openAll(first.getString("id"))
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.optBoolean("open")) toEnd()
+                if (sc.has("ask")) ask(sc.getString("ask"))
             }
             name == "settings" -> show { SettingsScreen({}, {}) }
+            name == "changelog" -> show { ChangelogScreen(null, {}) }
             else -> return false
         }
         return true
@@ -196,6 +236,40 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "On it.")))),
             rec("custom-title", "customTitle" to s.getString("title"), "sessionId" to id),
         ).joinToString("\n") { it.toString() } + "\n"
+    }
+
+    /** The permission its call asks, as claude's control_request for it (the call is the transcript's, with no result). */
+    private fun ask(id: String) {
+        val chat = Mesh.open!!
+        if (chat.calls.byId[id] == null) settle()
+        val call = chat.calls.byId.getValue(id)
+        chat.asks.add(Ask("perm-$id", call.name, JSONObject(call.input.toString()), id))
+        settle()
+    }
+
+    /** The chat read and every group and every call's input and output opened, before it's drawn (as desktop.py opens
+     * them: all open, the chat at its end). */
+    private fun openAll(first: String) {
+        val chat = Mesh.openChat(host.getString("id"), first)
+        settle()
+        for (call in chat.calls.byId.values) {
+            call.inputOpen = true
+            call.outputOpen = true
+            chat.calls.opened[call.id] = true
+        }
+    }
+
+    /** The chat's list (the one that scrolls up and down, with items) scrolled to its end. */
+    private fun toEnd() {
+        val list = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            val c = n.config
+            c.contains(SemanticsProperties.CollectionInfo) && c.contains(SemanticsProperties.VerticalScrollAxisRange) &&
+                c.contains(SemanticsActions.ScrollBy)
+        } ?: return
+        repeat(8) {
+            list.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f)
+            settle()
+        }
     }
 
     private fun transcript(file: String, lines: Int): String {
@@ -217,6 +291,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
         // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A long-press on what's labelled label, as a finger's would. */
+    private fun hold(label: String) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnLongClick) && (label in said(n) || label == described(n))
+        } ?: error("nothing to hold labelled $label")
+        node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

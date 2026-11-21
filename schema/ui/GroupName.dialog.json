@@ -8,8 +8,7 @@
     {
       "name": "heading",
       "shows": "\"New group\", or \"Rename group\".",
-      "copy": ["new_session.new_group"],
-      "text": ["Rename group"]
+      "copy": ["new_session.new_group", "new_session.rename_group"]
     },
     {
       "name": "name field",

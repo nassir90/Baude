@@ -222,7 +222,7 @@ object Mesh {
             conns.remove(id)?.stop()
             states.remove(id)
         } else if (id.startsWith("mesh:")) meshed()
-        else hosts.firstOrNull { it.id == id }?.let(::connect)
+        else hosts.firstOrNull { it.id == id }?.let { declined.removeAll { d -> d.startsWith("${it.id} ") }; connect(it) }
         tick.value++
     }
 
@@ -231,6 +231,7 @@ object Mesh {
         val now = h.copy(command = command.ifBlank { "baude_headless.py" })
         val i = hosts.indexOfFirst { it.id == h.id }
         if (i >= 0) hosts[i] = now
+        declined.removeAll { it.startsWith("${h.id} ") }
         HostStore.save(app, hosts)
         connect(now)
     }

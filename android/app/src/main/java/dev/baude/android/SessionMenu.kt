@@ -111,6 +111,19 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     val active = !dead(h) && s.state in listOf("working", "waiting")
     val archived = s.archived == true
     val canBot = alive && takes(h, "bot") && program(s.model) in listOf("claude", "pi")
+    val hasMesh = !gone && canBot && s.bot == null && takes(h, "mesh_tools")
+    val meshAfterMake = hasMesh && top // (index 2 of the items: after Make Bot… if it's there, else after Move to Group)
+    val meshTools: @Composable () -> Unit = {
+        if (hasMesh) {
+            val on = s.meshTools == true
+            MenuChoice(if (on) Wording.Sidebar.removeMeshTools else Wording.Sidebar.giveMeshTools, false) {
+                dismiss()
+                Mesh.ask(h, Msg.MeshTools(session = sid, on = !on).json()) { r ->
+                    if (r.optString("op") == Op.ERROR) toast(Wording.BotSettings.failed(why = said(r)))
+                }
+            }
+        }
+    }
     Popover(open, dismiss, offset = at) {
         if (page == "groups") {
             Row(Modifier.heightIn(min = 38.dp).clickable { page = "items" }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -137,19 +150,12 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
                 }
             } else MenuChoice(Wording.Sidebar.makeBotEllipsis, false) { dismiss(); botting = true }
         }
-        if (!gone && canBot && s.bot == null && takes(h, "mesh_tools")) {
-            val on = s.meshTools == true
-            MenuChoice(if (on) Wording.Sidebar.removeMeshTools else Wording.Sidebar.giveMeshTools, false) {
-                dismiss()
-                Mesh.ask(h, Msg.MeshTools(session = sid, on = !on).json()) { r ->
-                    if (r.optString("op") == Op.ERROR) toast(Wording.BotSettings.failed(why = said(r)))
-                }
-            }
-        }
+        if (meshAfterMake) meshTools()
         MenuRow(Wording.Sidebar.moveToGroup) { page = "groups" }
+        if (!meshAfterMake) meshTools()
         if (gone) MenuChoice(Wording.Common.delete, false) {
             dismiss()
-            HomePrefs.hide(h, s, dead(h))
+            HomePrefs.hide(h, s, dead(h) || off(h))
         } else {
             if (archived) MenuChoice(Wording.Sidebar.unarchive, false) {
                 dismiss()

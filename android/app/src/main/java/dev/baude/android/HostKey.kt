@@ -14,14 +14,16 @@ import androidx.compose.ui.unit.dp
 fun HostKeyAsk() {
     val c = LocalBaude.current
     Mesh.tick.value
+    val dismissed = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateListOf<String>() } // (closed without an answer)
     val conn = Mesh.hosts.firstNotNullOfOrNull { h ->
-        Mesh.conn(h.id)?.takeIf { it.state == "key" && it.shown != null && "${h.id} ${it.shown!!.fingerprint}" !in Mesh.declined }
+        Mesh.conn(h.id)?.takeIf { it.state == "key" && it.shown != null && "${h.id} ${it.shown!!.fingerprint}" !in Mesh.declined &&
+            "${h.id} ${it.shown!!.fingerprint}" !in dismissed }
     } ?: return
     val host = conn.host ?: return
     val shown = conn.shown ?: return
     val decline = { Mesh.declined.add("${host.id} ${shown.fingerprint}"); Unit }
     AlertDialog(
-        onDismissRequest = decline,
+        onDismissRequest = { dismissed.add("${host.id} ${shown.fingerprint}") },
         title = { Text(Wording.PhoneKeys.trustHeading(host = Mesh.label(host.id))) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

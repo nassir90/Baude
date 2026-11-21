@@ -45,6 +45,11 @@ val (appVersionCode, appVersionName) = version()
 val appCommitTime = if (findProperty("baudeVersionCode") != null) "0" else git("log", "-1", "--format=%ct") ?: "0"
 /** The commit it's built from, whole ("" outside a checkout): said in its hello, as Baude's is (Mesh Versions). */
 val appCommit = if (findProperty("baudeVersionCode") != null) "" else git("rev-parse", "HEAD") ?: ""
+/** The same commit, short, and what update.changelog reads of it: every commit it has but merges, newest first, as
+ * short hash, time and subject on a line each (the phone's Changelog, from the asset changelog.txt). */
+val appShort = if (findProperty("baudeVersionCode") != null) "" else git("log", "-1", "--format=%h") ?: ""
+val appChangelog = if (findProperty("baudeVersionCode") != null) "" else
+    git("log", "--no-merges", "--format=%h%x1f%ct%x1f%s", "HEAD") ?: ""
 
 android {
     namespace = "dev.baude.android"
@@ -56,8 +61,8 @@ android {
         targetSdk = 35
         versionCode = appVersionCode // (version(): from git)
         versionName = appVersionName
-        resValue("string", "commit_time", appCommitTime) // (Settings → Version's when: the commit's, in seconds)
         buildConfigField("String", "COMMIT", "\"$appCommit\"")
+        buildConfigField("String", "SHORT", "\"$appShort\"")
         buildConfigField("long", "MADE", "${appCommitTime}L")
     }
 
@@ -133,6 +138,56 @@ val emissionJs = tasks.register<EmissionJs>("emissionJs") {
 
 androidComponents {
     onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(emissionJs, EmissionJs::outputDir) }
+}
+
+/** fonts/ (the code fonts Settings → Code Font offers, open fonts with their licences) as the app's assets, a
+ * variable font's "[wght]" in its file's name made "-VF". */
+abstract class AppFonts : DefaultTask() {
+    @get:InputDirectory abstract val source: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val from = source.get().asFile
+        val to = outputDir.get().asFile.resolve("fonts")
+        to.deleteRecursively()
+        from.walkTopDown().filter { it.isFile && it.extension != "md" }.forEach { f ->
+            val dest = to.resolve(f.parentFile.relativeTo(from).path).resolve(f.name.replace(Regex("\\[.*\\]"), "-VF"))
+            dest.parentFile.mkdirs()
+            f.copyTo(dest, true)
+        }
+    }
+}
+
+val appFontsTask = tasks.register<AppFonts>("appFonts") {
+    source.set(rootProject.layout.projectDirectory.dir("../fonts"))
+    outputDir.set(layout.buildDirectory.dir("generated/fonts"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(appFontsTask, AppFonts::outputDir) }
+}
+
+/** update.changelog's list for the commit the app's built from (asset changelog.txt): the phone's ☰ → Changelog. */
+abstract class AppChangelog : DefaultTask() {
+    @get:Input abstract val log: Property<String>
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        dir.resolve("changelog.txt").writeText(log.get())
+    }
+}
+
+val appChangelogTask = tasks.register<AppChangelog>("appChangelog") {
+    log.set(appChangelog)
+    outputDir.set(layout.buildDirectory.dir("generated/changelog"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(appChangelogTask, AppChangelog::outputDir) }
 }
 
 /** schema/tokens (W3C Design Tokens, 2025.10: baude.resolver.json, its sets and its theme's light and dark contexts),

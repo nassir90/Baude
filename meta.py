@@ -433,7 +433,9 @@ def trimmed(text, limit, where=None):
     """text, or its start as far as limit and what's left said, with where to read the rest."""
     if len(text) <= limit:
         return text
-    return text[:limit].rstrip() + f"\n[… {len(text) - limit} more characters" + (f": Read {where}" if where else "") + "]"
+    more = len(text) - limit
+    return text[:limit].rstrip() + "\n" + (wording.say("report.more_characters_read", n=more, where=where) if where else
+                                          wording.say("report.more_characters", n=more))
 
 
 def said_value(value):
@@ -503,8 +505,8 @@ def capped_report(head, parts, most=None):
         kept.append(part)
         size += len(part) + 2
     cut = len(parts) - len(kept)
-    return "\n\n".join([top] + ([f"[… the first {cut} message{'s' if cut != 1 else ''} left out: too long to "
-                                  "paste]"] if cut else []) + list(reversed(kept))).strip() + "\n"
+    return "\n\n".join([top] + ([wording.say("report.left_out", n=cut)] if cut else [])
+                        + list(reversed(kept))).strip() + "\n"
 
 
 def report_text(head, messages, limit=REPORT_ITEM, most=None):
@@ -571,7 +573,7 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                     content = msg.get("content")
                     text = content if isinstance(content, str) else "\n".join(
                         b.get("text") or "" for b in content or () if isinstance(b, dict) and b.get("type") == "text")
-                    said = f"Summary of the earlier conversation:\n{trimmed(text.strip(), limit)}"
+                    said = f"{wording.say('report.summary')}\n{trimmed(text.strip(), limit)}"
                     if parts and parts[-1].startswith("## Conversation compacted") and "\n" not in parts[-1]:
                         parts[-1] += "\n" + said
                     else:
@@ -586,24 +588,26 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                     elif c.get("type") == "tool_use":
                         calls[c.get("id")] = c.get("name")
                         inp = json.dumps(c.get("input") or {}, ensure_ascii=False, indent=1)
-                        out.append(f"[tool {c.get('name')}]\n{trimmed(inp, limit)}")
+                        out.append(f"{wording.say('report.tool_call', name=c.get('name'))}\n{trimmed(inp, limit)}")
                     elif c.get("type") == "tool_result":
                         res = c.get("content")
                         res = res if isinstance(res, str) else "\n".join(
                             b.get("text") or f"[{b.get('type')}]" for b in res or () if isinstance(b, dict))
-                        name = calls.get(c.get("tool_use_id")) or "tool"
-                        out.append(f"[{name} {'error' if c.get('is_error') else 'result'}]\n{trimmed(res, limit)}")
+                        name = calls.get(c.get("tool_use_id")) or wording.say("report.unknown_tool")
+                        out.append(f"{wording.say('report.tool_error' if c.get('is_error') else 'report.tool_result', name=name)}"
+                                   f"\n{trimmed(res, limit)}")
                 if not out:
                     continue
                 results = e["type"] == "user" and all(isinstance(c, dict) and c.get("type") == "tool_result"
                                                       for c in content or ()) and not isinstance(content, str)
-                who = "Tool results" if results else "User" if e["type"] == "user" else \
-                    "Claude" + (f" ({msg['model']})" if msg.get("model") and msg["model"] != "<synthetic>" else "") + \
-                    (" (API error)" if e.get("isApiErrorMessage") else "")
+                who = wording.say("report.tool_results") if results else wording.say("report.user") if e["type"] == "user" \
+                    else (wording.say("report.claude_model", model=msg["model"])
+                          if msg.get("model") and msg["model"] != "<synthetic>" else wording.say("report.claude")) + \
+                    (" " + wording.say("report.api_error") if e.get("isApiErrorMessage") else "")
                 when = (e.get("timestamp") or "").replace("T", " ")[:19]
                 parts.append(f"## {who}" + (f" · {when}" if when else "") + "\n" + "\n".join(out))
     except OSError as err:
-        parts.append(f"(transcript not read: {err})")
+        parts.append(wording.say("report.not_read", why=err))
     return capped_report(head, parts or [wording.say("report.nothing_said")], most)
 
 
@@ -1049,7 +1053,7 @@ def commands_row(chat):
 def settings_group(chat):
     """Settings → Meta, in Baude's and Record's Settings: Intelligence, Provider, Effort, Run commands and Code mode.
     They follow this machine's providers as they're found (Ollama started, a model pulled)."""
-    group = Adw.PreferencesGroup(title=NAME)
+    group = Adw.PreferencesGroup(title=wording.say("meta_settings.title"))
     group.add(model_row(chat))
     group.add(provider_row(chat))  # (where the model above runs)
     group.add(effort_row(chat))

@@ -574,7 +574,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
     }
 }
 
-/** What Meta showed under a reply, as it's kept in a line (from before calls had it). */
+/** What Meta showed under a reply, as a "rows" line keeps it: its JSON. */
 @Composable
 fun MetaRows(text: String) {
     MetaShown(try { JSONObject(text) } catch (_: Exception) { return })

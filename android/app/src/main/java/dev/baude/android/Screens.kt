@@ -245,10 +245,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 else {
                     val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
                         !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
-                    Box(if (sendTip != null) Modifier.tip(sendTip) else Modifier) {
-                        IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
-                            background = c.fg.copy(alpha = 0.10f)) { if (text.isNotBlank() || files.isNotEmpty()) send() }
-                    }
+                    IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
+                        background = c.fg.copy(alpha = 0.10f), tip = sendTip) { if (text.isNotBlank() || files.isNotEmpty()) send() }
                 }
             }
         }

@@ -231,7 +231,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
-                if (sc.optBoolean("open")) toEnd()
+                if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))

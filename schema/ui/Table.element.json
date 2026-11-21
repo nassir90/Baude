@@ -1,0 +1,60 @@
+{
+  "description": "A markdown table in a reply or message: a bordered grid with a shaded header row, cells that wrap when long, and sideways scrolling when it is wider than the chat column.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "code": [
+    "widgets.py:markdown_table",
+    "widgets.py:TableScroll",
+    "widgets.py:relink_table"
+  ],
+  "parts": [
+    {
+      "name": "frame",
+      "shows": "1px border in the rule colour (baude.rule), 8px corners, left-aligned, only as wide as its columns need, 2px above and below."
+    },
+    {
+      "name": "header row",
+      "shows": "The first row: bold, on the raised fill (baude.raised), 5px/12px padding, a 1px rule under it."
+    },
+    {
+      "name": "cells",
+      "shows": "4px/12px padding, a faint rule (rule colour at 50%) under each row, text top-aligned with inline markdown (code, bold, links). The |---| alignment row is not shown. A row with fewer cells than the widest row gets empty cells."
+    },
+    {
+      "name": "long cells",
+      "shows": "Short columns keep their natural width on one line; columns with cells longer than 40 characters share the rest of the chat's width and wrap, never narrower than 40 characters. Refitted as the window is resized."
+    },
+    {
+      "name": "sideways scroll",
+      "shows": "When the table can't fit even so, it scrolls horizontally inside its own frame (horizontal scrollbar under it) instead of squashing the columns.",
+      "actions": [
+        {
+          "by": "scroll sideways / drag the scrollbar",
+          "does": "Moves the table left and right."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "small",
+      "shows": "Inline with the text, as wide as its content."
+    },
+    {
+      "name": "tall",
+      "shows": "Every row is drawn; the chat itself scrolls (no inner vertical scroll)."
+    },
+    {
+      "name": "wide",
+      "shows": "Scrolls sideways within its frame."
+    }
+  ],
+  "scenes": [
+    "33-table-small",
+    "34-table-tall",
+    "35-table-wide",
+    "30-markdown-gallery"
+  ]
+}

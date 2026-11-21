@@ -1,0 +1,76 @@
+{
+  "description": "What the chat shows of Claude's artifacts (pages published on claude.ai): the Artifact tool's card with a \"Published <title> ↗ v2\" line, and artifact links in replies read as their titles. Every artifact is also listed on the side panel's Artifacts page.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "An Artifact tool call whose result says \"Published <file> at https://claude.ai/artifact/…\"",
+    "An artifact link in a reply",
+    "A Claude Desktop transcript's frame-link record"
+  ],
+  "code": [
+    "baude.py:artifact_from_tool",
+    "baude.py:html_title",
+    "baude.py:ToolCard.set_result",
+    "baude.py:BaudeWindow.register_artifact",
+    "baude.py:BaudeWindow.add_artifact_chips",
+    "baude.py:BaudeWindow.render_history",
+    "widgets.py:link_markup",
+    "baude.py:ArtifactChip"
+  ],
+  "copy": [
+    "artifacts",
+    "references"
+  ],
+  "parts": [
+    {
+      "name": "publish card",
+      "shows": "A normal tool card (ToolCall) named \"Artifact\" with its description as the summary. Right under its header line, always visible: \"Published \" then the artifact's title as a link followed by ↗, then dimmed (55%) \"v<version>\" when the result gives one. The title is: the call's title, else the published HTML file's <title> (or a Markdown file's first # heading), else its file name humanized and capitalized (ops_dashboard.html → \"Ops dashboard\"), else \"Artifact\". Link tooltip: its URL.",
+      "copy": [
+        "artifacts.untitled"
+      ],
+      "text": [
+        "Published "
+      ],
+      "actions": [
+        {
+          "by": "click the title",
+          "does": "Opens the artifact in the browser."
+        }
+      ]
+    },
+    {
+      "name": "link in a reply",
+      "shows": "Inline at text size: the title the chat knows for that URL (from a publish), else \"Claude artifact\", followed by ↗, as a link (tooltip the URL). Updates to the real title once a publish names it. Recorded on the side panel's Artifacts list.",
+      "copy": [
+        "references.claude_artifact"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens it in the browser."
+        }
+      ]
+    },
+    {
+      "name": "from history",
+      "shows": "A Claude Desktop session's record of an artifact it published (with no Artifact call drawn): a quiet small dimmed line \"Published <title> ↗\"."
+    },
+    {
+      "name": "side panel row",
+      "shows": "ArtifactChip — [icon by kind] Title / claude.ai/artifact/… · v2, Open and Copy link — is on the side panel's Artifacts page, not in the transcript (see Artifacts.panel)."
+    }
+  ],
+  "states": [
+    {
+      "name": "no publish in result",
+      "shows": "Just a normal Artifact tool card; no Published line."
+    }
+  ],
+  "scenes": [
+    "80-artifact-published",
+    "81-artifact-links",
+    "83-artifact-history",
+    "36-auto-links"
+  ]
+}

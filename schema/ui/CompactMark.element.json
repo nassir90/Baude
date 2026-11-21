@@ -1,0 +1,93 @@
+{
+  "description": "Where Claude Code compacted the conversation (summarised what came before to free its context window): a quiet centred line between two horizontal rules, saying what it did, with the summary it wrote folded under it.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "/compact, or an automatic compaction (live)",
+    "A compact_boundary in a transcript"
+  ],
+  "code": [
+    "widgets.py:CompactMark",
+    "widgets.py:compact_text",
+    "widgets.py:compact_said",
+    "baude.py:CompactMarks.on_compaction",
+    "baude.py:CompactMarks.compact_ended",
+    "baude.py:BaudeWindow.adopt_summary",
+    "record.py:Reader._add"
+  ],
+  "copy": [
+    "compaction",
+    "time"
+  ],
+  "parts": [
+    {
+      "name": "line",
+      "shows": "Full width, 6px above and below: a rule, the text (small, 0.85em, 60% opacity, centred, wrapping, selectable), a rule. Tooltip over all of it: \"Claude Code summarised the conversation so far, to free its context window: the summary stands in for what came before\".",
+      "copy": [
+        "compaction.tooltip"
+      ]
+    },
+    {
+      "name": "summary",
+      "shows": "Under the line, once known: a disclosure \"Summary of the earlier conversation\" (small, dimmed), folded. Opened, the summary as markdown, 18px in, 6px under it.",
+      "copy": [
+        "compaction.summary"
+      ],
+      "actions": [
+        {
+          "by": "click the disclosure",
+          "does": "Opens or folds the summary."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "running",
+      "shows": "\"Compacting the conversation\" followed by working dots (•, ••, ••• cycling); or \"Compacting the conversation · <N> characters of summary written\".",
+      "copy": [
+        "compaction.running",
+        "compaction.running_written"
+      ]
+    },
+    {
+      "name": "done",
+      "shows": "\"Conversation compacted automatically\" / \"Conversation compacted (/compact)\" / \"Conversation compacted\", then \" · 167k tokens of context → 18k\" (or \" · 167k tokens of context\" without the after), then \" · 41s\" (or \" · 1m 5s\") when it took a second or more.",
+      "copy": [
+        "compaction.compacted",
+        "compaction.compacted_auto",
+        "compaction.compacted_manual",
+        "compaction.tokens_before",
+        "compaction.tokens_before_after",
+        "time.seconds",
+        "time.minutes_seconds"
+      ]
+    },
+    {
+      "name": "failed",
+      "shows": "The text in the error colour at full opacity: \"Compaction failed: <error>\" or \"Compaction failed\".",
+      "copy": [
+        "compaction.failed_because",
+        "compaction.failed"
+      ]
+    },
+    {
+      "name": "unfinished",
+      "shows": "Its turn ended first: \"Compaction didn't finish\" in red.",
+      "copy": [
+        "compaction.unfinished"
+      ]
+    },
+    {
+      "name": "nothing to do",
+      "shows": "A compaction that ends without making one (a hook blocked it) removes its mark."
+    },
+    {
+      "name": "summary without its mark (history)",
+      "shows": "A summary whose boundary isn't drawn yet shows on its own as a small dimmed \"Summary of the earlier conversation\" disclosure, and moves under its mark when that is drawn."
+    }
+  ],
+  "scenes": []
+}

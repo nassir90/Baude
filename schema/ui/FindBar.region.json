@@ -1,0 +1,47 @@
+{
+  "description": "Find in the chat: a bar that slides in at the top of the chat column (under any banner, over the transcript) while searching, which shades every match in the chat's text. The same bar serves Meta's chat, a side question and a subagent's transcript, each over its own text.",
+  "apps": ["baude", "record"],
+  "opens": ["key Ctrl+F (⌘F on a Mac)"],
+  "code": ["widgets.py:ChatFind", "widgets.py:FindBar", "widgets.py:FindMarks", "baude.py:BaudeWindow.find_in_chat", "baude.py:BaudeWindow.find_beyond"],
+  "copy": ["find"],
+  "parts": [
+    {
+      "name": "search box",
+      "shows": "A search field, filling the bar, with the placeholder \"Find in chat\". Opens with the one-line text selected in the chat (if any) already typed in, and focused with its text selected.",
+      "copy": ["find.placeholder"],
+      "actions": [
+        {"by": "type", "does": "Finds every match as typed, case ignored, in the chat's text (up to 2000), the current one brought into view; matches shaded, the current one more strongly. A reply still arriving is searched again when stepping"},
+        {"by": "key Enter", "does": "Next match (wraps)"},
+        {"by": "key Shift+Enter", "does": "Previous match"},
+        {"by": "key Esc", "does": "Closes the bar, drops the shading and puts the focus back where it was"}
+      ]
+    },
+    {
+      "name": "count",
+      "shows": "A small dim label right of the box, right-aligned: \"3 of 12\"; \"3 of 12+\" while parts of a long chat are not drawn yet; \"No matches\"; \"⏎ earlier\" when the drawn text has no match but earlier, undrawn parts might (Enter then looks through the chat's saved transcript, draws the nearest part that has the text and goes to the match); \"searching…\" while that look runs. Empty with nothing typed.",
+      "copy": ["find.match_of", "find.match_of_more", "find.no_matches", "find.earlier", "find.searching"]
+    },
+    {
+      "name": "previous and next buttons",
+      "shows": "Two flat icon buttons, an up arrow and a down arrow.",
+      "copy": ["find.previous", "find.next"],
+      "actions": [
+        {"by": "hover", "does": "Tooltips \"Previous match (Shift+Enter)\" and \"Next match (Enter)\""},
+        {"by": "click", "does": "Steps to the previous or next match"}
+      ]
+    },
+    {
+      "name": "close button",
+      "shows": "A × at the right end of the bar.",
+      "actions": [{"by": "click", "does": "Closes the bar as Esc does"}]
+    },
+    {
+      "name": "what is searched",
+      "shows": "The chat's visible text (messages, tool cards that are open); text inside closed tool cards or revealers is not. Matches in a code block's own scroller are scrolled into view too. Ctrl+F goes to the find bar of the thing the focus is in (Kubernetes' or a code page's find, a side question, a subagent, Meta) before the main chat's."
+    }
+  ],
+  "states": [
+    {"name": "closed", "shows": "No bar, no width or height taken"},
+    {"name": "open, no matches", "shows": "Count reads \"No matches\" (or \"⏎ earlier\")"}
+  ]
+}

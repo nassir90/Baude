@@ -1,0 +1,25 @@
+{
+  "description": "The right-click menu on a tab of the main area's tab bar. Record only (Baude's tabs have no menu).",
+  "apps": ["record"],
+  "opens": ["Right-click a tab in Record's main tab bar"],
+  "code": ["widgets.py:MainTabs.__init__"],
+  "copy": ["tabs", "common"],
+  "parts": [
+    {
+      "name": "Copy Link",
+      "shows": "\"Copy Link\"",
+      "copy": ["tabs.copy_link"],
+      "actions": [
+        {"by": "click", "does": "Puts that tab's absolute link on the clipboard (a file path with :line, a notes page's file, a chat's transcript) and toasts \"Link copied\", or \"This page has no link to copy\"."}
+      ]
+    },
+    {
+      "name": "Rename…",
+      "shows": "\"Rename…\" (the common wording); greyed on every tab that isn't a chat.",
+      "text": ["Rename…"],
+      "actions": [
+        {"by": "click", "does": "Asks for a new name for that chat (the window's rename dialog)."}
+      ]
+    }
+  ]
+}

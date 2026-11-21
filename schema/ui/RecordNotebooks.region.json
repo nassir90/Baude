@@ -1,0 +1,48 @@
+{
+  "description": "The Notebooks section of Record's left column: the host picker, one row per notebook, New Notebook. Pages of the open notebook are listed above it (RecordPages). Styled as Baude's sessions list.",
+  "apps": ["record"],
+  "code": ["record.py:Window.__init__", "record.py:Window._row", "record.py:Window.new_notebook", "record.py:Window.show_host", "record.py:Window.host_state"],
+  "copy": ["hosts", "common"],
+  "parts": [
+    {
+      "name": "host banner",
+      "shows": "At the very top of the column, hidden normally. Appears when the host whose notebooks are listed is not there. Text (the host's name in {host}): \"Looking for {host} on the network…\", \"{host} is deactivated\", \"Can't connect to {host} at the moment\", with \": {why}\" when the last try gave a reason; or a stopping/restarting line from the host (\"{host} stopping…\"). The notebooks stay as they were last listed; changes made meanwhile are sent when the host is back.",
+      "copy": ["hosts.looking", "hosts.deactivated", "hosts.down", "hosts.down_because", "host_status.stopping", "host_status.restarting"]
+    },
+    {
+      "name": "Notebooks header",
+      "shows": "A group header: an arrow, the word \"Notebooks\", a host dropdown, then a + button on the right. The arrow folds the list away (kept); the pages section then takes the room. The + tooltip is \"New Notebook (Ctrl+N)\".",
+      "text": ["Notebooks", "New Notebook (Ctrl+N)"],
+      "actions": [
+        {"by": "click the arrow or the header", "does": "Folds or unfolds the notebooks list."},
+        {"by": "click +", "does": "New notebook. See \"New Notebook\" under states."},
+        {"by": "key Ctrl+N", "does": "Same as +."}
+      ]
+    },
+    {
+      "name": "host dropdown",
+      "shows": "Beside the header's name, flat, ellipsized, tooltip \"The host whose notebooks are listed\". Lists \"This machine\" first, then every other known host that keeps notebooks (a phone's keeps none), by name, and the one picked while it isn't known any more. Opening it looks for hosts on the network and starts one a moment ago offered. The pick is kept across restarts, also while the host is gone.",
+      "text": ["The host whose notebooks are listed"],
+      "actions": [
+        {"by": "pick a host", "does": "Closes the open notebook (what was typed is saved or sent to the host it is on), lists that host's notebooks and opens its first."},
+        {"by": "right-click", "does": "Host menu (RecordHostMenu), only on another machine's host."}
+      ]
+    },
+    {
+      "name": "notebook row",
+      "shows": "One line per notebook, its name (fades where too long; \"Untitled\" if it has none). The open one is selected. A notebook Meta added, and not yet kept or undone, is marked green by Meta's marks. At most about 240 px of rows show while the pages section is also shown; more scroll.",
+      "actions": [
+        {"by": "click", "does": "Opens that notebook: the pages' tabs it had open come back, its last page shown, and Meta's tools work on it. The notebook left, if it was new and still blank, is dropped."},
+        {"by": "right-click", "does": "Notebook menu (RecordNotebookMenu), the row selected first."},
+        {"by": "key F2 (list focused)", "does": "Rename the open notebook (RecordAlerts)."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "New Notebook", "shows": "A notebook named after the chat read's folder (else \"Untitled\"; \"Shop 2\" when taken) is made at the top of the list and selected, its Home page opened, and a Rename dialog titled \"New Notebook\" with the button \"Create\" asks for the name. While one made this way is still blank (never named, nothing written, no question asked), + selects that one again instead of making another; leaving it blank drops it."},
+    {"name": "folded", "shows": "The Notebooks header only; the arrow points the other way."},
+    {"name": "another host", "shows": "The list is that host's. Until its notebooks are first listed nothing is sent to it. If it is gone or deactivated the banner above says so."},
+    {"name": "empty", "shows": "No rows; the middle shows \"Make a Notebook\" (RecordWindow)."}
+  ],
+  "scenes": []
+}

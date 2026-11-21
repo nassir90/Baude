@@ -1,0 +1,64 @@
+{
+  "description": "A Claude Code chat read in a tab: its prose only, live. Record has no tool calls, tool output or thinking in this view. You select passages in it to ask Meta about them, or copy them as citation links for the notes. A chat is read whichever notebook is open; a notebook has no chat of its own; one chat is \"the chat read\", the one shown last, and its folder is what @, ⌘K, Files, Git and the GitHub lists look in.",
+  "apps": ["record"],
+  "opens": ["☰ → Open a Chat…", "an @chat in the notes, ⌘K or Meta's reply linking a chat", "a citation link in the notes", "Baude's \"Open in Record\" (record.py --chat), or record.py --chat from the command line", "the chats open when Record last closed come back in their tabs"],
+  "code": ["record.py:Reader", "record.py:parse_records", "record.py:Picks", "record.py:Window.open_chat", "record.py:Window.open_citation", "record.py:citation_link", "record.py:Unexplained"],
+  "copy": ["find", "chats", "tabs", "common", "compaction"],
+  "parts": [
+    {
+      "name": "transcript",
+      "shows": "A column of messages 760 wide (the whole pane with Full-width text), 14 apart, centred, scrolling. Only what was said is drawn. What is not drawn: tool calls and their results, thinking, subagents' messages (sidechains), system reminders and command lines, a tool-only assistant record (no text), meta messages. An assistant message written by Claude Code as several records is one message, grown. Messages are drawn in the order of the transcript file:",
+      "parts": [
+        {"name": "your message", "shows": "Right-aligned bubble, Baude's markdown. A message longer than 1200 characters is cut at 1200 and ends in …."},
+        {"name": "Claude's reply", "shows": "Baude's markdown at full width: headings, lists, tables, code blocks with their copy button, images. Names that the notebooks or the chat's folder have (files, branches, Kubernetes objects, tables, pull requests and issues, chats, pages) are links with their logo in front. A \"the X\" phrase the reply takes as known that nothing in the chat nor the notebook's notes introduced is marked in red (a word-class tagger run on the chat; the notes' pages count as known)."},
+        {"name": "started-with message", "shows": "A session that was started from outside (a prompt not typed, e.g. from a script or Bot's task on the mesh, but not those a Bot started, which show as an ordinary message of yours): the first message is drawn at the top of the chat as Baude draws a started-with prompt."},
+        {"name": "task ending", "shows": "A background task's ending is one quiet line, dimmed, red if it failed; tooltip its summary. Same as in Baude's chat."},
+        {"name": "compaction marker", "shows": "Where Claude Code compacted the conversation, a marker \"Conversation compacted automatically · 167k tokens of context → 18k · 41s\"; it can show what Claude wrote as the summary of what was compacted. Same as Baude's."},
+        {"name": "reverted", "shows": "A revert in the transcript takes back what was after the record it keeps: those rows go."}
+      ]
+    },
+    {
+      "name": "live follow",
+      "shows": "The chat file is read as it is written (new records appear within a moment, a reply being written grows). The view sticks to the newest message once it has been read to, as Baude's chat does, until you scroll or follow a citation. A shorter file (rewritten) is read from the start again."
+    },
+    {
+      "name": "selecting a passage",
+      "shows": "Selecting text in one message, or across messages, with the mouse, leaves it shaded as a selection. The passage, if more than 2 characters, is quoted to Meta with what is asked (RecordMeta: a quote chip over Meta's box).",
+      "actions": [
+        {"by": "drag (no modifier)", "does": "Selects a passage; every earlier pick and selection is let go; the one made is quoted to Meta."},
+        {"by": "click", "does": "Lets go of every picked passage and selection."},
+        {"by": "Ctrl+drag (Cmd+drag on macOS)", "does": "Picks another passage, kept with the earlier ones, shaded, each with a number in an accent dot at its top left once more than one is picked; Meta's quote lists them as \"[1] …\" \"[2] …\" with a blank line between. Ctrl+drag over a picked passage again takes it back; a Ctrl+click on one lets that one go."},
+        {"by": "key Ctrl+C (Cmd+C)", "does": "With passages picked: copies them all, a blank line between each."},
+        {"by": "key Ctrl+Shift+C (Cmd+Shift+C)", "does": "With passages picked: copies a citation link to each, one per line. Toast \"Citation link copied\" or \"{n} citation links copied\"."},
+        {"by": "right-click a picked passage", "does": "Menu: \"Copy\" and \"Copy citation link\". Elsewhere on text, the label's own menu."}
+      ]
+    },
+    {
+      "name": "citation link",
+      "shows": "Markdown to paste in the notes: [“{first 60 characters}…”](baude-chat:{session}?message=…&length=…#:~:text=…). It finds the passage again by its words, as a web browser's link to a highlight does (up to 8 words from each end and 4 words before), starting from the message it was in. Followed from the notes: the chat is opened and scrolled to the passage, which is shaded in the accent colour until the next click; a chat that is not on this computer: toast \"That chat isn't on this computer\"; words gone: toast \"That passage isn't in the chat any more\".",
+      "text": ["That chat isn't on this computer", "That passage isn't in the chat any more", "Citation link copied", "Copy citation link"]
+    },
+    {
+      "name": "names",
+      "shows": "A linked name has the hand pointer; resting on it shows the name's card (RecordNameCard) with a \"To notes\" button.",
+      "actions": [
+        {"by": "click a name", "does": "Opens it where it is (a file on a Code tab, a branch on Git, a Kubernetes object or table in their views, a chat on a Read tab, a page or notebook in Record, a pull request or issue on its web page). A name with nowhere to open shows its card as a toast; one not found says \"@{name}: not found in {folder}\"."}
+      ]
+    },
+    {
+      "name": "find",
+      "shows": "Baude's chat find bar (shared): at the top, search box \"Find in chat\", count \"3 of 12\" (\"3 of 12+\" while more is not drawn), Previous (Shift+Enter) and Next (Enter) buttons.",
+      "copy": ["find.placeholder", "find.previous", "find.next", "find.no_matches", "find.match_of"],
+      "actions": [
+        {"by": "key Ctrl+F (Cmd+F)", "does": "Opens it."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "no chat", "shows": "A status page: Claude icon, title \"No chat open\", text \"Open a Claude Code chat to read it here: @ one in your notes, find it with ⌘K, or Open in Record in Baude.\" and a pill button \"Open a chat…\" (opens the Open a Chat dialog).",
+     "text": ["No chat open", "Open a Claude Code chat to read it here: @ one in your notes, find it with ⌘K, or Open in Record in Baude.", "Open a chat…"]},
+    {"name": "tab", "shows": "Claude icon, the chat's title, tooltip \"{title} · {folder}\"; right-click: Copy Link (the transcript's path) and Rename… (RecordTabMenu). Which chats are open is kept for the next start."},
+    {"name": "another notebook opened", "shows": "The same chat read on from where it is; its names and its red marks are the new notebook's."}
+  ],
+  "scenes": []
+}

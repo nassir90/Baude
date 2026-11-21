@@ -1,0 +1,59 @@
+{
+  "description": "The side panel's Files page: the folder tree of the chat's folder (or of the git repository a clicked path is in), opened down to the file or folder asked for, with an alternative gallery view for pictures. Clicking a file opens it in a tab; this is not the OS file manager.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Files\" (first time: loads the folder the chat works in)",
+    "A folder link in a reply (opens here, not in the file manager; the tree is opened down to it)",
+    "A code tab's Show in Files button (opens here with that file selected)"
+  ],
+  "code": ["codeview.py:FilesPage", "codeview.py:file_children", "codeview.py:FileIgnores", "baude.py:BaudeWindow.show_folder", "widgets.py:open_code"],
+  "copy": ["code_view", "lookup.files"],
+  "parts": [
+    {
+      "name": "header",
+      "shows": "Left to right: an Up button (only in gallery view), the title (folder name as a heading, one line) over a dim caption (the folder it's in, with ~ for home, start-ellipsised), then a gallery/tree toggle, a refresh button and an open-in-file-manager button.",
+      "parts": [
+        {"name": "Up", "shows": "Up-arrow icon, tooltip \"Up a folder\"; visible only in gallery view; greyed at the tree's root.", "copy": ["code_view.up_folder"],
+         "actions": [{"by": "click", "does": "the gallery shows the parent folder (never above the root)"}]},
+        {"name": "title and where", "shows": "Tree view: the root folder's name and its parent's path. Gallery: the folder shown now and its parent's path."},
+        {"name": "gallery toggle", "shows": "A toggle with a grid icon in tree view (tooltip \"Show as a gallery\"), a list icon in gallery view (tooltip \"Show as a tree\"). Which view is on is remembered and used for the next folder too.", "copy": ["code_view.show_gallery", "code_view.show_tree"],
+         "actions": [{"by": "click", "does": "switches view with a cross-fade; the gallery shows the selected folder, or the folder the selected file is in, else the root"}]},
+        {"name": "refresh", "shows": "Refresh icon, tooltip \"Read the folders again\"", "copy": ["code_view.read_folders_again"],
+         "actions": [{"by": "click", "does": "re-reads the folders keeping open folders open and the selection (gallery: keeps its scroll place)"}]},
+        {"name": "open in file manager", "shows": "Folder-open icon, tooltip \"Open in your file manager\"", "copy": ["code_view.open_file_manager"],
+         "actions": [{"by": "click", "does": "opens the selected folder (or the gallery's folder, or the root) in the system file manager; a selected file is shown in its folder"}]}
+      ]
+    },
+    {
+      "name": "tree",
+      "shows": "A scrolling tree, indented with thin vertical lines from an open folder's icon down to its last child. Folders first, then files, each sorted by name (case-insensitive). .git is left out. Each row: an icon (closed folder, open folder, or a file-type icon; for pictures, PDFs and other files with system thumbnails, the thumbnail itself about 20px) then the name (one line, middle-ellipsised). Files and folders git ignores are drawn dimmed (about 55% opacity), marked a moment after listing. No expander arrows: the folder icon says open or closed.",
+      "actions": [
+        {"by": "click a folder", "does": "opens or closes it"},
+        {"by": "click a text file", "does": "opens it on the Code page, a tab beside the chat"},
+        {"by": "click a picture", "does": "opens the large image viewer with the folder's other pictures to go through (by name)"},
+        {"by": "click a file that isn't text, or is very big", "does": "opens it in its own app or the editor"},
+        {"by": "right-click a row", "does": "popover menu with: Show as a gallery (folders only), Copy path (toasts \"Path copied\"), Open in your file manager"},
+        {"by": "hover a row (tooltip)", "does": "the path (with ~); for pictures and other files with thumbnails, a larger thumbnail (about 240px) above the path"}
+      ],
+      "copy": ["code_view.show_gallery", "code_view.copy_path", "code_view.path_copied", "code_view.open_file_manager"]
+    },
+    {
+      "name": "gallery",
+      "shows": "For one folder at a time: first its sub-folders as wrapping buttons (folder icon + name, middle-ellipsised to 18 characters, tooltip full name), then its files as rows of tiles. Pictures and other thumbnailed files are tiles of one height (about 120px) each as wide as its shape, packed so each row fills the panel's width (laid out again as the panel resizes). A file with no thumbnail is a tile with its type icon over its name in small text. Order: folders, then thumbnailed files, then the rest, each by name.",
+      "actions": [
+        {"by": "click a folder button", "does": "the gallery goes into that folder"},
+        {"by": "click a picture tile", "does": "opens the large viewer with all the pictures in the folder"},
+        {"by": "click any other tile", "does": "opens it like a tree row (Code page, or its app)"},
+        {"by": "hover a tile (tooltip)", "does": "the file's name"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "tree view", "shows": "As described; the gallery toggle shows a grid icon"},
+    {"name": "gallery view", "shows": "Up button visible; title is the folder shown"},
+    {"name": "empty folder (gallery)", "shows": "\"Nothing in this folder\" centred at the top", "copy": ["code_view.empty_folder"]},
+    {"name": "no folder yet", "shows": "Blank until a folder is known: the page loads the chat's folder when first opened (the repository's top if the chat is in a git folder)"},
+    {"name": "folder unreadable", "shows": "No rows"}
+  ],
+  "scenes": []
+}

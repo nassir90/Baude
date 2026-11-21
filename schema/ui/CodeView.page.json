@@ -1,0 +1,257 @@
+{
+  "description": "A file (or a version of one) read as code in a tab of its own in the main area, beside the chat: a bar of buttons, the folder it's in, for Python where you are (module › class › def) and the class the shown function or field belongs to with its members, then the code highlighted with line numbers and the wanted line marked. The same code view (highlighted text, line numbers, find bar) is reused for the Kubernetes YAML and logs.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "A file, function, class or constant name in a reply (a Signal link) that resolves to one place: opens that file at that line. With several places, a popover lists them and picking one opens it.",
+    "A location in a Signal link's popover: opens where it is now, which may have moved with the code (if it can't be found again, a toast says \"The code there changed and this couldn't be found again\"); a location on another branch opens that file as the branch has it, with the note \"On <branch>: not in this checkout\" (or a toast \"<rev> hasn't <path> any more\")",
+    "A location's \"as it was\" action: the version of the file read when it was looked up, read-only, with the note \"As it was when looked up (<state> at <sha> on <branch>): not the file as it is now.\"",
+    "Files side-panel page: clicking a file",
+    "Git side-panel page: a commit's diff, or one file's diff, as a .diff tab with a note naming the commit (\"<path> in commit <sha>\" or the commit's)",
+    "Database Schemas: the Definition button",
+    "⌘K / Ctrl+K glossary: a catalogued file, or a manifest's object, opens its file at its line",
+    "A file on another host in the mesh: fetched from it and shown with the note \"on <host>\"; a file that can't be shown there says \"<path> on <host>: <why>\" (\"not text to read here\" when it is binary)",
+    "Keys: back and forward (Alt+Left, Alt+Right; ⌥⌘← ⌥⌘→ on macOS) step through the tabs and lines shown, as a browser's history; up (Alt+Up) goes to the file's folder in the Files page with the file selected"
+  ],
+  "code": [
+    "codeview.py:CodePage",
+    "codeview.py:CodeView",
+    "codeview.py:FindInText",
+    "codeview.py:python_context",
+    "widgets.py:LineGutter",
+    "widgets.py:code_spans",
+    "widgets.py:code_style",
+    "widgets.py:open_code",
+    "baude.py:BaudeWindow.show_code",
+    "baude.py:BaudeWindow.open_location",
+    "baude.py:BaudeWindow.go_up",
+    "record.py:RecordWindow.show_code"
+  ],
+  "copy": [
+    "code_view",
+    "file_view",
+    "find",
+    "tabs"
+  ],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Each file is a tab of its own in the main area's tab bar, after the chat's pinned tab (the bar is hidden while only the chat is open in Baude). Tab title: the file's name, with \" (<note>)\" added when it is a version or a diff. Icon: a script/text-file icon. Tooltip: the file's full path. A file already open is shown again (at the new line), not opened twice; a version is a separate tab from the file itself. See MainTabs for the tab bar, history and closing.",
+      "actions": [
+        {
+          "by": "click the tab",
+          "does": "Shows it."
+        },
+        {
+          "by": "click the tab's ×, or key Ctrl+W (⌘W)",
+          "does": "Closes the tab; the chat stays."
+        }
+      ]
+    },
+    {
+      "name": "bar",
+      "shows": "A row on the frame's colour at the top of the page: on the left the folder the file is in (relative to the chat's folder when inside it, else with ~; dim, small, truncated at its start so the nearest folder stays visible), then four flat icon buttons at the right: find, wrap, show in Files, open in editor.",
+      "parts": [
+        {
+          "name": "folder",
+          "shows": "The file's folder path, dim and small, cut with … at the start when long."
+        },
+        {
+          "name": "Find button",
+          "shows": "Find icon, tooltip \"Find (Ctrl+F)\"",
+          "copy": [
+            "code_view.find_tip"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Opens the find bar (see find bar)."
+            },
+            {
+              "by": "key Ctrl+F (⌘F) with a code tab shown",
+              "does": "The same."
+            }
+          ]
+        },
+        {
+          "name": "Wrap button",
+          "shows": "A toggle with a text-wrap icon, tooltip \"Wrap long lines\"; remembered across sessions (setting code_wrap).",
+          "copy": [
+            "code_view.wrap"
+          ],
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "Wraps long lines at the view's width (at word boundaries where there are some), or lets them scroll sideways."
+            }
+          ]
+        },
+        {
+          "name": "Show in Files button",
+          "shows": "A folder icon button, tooltip \"Show in Files\"",
+          "copy": [
+            "code_view.show_in_files"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Opens the side panel's Files page with the file's folder opened and the file selected (does nothing for a version or diff whose file isn't on disk)."
+            }
+          ]
+        },
+        {
+          "name": "Open in editor button",
+          "shows": "A pencil icon button, tooltip \"Open in your editor\"",
+          "copy": [
+            "code_view.open_in_editor"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Opens the file in the user's editor at the shown line."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "breadcrumbs",
+      "shows": "For a Python file (.py, .pyi) opened at a line: a small line under the bar, wrapping, the file's name without its extension then \" › \" and each class or def around the line, outermost first, as \"class Name\" or \"def name\"; each one after the file name is a link. Hidden when the line isn't inside any class or def, for other languages, and when no line is given.",
+      "actions": [
+        {
+          "by": "click a crumb",
+          "does": "Jumps to that definition's first line: marks it, the class shading follows, and the view scrolls so it is about a third down."
+        }
+      ]
+    },
+    {
+      "name": "note",
+      "shows": "For a version or a diff: a small warning-coloured paragraph under the bar, wrapping, such as \"As it was when looked up (…): not the file as it is now.\", \"On <branch>: not in this checkout\", \"on <host>\" or a commit note. Hidden otherwise.",
+      "copy": [
+        "file_view.on_host"
+      ]
+    },
+    {
+      "name": "class card",
+      "shows": "For a Python file where the line is inside a class, or (a plain function) where the function's signature names a class of the same module: a collapsible section, open to start, with the left and right margins of the page. Its heading: \"Class: <decorators as @name> <ClassName>(<bases>)\" in monospace with the name in bold, and dim \"lines <start>–<end>\"; for a class the function only mentions in its signature, \"Related class: …\" instead. Opened out: the class's first docstring paragraph (small, wrapping, hidden if none), then a wrapping row of flat monospace buttons, one per member: the class's own name first, then each method as \"name()\", each annotated field or class attribute by name, each nested class by name, in source order. The button for the shown line's member (or the function the cursor is inside) is marked current. Each button's tooltip is \"<kind> <name>, line <n>\" (kind: class, def, field, attr).",
+      "copy": [
+        "code_view.class_label",
+        "code_view.related_class",
+        "code_view.lines",
+        "code_view.member_tip"
+      ],
+      "actions": [
+        {
+          "by": "click the heading",
+          "does": "Folds or unfolds the card."
+        },
+        {
+          "by": "click a member button",
+          "does": "Jumps to its line: marks it and scrolls so it is about a third down; the shaded class range follows."
+        }
+      ]
+    },
+    {
+      "name": "code",
+      "shows": "The file's text, read-only (not editable, no cursor), monospace, at the shared code text size, with the text selectable. Highlighted by language: the part around the marked line (about 150 lines each way) is coloured first and the rest follows in the background, so the code is readable at once and colours arrive within a moment; light and dark themes have their own colours (strings, comments, keywords, numbers, names, and so on; bold and italic where the style has them); the colours change with the theme. A gutter at the left of right-aligned line numbers in dim text, the marked line's in full strength and bold; the gutter widens with the digits. The marked line has a warm yellow background across its whole width; for Python the class it belongs to is shaded in a faint blue background over its whole range of lines (not shaded for a class only named in a signature). Opening scrolls so the marked line is about a third of the way down and puts the caret there. Line endings are normalized (CRLF, CR to newline). Large files: anything over 4 MiB, a folder, or a binary (a NUL in the first 8 KiB) is not shown here but opened in the user's editor instead; also, if the setting code_viewer is off everything opens in the editor.",
+      "actions": [
+        {
+          "by": "select text",
+          "does": "Selects as in any text; Ctrl+C copies."
+        },
+        {
+          "by": "key Ctrl+plus / Ctrl+minus / Ctrl+0 with the code focused, or Ctrl+scroll over it",
+          "does": "Sizes the code text for every code view (a step each; 0 returns to 100%); remembered across sessions (setting code_zoom). The chat's own size is separate.",
+          "phone": {
+            "does": "nothing",
+            "why": "Ctrl+scroll is a mouse and keyboard gesture; the size steps are Settings' text size",
+            "decided": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "name": "find bar",
+      "shows": "A bar that slides in at the top of the code (over its first lines, which move down), with a search box (placeholder \"Find\"), a count (\"3 of 12\", or \"3 of 5000+\" past 5,000 matches; \"No matches\"), previous and next arrow buttons (tooltips \"Previous match (Shift+Enter)\" and \"Next match (Enter)\") and a close ×. Finding ignores case; every match is shaded and the current one more strongly; the view scrolls to it. If text is selected (one line) when the bar opens, that text is what it looks for. A new file loaded under an open bar searches for the same text again.",
+      "copy": [
+        "code_view.find",
+        "code_view.match_of",
+        "code_view.match_of_more",
+        "find.previous",
+        "find.next",
+        "find.no_matches"
+      ],
+      "actions": [
+        {
+          "by": "type",
+          "does": "Shades every match and shows the first at or after the top of what's on screen."
+        },
+        {
+          "by": "key Enter, or Ctrl+G, or the next arrow",
+          "does": "The next match, round the end."
+        },
+        {
+          "by": "key Shift+Enter, or Ctrl+Shift+G, or the previous arrow",
+          "does": "The match before."
+        },
+        {
+          "by": "key Esc, or the ×",
+          "does": "Closes the bar, clears the shading, and returns the focus to the text."
+        },
+        {
+          "by": "click in the text with the bar open",
+          "does": "Closes the bar at once and keeps what was under the pointer where it was."
+        }
+      ]
+    },
+    {
+      "name": "links in code",
+      "shows": "A code view can have spans that are links (blue, underlined; the hand cursor over them). Only the Kubernetes YAML uses them (the names of other objects); a file's code has none.",
+      "phone": {
+        "does": "The links work by tap, with no hand cursor",
+        "why": "No pointer on touch",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click a link (with no text selected)",
+          "does": "Calls what the host set: for the YAML, goes to that object."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "empty",
+      "shows": "Before any file is opened the page says \"Click a file, function or class in a reply to see its code here.\" (centred, dim); the code, bar details and class card are hidden. A tab is only ever made for a file, so this is seen only when the page is made and not yet filled.",
+      "copy": [
+        "code_view.empty"
+      ]
+    },
+    {
+      "name": "plain file",
+      "shows": "No breadcrumbs and no class card: the bar, then the code (a non-Python file, or a Python file opened with no line)."
+    },
+    {
+      "name": "function in a class",
+      "shows": "Breadcrumbs, the class card open with the function's button marked current, the class's lines shaded blue and the function's line marked yellow (scene 38b-code-view)."
+    },
+    {
+      "name": "function with a related class",
+      "shows": "As above, but the card is headed \"Related class\" and no range is shaded."
+    },
+    {
+      "name": "version or diff",
+      "shows": "A warning-coloured note under the bar; the tab's title carries \" (<note>)\"; Copy Link to This Page (Record) says \"This page has no link to copy\" for it."
+    },
+    {
+      "name": "unreadable file on another host",
+      "shows": "No tab; a note \"<path> on <host>: <why>\" (\"not text to read here\" for a binary)."
+    }
+  ],
+  "scenes": [
+    "38b-code-view"
+  ]
+}

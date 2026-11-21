@@ -1,0 +1,40 @@
+{
+  "description": "The card that says what an @name is: a small popover (no arrow, no focus) just under the pointer while it rests on the name, in a page of notes, in Meta's replies, or in a chat being read.",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "rest the pointer on an @name in notes",
+    "rest the pointer on a name linked in a chat read or in Meta's replies"
+  ],
+  "code": [
+    "record.py:Window.hover_ref",
+    "record.py:Window.ref_card",
+    "record.py:on_name_hover"
+  ],
+  "copy": [],
+  "phone": {
+    "does": "A long-press reveals the same controls",
+    "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
+    "decided": "2026-11-21"
+  },
+  "parts": [
+    {
+      "name": "card",
+      "shows": "One line \"{name}: {kind} · {summary}\" (wraps at 64 characters; hovering the time-bearing part shows when). It waits 0.3 seconds before it comes up; it is not shown while a mouse button is held (text being selected); a press calls it off. It stays 0.35 seconds after the pointer leaves the name, and while the pointer is on the card.",
+      "actions": [
+        {
+          "by": "click \"To notes\" (only on names in a chat or in Meta's replies)",
+          "does": "Writes \"- @name: \" at the end of the page of notes shown (Home if none), the caret after it to say what it means to you."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "no pointer",
+      "shows": "Where there is nothing on screen to put it under, the same line is a toast at the window's bottom for 6 seconds, with a \"To notes\" button for names from a chat."
+    }
+  ],
+  "scenes": []
+}

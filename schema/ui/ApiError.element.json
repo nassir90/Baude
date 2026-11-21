@@ -1,0 +1,32 @@
+{
+  "description": "What Claude Code says in place of a reply that didn't come (\"API Error: …\", or a synthetic message): a line in the error red, aligned with a tool card's text, \"API Error\" in bold.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "An assistant message marked as an API error, or from the <synthetic> model, live or from history"
+  ],
+  "code": [
+    "baude.py:api_error_label",
+    "baude.py:BaudeWindow.h_assistant",
+    "baude.py:BaudeWindow.render_history",
+    "baude.py:ended_by_stop"
+  ],
+  "parts": [
+    {
+      "name": "line",
+      "shows": "The message's text in the theme's error colour, wrapping, selectable, 11px in from both sides (where a tool card's text starts). A leading \"API Error\" is bold, the rest regular: e.g. \"API Error: 529 Overloaded\"."
+    }
+  ],
+  "states": [
+    {
+      "name": "stopped turn",
+      "shows": "When you stopped the turn, the CLI's abort words (\"Request was aborted.\", \"This operation was aborted\") are not shown as an error: the turn just gets its \"interrupted\" note."
+    },
+    {
+      "name": "retrying",
+      "shows": "While claude retries the API, that's said in the banner above the chat (Banners), not here."
+    }
+  ],
+  "scenes": []
+}

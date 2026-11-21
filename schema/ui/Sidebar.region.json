@@ -1,0 +1,398 @@
+{
+  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, search with the ⋮ menu, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "key Ctrl+B or F9 (toggles the sidebar)",
+    "the Sessions sidebar button in the header bar (tooltip \"Sessions sidebar (Ctrl+B)\")"
+  ],
+  "code": [
+    "baude.py:SessionSidebar",
+    "baude.py:SessionSidebar.groups",
+    "baude.py:SessionSidebar.fill",
+    "baude.py:SessionSidebar.session_row",
+    "baude.py:SessionSidebar.bot_row",
+    "baude.py:SessionSidebar.header_row",
+    "baude.py:StatusDot",
+    "baude.py:fork_tree",
+    "baude.py:list_sessions",
+    "baude.py:session_group",
+    "baude.py:date_group",
+    "baude.py:chat_group",
+    "baude.py:remote_info",
+    "widgets.py:group_header",
+    "widgets.py:TreeList",
+    "widgets.py:FadeLabel",
+    "widgets.py:HostState",
+    "widgets.py:UpdateBar",
+    "widgets.py:sidebar_action"
+  ],
+  "copy": [
+    "sidebar",
+    "hosts",
+    "host_status",
+    "new_session",
+    "trash",
+    "common",
+    "chats",
+    "meta",
+    "asks",
+    "update_bar"
+  ],
+  "phone": {
+    "does": "The session list is the phone's home screen; opening a session replaces it, back returns to it",
+    "why": "One column at a time on a phone",
+    "decided": "2026-11-21"
+  },
+  "parts": [
+    {
+      "name": "New session button",
+      "shows": "A flat button with a new-document icon and the words \"New session\", filling the row, left of the host picker. Tooltip \"Ctrl+N\".",
+      "copy": [
+        "sidebar.new_session"
+      ],
+      "text": [
+        "Ctrl+N"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Starts a new, blank chat on the host picked beside it. This machine: a draft chat here, in the group chosen by the rule below (switching away from the open chat first). Another host: that host's new-session form (prompt, folder, group, model, effort, mode) opens there. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
+        },
+        {
+          "by": "key Ctrl+N",
+          "does": "Same as the button."
+        }
+      ]
+    },
+    {
+      "name": "New session's group rule",
+      "shows": "Not drawn; decides which group a new chat joins. If exactly one group is ticked in ⋮ → Groups, that one. Else, if the chats listed all belong to one group, that one. Else, if no groups are ticked-out (all listed), none. Else the open chat's group if it's ticked, else none. After starting, that group is ticked in ⋮ too if it wasn't, so the new chat is listed."
+    },
+    {
+      "name": "Host picker (beside New session)",
+      "shows": "A flat dropdown right of New session, naming the host a new session is made on and whose chats the list shows. Its button shows the name cut with … in the middle (about 12 characters); the popup list shows every name whole, each with its name as tooltip. Choices: \"local\" (this machine) first, then every other known host sorted by name, case-insensitively. A host that is gone is dimmed in the list. When only this machine exists the dropdown is dimmed and has nothing else to pick. The choice is remembered across restarts, with its name, even while the host is gone or unknown (then it's still listed, by the name it had). Tooltip \"The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…\".",
+      "text": [
+        "local",
+        "The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the list of hosts (and the network is looked at again, so a host started a moment ago is offered). Picking one saves it, shows or hides the host banner for it, and re-lists the sessions of that host only."
+        },
+        {
+          "by": "right-click",
+          "does": "Opens the host menu (Host Command…, Deactivate/Activate, Add Host…): see HostMenu.menu.json. Not when its list is open."
+        },
+        {
+          "by": "long-press",
+          "does": "Touch's right-click: the same host menu, its list not opened."
+        }
+      ]
+    },
+    {
+      "name": "Open folder button",
+      "shows": "A flat button under New session with a folder-open icon and the words \"Open folder…\". Tooltip \"Start a session in another folder\".",
+      "text": [
+        "Open folder…",
+        "Start a session in another folder"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "A folder chooser opens; the folder picked gets a new session."
+        }
+      ]
+    },
+    {
+      "name": "Search field",
+      "shows": "A search entry under a small gap, placeholder \"Search sessions\", filling the row left of the ⋮ button.",
+      "copy": [
+        "sidebar.search"
+      ],
+      "actions": [
+        {
+          "by": "type",
+          "does": "Filters as it changes. A session stays if the text (case-insensitive) is in its title, its folder's name as the group label shows it, its worktree's folder name, or its Bot's name; for a session on another host also its folder path and its host's name. Searching shows every match in every group at once: collapsed groups open, \"Show N more\" limits are lifted, the open unsaved chat is not added. Clearing restores the grouping."
+        }
+      ]
+    },
+    {
+      "name": "⋮ button",
+      "shows": "A flat icon button (three vertical dots) right of search. Tooltip \"Group by, and which groups are listed\".",
+      "copy": [
+        "sidebar.group_by_tip"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Group by / Groups menu: see GroupByMenu.menu.json. Opening it, or the window coming to the front, looks at the network again for a host started a moment ago."
+        }
+      ]
+    },
+    {
+      "name": "Host banner",
+      "shows": "Between the search row and the list: an inset, outlined box with centred, wrapped text, slid down when a host is in the way. Over the chats of the host picked, which stay listed below as they were last seen. Nothing for this machine unless the network is still being looked at.",
+      "copy": [
+        "hosts.looking",
+        "hosts.down",
+        "hosts.down_because",
+        "hosts.deactivated",
+        "host_status.stopping",
+        "host_status.restarting",
+        "host_status.stopping_left",
+        "host_status.restarting_left",
+        "host_status.stopping_all_stopped",
+        "host_status.restarting_all_stopped"
+      ],
+      "actions": [
+        {
+          "by": "none",
+          "does": "Informational only; it hides when the host is back, activated, or another host is picked."
+        }
+      ]
+    },
+    {
+      "name": "Session list",
+      "shows": "A scrolling list (no horizontal scroll) of group headers, each followed by its session rows and, when cut short, a \"Show N more\" row. Scroll position and focus are kept when it is rebuilt. The open session's row is highlighted (selected). Order: Bots first (no header), then groups; by folder the folder of the open chat first then by latest activity; by date newest day first; then the Archived group at the end.",
+      "parts": [
+        {
+          "name": "Group header (folder)",
+          "shows": "A small faint label with the folder's last path part (the whole path is its tooltip; the label is cut with … in the middle). The folder of the open chat is drawn in the accent colour. Right of the name an arrow button (pointing down when open, right when collapsed; tooltips \"Collapse\" / \"Expand\"), and at the far end a + button. Special folder groups: \"Unknown folder\" for sessions with no folder; \"No folder (Claude Desktop)\" for Claude Desktop's per-chat scratch folders (all in one group). A session that ran in a git worktree is listed under its repository's folder (and its tooltip names the worktree). A folder on another host is its own group labelled \"<folder> on <host>\" (folder written as on that host, home as ~).",
+          "copy": [
+            "sidebar.unknown_folder",
+            "chats.no_folder_desktop",
+            "sidebar.folder_on_host",
+            "common.expand",
+            "common.collapse"
+          ],
+          "phone": {
+            "does": "The arrow and + are always shown",
+            "why": "No hover on touch",
+            "decided": "2026-11-21"
+          },
+          "actions": [
+            {
+              "by": "click arrow",
+              "does": "Folds or unfolds the group; remembered across restarts. Only the Archived group starts folded. Not applied while searching."
+            },
+            {
+              "by": "click +",
+              "does": "New session in that folder (tooltip \"New session in <folder>\"). Only if the folder exists here. If a chat made here would not be listed (this machine's host not picked, or No group ticked out), it starts through this machine's host instead (tooltip \"New session in <folder>, through local's server\"). For a folder on another host: starts a session on that host in that folder (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
+            }
+          ]
+        },
+        {
+          "name": "Group header (date)",
+          "shows": "When grouped by Date: \"Today\", \"Yesterday\", then each of the 5 days before as \"Oct 20\" style (month abbreviation, day), then \"Older\". Same arrow; no + button. A session and its forks go together by the latest activity of any of them; a fork used today brings its parent into today. Days regroup at local midnight, and when the window comes to the front after one.",
+          "copy": [
+            "sidebar.today",
+            "sidebar.yesterday",
+            "sidebar.older"
+          ]
+        },
+        {
+          "name": "Show more row",
+          "shows": "A dimmed row \"Show N more\" at the end of a group cut short. Limits count top-level sessions, their forks come with them: this folder's group none; another folder 8; by date, today none, yesterday 10, an earlier day 5.",
+          "copy": [
+            "meta.show_more"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Shows the rest of that group (until the day changes for date groups)."
+            }
+          ]
+        },
+        {
+          "name": "Session row",
+          "shows": "One line: the title (a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title dimmed with a small \"dead\" tag (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title; its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
+          "copy": [
+            "common.untitled",
+            "sidebar.held"
+          ],
+          "text": [
+            "dead",
+            "On {host} ({address})",
+            ", deactivated",
+            ", gone from the network since {time}",
+            "Group {name}",
+            "Worktree {name} of {folder}",
+            "{n} message(s) held for it, to send or delete in it",
+            "{n} earlier copy/copies of this conversation hidden"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Switches to that session: its history is drawn, its folder becomes the window's folder. A session on a host has its transcript fetched first. The open session: nothing. Clicking in the Feedback tab or a code page returns to the chat."
+            },
+            {
+              "by": "right-click",
+              "does": "The session menu: see SessionRowMenu.menu.json."
+            },
+            {
+              "by": "key F2",
+              "does": "Rename… the focused (or selected) session. Not for the unsaved open chat, or a session whose host is gone."
+            }
+          ],
+          "parts": [
+            {
+              "name": "Fork nesting",
+              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from under the parent's title to its last child, then a corner across to each child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. Forks are found within a folder, by date too."
+            },
+            {
+              "name": "Desktop chats",
+              "shows": "Chats of Claude Desktop (and Claude Code) listed with this machine's own, by their last-used time as Claude Desktop reckons it (unless typed in since elsewhere). Several stale copies of one conversation are folded into one row (the tooltip says how many). Desktop-archived chats show in Archived unless unarchived here."
+            },
+            {
+              "name": "Active elsewhere",
+              "shows": "A session not open here but being run by another program (Claude Desktop, a terminal) or left mid-turn with its claude running in the background shows the working dot (grey, pulsing), or yellow if it asks something, while that goes on, then blue for a minute after, as file changes are watched with no polling. Opening it shows it read-only/live-tailing: see the chat's banner (not this area)."
+            }
+          ]
+        },
+        {
+          "name": "Bot row",
+          "shows": "For a session on a host that is a Bot (top level only, not dead): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), the Bot's name in bold, under it in small dim text the chat's title; a \"held\" tag if any; the status dot. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; title; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree.",
+          "copy": [
+            "sidebar.bot",
+            "sidebar.held",
+            "common.bots"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "As a session row."
+            },
+            {
+              "by": "right-click",
+              "does": "The session menu, with Bot Settings…: see SessionRowMenu.menu.json."
+            }
+          ]
+        },
+        {
+          "name": "Archived group",
+          "shows": "At the end of the list a group headed \"Archived\" (no + button), folded at first, holding archived sessions (archived here, in Claude Desktop, or on their host) with their forks. Rows look as normal; their menu says Unarchive instead of Archive.",
+          "copy": [
+            "sidebar.archived"
+          ]
+        },
+        {
+          "name": "Changed by Meta",
+          "shows": "A chat that Meta (the assistant) changed and that isn't kept yet is marked in its row, with Keep and Undo; one Meta deleted stays listed, struck through, until kept; a deleted one (ghost) has no menu and doesn't open. Belongs with Meta's own entry."
+        }
+      ]
+    },
+    {
+      "name": "Update bar",
+      "shows": "At the very foot, under a rule from the list, only while a new version waits to be restarted onto: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what the restart waits for, or \"A new version is ready\".",
+      "copy": [
+        "update_bar.update",
+        "update_bar.waiting_for",
+        "update_bar.ready"
+      ],
+      "phone": {
+        "does": "The phone's own updater: the Update bar at the foot of home (Update.kt)",
+        "why": "The phone installs builds, not a git checkout",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Restarts onto the new version now (asking first if that would stop something running)."
+        }
+      ]
+    },
+    {
+      "name": "Sidebar toggle",
+      "shows": "The whole sidebar slides away and back as one pane on the left; the header bar's sidebar button toggles it too.",
+      "phone": {
+        "does": "nothing",
+        "why": "The session list is the phone's home screen; keyboard shortcuts only",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+B",
+          "does": "Shows or hides the sidebar (also F9). Handled before the focused text box so it works inside text fields."
+        },
+        {
+          "by": "key F9",
+          "does": "Same."
+        }
+      ]
+    },
+    {
+      "name": "Status dot",
+      "shows": "A small round dot at the right of each row (also in Bot rows), same size as the icon size set in Settings → Size. Working: grey (the text colour at 55% strength) and pulsing, tooltip \"Working\". Waiting: yellow (#e5a50a), tooltip \"Waiting for your answer\" (a question or permission prompt needs an answer). Done: blue (#3584e4), tooltip \"Finished — waiting for input\" (the turn finished, waiting for your next message). Inactive: not drawn at all. The open session's dot follows the live chat. For other sessions on this machine: working while another program is mid-turn in the file, waiting if it asks, done for a minute after its last write, else inactive; mid-turn but silent 10 minutes counts as inactive. For a session on a host: as that host last said (working, waiting, else inactive; inactive while the host is gone).",
+      "copy": [
+        "common.working",
+        "asks.waiting"
+      ],
+      "text": [
+        "Finished — waiting for input",
+        "Inactive"
+      ],
+      "actions": []
+    }
+  ],
+  "states": [
+    {
+      "name": "empty list",
+      "shows": "Nothing is drawn: no rows and no headers (a search with no match, or no sessions on the picked host or in the picked groups, leaves a blank list). Only the open chat once it has something typed in appears."
+    },
+    {
+      "name": "loading",
+      "shows": "The first read of a slow list shows the newest sessions as they are found, then the whole list when done; the list refreshes in the background, unchanged files from a cache."
+    },
+    {
+      "name": "host gone",
+      "shows": "Host banner \"Can't connect to <host> at the moment\", or \"…at the moment: <why>\" if the last try said why; the host's chats listed dimmed with a \"dead\" tag; their menu offers only Delete. The host is also dimmed in the host picker."
+    },
+    {
+      "name": "host deactivated",
+      "shows": "Host banner \"<host> is deactivated\"; its chats dimmed, no \"dead\" tag; New session toasts that text."
+    },
+    {
+      "name": "host unknown",
+      "shows": "A host picked that the network doesn't have now (forgotten, or a mesh member not listed yet): listed in the picker by the name it had; banner \"Looking for <host> on the network…\"; its chats absent."
+    },
+    {
+      "name": "host stopping or restarting",
+      "shows": "Banner \"<host> stopping…\" / \"<host> restarting…\", with a count when known (\"<host> stopping — N of M processes to stop\", \"… every process stopped\"); this machine's host process is called \"Daemon\"."
+    },
+    {
+      "name": "grouped by folder",
+      "shows": "Default. The open chat's folder first, others by latest activity."
+    },
+    {
+      "name": "grouped by date",
+      "shows": "Today, Yesterday, the last five days, Older."
+    },
+    {
+      "name": "searching",
+      "shows": "Groups all open, every match shown, no Show more rows."
+    },
+    {
+      "name": "groups filtered",
+      "shows": "Only the sessions of the groups ticked in ⋮ → Groups (see GroupByMenu.menu.json); ⋮ → Show All is then offered."
+    }
+  ],
+  "scenes": [
+    "50-sessions-sidebar",
+    "50b-sidebar-search",
+    "50c-dot-working",
+    "50d-dot-waiting",
+    "50e-dot-done",
+    "50f-fork-tree",
+    "53c-folder-collapse",
+    "53d-live-tail",
+    "55b-network-group",
+    "55l-network-hosts",
+    "55m-network-all",
+    "55r-network-host-gone",
+    "55r2-network-host-unknown",
+    "55t-network-host-deactivated"
+  ]
+}

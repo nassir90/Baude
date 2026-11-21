@@ -1,0 +1,34 @@
+{
+  "description": "The ⋮ menu at the end of a pod's row in the Kubernetes view's Pods table, and the namespaces popover in its top bar.",
+  "apps": ["baude", "record"],
+  "opens": ["Click ⋮ on a pod row (tooltip \"Delete…\")", "Click the namespaces button in the Kubernetes top bar"],
+  "code": ["kubeview.py:KubeView.make_pod_buttons", "kubeview.py:KubeView.ask_delete", "kubeview.py:KubeView.fill_namespaces"],
+  "copy": ["kube", "common"],
+  "parts": [
+    {
+      "name": "pod ⋮ menu: Delete",
+      "shows": "\"Delete\"",
+      "copy": ["common.delete"],
+      "actions": [
+        {"by": "click", "does": "Opens the confirmation dialog \"Delete pod <name>?\" naming the namespace, the context, whether it is a remote cluster and what controls the pod; nothing is deleted until its Delete button is pressed."}
+      ]
+    },
+    {
+      "name": "pod ⋮ menu: Force delete",
+      "shows": "\"Force delete\"",
+      "copy": ["kube.force_delete"],
+      "actions": [
+        {"by": "click", "does": "Opens the stronger confirmation \"Force delete pod <name>?\" (the cluster forgets the pod at once, its containers possibly still running on their node); its confirm button reads \"Force Delete\"."}
+      ]
+    },
+    {
+      "name": "namespaces popover",
+      "shows": "A popover under the namespaces button: a check \"All namespaces\", a separator, then a scrolling list (up to about 420 px tall) of a check per namespace, sorted by name.",
+      "copy": ["kube.all_namespaces"],
+      "actions": [
+        {"by": "tick All namespaces", "does": "Shows every namespace's objects."},
+        {"by": "tick or untick a namespace", "does": "Adds it to or removes it from the namespaces shown; any number at once."}
+      ]
+    }
+  ]
+}

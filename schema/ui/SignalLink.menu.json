@@ -1,0 +1,179 @@
+{
+  "description": "What a click on a Signal link (a file, name, commit, branch, pull request, env var, route, service and so on that Claude's reply names) does, and the two small popovers it can open: the names popover (where it lives, why it wasn't found) and the lookup popover (a name not looked up yet). Both point into the reply at the link and close on a click outside or Esc.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Click a Signal link in a reply (a name drawn as a link), in Meta's replies or a subagent's transcript too"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.open_ref",
+    "baude.py:RefPopover",
+    "baude.py:LookupPopover",
+    "baude.py:BaudeWindow.lookup_pending",
+    "baude.py:BaudeWindow.runs_popover",
+    "baude.py:ref_place_items",
+    "baude.py:AnchoredPopover",
+    "baude.py:BaudeWindow.hover_link"
+  ],
+  "copy": [
+    "lookup",
+    "references",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "what a click does first",
+      "shows": "Not every click opens a popover. In order: (a) the reader placed it in that reply at one place: a table or column opens its database diagram, a service or Kubernetes object that could run in a local cluster gets the names popover (to show where it runs), anything else opens the file at that line in a code tab; (b) the reader said it isn't in the code: a names popover with an explanation (\"Not found\" style, or an outside tool or product note); (c) a hash-like name not looked up yet: git is asked at once and a commit that exists opens in Git, else the lookup popover; (d) not looked up yet: the lookup popover; (e) a running database's table, collection or database: its schema diagram; (f) a resolved commit or branch: the Git page at it; (g) a resolved pull request or issue: its page (GitHub, or one of Baude's own feedback issues on the Feedback tab); (h) a resolved tool, subagent type, skill or kubeconfig context: its card on the Signal page; (i) a table or column in the code: the schema diagram with it selected; (j) one place chosen by the reader's checking model among several: it opens; (k) a resolved file, symbol, constant, config key, command or Kubernetes object with exactly one place: it opens in a code tab (a workload that can run somewhere gets the popover instead); (l) everything else (several places, not found, stale): the names popover.",
+      "actions": []
+    },
+    {
+      "name": "hover",
+      "shows": "Pointing at a link to a commit or branch lights its row on the Git page if that row is in view. Pointing at a table or column link starts looking for its running database so a click opens at once.",
+      "phone": {
+        "does": "The lookup starts on touch-down",
+        "why": "No hover on touch",
+        "decided": "2026-11-21"
+      },
+      "actions": []
+    },
+    {
+      "name": "names popover (RefPopover)",
+      "shows": "A popover 520px wide when the name has places, 320px otherwise. Top: a title line (the kind dimmed, e.g. \"Env var\" / \"Code symbol\" / \"Database table\", then the name in monospace; wraps), and at its right a row of flat icon buttons. Under it a status line (dim, or amber for stale), then \"Known as: ...\" when the glossary has it from several kinds, then a table of places, then (for services and workloads) \"Running\" rows.",
+      "parts": [
+        {
+          "name": "icon buttons (top right)",
+          "shows": "In order, each only when it applies: a Kubernetes logo (tooltip \"Open this cluster in the Kubernetes view\") for a kubeconfig context; a database logo (tooltip \"Show it in its database's schema diagram\") for a table or column; a refresh icon (tooltip \"Search again\", or \"Try again\" when not found or stale); an open icon (tooltip \"Open\").",
+          "copy": [
+            "common.try_again",
+            "common.open"
+          ],
+          "text": [
+            "Open this cluster in the Kubernetes view",
+            "Show it in its database's schema diagram",
+            "Search again"
+          ],
+          "actions": [
+            {
+              "by": "click the Kubernetes logo",
+              "does": "closes the popover and opens the Kubernetes view on that context"
+            },
+            {
+              "by": "click the database logo",
+              "does": "opens the database schema diagram with the table or column selected"
+            },
+            {
+              "by": "click refresh",
+              "does": "searches that name again, ignoring earlier give-ups; closes the popover"
+            },
+            {
+              "by": "click open",
+              "does": "closes the popover and shows the name's card on the Signal page"
+            }
+          ]
+        },
+        {
+          "name": "status line",
+          "shows": "The same text as the Signal card's status line: \"Looking it up…\", \"Not found: <reason>.\", \"Stale: the code changed and this couldn't be found again. It can still be opened as it was.\", \"N matches (<why>).\", or the resolved summary with the late-lookup note. Tooltip on a late lookup: when the message was written.",
+          "copy": [
+            "lookup.looking_it_up",
+            "lookup.stale"
+          ]
+        },
+        {
+          "name": "places table",
+          "shows": "A table (no header; columns Name, Kind, Where) of up to 12 rows before it scrolls. Name: the logo of what kind of place it is (code, folder, Kubernetes, git, database, ...) and the file name with \":line\" (folders end with \"/\"); Kind: the role there (Definition, Used, Table, Column, Folder, ...); Where: the folder it's in, then \"(note)\" if any. A stale name has a second, fainter row after each place that has a saved version, with kind \"As it was\". Names, kinds and wheres over their widths are ellipsised with the full text in a tooltip.",
+          "text": [
+            "As it was"
+          ],
+          "actions": [
+            {
+              "by": "click a row",
+              "does": "closes the popover and opens that place: a code tab at the line; \"As it was\" opens the saved version read-only with a note"
+            }
+          ]
+        },
+        {
+          "name": "running rows",
+          "shows": "A dim \"Running\" heading and one flat row per matching workload in the user's local Kubernetes clusters (green or amber dot, \"<kind> <name> · <context> · <namespace> · <state>\"), added a moment after the popover shows; nothing when it runs nowhere. The popover grows to fit.",
+          "actions": [
+            {
+              "by": "click",
+              "does": "closes the popover and opens the Kubernetes view filtered to that workload"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lookup popover (LookupPopover)",
+      "shows": "A 320px popover for a name Signal hasn't looked up yet. Title: the name in monospace (no kind claimed: it may be anything) and, once known, the kind dimmed before it. A status line with a spinner while busy, then a list of choices, then buttons at the right.",
+      "parts": [
+        {
+          "name": "looking up",
+          "shows": "Spinner and \"Looking it up…\"; the popover updates itself as Signal's answer arrives, and stops listening when it's closed.",
+          "copy": [
+            "lookup.looking_it_up"
+          ]
+        },
+        {
+          "name": "found",
+          "shows": "\"Found. <summary>\" with a default button \"Open\".",
+          "copy": [
+            "common.open"
+          ],
+          "actions": [
+            {
+              "by": "click Open",
+              "does": "closes it and does what a click on the link does now that it's known"
+            }
+          ]
+        },
+        {
+          "name": "not found",
+          "shows": "\"Not found: <reason>.\" with a default button \"Try again\".",
+          "copy": [
+            "common.try_again"
+          ],
+          "actions": [
+            {
+              "by": "click Try again",
+              "does": "searches again and shows \"Looking it up…\""
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "pending",
+      "shows": "Lookup popover with spinner"
+    },
+    {
+      "name": "resolved with places",
+      "shows": "Names popover with the table"
+    },
+    {
+      "name": "several matches",
+      "shows": "\"N matches (<why>).\" and the table of candidates"
+    },
+    {
+      "name": "not found",
+      "shows": "\"Not found: <reason>.\" with a Try again icon; for a name the reader said isn't in the code, the reader's note or its stock reason"
+    },
+    {
+      "name": "stale",
+      "shows": "Amber status line and an \"As it was\" row after each place that has a saved copy"
+    },
+    {
+      "name": "outside tool or product",
+      "shows": "A resolved name of kind \"External tool\" with the reader's note and no places"
+    }
+  ],
+  "scenes": [
+    "37-signal",
+    "37b-signal-link-kinds",
+    "38-signal-popover"
+  ]
+}

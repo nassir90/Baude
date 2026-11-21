@@ -1,0 +1,200 @@
+{
+  "description": "The Baude main window's keyboard shortcuts and zoom. Shortcuts work from anywhere in the window unless noted; on a Mac Ctrl is replaced by ⌘ where stated (Settings, Feedback, zoom, find, command palette), and the Alt arrows become ⌥⌘.",
+  "apps": [
+    "baude"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.__init__",
+    "baude.py:BaudeWindow.set_zoom",
+    "baude.py:BaudeWindow.show_zoom_toast",
+    "baude.py:BaudeWindow.apply_zoom",
+    "baude.py:BaudeWindow.on_ctrl_scroll",
+    "baude.py:BaudeWindow.apply_full_width",
+    "widgets.py:zoom_keys",
+    "widgets.py:first_keys",
+    "widgets.py:ZOOM_MIN"
+  ],
+  "copy": [
+    "window"
+  ],
+  "parts": [
+    {
+      "name": "send and stop",
+      "shows": "Keys inside the composer (see Composer).",
+      "phone": {
+        "does": "nothing",
+        "why": "Hardware-keyboard shortcuts",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+Enter (⌘Enter)",
+          "does": "Send"
+        },
+        {
+          "by": "key Enter",
+          "does": "New line"
+        },
+        {
+          "by": "key Esc",
+          "does": "Stop the running turn"
+        }
+      ]
+    },
+    {
+      "name": "sessions and panel",
+      "shows": "Showing and hiding the window's panes.",
+      "phone": {
+        "does": "nothing",
+        "why": "Hardware-keyboard shortcuts",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+N",
+          "does": "A new chat"
+        },
+        {
+          "by": "key Ctrl+O",
+          "does": "Shows the sessions sidebar and focuses its search"
+        },
+        {
+          "by": "key Ctrl+B or F9",
+          "does": "Toggles the sessions sidebar"
+        },
+        {
+          "by": "key Ctrl+Alt+B",
+          "does": "Toggles the side panel"
+        },
+        {
+          "by": "key Ctrl+M",
+          "does": "Meta shown and focused in the side panel, or closed if already shown there"
+        },
+        {
+          "by": "key F2 (on a focused sidebar row)",
+          "does": "Rename that chat"
+        }
+      ]
+    },
+    {
+      "name": "dialogs and tools",
+      "shows": "Opening things.",
+      "phone": {
+        "does": "nothing",
+        "why": "Hardware-keyboard shortcuts",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+, (⌘,)",
+          "does": "Settings"
+        },
+        {
+          "by": "key Ctrl+. (⌘.)",
+          "does": "Send Feedback, over whatever is open"
+        },
+        {
+          "by": "key Ctrl+K (⌘K)",
+          "does": "Opens a command palette of every name in the glossary, searched"
+        },
+        {
+          "by": "key Ctrl+F (⌘F)",
+          "does": "Find in the chat the focus is in (see FindBar); in the Kubernetes view its filter; in a code tab its find"
+        }
+      ]
+    },
+    {
+      "name": "tabs",
+      "shows": "The main area has the chat pinned first and a tab for each code file opened from the chat; the tab bar shows only while code is open.",
+      "phone": {
+        "does": "nothing",
+        "why": "Hardware-keyboard shortcuts",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+W (⌘W)",
+          "does": "Closes the current code tab (the chat tab stays)"
+        },
+        {
+          "by": "key Alt+Left / Alt+Right (⌥⌘←/→)",
+          "does": "Back and forward through the tabs, as a browser's history"
+        },
+        {
+          "by": "key Alt+Up (⌥⌘↑)",
+          "does": "Up one level from the current page"
+        }
+      ]
+    },
+    {
+      "name": "chat zoom",
+      "shows": "The chat's text and the composer's text scale together (the chat column only: not the header, sidebar or side panel). Range 60 % to 250 % in steps of 0.1; the size is remembered between runs. Ctrl+0 returns to the default size (1.0 unless Settings → default zoom says otherwise). The place being read is kept while the text re-flows: only what is near the view is laid out at once and the rest comes back a few messages a frame, nearest first.",
+      "phone": {
+        "does": "nothing",
+        "why": "The key and Ctrl+scroll triggers are hardware-input shortcuts; the setting itself (chat text size 0.6 to 2.5) is not desktop-only, and a phone gets it by pinch or in Settings",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl + (also Ctrl+= , Ctrl+Shift+=, keypad +; ⌘ on a Mac)",
+          "does": "Zoom in one step"
+        },
+        {
+          "by": "key Ctrl - (also Ctrl+_, keypad -; ⌘ on a Mac)",
+          "does": "Zoom out one step"
+        },
+        {
+          "by": "key Ctrl+0 (keypad 0; ⌘0)",
+          "does": "Back to the default zoom"
+        },
+        {
+          "by": "Ctrl + scroll wheel or touchpad",
+          "does": "Zoom in/out: a wheel click is a step; touchpad deltas add up to steps. Over a code page or the database diagram the key and scroll zoom that view's own size instead"
+        }
+      ],
+      "parts": [
+        {
+          "name": "zoom toast",
+          "shows": "A short toast at the bottom of the window, one second, \"Chat zoom 1.4\" (the factor written with trailing zeros dropped: 1.0, 1.2, 1.25). A burst of presses shares one toast and updates its text.",
+          "text": [
+            "Chat zoom {factor}"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "full width",
+      "shows": "☰ → Full-width text: limits the chat column to 860 px wide when off (centred) and lets it fill the window when on. No key. On from a fresh installation.",
+      "copy": [
+        "meta_settings.full_width"
+      ]
+    },
+    {
+      "name": "window",
+      "shows": "A normal resizable window, 900 by 800 px at first, titled \"Baude\" or \"Baude — <chat name>\". Its size, whether maximised and where it was (on a Mac, which display) come back after ☰ → Restart Baude, with the sidebar and side panel states and the width the side panel was dragged to. Closing it stops the chat's own claude (a host's chat goes on there).",
+      "text": [
+        "Baude",
+        "Baude — {title}"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Window size, position, maximise and close are desktop window management",
+        "decided": "2026-11-21"
+      }
+    },
+    {
+      "name": "panes' rules",
+      "shows": "The sessions sidebar and the side panel are split from the chat by a 1 px rule that is dragged to resize; the side panel never covers the chat below its minimum (320 px panel). Dropping files on the window attaches them (see Composer).",
+      "phone": {
+        "does": "nothing",
+        "why": "Drag-to-resize splitters and drag-and-drop between windows",
+        "decided": "2026-11-21"
+      }
+    }
+  ],
+  "scenes": [
+    "62-full-width",
+    "63-zoomed",
+    "01-empty"
+  ]
+}

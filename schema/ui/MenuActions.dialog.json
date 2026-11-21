@@ -1,0 +1,149 @@
+{
+  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Database Schemas and the menu itself are elsewhere).",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "☰ menu"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.copy_report",
+    "baude.py:BaudeWindow.report",
+    "meta.py:transcript_report",
+    "baude.py:BaudeWindow.restart_app",
+    "baude.py:BaudeApp.restart",
+    "baude.py:BaudeApp.update_now",
+    "baude.py:BaudeWindow.set_read_only",
+    "baude.py:BaudeWindow.apply_read_only",
+    "baude.py:BaudeWindow.show_composer",
+    "baude.py:BaudeWindow.open_record"
+  ],
+  "copy": [
+    "window",
+    "report",
+    "code_apart",
+    "update_bar"
+  ],
+  "parts": [
+    {
+      "name": "Copy Transcript for an Issue",
+      "shows": "Menu item \"Copy Transcript for an Issue\" (Record has it too). Puts text on the clipboard and shows a toast \"Transcript copied\" (2 s). The text: a header of lines \"App: Baude\", \"Session: <id or new>\", \"Model: <the model claude says it started with>\", \"Picked: <model>\" (only when it differs), \"Effort: <effort or default>\", \"Mode: <permission mode>\", \"Host: <this machine, or name (host)>\", \"Folder: <cwd>\", \"Claude Code: <version>\", \"Context: <what the context meter shows, with its tooltip's detail, or 'not said yet'>\", \"Tools: <names>\", \"Copied: <date time zone>\"; then the whole transcript in order, each entry headed \"## User · <time>\" / \"## Claude (<model>) · <time>\" / \"## Tool results\", each tool call with its whole input (JSON), each result marked result or error, each cut at 4000 characters, compactions as their own \"## Conversation compacted\" headings with the summary under them. For a chat on another host the mirror drawn here is used.",
+      "copy": [
+        "window.copy_transcript",
+        "window.transcript_copied",
+        "report.app",
+        "report.mode",
+        "report.context",
+        "report.copied",
+        "report.nothing_said",
+        "meta_settings.effort",
+        "common.model",
+        "common.folder",
+        "lookup.tools"
+      ],
+      "text": [
+        "Session",
+        "Picked",
+        "Host",
+        "Claude Code",
+        "not said yet"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "copies the report; if there is no transcript yet, copies \"(nothing said yet)\" and a newline"
+        }
+      ]
+    },
+    {
+      "name": "Restart Baude",
+      "shows": "Menu item \"Restart Baude\" (Record's: \"Restart Record\"), the last item. No confirmation.",
+      "copy": [
+        "code_apart.restart_app"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Re-executes the desktop process and puts back its windows; the phone's app restarts by the system.",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "every window of the app is replaced by a fresh process that puts each back as it was (chat, scroll place, drafts, open tabs, feedback draft), giving the front back to the app you were in; chats of this machine's host process go on through it; a chat running as the app's own claude has its turn cut short and resumed after (\"Cut short by a restart\", with Continue). Nothing is said after a plain restart; after an automatic update a toast \"Baude updated: N new commit(s)\" (5 s) appears."
+        }
+      ]
+    },
+    {
+      "name": "Restart Now confirmation",
+      "shows": "The sidebar's Update button, when a new version waits and things are running, first asks: heading \"Restart now?\", body \"The new version is picked up now. These are stopped, and their chats can be continued after:\" then a bulleted list of what would be stopped (running commands, a side question's reply being written, a dialog open, \"you, using this window\"), buttons Cancel and \"Restart Now\" (red). With nothing running it restarts at once without asking. (The button itself belongs to the sidebar.)",
+      "copy": [
+        "window.restart_now_heading",
+        "window.restart_now",
+        "update_bar.update",
+        "update_bar.waiting_for",
+        "window.blocker_dialog",
+        "window.blocker_using",
+        "common.cancel"
+      ],
+      "text": [
+        "The new version is picked up now. These are stopped, and their chats can be continued after:"
+      ],
+      "actions": [
+        {
+          "by": "click Restart Now",
+          "does": "asks this machine's host process to restart onto the update, then restarts the app"
+        }
+      ]
+    },
+    {
+      "name": "Read-only session",
+      "shows": "A checkable menu item \"Read-only session\" (a check mark when on; Baude only). On: the chat has no text box at all (not a greyed one, and the attach row goes with it) — for a chat you only watch; the status line with the context it uses stays. Remembered per session id once the session has one, and applied again whenever that session is opened. A session another program has live is read-only too, while it does, without the item being on (and the text box is likewise gone); focus leaves the input to the chat when it hides.",
+      "text": [
+        "Read-only session"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "toggles: hides or shows the composer, and keeps the choice for this session"
+        }
+      ]
+    },
+    {
+      "name": "Open in Record…",
+      "shows": "Menu item \"Open in Record…\" (Baude only). Starts Record, the notebook app, beside Baude, reading this chat on its Read tab in whichever notebook is open; a Record already running is handed the chat. With no transcript file yet it opens Record alone. No dialog or toast.",
+      "text": [
+        "Open in Record…"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Starts another desktop program from this one.",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "launches record.py (detached) with --chat <this chat's transcript> when it exists"
+        }
+      ]
+    },
+    {
+      "name": "Chat zoom toast",
+      "shows": "While the chat's zoom changes (Ctrl/Cmd +, -, 0 or the pinch/scroll gesture): a 1-second toast \"Chat zoom <factor>\" (for example 1.2), updated in place during a burst rather than stacked, shown once the zoom has settled.",
+      "text": [
+        "Chat zoom <factor>"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "read-only on",
+      "shows": "No text box; the ☰ item checked"
+    },
+    {
+      "name": "no transcript yet",
+      "shows": "Copy Transcript copies only \"(nothing said yet)\""
+    }
+  ],
+  "scenes": []
+}

@@ -1,0 +1,57 @@
+{
+  "description": "The thin bar under the composer in the Baude main window's chat column: from the left a working indicator, the chat's host, the folder and last-turn summary, a background-tasks button, what the chat has spent, and the context meter at the far right.",
+  "apps": ["baude"],
+  "code": ["baude.py:BaudeWindow.update_status", "baude.py:BaudeWindow.cost_said", "baude.py:BaudeWindow.update_tasks_indicator", "baude.py:BaudeWindow.show_context", "baude.py:BaudeWindow.h_result", "widgets.py:WorkingDots", "widgets.py:ContextUsage", "widgets.py:ContextMeter"],
+  "copy": ["context_usage", "common"],
+  "parts": [
+    {
+      "name": "working dots",
+      "shows": "While a turn runs: three dots stepping •, ••, ••• and again every 0.35 s (the unlit dots take their room invisibly, so nothing next to them moves). Not there, and takes no room, when idle. Holds still in a window that is not being looked at.",
+      "copy": ["common.working"],
+      "actions": [{"by": "hover", "does": "Tooltip \"Working\""}]
+    },
+    {
+      "name": "host",
+      "shows": "The host the chat lives on, by name, in monospace: \"local\" for this machine, else the other host's name.",
+      "text": ["local", "The host this chat lives on: its files, and its agent's tools"],
+      "actions": [{"by": "hover", "does": "Tooltip \"The host this chat lives on: its files, and its agent's tools\", with the host's address in brackets for another host"}]
+    },
+    {
+      "name": "folder and last turn",
+      "shows": "Takes the room left, one line, cut with … at the end. The chat's folder as people say it (home shown as ~, \"~/projects/x\"), plus \" (worktree <name>)\" when the chat works in a git worktree; for another host's chat, that folder as its host says it. After three spaces, the last turn's summary: \"<N> turns · <seconds>s · in <tokens> / out <tokens> tok\" (tokens as 950, 12.4k, 1.2M) after each finished turn; \"<N> tools\" right after claude starts; blank for a network chat just attached.",
+      "text": ["{n} turns · {s}s · in {tokens} / out {tokens} tok", "{n} tools"],
+      "actions": [{"by": "hover", "does": "Tooltip: the full folder path"}]
+    },
+    {
+      "name": "background tasks button",
+      "shows": "Shown only while background things run: a flat button \"⚙ 2 background processes · 1 subagent running\" (singular \"1 background process\"/\"1 subagent\"; a part with none is left out).",
+      "text": ["Background tasks", "⚙ {n} background process(es) · {n} subagent(s) running"],
+      "actions": [
+        {"by": "hover", "does": "Tooltip: each running task's description (or its id), one per line, then \"Click to open the side panel\""},
+        {"by": "click", "does": "Opens the side panel on Subagents when a subagent is running, else on Processes"}
+      ]
+    },
+    {
+      "name": "cost",
+      "shows": "Right-aligned label of what this chat has spent, \"$0.0125\" (four decimals), never cut short. For a model run on the user's own machines that adds nothing per turn, \"$0.00 (local)\" until something is spent. A resumed chat carries on from its recorded cost.",
+      "text": ["What this chat has spent", "${cost}", "$0.00 (local)"],
+      "actions": [{"by": "hover", "does": "Tooltip \"What this chat has spent\""}]
+    },
+    {
+      "name": "context meter",
+      "shows": "The word \"context\" and a 110 px wide, 16 px high bar at the far right. The count \"24k / 200k\" is drawn inside the bar (small, tabular figures): in the window background colour over the filled part, in the text colour after it. The fill is the accent colour up to 60 %, amber (warning) past 60 %, red past 85 %. Past the window (\"12.4k / 8.2k\") the bar is full. After a turn ended with claude saying the prompt is too long, the bar is full too. Refreshed at most once a second during a turn, and when the model changes.",
+      "copy": ["context_usage.label", "context_usage.tooltip", "context_usage.usage_percent", "context_usage.window_known", "context_usage.used_no_limit", "context_usage.unknown_no_limit"],
+      "actions": [
+        {"by": "hover", "does": "Tooltip (it is a tooltip, there is no popover): \"Context window usage\" then the percentage and a line per category of what fills it (\"Messages: 160k\", categories with no tokens or deferred ones left out): \"Context window usage: 90%\" + categories. Before the session has said, \"Context window usage\", the model's window \"{n} tokens\" when known, and \"What's used is said once its session starts\""}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "new chat", "shows": "No dots, host \"local\", folder only, cost $0.0000, context shows \"— / <the model's window>\" (or \"—\" when its window isn't known yet)"},
+    {"name": "working", "shows": "Dots stepping; tasks button when background tasks run"},
+    {"name": "window without a limit", "shows": "Some models report use but no window: no bar; the label reads \"context: 24k\" (\"context —\" while unknown)"},
+    {"name": "context high", "shows": "Bar amber past 60 %, red past 85 %; at full, \"Context Exhausted\" appears over the composer (see Composer)"},
+    {"name": "another host's chat", "shows": "Host name and that host's folder path in place of local ones"}
+  ],
+  "scenes": ["01-empty", "02-turn-complete", "03-working", "61-context-high", "70-background-running"]
+}

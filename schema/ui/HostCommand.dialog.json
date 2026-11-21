@@ -1,0 +1,38 @@
+{
+  "description": "A dialog to set the command a host's process is started by over ssh, for a host where baude_headless.py isn't on the PATH or isn't the right one.",
+  "apps": ["baude"],
+  "opens": ["host picker's right-click → Host Command… (a host reached over ssh)"],
+  "code": ["baude.py:BaudeWindow.ask_host_command"],
+  "copy": ["hosts", "common"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"Baude on <host>\" (the host's name).",
+      "copy": ["hosts.command_heading"]
+    },
+    {
+      "name": "body",
+      "shows": "\"The command ssh runs on <address>, with connect after it\".",
+      "copy": ["hosts.command_body"]
+    },
+    {
+      "name": "command field",
+      "shows": "A text entry about 36 characters wide, pre-filled with the command now set (empty if none), focused. Placeholder: what the host's own setting says, else \"baude_headless.py, on its PATH\".",
+      "copy": ["hosts.command_placeholder"]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; Escape.",
+      "copy": ["common.cancel"]
+    },
+    {
+      "name": "Save",
+      "shows": "\"Save\" button, the default, suggested style.",
+      "copy": ["common.save"],
+      "actions": [
+        {"by": "click", "does": "Saves the command (trimmed; empty means PATH's) for that host, which is then reconnected with it."}
+      ]
+    }
+  ],
+  "scenes": ["55q-network-host-command"]
+}

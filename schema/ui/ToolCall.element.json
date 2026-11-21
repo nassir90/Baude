@@ -1,0 +1,244 @@
+{
+  "description": "One tool call Claude made, as a bordered card in the chat: a single header line (the tool's name in bold, small toggle buttons that fold open what it was given and what came back, then a one-line summary), and under it whatever has been opened. Its border says how it ended. Two or more calls in a row are folded into a ToolGroup.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Each tool_use (or server_tool_use) block of an assistant message, live as it streams or from history"
+  ],
+  "code": [
+    "baude.py:ToolCard",
+    "baude.py:summarize_tool",
+    "baude.py:tool_display",
+    "baude.py:tool_input_view",
+    "baude.py:_kv_rows",
+    "baude.py:_value_widget",
+    "baude.py:_path_label",
+    "baude.py:humanize",
+    "baude.py:said_nothing",
+    "baude.py:read_tail",
+    "baude.py:BaudeWindow.tool_card",
+    "baude.py:BaudeWindow.render_assistant",
+    "baude.py:BaudeWindow.render_tool_results",
+    "baude.py:BaudeWindow.cut_short",
+    "baude.py:BaudeWindow.jump_to_card",
+    "baude.py:SidePanel.link_card",
+    "widgets.py:Disclosure",
+    "widgets.py:_card_status",
+    "widgets.py:_status_icon",
+    "widgets.py:Spinner"
+  ],
+  "copy": [
+    "meta",
+    "common",
+    "images"
+  ],
+  "parts": [
+    {
+      "name": "card",
+      "shows": "Full column width. 1px border in the rule colour (baude.rule), 8px corners (radius.card), padding 6px top/bottom and 10px left/right (gap.card-v / gap.card-h). No fill. Everything inside is left-aligned."
+    },
+    {
+      "name": "header line",
+      "shows": "One line, items 8px apart, in this order: name, toggles, summary, status. It never wraps: the summary is cut with … at the end.",
+      "parts": [
+        {
+          "name": "name",
+          "shows": "The tool's name in bold, as Claude Code names it (Bash, Read, Edit, Write, Grep, Glob, WebFetch, WebSearch, TodoWrite, Task, Agent, Skill, NotebookEdit, ExitPlanMode, …). An MCP tool (mcp__<server>__<tool>) shows its tool part humanized and capitalized, with the server's prefix dropped: mcp__github__create_issue → \"Create issue\", mcp__claude_ai_Slack__slack_send_message → \"Send message\"."
+        },
+        {
+          "name": "toggles",
+          "shows": "Small toggle buttons right after the name, 4px apart (0.85em text, 1px/7px padding, 4px corners; pressed look while open). The first opens the input; its label is \"Command\" for Bash/BashOutput/PowerShell, \"Prompt\" for Task/Agent, \"Diff\" for Edit/MultiEdit, else \"Input\". The second, \"Output\", appears only once there is output, and reads \"Error\" when the call failed. A subagent's card (Task/Agent run as a tracked subagent) has \"View\" instead of Output (Output kept only for an Error). A plain Read (just a path, no line range or pages) has no Input button; with no buttons at all, the summary follows the name directly.",
+          "copy": [
+            "meta.input",
+            "meta.output",
+            "meta.error",
+            "common.view"
+          ],
+          "text": [
+            "Command",
+            "Prompt",
+            "Diff"
+          ],
+          "actions": [
+            {
+              "by": "click Command / Prompt / Diff / Input",
+              "does": "Slides the input view open under the line (120ms), or closed again. The button stays where it is on screen; what's below moves."
+            },
+            {
+              "by": "click Output / Error",
+              "does": "Slides the output open under the input (or closed)."
+            },
+            {
+              "by": "click View",
+              "does": "Opens this subagent's own transcript on the side panel's Subagents page. Tooltip \"Open this subagent in the side panel\"."
+            }
+          ]
+        },
+        {
+          "name": "summary",
+          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. An MCP tool's server name comes first, dimmed (55%), then two spaces (\"GitHub  …\"; an unnamed connector with only an id shows \"MCP\"). Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
+          "text": [
+            "running in background",
+            "interrupted",
+            "denied",
+            "MCP"
+          ]
+        },
+        {
+          "name": "status",
+          "shows": "At the end of the line, a 16px spinner (a faint ring with an arc going round, growing and shrinking) while the call runs or runs in the background. Nothing once it's done, failed or interrupted: success says nothing; failure is the red border. Hidden while the call waits for your permission."
+        }
+      ]
+    },
+    {
+      "name": "media",
+      "shows": "Right under the header line (6px gap), always visible, not behind a toggle: any images the tool returned, each at most 480px on its longest side with 6px corners, clickable to the image viewer, right-click for its menu (see ImageViewer). An image that can't be decoded shows \"[image could not be decoded]\". An Artifact publish shows its \"Published …\" line here (see Artifact).",
+      "text": [
+        "[image could not be decoded]"
+      ]
+    },
+    {
+      "name": "input view",
+      "shows": "Opened by the first toggle, under the line (6px gap), built only when first opened. Never raw JSON; the description is never repeated (the header has it). Per tool kind:",
+      "parts": [
+        {
+          "name": "Bash / PowerShell / BashOutput",
+          "shows": "The command in a code block tagged \"bash\" (\"powershell\"), shell-highlighted; then labelled rows for any other fields (timeout, run in background: yes, …)."
+        },
+        {
+          "name": "Read",
+          "shows": "The path in monospace (85% opacity), then dimmed after two spaces \"lines 120–159\" (offset and limit) or \"from line 120\" (offset only); labelled rows for other fields (pages …). A plain Read has no input view at all (the header shows the path)."
+        },
+        {
+          "name": "Edit",
+          "shows": "The path in monospace, \"all occurrences\" dimmed after it when replace_all; then the change as a diff: the old lines on red, then the new lines on green, highlighted as the file's code (see CodeBlock diff)."
+        },
+        {
+          "name": "MultiEdit",
+          "shows": "The path, then dimmed \"N edits\"; then one red/green diff block per edit, one under another."
+        },
+        {
+          "name": "Write",
+          "shows": "The path, then dimmed \"N lines\"; then the whole file in a code block highlighted by its extension (tag \"python\", \"bash\", …), scrolling inside itself past two thirds of the chat's height. Past 2,000 lines it ends with \"… N more lines\"."
+        },
+        {
+          "name": "Grep",
+          "shows": "The pattern in a code block tagged \"regex\", highlighted as a regular expression, exactly as written; then labelled rows (path, output mode, glob, -n: yes …)."
+        },
+        {
+          "name": "Glob",
+          "shows": "The pattern in a code block tagged \"glob\"; then labelled rows (path)."
+        },
+        {
+          "name": "WebFetch",
+          "shows": "The URL as a link (opens in the browser), then the prompt drawn as markdown."
+        },
+        {
+          "name": "WebSearch",
+          "shows": "Labelled rows: query, allowed domains, blocked domains. A server-side web search's result arrives inside the reply and only sets the card done (or failed); it has no Output."
+        },
+        {
+          "name": "TodoWrite",
+          "shows": "One line per todo: \"☑  <text>\" struck through when completed, \"◐  <text>\" in progress, \"☐  <text>\" pending (text: content, else activeForm). Header summary is empty."
+        },
+        {
+          "name": "Task / Agent (subagent)",
+          "shows": "The prompt drawn as markdown; then labelled rows (subagent type, model, run in background …). Header summary: its description."
+        },
+        {
+          "name": "AskUserQuestion",
+          "shows": "Each question in bold, its options under it \"  •  <label>  <description dimmed>\", and once answered \"  →  <answer>\". While it asks, see QuestionForm."
+        },
+        {
+          "name": "Codex file changes",
+          "shows": "For each changed file: its path, then its unified diff in a code block tagged \"diff\"."
+        },
+        {
+          "name": "MCP tools, NotebookEdit, ExitPlanMode, Skill, unknown tools",
+          "shows": "Labelled rows (\"key: value\" grid, 12px between columns, 4px between rows): each key humanized (snake_case, camelCase and kebab-case become lower-case words: file_path → \"file path\", -n → \"n\") right-aligned and dimmed, its value beside it filling the width. Values: text as is; true/false as \"yes\"/\"no\"; a list of plain values comma-joined (\"bug, ui\"); a list of one-key objects as their values comma-joined ([{\"login\":\"dev\"}] → \"dev\"); an object as nested labelled rows (up to 3 deep); a list of objects one under another; text with line breaks as a code block; anything else as compact JSON in monospace. Empty values (null, \"\", [], {}) are left out. Never raw JSON for the whole input. E.g. NotebookEdit: notebook path, cell id, new source (a code block), cell type, edit mode; ExitPlanMode: plan (a code block); Skill: skill, args."
+        }
+      ]
+    },
+    {
+      "name": "output view",
+      "shows": "Opened by Output/Error, under the input view (6px gap), built when first opened. Each piece of text the tool returned is a code block (no tag), monospace, long lines scrolling sideways, at most two thirds of the chat's height then scrolling inside itself. Text over 200,000 characters is cut, ending \"… (N chars)\". A Read's output (the file's lines) has its line numbers dimmed and the lines highlighted as that file's code. A Task/Agent's final answer is drawn as markdown instead, not code. A background command's output (see BackgroundTask) is the last 6,000 bytes of its output file, \"… \" before it when cut, tagged \"output\".",
+      "text": [
+        "… (N chars)"
+      ]
+    },
+    {
+      "name": "nested calls",
+      "shows": "A subagent's own messages and tool calls, when there's no side-panel view for it, are drawn inside its card's output (above its final answer), as cards of their own; they open the card's Output button."
+    }
+  ],
+  "states": [
+    {
+      "name": "streaming in",
+      "shows": "The card appears as soon as the call starts, with just its name and a spinner; the summary and Input button appear as the input arrives."
+    },
+    {
+      "name": "running",
+      "shows": "Spinner at the end of the line; rule-colour border."
+    },
+    {
+      "name": "done",
+      "shows": "No status icon; rule-colour border; Output button if there was output. Edit/MultiEdit/Write whose whole result is only \"The file … has been updated successfully.\" / \"File created successfully at: …\" (and Skill's \"Launching skill: …\") get no Output button: the card says that already."
+    },
+    {
+      "name": "error",
+      "shows": "Border in the theme's error red; the output button reads \"Error\" and holds what the tool said."
+    },
+    {
+      "name": "interrupted",
+      "shows": "The turn ended (Esc / stop, or a saved chat whose call never got a result) before the call did: red border, no spinner, \"· interrupted\" dimmed after the summary. If its input never finished arriving, it has no Input button. A result that arrives later turns it back into done/error."
+    },
+    {
+      "name": "background",
+      "shows": "The CLI moved the call to a background task: the spinner keeps going and \"· running in background\" follows the summary until the task ends (see BackgroundTask)."
+    },
+    {
+      "name": "asking permission",
+      "shows": "Amber (warning-colour) border, no spinner, the input opened automatically, and Allow / Always allow / Deny buttons at the bottom of the card (see PermissionPrompt)."
+    },
+    {
+      "name": "denied",
+      "shows": "\"· denied\" after the summary; the tool's refusal as its Error."
+    },
+    {
+      "name": "image result",
+      "shows": "A Read of an image file: no buttons, the card is the header line (the path, as a link that opens the file in its default app, tooltip \"Open with default app\") and the image under it, shown at once. Any tool returning images shows them the same way, and the ToolGroup it's in opens by itself.",
+      "copy": [
+        "images.open_with_default_app"
+      ]
+    },
+    {
+      "name": "long output",
+      "shows": "Output taller than two thirds of the chat scrolls inside its own pane, not as pages of chat."
+    },
+    {
+      "name": "no-description command",
+      "shows": "Just \"Bash\" and its Command/Output buttons on the line; the command is only in its Command section."
+    },
+    {
+      "name": "jumped to",
+      "shows": "When a background task's ending line is clicked, the chat scrolls back to the card (opening its group) and the card flashes with an accent tint (12%) for about 1.4s."
+    }
+  ],
+  "scenes": [
+    "02-turn-complete",
+    "03-working",
+    "20-tool-views",
+    "21-output-text",
+    "21b-output-long",
+    "21c-write-long",
+    "21d-command-no-description",
+    "22-output-error",
+    "23-output-image",
+    "24-output-collapsed",
+    "25-image-read",
+    "52-resumed-image-read",
+    "53d-live-tail",
+    "71-background-finished"
+  ]
+}

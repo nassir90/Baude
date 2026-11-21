@@ -1,0 +1,122 @@
+{
+  "description": "Claude's reply text in the chat: markdown drawn full width of the chat column (no bubble), one block under another 6px apart, growing live as it streams in. The same markdown is used for your messages, a subagent's report, a mesh chat's answer, thinking, and compaction summaries.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "Each text block of an assistant message, live (streamed) or from history"
+  ],
+  "code": [
+    "widgets.py:MarkdownView",
+    "widgets.py:markdown_parse",
+    "widgets.py:_inline_markup",
+    "widgets.py:_emphasis",
+    "widgets.py:link_markup",
+    "widgets.py:link_paths",
+    "widgets.py:resolve_path",
+    "widgets.py:resolve_link",
+    "widgets.py:on_label_link",
+    "widgets.py:open_code",
+    "widgets.py:bullet_for",
+    "widgets.py:ChatSelection",
+    "baude.py:BaudeWindow.render_assistant",
+    "baude.py:BaudeWindow.reply_view",
+    "record.py:Reader._add"
+  ],
+  "copy": [
+    "references",
+    "images"
+  ],
+  "parts": [
+    {
+      "name": "paragraph",
+      "shows": "Body text (15px, token font.body), wrapping at the column's width, selectable. Lines of one paragraph keep their line breaks; a blank line starts a new paragraph."
+    },
+    {
+      "name": "inline formatting",
+      "shows": "**bold**, *italic* / _italic_ (not inside a word), ***bold italic***, ~~struck~~ (CommonMark rules: a run that opens isn't followed by a space, so 2 * 3 * 4 stays plain). `code` spans: monospace at the code size on a grey (#7f7f7f at 22%) background; emphasis can wrap code (**`name`** is bold code). A lone -- between spaces becomes an em dash — (never inside code)."
+    },
+    {
+      "name": "headings",
+      "shows": "# is bold at 1.44em, ## bold at 1.2em, ### to ###### bold at body size. Inline formatting applies inside."
+    },
+    {
+      "name": "lists",
+      "shows": "Each item a row: a marker column 2 characters wide, right-aligned, bold at 70% opacity, then the item's text wrapping beside it (hanging indent). Bullets (-, *, +) show • at the top level and ◦ one level in, alternating deeper; numbered items keep their own number (\"1.\", \"2)\"). Each level (2 spaces of indent in the source) is 18px further in, from a 6px start. An indented line right after an item continues that item."
+    },
+    {
+      "name": "quote",
+      "shows": "Lines starting with > : a 3px vertical rule at the left in the text colour at 25%, 10px padding, the text at 85% opacity. Consecutive > lines join into one quote, keeping their line breaks."
+    },
+    {
+      "name": "rule",
+      "shows": "--- (or *** or ___) alone on a line: a 1px horizontal separator across the column, 4px above and below."
+    },
+    {
+      "name": "code block",
+      "shows": "A fenced ``` block: see CodeBlock. Its fence's tag (```python) names the language, shown in its corner and used for highlighting. An unclosed fence while streaming is drawn as a code block up to the end."
+    },
+    {
+      "name": "table",
+      "shows": "Lines starting and ending with | : see Table."
+    },
+    {
+      "name": "image",
+      "shows": "![alt](src) alone on a line: see MarkdownImage."
+    },
+    {
+      "name": "links",
+      "shows": "In the link colour, underlined on hover. Kinds: [text](url) and bare http(s):// addresses (trailing punctuation left out) open in the browser. A path that exists (absolute, ~/, ./, ../, relative with an extension, or relative in a folder; optionally :line or :line:col), in prose or in `code`, relative to the chat's folder, is a link; its tooltip is the full path. A [text](path) link to an existing file (with #L12 or :12 for a line) is too, even without an extension. Paths that don't exist stay plain text. A claude.ai artifact link (https://claude.ai/artifact/… or /code/artifact/…) reads as the artifact's title followed by ↗ (\"Ops Dashboard ↗\"), or \"Claude artifact ↗\" until its title is known, tooltip the URL; a [text](artifact-url) keeps its own text plus ↗. A GitHub pull-request link is drawn as a PR pill (its state's colour, see the Signal area). Links are never fetched to preview.",
+      "copy": [
+        "references.claude_artifact"
+      ],
+      "actions": [
+        {
+          "by": "click a file link",
+          "does": "Opens the file in Baude's code view beside the chat at that line (or in the editor / its default app when it isn't text, or code_viewer is off in settings); a folder opens on the side panel's Files page."
+        },
+        {
+          "by": "click a URL or artifact link",
+          "does": "Opens it in the default browser."
+        },
+        {
+          "by": "right-click a link",
+          "does": "The label's own menu: Copy Link Address gives the path (with :line) or URL."
+        }
+      ]
+    },
+    {
+      "name": "selection",
+      "shows": "All text is selectable. A drag from one paragraph (or one message) to another selects everything it passes, across blocks, shaded; copying gives it as markdown-ish text (list items with their markers).",
+      "actions": [
+        {
+          "by": "drag across blocks",
+          "does": "Selects what the drag passes, across paragraphs and messages."
+        },
+        {
+          "by": "key Ctrl/⌘+C",
+          "does": "Copies the selection."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "streaming",
+      "shows": "The reply grows as text arrives, redrawn at most once a frame; finished blocks stay as they are and only the last one changes. When the message completes it is redrawn once from the top so paths that exist now become links."
+    },
+    {
+      "name": "Signal on",
+      "shows": "Names the reply mentions (files, env vars, constants, routes, commits, branches) can additionally become links with icons; that is Signal's area."
+    }
+  ],
+  "scenes": [
+    "30-markdown-gallery",
+    "36-auto-links",
+    "97-chat-selection",
+    "02-turn-complete",
+    "62-full-width",
+    "63-zoomed"
+  ]
+}

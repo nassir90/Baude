@@ -1,0 +1,247 @@
+{
+  "description": "A Bot's browser, a page of the right-hand side panel: the Bot's own Emission browser, watched live and drivable by you with the same input the Bot uses (clicks, typing, keys, scroll, drag, hover). It sits on one of the hosts the Bot has used (its chat's host to start with). While the Bot is acting an accent-coloured glow frames the page and the Bot's pointer is drawn moving over it. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. The page can also be moved out into a window of its own (see 'Its own window'). This inventory covers what the pane shows, not Emission's own internals.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "the 'Browser' tab (web-browser icon) in the side panel's switcher, visible only while the open chat is a Bot",
+    "Move to Its Own Window button in the pane's bar",
+    "Baude restores a Bot's browser window as it was left when Baude last ran"
+  ],
+  "code": [
+    "browserpane.py:BrowserPane",
+    "browserpane.py:BrowserPane.panel_bars",
+    "browserpane.py:BrowserPane.set_state",
+    "browserpane.py:BrowserPane.show_prompts",
+    "browserpane.py:BrowserPane.ask",
+    "browserpane.py:Presence",
+    "browserpane.py:BrowserWindow",
+    "browserpane.py:Here",
+    "browserpane.py:Stream",
+    "baude.py:SidePanel.bot_changed"
+  ],
+  "copy": [
+    "bot_browser",
+    "browser",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Switcher tab with a web-browser icon and the label 'Browser'; present only for a Bot chat.",
+      "copy": [
+        "bot_browser.title"
+      ]
+    },
+    {
+      "name": "bar",
+      "shows": "One row of flat buttons across the top of the page (6 px side margins), in this order: Back (left arrow), Forward (right arrow), Reload (circular arrow; becomes a stop square while the selected tab is loading), the address field (takes all the spare width, at least 74 px, placeholder 'Search or type an address'), the host picker (an icon-only drop-down, tooltip 'Host: <name>', only when more than one host is available), New tab (plus-in-tab icon), Restart as Native (monitor icon, tooltip 'Restart as Native (its pages reload)', only for a Bot's browser on this Mac that is being streamed), Move to Its Own Window (window icon, a toggle, only once a Bot is shown), and Read-only (a lock icon toggle). Everything but Read-only is greyed while read-only is on and while the browser is on a phone.",
+      "copy": [
+        "browser.back",
+        "browser.forward",
+        "browser.reload",
+        "browser.address",
+        "browser.new_tab",
+        "bot_browser.read_only"
+      ],
+      "text": [
+        "Host",
+        "Host: <host name>",
+        "Restart as Native (its pages reload)",
+        "Move to Its Own Window",
+        "Put Back in the Side Panel"
+      ],
+      "actions": [
+        {
+          "by": "click Back / Forward",
+          "does": "navigates the selected tab back or forward"
+        },
+        {
+          "by": "click Reload",
+          "does": "reloads the selected tab (while loading the icon is a stop button)"
+        },
+        {
+          "by": "type an address and press Enter",
+          "does": "opens it (a search or address; blank is ignored) in the selected tab; the field shows the selected tab's current address unless you are typing in it"
+        },
+        {
+          "by": "click host picker",
+          "does": "lists the hosts that are there (the chat's first, then the other live hosts, each by name); picking one watches that host's browser of this Bot instead (the Bot has a separate browser on each host it has used)"
+        },
+        {
+          "by": "click New tab",
+          "does": "opens a blank tab (about:blank) in the Bot's browser"
+        },
+        {
+          "by": "click Restart as Native",
+          "does": "for a browser of this Mac's that is streamed: takes it over into Baude drawn natively instead, taken from its own Emission window even if busy; its pages reload and the Bot is told. If that cannot be done a line under the page says 'Couldn't restart as native: <why>'. The button then disappears"
+        },
+        {
+          "by": "toggle Move to Its Own Window",
+          "does": "moves the Bot's browser into an Emission window of its own (see 'Its own window'); when it is out the tooltip says 'Put Back in the Side Panel' and toggling brings it back"
+        },
+        {
+          "by": "toggle Read-only",
+          "does": "tooltip 'Read-only'. On: the bar buttons, address field, tab strip and prompt answers are greyed and mouse/keyboard on the page do nothing, so you only watch; the page is no longer resized to fit the panel (the Bot's own size again). The choice is remembered per Bot"
+        }
+      ]
+    },
+    {
+      "name": "tab strip",
+      "shows": "Shown only while the Bot's browser has more than one tab: a horizontally scrolling row (no scrollbar, 6 px margins) of linked pairs, each a flat toggle with the tab's title (28 characters, ellipsised; the address if there is no title; 'New tab' if neither; tooltip is the address) and a small flat close (x) button (tooltip 'Close tab'). The selected tab's toggle is active.",
+      "copy": [
+        "bot_browser.close_tab",
+        "browser.new_tab"
+      ],
+      "actions": [
+        {
+          "by": "click a tab",
+          "does": "selects it in the Bot's browser"
+        },
+        {
+          "by": "click x",
+          "does": "closes that tab in the Bot's browser"
+        }
+      ]
+    },
+    {
+      "name": "prompt cards",
+      "shows": "Under the bar, one card for each thing a page in the Bot's browser is waiting on, answerable here or by the Bot: a JavaScript alert (message, OK), confirm (message, Cancel and OK), prompt (message, a text field with the default, Cancel and OK), a sign-in (title '<host> asks to sign in' or '<host> asks to sign in (“<realm>”)', a 'User name' field and a 'Password' field with a peek icon, Cancel and OK; 'A site' stands in for an unknown host), and a file upload ('The page asks for files to upload', Cancel and a disabled OK, because the files are the Bot's to give from its host). OK is the suggested style. The cards are rebuilt only when the set of prompts changes so what you type is not lost.",
+      "copy": [
+        "browser.sign_in",
+        "browser.sign_in_realm",
+        "browser.a_site",
+        "browser.user_name",
+        "browser.password",
+        "bot_browser.asks_for_files",
+        "common.cancel",
+        "common.ok"
+      ],
+      "actions": [
+        {
+          "by": "click OK / Cancel",
+          "does": "answers the prompt in the Bot's browser, with the typed text, user name and password where the card has fields"
+        }
+      ]
+    },
+    {
+      "name": "page",
+      "shows": "The Bot's selected tab drawn to fill the page area (kept in proportion, centred), set into the panel's dark inside like the other panes. A streamed page is asked for at the area's size (frames at device pixels) and re-requested a quarter second after the size settles; the Bot's page is laid out at the panel's shape while you are driving it. A hosted (native) page is drawn by Baude itself. While the Bot acts, a glow in the accent colour frames the page and the Bot's pointer (an arrow with a soft shadow, click rings, scroll chevrons) is drawn over it moving as the Bot moves it; these never take a click. Nothing but the page is shown when the page is out in its own window (see 'Its own window').",
+      "actions": [
+        {
+          "by": "click on the page",
+          "does": "clicks there in the Bot's page (left; right-click and middle-click as they are; modifiers Shift, Ctrl, Alt, Cmd held are sent; a second or third press within 0.45 s and 6 px counts as a double or triple click)"
+        },
+        {
+          "by": "drag on the page",
+          "does": "a press that moves more than 5 px is a drag along the path you moved (about 20 points of it)"
+        },
+        {
+          "by": "type on the page",
+          "does": "typed characters are sent as text, batched when typed within 60 ms; Enter, Backspace, Delete, Escape and modifier combinations are sent as keys; a lone space is the Space key"
+        },
+        {
+          "by": "scroll (wheel / trackpad)",
+          "does": "scrolls the page under the pointer; turns within 50 ms are merged"
+        },
+        {
+          "by": "hover (pointer still for 300 ms)",
+          "does": "hovers there in the Bot's page, only when nothing else is waiting; hover-only on desktop, a phone has no hover"
+        }
+      ]
+    },
+    {
+      "name": "status page",
+      "shows": "A centred placeholder (web-browser icon, a title, a description) in place of the page whenever there is no page frame. Text by case: 'No pages open' (nothing there yet or no tab); 'Connecting…' while the watch is starting; 'On a phone' with \"<Bot name>'s browser is on a phone now, and shown there. It's back here once the phone closes it.\" (the Bot's browser is on a phone: nothing is watched here and every control is greyed); \"Couldn't open the browser\" with the reason (the browser never showed); 'The browser stopped' with 'It restarts when you open this page again.' (or, in an Emission window, 'It restarts in a moment, or when you come back to this window.').",
+      "copy": [
+        "bot_browser.no_pages",
+        "bot_browser.connecting",
+        "bot_browser.on_phone_title",
+        "bot_browser.on_phone",
+        "bot_browser.the_bot",
+        "bot_browser.couldnt_open",
+        "bot_browser.stopped",
+        "bot_browser.restarts_on_open",
+        "bot_browser.restarts_soon"
+      ]
+    },
+    {
+      "name": "message line",
+      "shows": "A dim wrapping line under the page (8 px margins), hidden unless there is something to say. After a browser action fails: 'Can't connect to the browser.' when the host cannot be reached, else a line naming what could not be done: \"Couldn't click.\", \"Couldn't close the tab.\", \"Couldn't drag.\", \"Couldn't hover.\", \"Couldn't press the key.\", \"Couldn't open the page.\", \"Couldn't open a tab.\", \"Couldn't scroll.\", \"Couldn't switch tabs.\", \"Couldn't type.\", \"Couldn't answer.\", else \"Couldn't do that.\" (the host's reason is its tooltip). When a streamed browser stops while its last frame is still shown: 'The browser stopped. <it restarts ...>' under the frozen page; it goes when frames come again. Also 'Couldn't restart as native: <why>'.",
+      "copy": [
+        "bot_browser.cant_connect",
+        "bot_browser.couldnt_do",
+        "bot_browser.stopped_again",
+        "bot_browser.host_said_no"
+      ]
+    },
+    {
+      "name": "Its own window",
+      "shows": "Moving the browser out puts the same pages and tabs, nothing reloaded, in a window titled '<page title or address> — <Bot name>' (an Emission window, 1180 by 820, with Emission's own bar: back, forward, reload, address, new tab, the Bot's profile name greyed, plus Restart as Native and Read-only at the end, and Emission's tab bar). The side panel page then shows only the dim title text 'Currently disembodied' with the bar reduced to the Move to Its Own Window toggle (now 'Put Back in the Side Panel'); the address, back, forward, reload, new tab, host picker and Read-only (the window has its own lock) are hidden, and so are the tab strip, prompt cards and message line. Closing the window, or toggling back, puts the browser back in the panel. Browsers that were out when Baude last ran come out again at start, shown behind the main window. Such a window is closed with the Baude window it came from. Keys in the window: Ctrl/Cmd+T new tab, Ctrl/Cmd+W close the tab, Ctrl/Cmd+L focus the address, Ctrl/Cmd+R reload.",
+      "text": [
+        "Currently disembodied"
+      ],
+      "phone": {
+        "does": "The browser fills the screen",
+        "why": "One window at a time on a phone",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Ctrl+T / Cmd+T (in the window)",
+          "does": "new tab"
+        },
+        {
+          "by": "key Ctrl+W / Cmd+W (in the window)",
+          "does": "close the tab"
+        },
+        {
+          "by": "key Ctrl+L / Cmd+L (in the window)",
+          "does": "focus the address field"
+        },
+        {
+          "by": "key Ctrl+R / Cmd+R (in the window)",
+          "does": "reload"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "no Bot",
+      "shows": "Tab hidden."
+    },
+    {
+      "name": "connecting",
+      "shows": "Status page 'Connecting…'."
+    },
+    {
+      "name": "no pages",
+      "shows": "Status page 'No pages open'."
+    },
+    {
+      "name": "watching",
+      "shows": "Live page; tab strip if more than one tab; pointer and glow while the Bot acts (its host says it is working and acting)."
+    },
+    {
+      "name": "Bot busy in its own Emission",
+      "shows": "A Bot's own Emission window on this Mac is not taken into Baude while it is in use (it is taken once it has been idle for 5 seconds); meanwhile the page is streamed and tried again every 10 seconds."
+    },
+    {
+      "name": "read-only",
+      "shows": "Lock toggle on; every control greyed; the page is watched only."
+    },
+    {
+      "name": "on a phone",
+      "shows": "Status page 'On a phone'; controls greyed; back to the pane once the phone closes it."
+    },
+    {
+      "name": "stopped",
+      "shows": "Status page 'The browser stopped' (or the frozen last frame with the message line)."
+    },
+    {
+      "name": "own window",
+      "shows": "'Currently disembodied' placeholder; see the part above."
+    }
+  ]
+}

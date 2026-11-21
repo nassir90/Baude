@@ -1,0 +1,33 @@
+{
+  "description": "A change Meta proposes to a page's text, drawn on the page itself as tracked changes read: what it takes away struck through on red, what it puts in just after it on green, with Accept and Reject at the end of it. It is not the page's until accepted: it is not saved, not read back by Meta as the page, can't be typed into, and is in none of Undo.",
+  "apps": ["record"],
+  "code": ["record.py:DiaryEditor.show_proposal", "record.py:DiaryEditor.decide", "record.py:EditControls", "record.py:RecordChat.propose"],
+  "copy": ["edit_review"],
+  "parts": [
+    {
+      "name": "old passage",
+      "shows": "The text the change replaces: red background, struck through, where it is on the page. A change that only adds has none and is shown at the page's end. A change whose passage is gone from the page is shown at the page's end."
+    },
+    {
+      "name": "new passage",
+      "shows": "The replacement just after it, green background, in the page's own lines (wrapping, font and size as the text)."
+    },
+    {
+      "name": "Accept and Reject",
+      "shows": "Two square buttons in the line where the green ends, as tall as the green: a tick on green and a cross on red. They do not take the focus.",
+      "copy": ["edit_review.accept_tip", "edit_review.reject_tip"],
+      "actions": [
+        {"by": "click the tick", "does": "Puts the green into the page in the red's place, as one edit that Undo takes back."},
+        {"by": "click the cross", "does": "Takes the proposal away; the red is as it was."},
+        {"by": "key Tab, caret inside the change", "does": "Accept (tooltip \"Accept (Tab)\")."},
+        {"by": "key Esc, caret inside the change", "does": "Reject (tooltip \"Reject (Esc)\")."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "several", "shows": "Each shown in turn on its page; Meta's pending bar (RecordMeta) counts them and steps between them."},
+    {"name": "passage selected", "shows": "A passage you had selected and asked about is let go once its change is shown in its place; the caret goes to the end of the change."},
+    {"name": "page deleted meanwhile", "shows": "Its edits waiting are rejected."}
+  ],
+  "scenes": []
+}

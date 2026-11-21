@@ -1,0 +1,30 @@
+{
+  "description": "The tab bar of Record's middle: each open page of notes, chat being read, file's code and the Feedback page is a tab. A closed tab is remembered for next time (pages of the notebook, chats).",
+  "apps": ["record"],
+  "code": ["record.py:Window.open_note", "record.py:Window.open_chat", "record.py:Window.show_code", "record.py:Window.open_fixes", "record.py:Window._tab_closed", "record.py:Window._keep_open", "widgets.py:MainTabs"],
+  "copy": ["tabs", "feedback", "window"],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "A tab has an icon, a title, a close ×, and a tooltip. A page of notes: dictionary icon, the page's own short name (a page Work:Plans is titled Plans, tooltip is its full name Work:Plans). A chat: Claude icon, the chat's title, tooltip \"{title} · {folder}\". A file's code: a script icon, the file's name (with \" (note)\" for a version of a file), tooltip is its path. Feedback: mail icon, title \"Feedback\", tooltip \"The feedback on Baude, and where each stands\". The bar is always shown (it does not hide with one tab).",
+      "text": ["The feedback on Baude, and where each stands"],
+      "copy": ["feedback.title", "window.feedback_tab_tip"],
+      "actions": [
+        {"by": "click", "does": "Shows the tab."},
+        {"by": "click ×", "does": "Closes it. A chat's reading and a page's timers stop; what is open is kept for the next start; the page left empty and unlinked goes from the pages list."},
+        {"by": "right-click", "does": "Tab menu (RecordTabMenu)."},
+        {"by": "drag", "does": "Reorders tabs (libadwaita tab bar); the order is kept."}
+      ]
+    },
+    {
+      "name": "tab content",
+      "shows": "Only the tab shown has a size. A page of notes: RecordNotes. A chat: RecordRead. A file's code: Baude's code view, with its own find bar and zoom. Feedback: Baude's Ongoing Feedback page (shared, not described here)."
+    }
+  ],
+  "states": [
+    {"name": "tab opened again", "shows": "Opening what is open already shows its tab and does not make another. One page, one chat, one file's code (per version) each have one tab."},
+    {"name": "notebook switched", "shows": "Switching notebook closes the pages' tabs of the one left and opens the new one's: the ones it had open, its last page shown (Home if none). Chats and code tabs stay."},
+    {"name": "browser-like history", "shows": "Each tab shown is remembered, a file's code at each line it was shown at. Back and forward (Alt+Left/Right, Option+Cmd on macOS) show it again, opening the tab again if it was closed, unless it is gone (a deleted page, a chat file removed, another notebook's page)."}
+  ],
+  "scenes": []
+}

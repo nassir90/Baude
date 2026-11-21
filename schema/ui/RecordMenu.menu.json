@@ -1,0 +1,81 @@
+{
+  "description": "Record's ☰ main menu, the last button at the right end of the header bar. Sections separated by rules.",
+  "apps": ["record"],
+  "opens": ["click ☰ in the header bar"],
+  "code": ["record.py:Window.__init__"],
+  "copy": ["window", "tabs", "changelog", "mesh_versions", "fixes", "code_apart", "meta_settings"],
+  "parts": [
+    {
+      "name": "Open a Chat…",
+      "shows": "\"Open a Chat…\"",
+      "actions": [{"by": "click", "does": "Opens the Open a Chat dialog (RecordOpenChat)."}]
+    },
+    {
+      "name": "Copy Link to This Page",
+      "shows": "\"Copy Link to This Page\", key Ctrl+Shift+L (Cmd+Shift+L on macOS).",
+      "copy": ["tabs.copy_link_to_page"],
+      "actions": [{"by": "click", "does": "Puts the shown tab's absolute link on the clipboard (a page's file, a chat's transcript path, a file's path) and says \"Link copied\", or \"This page has no link to copy\"."}]
+    },
+    {
+      "name": "Copy Transcript for an Issue",
+      "shows": "\"Copy Transcript for an Issue\".",
+      "copy": ["window.copy_transcript", "window.transcript_copied", "report.app", "report.copied", "report.the_chat", "chats.chat", "common.model", "common.folder"],
+      "actions": [{"by": "click", "does": "Copies the chat being read as text for pasting into an issue: a header (App: Record, Chat: {session id} ({title}), Model, Folder, Copied: date and time), then the transcript with each tool call, its input and its result. Toast \"Transcript copied\". With no chat open, toast \"No chat open\"."}]
+    },
+    {
+      "name": "Full-width text",
+      "shows": "A toggle item \"Full-width text\" (section of its own). On: notes pages and chats read run across the whole pane; off: a centred column (820 wide for notes, 760 for a chat). Kept.",
+      "copy": ["meta_settings.full_width"],
+      "actions": [{"by": "click", "does": "Toggles. Also a row in Settings."}]
+    },
+    {
+      "name": "Kubernetes…",
+      "shows": "\"Kubernetes…\" (section with Database Schemas…).",
+      "copy": ["window.kubernetes_menu"],
+      "actions": [{"by": "click", "does": "Opens Baude's Kubernetes view over the window."}]
+    },
+    {
+      "name": "Database Schemas…",
+      "shows": "\"Database Schemas…\"",
+      "copy": ["window.database_schemas"],
+      "actions": [{"by": "click", "does": "Opens Baude's database diagram over the window."}]
+    },
+    {
+      "name": "Settings…",
+      "shows": "\"Settings…\", key Ctrl+, (Cmd+, on macOS), in the app section.",
+      "copy": ["window.settings"],
+      "actions": [{"by": "click", "does": "Opens the Settings dialog (RecordSettings)."}]
+    },
+    {
+      "name": "Changelog",
+      "shows": "\"Changelog\". Shared with Baude; described in Changelog.dialog.json.",
+      "copy": ["changelog.title"],
+      "actions": [{"by": "click", "does": "Opens the Changelog dialog."}]
+    },
+    {
+      "name": "Mesh",
+      "shows": "\"Mesh\" (the mesh's versions). Shared with Baude; described in MeshVersions.dialog.json.",
+      "copy": ["mesh_versions.title"],
+      "actions": [{"by": "click", "does": "Opens the Mesh versions dialog."}]
+    },
+    {
+      "name": "Send Feedback…",
+      "shows": "\"Send Feedback…\", key Ctrl+. (Cmd+. on macOS), over whatever is open. Shared with Baude; its dialog is described elsewhere. The note it sends carries Record's context: the chat's session id and the notebook, the chat's folder, the path of Record's code, the chat as a transcript and Meta's.",
+      "copy": ["fixes.send_feedback"],
+      "actions": [{"by": "click", "does": "Opens Send Feedback."}]
+    },
+    {
+      "name": "Ongoing Feedback",
+      "shows": "\"Ongoing Feedback\". Shared with Baude; described elsewhere.",
+      "copy": ["window.ongoing_feedback"],
+      "actions": [{"by": "click", "does": "Opens (or shows) the Feedback tab: the feedback on Baude and Record and where each stands."}]
+    },
+    {
+      "name": "Restart Record",
+      "shows": "\"Restart Record\".",
+      "copy": ["code_apart.restart_app"],
+      "actions": [{"by": "click", "does": "Saves, and replaces this process by a fresh Record that puts everything back as it was (RecordWindow, restarted). Picks up new code."}]
+    }
+  ],
+  "scenes": []
+}

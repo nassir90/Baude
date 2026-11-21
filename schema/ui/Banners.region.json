@@ -1,0 +1,201 @@
+{
+  "description": "Everything that says what is in the way of the chat from outside it, as banners and bars around the Baude main window's chat column. One file, one part per banner. The chat banner is a single strip at the top of the chat column, above the find bar and the transcript, showing one message at a time (the first applicable in the order listed under parts); the others sit elsewhere as stated.",
+  "apps": [
+    "baude"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.update_banner",
+    "baude.py:BaudeWindow.banner_text",
+    "baude.py:BaudeWindow.host_apart_said",
+    "baude.py:BaudeWindow.show_retry",
+    "baude.py:BaudeWindow.drop",
+    "baude.py:BaudeWindow.live_elsewhere",
+    "baude.py:stopping_said",
+    "baude.py:BaudeApp.show_update_bars",
+    "baude.py:BaudeApp.update_now",
+    "baude.py:SessionSidebar.show_host_state",
+    "widgets.py:UpdateBar",
+    "widgets.py:HostState",
+    "widgets.py:HostApart",
+    "widgets.py:ShutBar"
+  ],
+  "copy": [
+    "host_status",
+    "hosts",
+    "code_apart",
+    "update_bar",
+    "window",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "chat banner",
+      "shows": "A full-width strip (an Adw banner) revealed with a slide under the header and above the chat, one title line (markup) and an optional button at its right. It is hidden when nothing applies. When several things apply, the one shown is the first of: host gone, chat missing, active elsewhere, connection dropped, API retrying, daemon/app older. The composer's send button is switched off while the host is gone, the chat is missing, or the connection dropped.",
+      "parts": [
+        {
+          "name": "host gone",
+          "shows": "A network chat whose host is out of reach: \"Can't connect to <host> at the moment\" (\"Can't connect to <host> at the moment: <why>\" when the last try said why) for a host that is down; \"Looking for <host> on the network…\" while it is being looked for; this machine's host is called Daemon (\"Looking for daemon…\"). No button. The viewed chat is shown as it was last seen.",
+          "copy": [
+            "hosts.down",
+            "hosts.down_because",
+            "hosts.looking"
+          ],
+          "text": [
+            "Looking for daemon…"
+          ]
+        },
+        {
+          "name": "host stopping",
+          "shows": "While the chat's host announces it is stopping or restarting (in place of gone or dropped): \"<host> stopping…\" or \"<host> restarting…\", with the count when known \"<host> stopping — 2 of 3 processes to stop\" (singular \"process\"), and \"<host> stopping — every process stopped\" at the end. This machine's host is named Daemon.",
+          "copy": [
+            "host_status.stopping",
+            "host_status.restarting",
+            "host_status.stopping_left",
+            "host_status.restarting_left",
+            "host_status.stopping_all_stopped",
+            "host_status.restarting_all_stopped"
+          ]
+        },
+        {
+          "name": "chat missing on its host",
+          "shows": "The host is there but has no such session: \"<Daemon or host> no longer has this chat\", or \"<name> couldn't take this chat up again: <reason>\". Button \"New chat\" starts a new chat on that host.",
+          "text": [
+            "{name} no longer has this chat",
+            "{name} couldn't take this chat up again: {reason}",
+            "New chat"
+          ],
+          "actions": [
+            {
+              "by": "click button",
+              "does": "Starts a new chat on that host"
+            }
+          ]
+        },
+        {
+          "name": "active elsewhere",
+          "shows": "\"This session is currently active elsewhere\", no button. Shown for a Claude Desktop chat that Claude Desktop is writing to now; the composer is hidden meanwhile and what Desktop writes appears live in the transcript with a spinner while it works. Goes when its transcript has been quiet. Other chats (host's, other windows', terminals') never show this.",
+          "text": [
+            "This session is currently active elsewhere"
+          ]
+        },
+        {
+          "name": "connection dropped",
+          "shows": "\"Connection to <daemon or host> dropped...\" with the three dots stepping (every 0.35 s); the send button is off. Cleared when attached again (retried about every 10 s); the host leaving the network shows \"host gone\" instead. A turn that was running goes on on the host, and a message sent after a claude that exited notes \"— resumed from <reason> —\".",
+          "text": [
+            "Connection to {host} dropped"
+          ]
+        },
+        {
+          "name": "API retrying",
+          "shows": "While claude retries the model's API: \"The API returned <status>: retrying, attempt 2 of 5\" or \"The API didn't answer: retrying\" (attempt part only when known), dots stepping; gone when the next thing arrives or the turn ends.",
+          "text": [
+            "The API returned {status}: retrying, attempt {n} of {max}",
+            "The API didn't answer: retrying"
+          ]
+        },
+        {
+          "name": "daemon or app older",
+          "shows": "This Mac's host process (daemon) and Baude running different code, when nothing about the chat itself is in the way: \"Baude is older than its daemon\" (button \"Restart Baude\"), \"Daemon is older than Baude\" (button \"Restart Daemon\"), \"Baude and its daemon are out of date\" (button \"Restart Both\"), or for another checkout's code \"Daemon runs the code in <folder>\" / \"Daemon runs another checkout's code\" (button \"Dismiss\"). Said after the difference has lasted a while (at once for another checkout). Not said while an Update button already says it.",
+          "copy": [
+            "code_apart.app_older",
+            "code_apart.restart_app",
+            "code_apart.daemon_older",
+            "code_apart.restart_daemon",
+            "code_apart.both_old",
+            "code_apart.restart_both",
+            "code_apart.elsewhere_folder",
+            "code_apart.elsewhere",
+            "code_apart.dismiss"
+          ],
+          "phone": {
+            "does": "nothing",
+            "why": "Restarting this Mac's host process and the desktop app that talks to it",
+            "decided": "2026-11-21"
+          },
+          "actions": [
+            {
+              "by": "click button",
+              "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" after"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update bar",
+      "shows": "At the foot of the sessions sidebar, under a rule: a flat left-aligned button \"Update\", shown while a new version waits to be restarted onto. Hidden when no update waits.",
+      "copy": [
+        "update_bar.update",
+        "update_bar.ready",
+        "update_bar.waiting_for"
+      ],
+      "phone": {
+        "does": "The phone's own updater: the Update bar at the foot of home (Update.kt)",
+        "why": "The phone installs builds, not a git checkout",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip \"A new version is ready\" when nothing is in the way; else \"Waiting for:\" then a bulleted line per blocker (\"• running: <command>\", \"• a side question's reply being written\", \"• a dialog open\", \"• you, using this window\", \"• local's host process: <command>\")"
+        },
+        {
+          "by": "click",
+          "does": "Restarts onto the new version. If that would stop running commands, first asks \"Restart now?\" listing them with Cancel and \"Restart Now\" (destructive style); stopped chats can be continued after"
+        }
+      ],
+      "text": [
+        "Restart now?",
+        "The new version is picked up now. These are stopped, and their chats can be continued after:"
+      ]
+    },
+    {
+      "name": "host state note",
+      "shows": "Over the sidebar's chat list (not the chat column): a small outlined island, text centred and wrapped, slid down, saying why the host picked beside New session can't be reached: \"Looking for <host> on the network…\", \"Can't connect to <host> at the moment[: why]\", \"<host> is deactivated\", or its stopping/restarting line. The host's chats stay listed as they were last seen. Gone when the host is there.",
+      "copy": [
+        "hosts.looking",
+        "hosts.down",
+        "hosts.down_because",
+        "hosts.deactivated",
+        "host_status.stopping",
+        "host_status.restarting"
+      ]
+    },
+    {
+      "name": "cut short by a restart line",
+      "shows": "At the end of the transcript (a chat line, not a banner): dim \"Cut short by a restart\" with a button \"Continue\" (tooltip sends the continue message); after pressing, a spinner and \"Continuing…\". Shown for a turn a restart cut short, until something is sent.",
+      "text": [
+        "Cut short by a restart",
+        "Continue",
+        "Continuing…"
+      ],
+      "actions": [
+        {
+          "by": "click Continue",
+          "does": "Sends the continue message to the chat"
+        }
+      ]
+    },
+    {
+      "name": "toasts",
+      "shows": "Short messages at the bottom of the window that go by themselves after a few seconds: \"Transcript copied\", \"That session was deleted on <host>\", Signal on/off notes (with a Show button), the zoom toast (see Shortcuts), held-send refusals (see Composer).",
+      "copy": [
+        "window.transcript_copied"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "no banner",
+      "shows": "The strip is hidden, no room is taken"
+    }
+  ],
+  "scenes": [
+    "56-host-older",
+    "53d-live-tail",
+    "55r-network-host-gone",
+    "55r2-network-host-unknown",
+    "55t-network-host-deactivated",
+    "55c-network-session-asking"
+  ]
+}

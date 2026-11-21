@@ -1,0 +1,30 @@
+{
+  "description": "What the Baude main window shows for a brand-new chat, before anything has been written: the header and sidebar as usual, an empty chat column, the composer and the status bar. There is no welcome text, logo or example prompt.",
+  "apps": ["baude"],
+  "code": ["baude.py:BaudeWindow.__init__", "baude.py:BaudeWindow.draft_changed", "baude.py:BaudeWindow.sync_models"],
+  "copy": ["sidebar.new_session"],
+  "parts": [
+    {
+      "name": "header",
+      "shows": "The title reads \"New session\". The model picker shows claude's default model (as soon as claude lists its models) and the mode picker shows Auto; the effort picker shows the model's default level; the provider picker is hidden for Claude's models. See HeaderBar.",
+      "copy": ["sidebar.new_session"]
+    },
+    {
+      "name": "chat area",
+      "shows": "Blank: nothing is drawn in the transcript and no placeholder text is shown. The column is centred and at most 860 px wide unless Full-width text is on."
+    },
+    {
+      "name": "composer",
+      "shows": "The empty text box (two lines tall, no placeholder), the + attach button and the grey send button, with the focus in the box when the window opens. See Composer."
+    },
+    {
+      "name": "status bar",
+      "shows": "No dots; the host \"local\"; the chat's folder (~/…); cost $0.0000; context shows \"— / <window>\" with an empty bar. After claude starts, \"<N> tools\" follows the folder. See StatusBar."
+    },
+    {
+      "name": "sidebar",
+      "shows": "A new chat is not listed in the sessions sidebar until something is typed or attached (text or an attachment begins it); it is listed from then on, even before the first send. A new chat keeps one shared draft that the next new chat opens with. Starting another new chat with /new, /clear or Ctrl+N comes back to this same blank state."
+    }
+  ],
+  "scenes": ["01-empty"]
+}

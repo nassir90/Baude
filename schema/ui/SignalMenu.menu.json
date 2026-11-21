@@ -1,0 +1,28 @@
+{
+  "description": "The popover under the header's chain-link button: this chat's two Signal switches, each a title and a small grey explanation with a switch at the right, 310 px wide.",
+  "apps": ["baude"],
+  "opens": ["header Signal button"],
+  "code": ["baude.py:BaudeWindow.signal_menu", "baude.py:BaudeWindow.set_signal", "baude.py:BaudeWindow.chat_signal", "baude.py:BaudeWindow.apply_chat_signal"],
+  "parts": [
+    {
+      "name": "Show links",
+      "shows": "Title \"Show links\", caption \"Draw the names Signal knows as links: files, code, commits, routes, Kubernetes objects, tools\", a switch. On by default for a new chat.",
+      "text": ["Show links", "Draw the names Signal knows as links: files, code, commits, routes, Kubernetes objects, tools"],
+      "actions": [
+        {"by": "click switch", "does": "Draws or stops drawing the names Signal knows in Claude's replies as links (alone: from what the folder's glossary, the catalogue and git already know, with no model). The reply views are relinked at once"}
+      ]
+    },
+    {
+      "name": "Activate Signal",
+      "shows": "Title \"Activate Signal\", caption \"Look up the names in this chat's replies as they come, and let the reader (a model session) read the chat\", a switch. Off by default for a new chat.",
+      "text": ["Activate Signal", "Look up the names in this chat's replies as they come, and let the reader (a model session) read the chat"],
+      "actions": [
+        {"by": "click switch", "does": "On: Signal runs for the chat's folder, looking up names as replies arrive and filling the glossary; toast \"Signal is on for this chat: the names in its replies are looked up\" (\" and become links\" when links are on) with a Show button that opens the side panel's Signal page. Off: toast \"Signal stopped looking things up\" (naming what stopped) \"; its links stay\", or \"Signal is off: stopped …\" if no window shows the chat"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "per chat", "shows": "Each chat keeps its own two switches (the last 500 chats); a new chat starts with links shown and Signal off, and what is set before the chat has an id is kept once it has one"},
+    {"name": "no folder", "shows": "With no folder known, Signal is off whatever the switches say"}
+  ]
+}

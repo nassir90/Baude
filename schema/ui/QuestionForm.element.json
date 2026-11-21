@@ -1,0 +1,94 @@
+{
+  "description": "Claude's AskUserQuestion: its questions with their options to pick, an Other choice to type your own answer, and Answer / Skip, inside the call's card (or its own amber box). Answered, the card folds back to one line saying what was picked.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "An AskUserQuestion call's permission request (always asked)"
+  ],
+  "code": [
+    "baude.py:QuestionForm",
+    "baude.py:BaudeWindow.permission_card",
+    "baude.py:summarize_tool",
+    "baude.py:tool_input_view"
+  ],
+  "copy": [
+    "asks",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "where",
+      "shows": "At the bottom of the AskUserQuestion card (amber border, its input NOT opened, since the form says it all), or, with no card, in an amber-bordered box whose first line is \"Claude has a question\" in bold.",
+      "copy": [
+        "asks.has_question"
+      ]
+    },
+    {
+      "name": "question",
+      "shows": "Questions one under another, 10px apart. Each: its header dimmed (60%) then two spaces then the question in bold, on one wrapping line.",
+      "parts": [
+        {
+          "name": "options",
+          "shows": "Under the question, 4px apart: one radio button per option (check boxes if the question allows several), its label, and under the label its description dimmed, both wrapping.",
+          "actions": [
+            {
+              "by": "click an option",
+              "does": "Picks it (one only unless multi-select)."
+            }
+          ]
+        },
+        {
+          "name": "Other",
+          "shows": "A last choice \"Other\" in the same group. Picked, a text field appears under it (placeholder \"Your own answer\") and takes the focus.",
+          "copy": [
+            "common.other",
+            "asks.own_answer"
+          ],
+          "actions": [
+            {
+              "by": "key Enter in the field",
+              "does": "Same as Answer, when Answer is enabled."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "buttons",
+      "shows": "A row under all the questions: \"Answer\" (accent; greyed until every question has an answer) and \"Skip\".",
+      "copy": [
+        "asks.answer",
+        "asks.skip"
+      ],
+      "actions": [
+        {
+          "by": "click Answer",
+          "does": "Sends each question's answer (its picked labels comma-joined, plus your own text) back to Claude. The form goes; the card's summary becomes \"<header>: <answer> · <header>: <answer>\" and its Input view lists each question, its options and \"  →  <answer>\"; Claude's acknowledgement is its Output."
+        },
+        {
+          "by": "click Skip",
+          "does": "Declines all of them: Claude is told \"The user chose not to answer. Carry on without their answers, or ask in your reply.\" The form goes."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "asking",
+      "shows": "The form in the amber-bordered card; the chat is waiting on you (sidebar dot yellow, desktop notification \"Claude has a question for you\")."
+    },
+    {
+      "name": "answered",
+      "shows": "One line: \"AskUserQuestion  Header: answer · Header: answer\" with Input / Output buttons, normal border."
+    },
+    {
+      "name": "skipped",
+      "shows": "The card ends as the tool reports it; no \"denied\" is added (it's \"not answered\"). With no card, a note \"not answered AskUserQuestion\"."
+    }
+  ],
+  "scenes": [
+    "15-question-asking",
+    "16-question-answered"
+  ]
+}

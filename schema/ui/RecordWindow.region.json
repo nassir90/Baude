@@ -1,0 +1,141 @@
+{
+  "description": "Record's one window: a header bar across the top, over three columns: the notebooks and the open notebook's pages on the left, tabs (a page of notes, a chat being read, a file's code, Feedback) in the middle, Meta, Files and Git on the right. Window opens 1320 x 860.",
+  "apps": [
+    "record"
+  ],
+  "code": [
+    "record.py:Window.__init__",
+    "record.py:Window._tab_shown",
+    "record.py:Window.state",
+    "record.py:Window.restore"
+  ],
+  "copy": [
+    "window",
+    "update_bar",
+    "hosts"
+  ],
+  "parts": [
+    {
+      "name": "header bar",
+      "shows": "Across the whole window, over all three columns. Left to right: the notebooks-column toggle (sidebar icon, tooltip \"Notebooks\", on while the column shows); the open notebook's name centred (the text's own weight, ends in … past 48 characters, empty with no notebook open); at the right end the right-bar toggle (right-sidebar icon, on while it shows) and the ☰ menu button.",
+      "text": [
+        "Notebooks",
+        "Meta, Files and Git (Ctrl+Alt+B)"
+      ],
+      "copy": [
+        "window.rename_tip"
+      ],
+      "actions": [
+        {
+          "by": "click the notebooks toggle",
+          "does": "Slides the left column away or back. Nothing a side column is dragged over hides the bar."
+        },
+        {
+          "by": "key Ctrl+B or F9",
+          "does": "Same as the notebooks toggle."
+        },
+        {
+          "by": "click the right-bar toggle",
+          "does": "Slides the right column away or back."
+        },
+        {
+          "by": "key Ctrl+Alt+B",
+          "does": "Same as the right-bar toggle."
+        },
+        {
+          "by": "hover the notebook's name",
+          "does": "Tooltip \"Rename: right-click the notebook in the sidebar, or F2\" (only with a notebook open)."
+        },
+        {
+          "by": "click ☰",
+          "does": "Opens the main menu (RecordMenu)."
+        }
+      ]
+    },
+    {
+      "name": "host-apart banner",
+      "shows": "A banner just under the header bar, hidden normally. It appears once this machine's host process has been running other code than Record's for a while, with the banner's title and a button that restarts them onto the same code. Same banner Baude has.",
+      "actions": [
+        {
+          "by": "click its button",
+          "does": "Restarts Record, or this machine's host process, whichever puts both on the same code."
+        }
+      ]
+    },
+    {
+      "name": "notebooks column",
+      "shows": "The left column, held at one width (200 at first; its edge is dragged to resize, a notebook or page name too long ends in …). See RecordNotebooks and RecordPages.",
+      "actions": [
+        {
+          "by": "drag its right edge",
+          "does": "Resizes the column; the width is kept."
+        }
+      ]
+    },
+    {
+      "name": "middle: tabs",
+      "shows": "A tab bar at the top of an inner panel, the open tab's content under it. The tabs and the page under them are one rounded island set into the window frame. See RecordTabs. Empty states are below.",
+      "actions": [
+        {
+          "by": "key Ctrl+W",
+          "does": "Closes the current tab."
+        },
+        {
+          "by": "key Alt+Left / Alt+Right (Option+Cmd on macOS)",
+          "does": "Back and forward through the tabs shown, as a browser's history; a closed tab is opened again if it can be.",
+          "phone": {
+            "does": "The system back gesture",
+            "why": "Android's own back",
+            "decided": "2026-11-21"
+          }
+        },
+        {
+          "by": "key Alt+Up (Option+Cmd on macOS)",
+          "does": "Up: from a sub-page, the page it is under; from a file's code, its folder in Files with the file selected.",
+          "phone": {
+            "does": "The system back gesture",
+            "why": "Android's own back",
+            "decided": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "name": "right column",
+      "shows": "At least 340 wide; a draggable rule between it and the middle (its position is kept). At its top a page switcher centred: Meta (Baude's Meta icon), Files, Git. Under it the chosen page. Code opens in a tab, not here. See RecordMeta for Meta; Files and Git are Baude's pages for the folder of the chat being read.",
+      "actions": [
+        {
+          "by": "key Ctrl+M",
+          "does": "Shows Meta (right column opened if hidden) and puts the focus in its box; if Meta is already showing, closes the right column and puts the focus back where it was (the page's text at the caret, the chat read, the file's code)."
+        }
+      ]
+    },
+    {
+      "name": "capture bar",
+      "shows": "A bar at the foot of the middle while a Send Feedback capture is pending (Baude's own: shared)."
+    }
+  ],
+  "states": [
+    {
+      "name": "no notebook",
+      "shows": "Middle shows a status page: people icon, title \"Make a Notebook\", text \"A Notebook is your notes on a subject; Meta, in the right bar, reads them and AI prose with you, and organises them.\" and a pill-shaped suggested button \"New Notebook\" (makes one, as Ctrl+N). Meta still works (there are tools to add a notebook, open a host)."
+    },
+    {
+      "name": "notebook open, no tabs",
+      "shows": "Middle is blank, inside the frame."
+    },
+    {
+      "name": "Feedback tab without a notebook",
+      "shows": "The Ongoing Feedback tab shows even with no notebook open."
+    },
+    {
+      "name": "update waiting",
+      "shows": "A new version found: an Update button at the foot of the left column, its tooltip listing what it is waiting for (\"a question being answered\", \"a dialog open\", \"you, using this window\"). Record restarts itself once idle, or when the button is clicked. When a question is being answered to Meta, the click first asks \"Restart now?\" (body \"The question being answered is stopped.\", buttons Cancel, Restart Now in red)."
+    },
+    {
+      "name": "restarted",
+      "shows": "After ☰ → Restart Record or an auto-update the window comes back as it was: the notebook, the tab, window size and place, right column width and page, what was typed in Meta's box with its caret and quote, the page's caret and an un-kept new title, and every open page, chat and Meta's own scroll position. A toast says it updated (\"Record updated\", with the count of new commits)."
+    }
+  ],
+  "scenes": []
+}

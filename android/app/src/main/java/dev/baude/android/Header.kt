@@ -358,7 +358,7 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
             verticalAlignment = Alignment.CenterVertically) {
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
+            Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }) {
             for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed) { open = false; pick(value) }
@@ -377,10 +377,10 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo:
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = choices.isNotEmpty()) { open = true; query = "" }
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp))
+            if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp.icon))
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(18.dp.icon))
+            Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }) {
             SearchField(query, { query = it }, Wording.ModelPicker.search, Modifier.width(260.dp).padding(horizontal = 8.dp, vertical = 4.dp))

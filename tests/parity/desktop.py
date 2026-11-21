@@ -36,6 +36,7 @@ import time  # noqa: E402
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
 import update  # noqa: E402
+import baudelib.wording as wording  # noqa: E402
 import dump  # noqa: E402
 
 FIX = os.path.join(HERE, "fixtures")
@@ -132,6 +133,19 @@ def open_chat(app, sc):
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)
+    if sc.get("state") == "working":
+        win.set_busy(True)
+    if sc.get("queued"):
+        win.input.get_buffer().set_text(sc["queued"])
+        win.queue_message()
+        win.queued[-1].show_buttons(True)
+        T.pump(0.4)
+    if sc.get("down"):  # (the rig's chats are this machine's: stand in for a network host gone, as update_banner shows it)
+        win.banner.set_title(wording.say("hosts.down", host=fixture("sessions.json")["host"]["name"]))
+        win.banner.set_revealed(True)
+        win.composer_box.gate("host", True)
+    if sc.get("draft"):
+        win.input.get_buffer().set_text(sc["draft"])
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
@@ -149,6 +163,10 @@ def build(app, sc):
         win = open_chat(app, sc)
         button = next(b for b in T.find(win, Gtk.MenuButton) if b.get_icon_name() == "open-menu-symbolic")
         button.popup()
+        return win
+    if name == "feedback":
+        win = open_chat(app, sc)
+        win.open_feedback()
         return win
     if name == "settings":
         win = open_chat(app, sc)

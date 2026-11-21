@@ -102,7 +102,7 @@ fun ChatPage(chat: Chat, name: String, reachable: Boolean, hint: String = "Messa
     // as it grows; scrolled up to read, left where it is)
     var follow by remember(chat) { mutableStateOf(true) }
     LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
-    LaunchedEffect(chat.lines.size, chat.asks.size, chat.streaming.value.length / 120) {
+    LaunchedEffect(chat.lines.size, chat.asks.size, chat.queued.size, chat.sent.size, chat.streaming.value.length / 120) {
         val n = list.layoutInfo.totalItemsCount
         if (n > 0 && follow) {
             list.animateScrollToItem(n - 1)

@@ -149,7 +149,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "processes" -> ProcessesPage(chat, here)
                 "artifacts" -> ArtifactsPage(chat)
                 "btw" -> SideQuestionsPage(chat)
-                "files" -> FilesPage(at, sid)
+                "files" -> FilesPage(chat)
                 "git" -> GitPage(at, sid)
                 "signal" -> SignalPage(at, sid)
             }

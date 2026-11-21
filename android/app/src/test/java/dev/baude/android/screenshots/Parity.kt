@@ -21,7 +21,9 @@ import dev.baude.android.ChatShell
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
+import dev.baude.android.FeedbackScreen
 import dev.baude.android.Mesh
+import dev.baude.android.Queued
 import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
@@ -60,6 +62,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
     private val sessions = JSONObject(File(root, "fixtures/sessions.json").readText())
     private val host = sessions.getJSONObject("host")
     private val home = host.getString("home")
+
+    private lateinit var conn: FixtureConnection
 
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
@@ -101,9 +105,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val h = Host(id = host.getString("id"), name = host.getString("name"), user = "dev", address = "workshop.example")
         Mesh.hosts.add(h)
         Meta.host.value = h.id
-        FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
+        conn = FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
+        val first = list.getJSONObject(0)
         Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
             Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
                 updated = now - s.getDouble("ago"), said = now - s.getDouble("ago"),
@@ -163,7 +168,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     "data" to java.util.Base64.getEncoder().encodeToString(f.readBytes()))
             }
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
-            "signal_names" -> return reply("glossary" to JSONObject.NULL, "refs" to JSONArray())
+            "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
         }
         return null
     }
@@ -210,12 +215,24 @@ abstract class Parity(private val theme: String, private val scene: String) {
             }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
                 if (sc.optBoolean("open")) openAll(first.getString("id"))
+                if (sc.optBoolean("down")) {
+                    conn.state = "down"
+                    Mesh.tick.value++
+                }
+                if (sc.has("draft")) Mesh.openChat(host.getString("id"), first.getString("id")).draft.value = sc.getString("draft")
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.optBoolean("open")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
+                if (sc.has("queued")) {
+                    Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                    hold(sc.getString("queued"))
+                }
             }
+            name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
             else -> return false
@@ -295,11 +312,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
         settle()
     }
 
-    /** A long-press on what's labelled label, as a finger's would. */
+    /** A long-press on what's labelled label, as a finger's would be. */
     private fun hold(label: String) {
-        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+        fun found() = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             n.config.contains(SemanticsActions.OnLongClick) && (label in said(n) || label == described(n))
-        } ?: error("nothing to hold labelled $label")
+        }
+        repeat(20) { if (found() == null) settle() }
+        val node = found() ?: error("nothing to hold labelled $label")
         node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()

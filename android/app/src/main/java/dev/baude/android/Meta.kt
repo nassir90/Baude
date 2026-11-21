@@ -376,7 +376,7 @@ object Meta {
     }
 }
 
-/** Meta's page: the host it runs on, its conversation (as a chat's), Clear. */
+/** Meta's page: its conversation (as a chat's), Clear at the foot. */
 @Composable
 fun MetaPage(chatHost: String, here: Boolean) {
     val c = LocalBaude.current
@@ -388,25 +388,13 @@ fun MetaPage(chatHost: String, here: Boolean) {
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
     }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Runs on", style = Type.caption, color = c.dim)
-            val h = Meta.host.value
-            val face = h?.let { Mesh.label(it) + if (up.none { u -> u.first == it }) " (not connected)" else "" }
-            Picker(face ?: if (Mesh.reached().isEmpty()) "No host connected" else "No host can run it yet",
-                "Where Meta runs", up.map { it.second to it.first }, h, enabled = up.isNotEmpty()) {
-                if (it != Meta.host.value) {
-                    Meta.host.value = it
-                    Meta.clear()
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            if (Meta.chat.lines.isNotEmpty()) Button(Wording.Common.clear) { Meta.clear() }
-        }
         Column(Modifier.weight(1f)) {
             ChatPage(Meta.chat, "Meta", attach = false, foot = {
                 Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) { WorkingDots(Meta.chat.thinking.value) }
             })
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
+            Button(Wording.Common.clear) { Meta.clear() }
         }
     }
     MetaTools.form.value?.takeIf { it.optString("state", "open") == "open" }?.let { f -> // (a form Meta brought up, as

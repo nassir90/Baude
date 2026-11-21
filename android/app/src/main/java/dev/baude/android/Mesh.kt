@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Handler
+import android.widget.Toast
 import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -104,6 +105,12 @@ class Chat(hostId: String, sid: String) {
     var offset = -1L
     var reading = false
     var again = false
+    val sent = mutableStateListOf<Outgoing>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
+    val queued = mutableStateListOf<Queued>() // (written while a turn ran: sent when it ends)
+    var queueUpto: Queued? = null             // (↑ on a queued message: the queue is sent up to it at the turn's end)
+    var stopAsked = false                     // (the turn was stopped: its queue stays)
+    val edit = mutableStateOf<String?>(null)  // (a queued message's revert: text for the box, before what's written)
+    var typed = ""                            // (what's in the box, kept as it's written)
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
     val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
@@ -134,7 +141,6 @@ object Mesh {
     // record, as the host it's reached through lists it (id, name, host, hops, through), and that host's label)
     @Volatile private var routes = emptyMap<String, Connection>() // (a member: the host that's up and reaches it in
     // fewest hops)
-    private val allowed = HashMap<String, MutableSet<String>>() // (a chat: the tools you've always allowed it here)
     private val listedBy = HashMap<String, MutableSet<String>>() // (a host of yours: the members it's listed)
     private val moved = HashMap<String, String>() // (a member's connection id: the host of yours its machine is now)
     private val askNotes = HashMap<String, MutableSet<String>>() // (a chat, "connection/session": the asks notified)
@@ -153,7 +159,11 @@ object Mesh {
         readKey()
         hosts.addAll(HostStore.load(app))
         deactivated.addAll(HostStore.deactivated(app))
-        Pending.load(app) { conns.values.filter { it.state == "up" }.forEach(::pumpAll) }
+        Queue.loadDrafts(app.filesDir)
+        Queue.migrateUnsent(app.filesDir) { machine, host -> // (its chat's host: the one of yours that's its machine, or the machine as a member)
+            hosts.firstOrNull { machine != null && HostStore.machine(app, it) == machine }?.id
+                ?: machine?.let { "mesh:$it" } ?: moved[host] ?: host
+        }
         channel()
         hosts.forEach { connect(it) }
         start(PhoneHost.connection(app, ::heard) { conn -> main.post { changed(conn) } }) // (this phone's own agents)
@@ -210,8 +220,6 @@ object Mesh {
     }
 
     fun removeHost(host: Host) {
-        // (what's waiting for it let go of: you're done with that host)
-        for (u in Pending.all.toList()) if (u.hostId == host.id || reach(u) == host.id) Pending.drop(u)
         val machine = conns[host.id]?.info?.id?.takeIf(::isId) ?: HostStore.machine(app, host)
         if (machine != null) HostStore.setRemoved(app, machine, true) // (nor reached again as a member another host lists)
         hosts.removeAll { it.id == host.id }
@@ -398,7 +406,6 @@ object Mesh {
                 }
             }
             if (sessions[c.id] != null) catchUp.add(c.id)
-            pumpAll(c)
             open?.let { if (it.hostId == c.id) attach(it) } // (read once its sessions are listed: their sizes)
         }
         if (c.place is Place.Direct) {
@@ -476,9 +483,10 @@ object Mesh {
                     val listing = Msg.Sessions.from(msg)
                     val now = listing.sessions.orEmpty()
                     val before = sessions[c.id]
+                    val was = open?.takeIf { it.hostId == c.id }?.let { isWorking(it) } == true
                     sessions[c.id] = now
+                    open?.takeIf { was && it.hostId == c.id && !isWorking(it) }?.let { Queue.flush(it) } // (a turn ended: what's queued sent)
                     Shares.look() // (its Bots, in the share sheet)
-                    vanished(c, now)
                     listing.server?.let { // (its mesh as it is now)
                         c.info = it
                         if (c.place is Place.Direct) {
@@ -580,13 +588,6 @@ object Mesh {
         }
     }
 
-    /** The tools its host allows the chat whenever it asks (a session's always_allow, version 15), and those you've
-     * allowed from here. */
-    fun alwaysAllowed(chat: Chat): Set<String> {
-        val host = session(chat.hostId, chat.sid)?.alwaysAllow.orEmpty()
-        return host.toSet() + allowed["${chat.hostId}/${chat.sid}"].orEmpty()
-    }
-
     /** An ask answered, as Baude answers it: claude's control_response for it, sent as the chat's input. allow: Allow
      * (always: and allowed whenever it asks for that tool, its host told so too: always_allow); answers: claude's
      * questions answered (AskUserQuestion's). */
@@ -613,10 +614,8 @@ object Mesh {
         val msg = JSONObject().put("type", "control_response").put("response", JSONObject().put("subtype", "success")
             .put("request_id", ask.rid).put("response", response))
         if (always) {
-            val mine = allowed.getOrPut("${chat.hostId}/${chat.sid}") { HashSet() }.apply { add(ask.tool) }
             c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
                 if (r.optString("op") == Op.ERROR) main.post {
-                    mine.remove(ask.tool)
                     chat.said.value = Wording.Asks.notAlwaysAllowed(tool = toolDisplay(ask.tool).first, why = Msg.Error.from(r).said.orEmpty())
                 }
             }
@@ -667,6 +666,10 @@ object Mesh {
         }
         close()
         val chat = Chat(hostId, sid)
+        Queue.takeDraft(hostId, sid, machine(hostId))?.let { d ->
+            chat.draft.value = d.text.ifBlank { null }
+            chat.files.addAll(d.files)
+        }
         open = chat
         attach(chat)
         senders(chat)
@@ -677,6 +680,7 @@ object Mesh {
 
     fun close() {
         val chat = open ?: return
+        Queue.keepDraft(chat)
         conns[chat.hostId]?.send(Msg.Detach(session = chat.sid).json())
         for (q in chat.btw) if (q.sid.isNotEmpty()) // (its side questions let go of with it, as Baude's window's are)
             conns[chat.hostId]?.send(Msg.Detach(session = q.sid).json())
@@ -765,7 +769,10 @@ object Mesh {
                                 while (chat.lines.size > keep) chat.lines.removeAt(chat.lines.size - 1)
                                 chat.ends.values.removeAll { it > keep }
                             }
-                            else -> chat.lines.add(line)
+                            else -> {
+                                if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
+                                chat.lines.add(line)
+                            }
                         }
                     }
                 }
@@ -855,18 +862,6 @@ object Mesh {
         }
     }
 
-    /** What you wrote (and the files you chose) sent to the chat, as Baude sends it: a user message for its agent,
-     * kept on this phone till its host has it (Pending), and sent after what's in line for the chat before it. */
-    fun send(chat: Chat, text: String, files: List<Picked>) {
-        chat.said.value = null
-        Shares.used(chat)
-        val u = Unsent(java.util.UUID.randomUUID().toString(), chat.hostId, machine(chat.hostId), chat.sid, text,
-            files.map { Attached(it.name, it.mime) }, Pending.next())
-        u.held = files
-        Pending.keep(u)
-        pump(chat.sid)
-    }
-
     /** The machine a connection's to (its id, as the mesh knows it), if it's known: this phone's agents, none. */
     private fun machine(connId: String): String? = when {
         connId == "phone" -> null
@@ -874,104 +869,52 @@ object Mesh {
         else -> conns[connId]?.info?.id?.takeIf(::isId) ?: hosts.firstOrNull { it.id == connId }?.let { HostStore.machine(app, it) }
     }
 
-    /** Where an unsent message's chat is reached now: a host of yours that's its machine, or that machine as a
-     * member of the mesh, or the connection it was sent on. */
-    fun reach(u: Unsent): String {
-        val ways = ArrayList<String>()
-        u.machine?.let { m ->
-            hosts.filter { (conns[it.id]?.info?.id ?: HostStore.machine(app, it)) == m }.forEach { ways.add(it.id) }
-            ways.add("mesh:$m")
-        }
-        ways.add(moved[u.hostId] ?: u.hostId)
-        return ways.firstOrNull { conns[it]?.state == "up" } ?: ways.firstOrNull { it in conns } ?: ways.last()
-    }
+    class Draft(val text: String, val files: List<Picked>)
+    val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as the box has it again)
 
-    private val delivering = HashSet<String>() // (unsent messages on their way)
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
-    /** The chat's next message in line sent, if its host's there and none of its is on its way: the oldest waiting
-     * (one its host said no to doesn't hold the rest up). */
-    private fun pump(sid: String) {
-        val line = Pending.of(sid)
-        if (line.any { it.id in delivering }) return
-        val u = line.firstOrNull { it.state.value == "waiting" } ?: return
-        val c = conns[reach(u)]?.takeIf { it.state == "up" } ?: return
-        deliver(c, u)
-    }
-
-    /** Each chat's line on a connection pumped (it's up, or listed). */
-    private fun pumpAll(c: Connection) {
-        for (sid in Pending.all.filter { reach(it) == c.id }.map { it.sid }.toSet()) pump(sid)
-    }
-
-    /** A message sent (made off the main thread, base64 and all, after it's written): let go of once its host has
-     * it; if it's not there, or the connection went as it was sent, waiting again (sent again once it's back: its host
-     * takes it once); if its host said no, kept, and why. The chat's next sent after it either way. */
-    private fun deliver(c: Connection, u: Unsent) {
-        delivering.add(u.id)
-        u.state.value = "sending"
-        u.why.value = null
-        Pending.keep(u)
-        val chat = open?.takeIf { it.sid == u.sid }
-        chat?.busy?.value = true
-        Pending.io.execute {
+    /** What you wrote (and the files you chose) sent to the chat at once, as Baude sends it: a user message for its
+     * agent, drawn as yours meanwhile (Outgoing). If its host says no, it's taken out and put back in the box, and why
+     * said. */
+    fun send(chat: Chat, text: String, files: List<Picked>) {
+        val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
+        chat.said.value = null
+        Shares.used(chat)
+        chat.busy.value = true
+        val id = java.util.UUID.randomUUID().toString()
+        io.execute {
             val msg = try {
-                build(u)
-            } catch (e: Exception) { // (its files gone from disk: not to be sent)
+                build(id, text, files)
+            } catch (e: Exception) {
                 null
             }
             if (msg == null) {
-                main.post {
-                    delivering.remove(u.id)
-                    chat?.busy?.value = false
-                    Pending.drop(u)
-                    pump(u.sid)
-                }
+                main.post { chat.busy.value = false }
                 return@execute
             }
-            c.request(Msg.Input(session = u.sid, msg = msg).json()) { r ->
-                main.post {
-                    delivering.remove(u.id)
-                    chat?.busy?.value = false
-                    val e = if (r.optString("op") == Op.ERROR) Msg.Error.from(r) else null
-                    when (e?.error) {
-                        null -> Pending.drop(u)
-                        Connection.NOT_CONNECTED, Connection.WENT -> u.state.value = "waiting"
-                        else -> {
-                            u.state.value = "failed"
-                            u.why.value = e.said?.ifBlank { null }
+            val lines = parse(JSONObject().put("type", "user").put("uuid", id).put("message", msg.getJSONObject("message"))
+                .toString(), cutFirst = false).filter { it.kind == "you" }
+            main.post {
+                val sent = Outgoing(id, lines, text, files)
+                chat.sent.add(sent)
+                c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
+                    main.post {
+                        chat.busy.value = false
+                        if (r.optString("op") == Op.ERROR) {
+                            val e = Msg.Error.from(r)
+                            chat.sent.remove(sent)
+                            Queue.addDraft(chat.hostId, chat.sid, text, files)
+                            chat.said.value = Wording.HeldSend.notSent(why = when (e.error) {
+                                Connection.NOT_CONNECTED, Connection.WENT -> Wording.HostStatus.connectionDropped
+                                else -> e.said?.ifBlank { null } ?: Wording.BotBrowser.hostSaidNo
+                            })
                         }
+                        if (open === chat) read(chat)
                     }
-                    if (e != null) Pending.keep(u)
-                    pump(u.sid)
-                    if (open === chat) chat?.let(::read)
                 }
             }
         }
-    }
-
-    /** One its host said no to put in line again, after what's there (its ↑). */
-    fun again(u: Unsent) {
-        if (u.id in delivering) return
-        u.at = Pending.next()
-        u.state.value = "waiting"
-        u.why.value = null
-        Pending.keep(u)
-        pump(u.sid)
-    }
-
-    /** An unsent message you've dropped (its ✕). */
-    fun dropUnsent(u: Unsent) {
-        if (u.id in delivering) return
-        Pending.drop(u)
-        pump(u.sid)
-    }
-
-    /** (a host listed its sessions) Messages to its chats that are gone (deleted) let go of: there's nowhere to send
-     * them, or show them; and what's in line sent. */
-    private fun vanished(c: Connection, listed: List<Msg.Session>) {
-        val ids = listed.map { it.id.orEmpty() }.toSet()
-        for (u in Pending.all.toList()) if (reach(u) == c.id && u.sid !in ids && u.id !in delivering) Pending.drop(u)
-        pumpAll(c)
     }
 
     /** A message its host holds for the chat (its held: a subagent's answer that came after its host restarted) sent to
@@ -981,24 +924,24 @@ object Mesh {
         val c = conns[chat.hostId]
         if (c == null || id in chat.holding) return
         chat.holding.add(id)
-        chat.said.value = null
         c.request(Msg.HeldOp(session = chat.sid, id = id, send = send).json()) { r ->
             main.post {
                 chat.holding.remove(id)
                 if (r.optString("op") == Op.ERROR)
-                    chat.said.value = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }
-                        .let { if (send) Wording.HeldSend.notSent(why = it) else Wording.HeldSend.notDeleted(why = it) }
+                    Toast.makeText(app, Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }
+                        .let { if (send) Wording.HeldSend.notSent(why = it) else Wording.HeldSend.notDeleted(why = it) },
+                        Toast.LENGTH_SHORT).show()
                 else read(chat)
             }
         }
     }
 
-    /** The message made (base64 and all, off the main thread), with the uuid it's kept by: null if there's nothing
+    /** The message made (base64 and all, off the main thread), with the uuid it's sent by: null if there's nothing
      * in it. */
-    private fun build(u: Unsent): JSONObject? {
+    private fun build(id: String, text: String, files: List<Picked>): JSONObject? {
         val blocks = JSONArray()
         val notes = StringBuilder()
-        for (f in Pending.files(u)) {
+        for (f in files) {
             when {
                 f.mime in IMAGE_TYPES -> blocks.put(JSONObject().put("type", "image").put("source", JSONObject()
                     .put("type", "base64").put("media_type", f.mime).put("data", f.base64())))
@@ -1009,10 +952,10 @@ object Mesh {
                     .append(String(f.bytes, Charsets.UTF_8)).append("\n```")
             }
         }
-        val all = (u.text + notes).trim()
+        val all = (text + notes).trim()
         if (all.isNotEmpty()) blocks.put(JSONObject().put("type", "text").put("text", all))
         if (blocks.length() == 0) return null
-        return JSONObject().put("type", "user").put("uuid", u.id)
+        return JSONObject().put("type", "user").put("uuid", id)
             .put("message", JSONObject().put("role", "user").put("content", blocks))
     }
 
@@ -1021,9 +964,9 @@ object Mesh {
     private fun channel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = app.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH)
+            nm.createNotificationChannel(NotificationChannel(MESSAGES, Wording.SharedSettings.notifications, NotificationManager.IMPORTANCE_HIGH)
                 .apply { lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE }) // (locked: who, not what)
-            nm.createNotificationChannel(NotificationChannel(LINKED, "Connected", NotificationManager.IMPORTANCE_MIN))
+            nm.createNotificationChannel(NotificationChannel(LINKED, Wording.BotBrowser.title, NotificationManager.IMPORTANCE_MIN))
         }
     }
 
@@ -1040,7 +983,7 @@ object Mesh {
         val contact = contact(c.id, sid) ?: return
         val result = turn.result.orEmpty().trim()
         when {
-            turn.isError == true -> notify(contact, "Couldn't finish" + if (result.isNotEmpty()) ": $result" else "")
+            turn.isError == true -> notify(contact, Wording.Meta.endedError(error = result.ifEmpty { Wording.Meta.errorUnknown }))
             result.isNotEmpty() -> notify(contact, result)
             else -> main.postDelayed({ // (no result said: its transcript's end, once its new size is listed)
                 val size = session(c.id, sid)?.size?.toLong() ?: 0
@@ -1106,7 +1049,7 @@ object Mesh {
             .setPublicVersion(NotificationCompat.Builder(app, MESSAGES)
                 .setSmallIcon(R.drawable.ic_baude)
                 .setContentTitle(contact.name)
-                .setContentText(if (tag != null) Wording.Asks.waiting else "New message")
+                .setContentText(if (tag != null) Wording.Asks.waiting else Wording.Meta.finished)
                 .build())
             .build()
         try {

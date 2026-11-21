@@ -98,7 +98,7 @@ abstract class Screens(private val theme: String) {
     }
 
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count
-     * it can't make), with the apps connected to each. */
+     * it can't make), with the apps connected to each, and one not reached now. */
     private fun versionsFixture() {
         val newest = "6be704e2dc23f0730cc73e2586db5561b1f4cd77"
         val older = "795a6cfd98c7e2517c183787ae4631ae75d39ff5"
@@ -115,7 +115,7 @@ abstract class Screens(private val theme: String) {
                     heads = listOf(head("record", older, made - day, 45), head("emission", newest, made, 0))),
                 Msg.Member(id = "m2", name = "attic", host = "attic.local", commit = oldest, made = made - 3 * day,
                     behind = null, heads = listOf(head("baude", null, null, null))),
-            )))
+            ), gone = listOf(Msg.Gone(id = "m3", name = "cellar"))))
     }
 
     @Test fun settingsPicked() {

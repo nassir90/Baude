@@ -10668,7 +10668,7 @@ VERSION_CLIENTS = {"baude": "baude", "record": "record", "emission": "emission",
 def mesh_versions(net):
     """The mesh's hosts as the host process here has them (or, with none here, the first host reached that has a
     mesh): (newest: (commit, made) or None, [{id, name, commit, made, behind, heads: [{client, commit, made,
-    behind}]}], each host once), or None with no host reached."""
+    behind}]}], each host once, [{id, name}] (the hosts in the mesh not reached now)), or None with no host reached."""
     with net.lock:
         reached = [r for r in net.servers.values() if r.state == "alive" and isinstance(r.info.get("mesh"), dict)]
     source = next((r for r in reached if r.mine), None) or next(iter(reached), None)
@@ -10682,7 +10682,8 @@ def mesh_versions(net):
     newest = mesh.get("newest")
     made = next((x.get("made") for h in hosts for x in [h, *(h.get("heads") or [])] if x.get("commit") == newest
                  and x.get("made")), None) if newest else None
-    return ((newest, made) if newest else None), hosts
+    seen = {h.get("id") for h in hosts}
+    return ((newest, made) if newest else None), hosts, [g for g in mesh.get("gone") or [] if g.get("id") not in seen]
 
 
 def version_standing(entry, newest):
@@ -10719,7 +10720,7 @@ def mesh_dialog(net):
         if got is None:
             prefs.add(Adw.PreferencesGroup(description=wording.say("mesh_versions.none")))
         else:
-            newest, hosts = got
+            newest, hosts, away = got
             for h in hosts:
                 group = Adw.PreferencesGroup(title=GLib.markup_escape_text(h.get("name") or h.get("id", "")[:8]))
                 group.add(version_row(wording.say("host_menu.daemon"), h, newest))
@@ -10728,6 +10729,10 @@ def mesh_dialog(net):
                     group.add(version_row(wording.say(f"mesh_versions.{client}") if client else x.get("client", ""),
                                           x, newest))
                 prefs.add(group)
+            for h in away:
+                name = h.get("name") or h.get("id", "")[:8]
+                prefs.add(Adw.PreferencesGroup(title=GLib.markup_escape_text(name),
+                                               description=GLib.markup_escape_text(wording.say("hosts.down", host=name))))
         view.set_content(prefs)
 
     def look():
@@ -10750,20 +10755,24 @@ def changelog_of(commit, widget):
 
 
 def version_row(title, entry, newest):
-    """A daemon's or an app's line on ☰ → Mesh: what it is, its commit (a link to that commit's changelog, ☰ →
-    Changelog's), and where that stands (Newest, dimmed; N commits behind or Older code, in the warning colour)."""
-    row = Adw.ActionRow(title=GLib.markup_escape_text(title))
+    """A daemon's or an app's line on ☰ → Mesh, one line tall: what it is, its commit (a link to that commit's
+    changelog, ☰ → Changelog's), and where that stands (Newest, dimmed; N commits behind or Older code, in the
+    warning colour)."""
+    row = Gtk.ListBoxRow(activatable=False, selectable=False)
+    box = Gtk.Box(spacing=12, margin_top=5, margin_bottom=5, margin_start=12, margin_end=12)
+    box.append(Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END))
     kind, said = version_standing(entry, newest)
-    box = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
     commit = entry.get("commit")
     if commit:
-        link = Gtk.Button(label=commit[:7], css_classes=["flat", "monospace", "accent"], valign=Gtk.Align.CENTER)
-        link.connect("clicked", lambda b: changelog_of(commit, b))
+        link = Gtk.Label(label=commit[:7], css_classes=["monospace", "accent"], cursor=Gdk.Cursor.new_from_name("pointer"))
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: changelog_of(commit, link))
+        link.add_controller(click)
         box.append(link)
     else:
         box.append(Gtk.Label(label=wording.say("updates.version_unknown"), css_classes=["dim-label"]))
     behind = Gtk.Label(label=said, xalign=1, width_chars=16)
     behind.add_css_class("dim-label" if kind == "newest" else "warning")
     box.append(behind)
-    row.add_suffix(box)
+    row.set_child(box)
     return row

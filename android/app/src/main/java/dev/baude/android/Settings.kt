@@ -162,7 +162,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit 
                 { VersionRow() },
                 {
                     ActionRow(Wording.MeshVersions.title, meshVersionsSummary(), onClick = versions, suffix = {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim, modifier = Modifier.size(18.dp))
+                        Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(18.dp))
                     })
                 },
             ), "") { it() }

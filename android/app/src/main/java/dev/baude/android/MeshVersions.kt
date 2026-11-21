@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -92,7 +90,7 @@ fun MeshVersionsScreen(back: () -> Unit) {
     Mesh.tick.value
     val got = meshVersions()
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar(Wording.MeshVersions.title, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) })
+        Bar(Wording.MeshVersions.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             if (got == null) {
                 Note(Wording.MeshVersions.none)

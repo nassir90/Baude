@@ -828,10 +828,11 @@ def own_dir(path):
     return path
 
 
-def _hello(ch, timeout, what):
-    """(channel, the server's info) past hello, or OSError: what didn't answer."""
+def _hello(ch, timeout, what, here=False):
+    """(channel, the server's info) past hello, or OSError: what didn't answer. here: by its socket, on its machine."""
     ch.sock.settimeout(timeout)
-    ch.send({"op": "hello", "client": HEAD_CLIENT, "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {})})
+    ch.send({"op": "hello", "client": HEAD_CLIENT, "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {}),
+             **({"here": True} if here else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()
@@ -861,7 +862,7 @@ def connect_local(path=None, timeout=5.0):
     except OSError:
         sock.close()
         raise
-    return _hello(Channel.over(sock), timeout, path)
+    return _hello(Channel.over(sock), timeout, path, here=True)
 
 
 def is_dest(dest):

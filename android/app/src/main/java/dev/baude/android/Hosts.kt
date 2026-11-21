@@ -84,6 +84,22 @@ object HostStore {
     fun setMachine(ctx: Context, host: Host, id: String) {
         if (machine(ctx, host) != id) prefs(ctx).edit().putString(machineName(host), id).apply()
     }
+
+    /** The name a member of the mesh has on this phone (Mesh's Rename), by its id; null: its own. */
+    fun alias(ctx: Context, member: String): String? = prefs(ctx).getString("alias:$member", null)
+
+    fun setAlias(ctx: Context, member: String, name: String) {
+        prefs(ctx).edit().apply { if (name.isBlank()) remove("alias:$member") else putString("alias:$member", name.trim()) }.apply()
+    }
+
+    /** The members of the mesh removed on this phone (Mesh's Remove), by id: not reached or listed here, till the
+     * machine's added as a host. */
+    fun removed(ctx: Context): Set<String> = prefs(ctx).getStringSet("removed", null).orEmpty()
+
+    fun setRemoved(ctx: Context, member: String, removed: Boolean) {
+        val now = removed(ctx).toMutableSet().apply { if (removed) add(member) else remove(member) }
+        prefs(ctx).edit().putStringSet("removed", now).apply()
+    }
 }
 
 /** The key a host showed, when it isn't the one trusted for it: none trusted yet, or another (was: the one trusted,

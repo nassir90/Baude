@@ -150,19 +150,19 @@ fun GreyBanner(text: String, onClick: (() -> Unit)? = null) {
 
 /** A button as libadwaita's pill-less ones: suggested (the accent), or plain (raised). */
 @Composable
-fun Button(label: String, suggested: Boolean = false, destructive: Boolean = false, onClick: () -> Unit) {
+fun Button(label: String, suggested: Boolean = false, destructive: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalBaude.current
     Box(
         Modifier.clip(RoundedCornerShape(8.dp))
             .background(if (suggested) c.accentBg else c.fg.copy(alpha = 0.10f))
-            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = Type.bold, color = when {
             suggested -> c.accentFg
             destructive -> c.destructive
             else -> c.fg
-        })
+        }.let { if (enabled) it else it.copy(alpha = it.alpha * 0.4f) })
     }
 }
 

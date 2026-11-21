@@ -279,6 +279,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (sc.has("gallery")) {
                     tap(sc.getString("gallery"))
                     tap(Wording.CodeView.showGallery)
+                    repeat(3) { flush(true) } // (the pictures are read and drawn)
                 }
                 if (sc.has("hold")) hold(sc.getString("hold"))
                 if (name == "menu") tap(Wording.ChatHeader.menu)

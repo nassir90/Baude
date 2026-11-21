@@ -230,6 +230,7 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
             Box(Modifier.layoutId("tasks")) {
                 Text(Wording.StatusBar.running(tasks = parts.joinToString(" · ")),
                     style = Type.caption.copy(fontSize = Type.caption.fontSize * 0.95f), color = text, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp).tip(what + "\n" + Wording.StatusBar.openPanel) {
                         openPage(if (agents > 0) "agents" else "processes")
                     })
@@ -253,13 +254,18 @@ private fun StatusRow(modifier: Modifier, content: @Composable () -> Unit) {
         val gap = 12.dp.roundToPx()
         val loose = androidx.compose.ui.unit.Constraints()
         val by = measurables.associateBy { it.layoutId as String }
-        val kept = by.filterKeys { it != "folder" }.mapValues { it.value.measure(loose) }.toMutableMap()
-        fun width() = kept.values.sumOf { it.width } + gap * (kept.size - 1)
-        for (id in listOf("host", "dots", "tasks")) if (width() > k.maxWidth) kept.remove(id)
-        val room = k.maxWidth - width() - gap * 2
+        val kept = by.filterKeys { it != "folder" && it != "tasks" }.mapValues { it.value.measure(loose) }.toMutableMap()
+        val tasksWide = by["tasks"]?.maxIntrinsicWidth(Int.MAX_VALUE) ?: 0 // (it shortens rather than goes)
+        val count = { kept.size + if (by["tasks"] != null) 1 else 0 }
+        fun width() = kept.values.sumOf { it.width } + tasksWide + gap * (count() - 1)
+        for (id in listOf("host", "dots")) if (width() > k.maxWidth) kept.remove(id)
+        val others = kept.values.sumOf { it.width } + gap * kept.size
+        val tasks = by["tasks"]?.measure(androidx.compose.ui.unit.Constraints(
+            maxWidth = minOf(tasksWide, (k.maxWidth - others).coerceAtLeast(0))))
+        val room = k.maxWidth - others - (tasks?.width ?: 0) - gap * 2
         val folder = by["folder"]?.takeIf { room >= 40.dp.roundToPx() }
             ?.measure(androidx.compose.ui.unit.Constraints(maxWidth = room))
-        val left = listOf("dots", "host").mapNotNull { kept[it] } + listOfNotNull(folder) + listOfNotNull(kept["tasks"])
+        val left = listOf("dots", "host").mapNotNull { kept[it] } + listOfNotNull(folder) + listOfNotNull(tasks)
         val right = listOfNotNull(kept["cost"], kept["context"])
         val h = (left + right).maxOfOrNull { it.height } ?: 0
         layout(k.maxWidth, h) {

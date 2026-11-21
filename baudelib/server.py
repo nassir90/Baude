@@ -257,6 +257,7 @@ class Session:
         # their tasks running, task_id -> their Agent call's id; each Agent call, id -> (the call it's in, run in the
         # background); and those running in the background, by call id (what runs in one outlives a turn's result)
         self.calls, self.tasks, self.agent_tasks, self.agent_calls, self.background_agents = {}, {}, {}, {}, set()
+        self.outputs, self.outputs_at = set(), 0  # (the output files its transcript names, and how far it's read for them)
 
     @property
     def id(self):
@@ -275,6 +276,27 @@ class Session:
             self.meta["written"] = os.path.getsize(path) if path else None
         except OSError:
             self.meta["written"] = None
+
+    def output_files(self):
+        """The output files its transcript names (a background task's start or end): what's new in it since the last
+        call is read."""
+        path = self.transcript()
+        try:
+            size = os.path.getsize(path) if path else 0
+            if size < self.outputs_at:
+                self.outputs, self.outputs_at = set(), 0
+            with open(path, "rb") as f:
+                f.seek(self.outputs_at)
+                data = f.read(size - self.outputs_at)
+        except (OSError, TypeError):
+            return self.outputs
+        whole = data[:data.rfind(b"\n") + 1]
+        for found in re.findall(rb"Output is being written to: (\S+)|<output-file>(.*?)</output-file>", whole):
+            name = (found[0].rstrip(b".") or found[1]).decode("utf-8", "replace").strip()
+            if name:
+                self.outputs.add(name)
+        self.outputs_at += len(whole)
+        return self.outputs
 
     def commands(self):
         """What its claude is running, oldest first: its calls of Bash and PowerShell (but one waiting on its own
@@ -1207,6 +1229,8 @@ class Server:
             return self.start(msg, conn, req)
         if op == "read_file":
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
+        if op == "task_output":
+            return reply("file", **self.task_output(msg.get("session"), msg.get("path"), msg.get("limit")))
         if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; one at a time,
             self.notes_ops.put((msg, reply))  # in the order asked, on a thread of their own: _notes)
             return None
@@ -2662,6 +2686,22 @@ class Server:
             return {"path": path, "error": e.strerror or str(e)}
         return {"path": path, "size": size, "truncated": len(data) > FILE_LIMIT,
                 "data": base64.b64encode(data[:FILE_LIMIT]).decode("ascii")}
+
+    def task_output(self, sid, path, limit=None):
+        """The last part of a background task's output file: one its session's transcript names, not any file."""
+        with self.lock:
+            s = self.sessions.get(sid)
+        if s is None or path not in s.output_files():
+            return {"path": path, "error": wording.say("host_errors.not_task_output")}
+        try:
+            n = min(int(limit or 4000), FILE_LIMIT)
+            with open(path, "rb") as f:
+                size = f.seek(0, os.SEEK_END)
+                f.seek(max(0, size - n))
+                data = f.read()
+        except (OSError, ValueError) as e:
+            return {"path": path, "error": getattr(e, "strerror", None) or str(e)}
+        return {"path": path, "size": size, "truncated": size > n, "data": base64.b64encode(data).decode("ascii")}
 
     def in_sessions(self, path):
         """Is path (real) one of its sessions' folders, or in one?"""

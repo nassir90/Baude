@@ -146,7 +146,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
                 "routines" -> RoutinesPage(at, sid, here)
                 "agents" -> SubagentsPage(chat)
-                "processes" -> ProcessesPage(at, sid)
+                "processes" -> ProcessesPage(chat, here)
                 "artifacts" -> ArtifactsPage(chat)
                 "btw" -> SideQuestionsPage(chat)
                 "files" -> FilesPage(at, sid)

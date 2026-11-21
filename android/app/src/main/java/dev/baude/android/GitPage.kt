@@ -178,6 +178,7 @@ object GitPages {
 
     /** The rig's: the branches picked (none: the chat's own), every branch or not. */
     fun prepare(hostId: String, sid: String, pick: List<String>?, every: Boolean) {
+        kept.remove("$hostId\u0000$sid")
         val s = of(hostId, sid)
         s.follow = pick == null
         s.revs = pick

@@ -235,7 +235,7 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
         verticalAlignment = Alignment.CenterVertically) {
         Spacer(Modifier.width(laneWidth(cols)))
         Box(Modifier.alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
-            Avatar(c.author.orEmpty(), GitAvatars.picture(c.email.orEmpty()), Tokens.Git.avatar)
+            Avatar(c.author.orEmpty(), GitAvatars.picture(c.email.orEmpty()), Tokens.Git.avatar.icon)
         }
         Column(Modifier.weight(1f).padding(vertical = 4.dp).alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             PillText(lineText(c, made, heads), style = Type.body.copy(fontWeight = if (own) Tokens.Git.ownWeight else null),
@@ -290,7 +290,7 @@ fun PullsList(rows: List<Msg.PullInfo>, cols: Int, resetKey: Any) {
                 .clickable { try { uri.openUri(p.url.orEmpty()) } catch (_: Exception) {} }
                 .padding(top = 2.dp, bottom = 2.dp, start = 2.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.Top) {
-                Box(Modifier.width(laneWidth(cols) + Tokens.Git.rowGap + Tokens.Git.avatar), contentAlignment = Alignment.TopEnd) {
+                Box(Modifier.width(laneWidth(cols) + Tokens.Git.rowGap + Tokens.Git.avatar.icon), contentAlignment = Alignment.TopEnd) {
                     PullPill(p)
                 }
                 Text(p.title.orEmpty(), style = Type.body, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,

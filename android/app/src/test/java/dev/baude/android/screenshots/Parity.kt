@@ -141,7 +141,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val what = msg.optString("what")
         val failed = reply(arrayOf("what" to what, "error" to Wording.HostErrors.gitFailed))
         val gh = githubFixture
-        if (gitScene == null) return if (what == "pulls") reply(arrayOf("what" to what, "repo" to null, "prs" to null, "gh" to false))
+        if (gitScene == null && !(github && what == "pulls")) return if (what == "pulls") reply(arrayOf("what" to what, "repo" to null, "prs" to null, "gh" to false))
             else reply(arrayOf("what" to what, "error" to Wording.HostErrors.notARepo))
         when (what) {
             "pulls" -> {
@@ -283,8 +283,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 gitScene?.let { g ->
-                    settle()
                     val st = GitPages.of(host.getString("id"), first.getString("id"))
+                    repeat(20) { if (st.commits.isEmpty()) settle() }
+                    settle()
                     if (g.optBoolean("branches")) st.listOpen = true
                     g.optString("commit").ifBlank { null }?.let { subject ->
                         st.card = st.commits.first { it.subject == subject }.sha

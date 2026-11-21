@@ -56,6 +56,13 @@ object HostStore {
         prefs(ctx).edit().putString("hosts", JSONArray(hosts.map { it.json() }).toString()).apply()
     }
 
+    /** The connection ids switched off (Deactivate): a host's id, or "mesh:<id>". */
+    fun deactivated(ctx: Context): List<String> = prefs(ctx).getStringSet("deactivated", emptySet()).orEmpty().toList()
+
+    fun setDeactivated(ctx: Context, ids: Collection<String>) {
+        prefs(ctx).edit().putStringSet("deactivated", ids.toSet()).apply()
+    }
+
     private fun keyName(host: Host) = "key:${host.address}:${host.port}"
 
     /** The key trusted for the host: "type base64", or null. */

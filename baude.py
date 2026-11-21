@@ -8173,14 +8173,13 @@ class SessionSidebar(Gtk.Box):
         self.new_btn = self._action("document-new-symbolic", wording.say("sidebar.new_session"), "Ctrl+N",
                                     self.new_chat)
         self.new_btn.set_hexpand(True)
-        self.folder_btn = self._action("folder-open-symbolic", "Open folder…", "Start a session in another folder",
+        self.folder_btn = self._action("folder-open-symbolic", wording.say("sidebar.open_folder"), wording.say("sidebar.open_folder_tip"),
                                        lambda: win.pick_folder())
         # (beside it: the host a new session's made on, by its name, verbatim (this machine's local), and whose chats
         # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click, or press and
         # hold: host_menu)
-        self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)], "The host a new session is made "
-                                                         "on, and whose chats are listed. Right-click (or "
-                                                         "press and hold) for Add Host…",
+        self.host_dd = ellipsize_dropdown(ChoiceDropDown([(HERE_HOST, THIS_MACHINE)],
+                                                         wording.say("sidebar.host_picker_tip"),
                                                          self.pick_host), 12)
         self.host_dd.add_css_class("flat")
         self.host_dd.add_css_class("new-host")
@@ -8215,7 +8214,7 @@ class SessionSidebar(Gtk.Box):
         item = Gio.MenuItem.new(None, None)
         item.set_attribute_value("custom", GLib.Variant.new_string("groups"))
         groups.append_item(item)
-        item = Gio.MenuItem.new("New Group…", None)  # (no chat moved to it: ask_new_group)
+        item = Gio.MenuItem.new(wording.say("sidebar.new_group_ellipsis"), None)  # (no chat moved to it: ask_new_group)
         item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
         groups.append_item(item)
         every = Gio.MenuItem.new(wording.say("sidebar.show_all"), "sb.show_all")  # (only while something's left out)
@@ -8439,14 +8438,15 @@ class SessionSidebar(Gtk.Box):
         the note over them saying so while it is."""
         if (r := next((r for r in network().remotes() if host_key(r) == key), None)) is not None:
             network().deactivate(r, off)
-            toast(self, f"{remote_name(r)} {'deactivated' if off else 'activated'}")
+            toast(self, wording.say("hosts.now_deactivated" if off else "hosts.now_activated", host=remote_name(r)))
 
     def group_menu(self, row, x, y):
         """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
         if not row.key:
             return
         menu = Gio.Menu()
-        for label, action in (("Rename Group…", "rename_group"), ("Delete Group", "delete_group")):
+        for label, action in ((wording.say("sidebar.rename_group_ellipsis"), "rename_group"),
+                              (wording.say("sidebar.delete_group"), "delete_group")):
             item = Gio.MenuItem.new(label, None)
             item.set_action_and_target_value(f"sb.{action}", GLib.Variant.new_string(row.key))
             menu.append_item(item)
@@ -8561,7 +8561,7 @@ class SessionSidebar(Gtk.Box):
         """Delete Group (⋮ → Groups, a group right-clicked): deleted, said with Undo."""
         state = self.delete_group(name)
         if (root := self.get_root()) is not None and hasattr(root, "toasts"):
-            said = Adw.Toast(title=f"Group “{GLib.markup_escape_text(name)}” deleted",
+            said = Adw.Toast(title=wording.say("sidebar.group_deleted", name=GLib.markup_escape_text(name)),
                              button_label=wording.say("common.undo"), timeout=5)
             said.connect("button-clicked", lambda *_: self.restore_group_state(state))
             root.toasts.add_toast(said)
@@ -8573,7 +8573,7 @@ class SessionSidebar(Gtk.Box):
 
     def ask_rename_group(self, name):
         """Rename Group… (⋮ → Groups, a group right-clicked)."""
-        self.ask_group_name("Rename group", wording.say("common.rename"), name,
+        self.ask_group_name(wording.say("new_session.rename_group"), wording.say("common.rename"), name,
                             lambda new: new != name and self.rename_group(name, new))
 
     def ask_group_name(self, heading, verb, text, then):
@@ -8998,7 +8998,7 @@ class SessionSidebar(Gtk.Box):
         if info.get("dead"):  # (its server's gone from the network, or deactivated: listed as it was last seen)
             title.add_css_class("dim-label")
         if info.get("dead") and not info.get("off"):
-            tag = Gtk.Label(label="dead", valign=Gtk.Align.CENTER)
+            tag = Gtk.Label(label=wording.say("sidebar.dead"), valign=Gtk.Align.CENTER)
             tag.add_css_class("row-tag")
             box.append(tag)
         elif info.get("held"):
@@ -9038,7 +9038,7 @@ class SessionSidebar(Gtk.Box):
         top = not getattr(row, "depth", 0) and not info.get("fork_parent")  # (a Bot's a top-level chat)
         menu = Gio.Menu()
         items = [(wording.say("common.rename_ellipsis"), "rename"),
-                 ("Unarchive" if info["id"] in self.archived_ids() else "Archive",
+                 (wording.say("sidebar.unarchive") if info["id"] in self.archived_ids() else wording.say("sidebar.archive"),
                   "unarchive" if info["id"] in self.archived_ids() else "archive"),
                  (wording.say("trash.move_dots"), "trash")]
         if info.get("remote") is not None:  # (on a host: renamed, archived, stopped or trashed there while it's there;
@@ -9048,17 +9048,18 @@ class SessionSidebar(Gtk.Box):
             rename = (wording.say("common.rename_ellipsis"), "rename")
             items = [(wording.say("common.delete"), "hide")] if info.get("dead") or \
                 info["remote"].state != "alive" else \
-                [rename] + ([("Unarchive", "unarchive")] if archived else [] if active else
-                            [("Archive", "archive")]) + \
+                [rename] + ([(wording.say("sidebar.unarchive"), "unarchive")] if archived else [] if active else
+                            [(wording.say("sidebar.archive"), "archive")]) + \
                 ([(wording.say("common.stop"), "stop")] if active else []) + \
                 [(wording.say("trash.move_dots"), "trash")]  # (Archive stops it: not at a turn)
-        items.insert(1 if items[0][1] == "rename" else 0, ("Move to Group", None))  # (any chat's, on a host or not)
+        items.insert(1 if items[0][1] == "rename" else 0, (wording.say("sidebar.move_to_group"), None))  # (any chat's, on a host or not)
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
-            items[1:1] = [("Bot Settings…", "make_bot"), ("Turn Back into a Chat", "unbot")] if info.get("bot") else \
-                [("Make Bot…", "make_bot")]
+            items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
+                                (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
+                [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
         if can_be_bot(info) and not info.get("bot") and baudelib.wire.takes(info["remote"].info, "mesh_tools"):
-            items.insert(2, ("Remove Mesh Tools", "mesh_off") if info.get("mesh_tools") else
-                         ("Give Mesh Tools", "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
+            items.insert(2, (wording.say("sidebar.remove_mesh_tools"), "mesh_off") if info.get("mesh_tools") else
+                         (wording.say("sidebar.give_mesh_tools"), "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -9074,10 +9075,10 @@ class SessionSidebar(Gtk.Box):
         self.actions.lookup_action("move_group").set_state(GLib.Variant("(ss)", (info["id"], now)))
         menu, known, new = Gio.Menu(), Gio.Menu(), Gio.Menu()
         for key, label, _note in self.known_groups():
-            item = Gio.MenuItem.new(label.replace("_", "__") if key else "No Group", None)  # (no mnemonics)
+            item = Gio.MenuItem.new(label.replace("_", "__") if key else wording.say("sidebar.no_group_item"), None)  # (no mnemonics)
             item.set_action_and_target_value("sb.move_group", GLib.Variant("(ss)", (info["id"], key)))
             known.append_item(item)
-        item = Gio.MenuItem.new("New Group…", None)
+        item = Gio.MenuItem.new(wording.say("sidebar.new_group_ellipsis"), None)
         item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(info["id"]))
         new.append_item(item)
         menu.append_section(None, known)
@@ -9098,7 +9099,7 @@ class SessionSidebar(Gtk.Box):
             return
         bot = info.get("bot") if info.get("remote") is not None else None  # (a Bot: its name, as it's known by)
         entry = Gtk.Entry(text=(bot or {}).get("name") or info.get("title") or "", activates_default=True)
-        dlg = Adw.AlertDialog(heading="Rename Bot" if bot else "Rename session", extra_child=entry,
+        dlg = Adw.AlertDialog(heading=wording.say("sidebar.rename_bot") if bot else wording.say("sidebar.rename_session"), extra_child=entry,
                               default_response="rename", close_response="cancel")
         dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("rename", wording.say("common.rename"))
@@ -9128,8 +9129,8 @@ class SessionSidebar(Gtk.Box):
         entry = Gtk.Entry(text=named, placeholder_text=wording.say("common.name"), activates_default=True)
         pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
         avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
-        choose = Gtk.Button(label="Choose Picture…")
-        remove = Gtk.Button(label="Remove Picture", visible=False)
+        choose = Gtk.Button(label=wording.say("bot_settings.choose_picture"))
+        remove = Gtk.Button(label=wording.say("bot_settings.remove_picture"), visible=False)
 
         def shown(tex):
             if tex is not None and pick["data"] is None:
@@ -9146,7 +9147,7 @@ class SessionSidebar(Gtk.Box):
                 pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(f.get_path(), 256, 256, True)
                 ok, data = pix.save_to_bufferv("png", [], [])
             except GLib.Error as e:
-                return self.win.note(f"Couldn't read that picture: {e.message}")
+                return self.win.note(wording.say("bot_settings.unreadable", why=e.message))
             pick["data"] = bytes(data)
             avatar.set_custom_image(Gdk.Texture.new_for_pixbuf(pix))
             remove.set_visible(True)
@@ -9162,7 +9163,7 @@ class SessionSidebar(Gtk.Box):
             images.add_pixbuf_formats()
             store = Gio.ListStore.new(Gtk.FileFilter)
             store.append(images)
-            Gtk.FileDialog(title="Choose a Picture", filters=store).open(self.win, None, chosen)
+            Gtk.FileDialog(title=wording.say("bot_settings.choose_a_picture"), filters=store).open(self.win, None, chosen)
         choose.connect("clicked", open_picker)
         buttons = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
         buttons.append(choose)
@@ -9171,12 +9172,11 @@ class SessionSidebar(Gtk.Box):
         body.append(widgets.shaded_picture(avatar))
         body.append(buttons)
         body.append(entry)
-        dlg = Adw.AlertDialog(heading="Bot Settings" if bot else "Make Bot",
-                              body=None if bot else "A Bot is a chat with a name, a picture and a memory it reads "
-                              "each time it starts.",
+        dlg = Adw.AlertDialog(heading=wording.say("bot_settings.settings") if bot else wording.say("bot_settings.make_bot"),
+                              body=None if bot else wording.say("bot_settings.body"),
                               extra_child=body, default_response="save", close_response="cancel")
         dlg.add_response("cancel", wording.say("common.cancel"))
-        dlg.add_response("save", wording.say("common.save") if bot else "Make Bot")
+        dlg.add_response("save", wording.say("common.save") if bot else wording.say("bot_settings.make_bot"))
         dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
 
         def typed(e):
@@ -9212,7 +9212,7 @@ class SessionSidebar(Gtk.Box):
 
     def bot_set(self, reply):
         if reply.get("op") == "error":
-            return self.win.note(f"Couldn't update the Bot: {baudelib.wire.said(reply)}")
+            return self.win.note(wording.say("bot_settings.failed", why=baudelib.wire.said(reply)))
         self.fill()
 
     def rename(self, info, title):
@@ -9238,7 +9238,7 @@ class SessionSidebar(Gtk.Box):
         """A network session's server answered a rename: listed by its new title here before it next says what it has
         (the title it has there: its claude may have made it its own)."""
         if reply.get("op") != "renamed":
-            toast(self, f"{remote_name(r)} didn't rename it: {baudelib.wire.said(reply)}")
+            toast(self, wording.say("sidebar.host_didnt_rename", host=remote_name(r), why=baudelib.wire.said(reply)))
             return
         listed = reply.get("session") or {}
         if listed.get("title") in (None, info.get("title")):  # (its claude's yet to write it: as asked, till it has)
@@ -9284,7 +9284,7 @@ class SessionSidebar(Gtk.Box):
             wording.say("trash.on_host", host=remote_name(r))
         body = wording.say("trash.body_copies", n=n, where=where) if n else wording.say("trash.body", where=where)
         if model_program(info.get("model")) == "codex":
-            body += " Codex keeps its own copy of this session."
+            body += " " + wording.say("trash.codex_copy")
         dlg = Adw.AlertDialog(heading=wording.say("trash.heading", title=info.get("title") or
                                                   wording.say("trash.this_session")), body=body,
                               default_response="cancel", close_response="cancel")
@@ -18771,7 +18771,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             if (to := where()) is None:
                 raise ValueError("Where ssh goes: user@host, or an alias in ~/.ssh/config")
             network().add({"via": "ssh", "dest": to}, by_hand=True, command=command.get_text().strip() or None)
-            toast(self.sidebar, f"Looking for Baude on {to}")
+            toast(self.sidebar, wording.say("hosts.looking_for_baude", dest=to))
             return f"looking for Baude on {to}"
         heading = wording.say("new_session.add_host")
         return meta.Form(heading, box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
